@@ -1,0 +1,11 @@
+# 遊戲客戶端（體積大、版權屬原廠，不上傳）
+GameClient/
+
+# 工具暫存 / 建置輸出
+tools/.cache/
+site/
+__pycache__/
+*.pyc
+
+# 遊玩紀錄 / 本機筆記（可能含角色資訊）
+notes/

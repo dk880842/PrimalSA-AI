@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>精靈王石器資料庫</title>
+<meta name="description" content="精靈王石器（PrimalSA）道具、寵物、NPC、地圖、技能、任務查詢">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🪨</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="#/">精靈王石器資料庫</a>
+  <form id="qform" class="search" autocomplete="off">
+    <input id="q" type="search" placeholder="搜尋道具 / 寵物 / NPC / 地圖 / 技能 / 任務（繁中、簡中、韓文、ID）" aria-label="搜尋">
+  </form>
+  <nav class="nav"><a href="#/">查詢</a><a href="#/docs">文件</a></nav>
+</header>
+<main id="app"><p class="muted">載入中…</p></main>
+<footer class="foot muted">
+  資料由遊戲客戶端設定表自動匯出，僅供玩家參考；遊戲內容版權屬原開發 / 營運商。<span id="ver"></span>
+</footer>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

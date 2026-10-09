@@ -1,0 +1,8786 @@
+{
+"1": {
+"w": 25,
+"h": 25,
+"headerName": "群魔之境",
+"walkable": 330
+},
+"2": {
+"w": 25,
+"h": 25,
+"headerName": "群魔之境",
+"walkable": 327
+},
+"3": {
+"w": 25,
+"h": 25,
+"headerName": "群魔之境",
+"walkable": 327
+},
+"21": {
+"w": 50,
+"h": 50,
+"headerName": "加加大厦1F",
+"walkable": 212
+},
+"22": {
+"w": 50,
+"h": 50,
+"headerName": "加加大厦2F",
+"walkable": 401
+},
+"23": {
+"w": 50,
+"h": 50,
+"headerName": "加加大厦3F",
+"walkable": 401
+},
+"24": {
+"w": 14,
+"h": 14,
+"headerName": "清洁公司",
+"walkable": 87
+},
+"25": {
+"w": 80,
+"h": 80,
+"headerName": "加加村的庄园",
+"walkable": 5522
+},
+"40": {
+"w": 20,
+"h": 20,
+"headerName": "奇努伊关卡",
+"walkable": 178
+},
+"41": {
+"w": 70,
+"h": 70,
+"headerName": "梦幻的洞窟",
+"walkable": 1038
+},
+"42": {
+"w": 70,
+"h": 70,
+"headerName": "梦幻的洞窟",
+"walkable": 1160
+},
+"80": {
+"w": 45,
+"h": 45,
+"headerName": "流冰回廊上层",
+"walkable": 619
+},
+"81": {
+"w": 45,
+"h": 45,
+"headerName": "流冰回廊上层",
+"walkable": 498
+},
+"82": {
+"w": 45,
+"h": 50,
+"headerName": "流冰回廊上层",
+"walkable": 630
+},
+"83": {
+"w": 45,
+"h": 45,
+"headerName": "流冰回廊上层",
+"walkable": 376
+},
+"84": {
+"w": 40,
+"h": 30,
+"headerName": "流冰回廊上层",
+"walkable": 155
+},
+"85": {
+"w": 45,
+"h": 45,
+"headerName": "流冰回廊上层",
+"walkable": 374
+},
+"86": {
+"w": 120,
+"h": 120,
+"headerName": "流冰回廊上层",
+"walkable": 920
+},
+"87": {
+"w": 120,
+"h": 120,
+"headerName": "流冰回廊上层",
+"walkable": 1346
+},
+"88": {
+"w": 120,
+"h": 120,
+"headerName": "流冰回廊上层",
+"walkable": 910
+},
+"89": {
+"w": 120,
+"h": 120,
+"headerName": "流冰回廊上层",
+"walkable": 1083
+},
+"90": {
+"w": 120,
+"h": 120,
+"headerName": "流冰回廊上层",
+"walkable": 976
+},
+"91": {
+"w": 120,
+"h": 120,
+"headerName": "流冰回廊下层",
+"walkable": 917
+},
+"92": {
+"w": 50,
+"h": 50,
+"headerName": "流冰回廊下层",
+"walkable": 493
+},
+"93": {
+"w": 20,
+"h": 40,
+"headerName": "流冰回廊下层",
+"walkable": 217
+},
+"94": {
+"w": 35,
+"h": 60,
+"headerName": "流冰回廊下层",
+"walkable": 491
+},
+"95": {
+"w": 50,
+"h": 50,
+"headerName": "流冰回廊下层",
+"walkable": 490
+},
+"96": {
+"w": 30,
+"h": 30,
+"headerName": "流冰回廊下层",
+"walkable": 145
+},
+"97": {
+"w": 30,
+"h": 30,
+"headerName": "流冰回廊下层",
+"walkable": 139
+},
+"98": {
+"w": 30,
+"h": 30,
+"headerName": "流冰回廊下层",
+"walkable": 139
+},
+"99": {
+"w": 30,
+"h": 30,
+"headerName": "流冰回廊底层",
+"walkable": 141
+},
+"100": {
+"w": 800,
+"h": 800,
+"headerName": "萨伊那斯",
+"walkable": 244904
+},
+"101": {
+"w": 30,
+"h": 30,
+"headerName": "阿布的独栋房屋",
+"walkable": 89
+},
+"102": {
+"w": 25,
+"h": 40,
+"headerName": "建构中的地下宫殿",
+"walkable": 636
+},
+"103": {
+"w": 25,
+"h": 40,
+"headerName": "建构中的地下宫殿",
+"walkable": 595
+},
+"104": {
+"w": 80,
+"h": 80,
+"headerName": "元神宫",
+"walkable": 2332
+},
+"105": {
+"w": 25,
+"h": 25,
+"headerName": "魔印之境",
+"walkable": 282
+},
+"106": {
+"w": 25,
+"h": 25,
+"headerName": "魔印之境",
+"walkable": 282
+},
+"107": {
+"w": 25,
+"h": 25,
+"headerName": "魔印之境",
+"walkable": 282
+},
+"108": {
+"w": 25,
+"h": 25,
+"headerName": "群魔之境",
+"walkable": 282
+},
+"109": {
+"w": 25,
+"h": 25,
+"headerName": "群魔之境",
+"walkable": 329
+},
+"110": {
+"w": 46,
+"h": 45,
+"headerName": "聊天室",
+"walkable": 1115
+},
+"111": {
+"w": 26,
+"h": 22,
+"headerName": "大广场",
+"walkable": 477
+},
+"112": {
+"w": 12,
+"h": 20,
+"headerName": "结婚会场",
+"walkable": 168
+},
+"113": {
+"w": 11,
+"h": 11,
+"headerName": "小房间１",
+"walkable": 66
+},
+"114": {
+"w": 11,
+"h": 11,
+"headerName": "小房间２",
+"walkable": 69
+},
+"115": {
+"w": 11,
+"h": 11,
+"headerName": "小房间３",
+"walkable": 63
+},
+"116": {
+"w": 45,
+"h": 45,
+"headerName": "长毛象大厅",
+"walkable": 1118
+},
+"117": {
+"w": 300,
+"h": 200,
+"headerName": "迷宫",
+"walkable": 9723
+},
+"118": {
+"w": 250,
+"h": 180,
+"headerName": "迷宫",
+"walkable": 7390
+},
+"119": {
+"w": 200,
+"h": 200,
+"headerName": "迷宫",
+"walkable": 8452
+},
+"120": {
+"w": 30,
+"h": 30,
+"headerName": "靠近水田的家",
+"walkable": 122
+},
+"121": {
+"w": 30,
+"h": 30,
+"headerName": "岬之家",
+"walkable": 149
+},
+"122": {
+"w": 300,
+"h": 200,
+"headerName": "迷宫",
+"walkable": 9723
+},
+"125": {
+"w": 50,
+"h": 30,
+"headerName": "狩猎场",
+"walkable": 1051
+},
+"130": {
+"w": 60,
+"h": 60,
+"headerName": "竞技场",
+"walkable": 2837
+},
+"132": {
+"w": 40,
+"h": 24,
+"headerName": "结婚大礼堂",
+"walkable": 715
+},
+"141": {
+"w": 50,
+"h": 50,
+"headerName": "PK竞技聚会场",
+"walkable": 2083
+},
+"142": {
+"w": 30,
+"h": 30,
+"headerName": "草原PK竞技场",
+"walkable": 627
+},
+"143": {
+"w": 30,
+"h": 30,
+"headerName": "丛林PK竞技场",
+"walkable": 857
+},
+"144": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"145": {
+"w": 30,
+"h": 30,
+"headerName": "水池PK竞技场",
+"walkable": 587
+},
+"146": {
+"w": 30,
+"h": 30,
+"headerName": "树洞PK竞技场",
+"walkable": 745
+},
+"147": {
+"w": 180,
+"h": 180,
+"headerName": "瑞尔亚斯大陆",
+"walkable": 10974
+},
+"148": {
+"w": 18,
+"h": 18,
+"headerName": "魔王秘境",
+"walkable": 152
+},
+"150": {
+"w": 50,
+"h": 50,
+"headerName": "龙蜥洞窟",
+"walkable": 1135
+},
+"151": {
+"w": 50,
+"h": 50,
+"headerName": "龙蜥洞窟",
+"walkable": 1734
+},
+"152": {
+"w": 50,
+"h": 50,
+"headerName": "龙蜥洞窟",
+"walkable": 895
+},
+"153": {
+"w": 50,
+"h": 50,
+"headerName": "龙蜥洞窟",
+"walkable": 987
+},
+"154": {
+"w": 30,
+"h": 30,
+"headerName": "魔王竞技场1F",
+"walkable": 743
+},
+"155": {
+"w": 30,
+"h": 30,
+"headerName": "魔王竞技场2F",
+"walkable": 743
+},
+"156": {
+"w": 30,
+"h": 30,
+"headerName": "魔王竞技场3F",
+"walkable": 743
+},
+"157": {
+"w": 30,
+"h": 30,
+"headerName": "魔王竞技场4F",
+"walkable": 743
+},
+"158": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 162
+},
+"159": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 162
+},
+"160": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 290
+},
+"161": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 290
+},
+"162": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 148
+},
+"163": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 148
+},
+"164": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 161
+},
+"165": {
+"w": 20,
+"h": 20,
+"headerName": "龙蜥洞窟",
+"walkable": 161
+},
+"200": {
+"w": 800,
+"h": 1200,
+"headerName": "加鲁卡",
+"walkable": 294436
+},
+"201": {
+"w": 30,
+"h": 40,
+"headerName": "卡鲁它那牧场事务所",
+"walkable": 352
+},
+"300": {
+"w": 600,
+"h": 600,
+"headerName": "吉鲁岛",
+"walkable": 76342
+},
+"400": {
+"w": 150,
+"h": 149,
+"headerName": "沙姆岛",
+"walkable": 5035
+},
+"500": {
+"w": 800,
+"h": 800,
+"headerName": "五十年前波拉岛",
+"walkable": 91448
+},
+"501": {
+"w": 50,
+"h": 70,
+"headerName": "aabbccddee",
+"walkable": 1377
+},
+"502": {
+"w": 800,
+"h": 800,
+"headerName": "五十年前波拉岛",
+"walkable": 91448
+},
+"503": {
+"w": 800,
+"h": 800,
+"headerName": "五十年前波拉岛",
+"walkable": 91448
+},
+"504": {
+"w": 800,
+"h": 800,
+"headerName": "五十年前波拉岛",
+"walkable": 91448
+},
+"505": {
+"w": 800,
+"h": 800,
+"headerName": "五十年前波拉岛",
+"walkable": 91448
+},
+"516": {
+"w": 60,
+"h": 100,
+"headerName": "516",
+"walkable": 842
+},
+"517": {
+"w": 60,
+"h": 100,
+"headerName": "517",
+"walkable": 992
+},
+"518": {
+"w": 50,
+"h": 50,
+"headerName": "518",
+"walkable": 632
+},
+"519": {
+"w": 50,
+"h": 50,
+"headerName": "519",
+"walkable": 831
+},
+"520": {
+"w": 50,
+"h": 50,
+"headerName": "520",
+"walkable": 870
+},
+"521": {
+"w": 50,
+"h": 50,
+"headerName": "521",
+"walkable": 830
+},
+"522": {
+"w": 30,
+"h": 30,
+"headerName": "abc",
+"walkable": 220
+},
+"555": {
+"w": 40,
+"h": 40,
+"headerName": "神秘之境",
+"walkable": 1389
+},
+"556": {
+"w": 20,
+"h": 20,
+"headerName": "绝情谷底",
+"walkable": 162
+},
+"557": {
+"w": 15,
+"h": 15,
+"headerName": "绝情谷主房间",
+"walkable": 143
+},
+"558": {
+"w": 40,
+"h": 40,
+"headerName": "法王巢穴",
+"walkable": 1389
+},
+"559": {
+"w": 30,
+"h": 30,
+"headerName": "猥琐地狱大厅1F",
+"walkable": 710
+},
+"560": {
+"w": 30,
+"h": 30,
+"headerName": "猥琐地狱大厅2F",
+"walkable": 710
+},
+"561": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.9房间",
+"walkable": 710
+},
+"562": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.6房间",
+"walkable": 710
+},
+"563": {
+"w": 80,
+"h": 80,
+"headerName": "界王神大殿",
+"walkable": 2332
+},
+"564": {
+"w": 30,
+"h": 30,
+"headerName": "时空缝隙",
+"walkable": 189
+},
+"565": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.10房间",
+"walkable": 710
+},
+"600": {
+"w": 200,
+"h": 200,
+"headerName": "药师群岛",
+"walkable": 12439
+},
+"601": {
+"w": 30,
+"h": 30,
+"headerName": "缘分占卜师的房间",
+"walkable": 363
+},
+"666": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船内部",
+"walkable": 109
+},
+"667": {
+"w": 18,
+"h": 18,
+"headerName": "海盗头目房间",
+"walkable": 83
+},
+"668": {
+"w": 18,
+"h": 18,
+"headerName": "海盗头目房间",
+"walkable": 83
+},
+"669": {
+"w": 18,
+"h": 18,
+"headerName": "海盗的宝藏库",
+"walkable": 32
+},
+"670": {
+"w": 20,
+"h": 34,
+"headerName": "海盗船内部",
+"walkable": 333
+},
+"700": {
+"w": 400,
+"h": 400,
+"headerName": "伊甸园区",
+"walkable": 145624
+},
+"701": {
+"w": 400,
+"h": 400,
+"headerName": "伊甸大陆西方",
+"walkable": 95848
+},
+"702": {
+"w": 400,
+"h": 400,
+"headerName": "尼克斯城区",
+"walkable": 40757
+},
+"703": {
+"w": 400,
+"h": 400,
+"headerName": "伊甸大陆南方",
+"walkable": 85069
+},
+"704": {
+"w": 400,
+"h": 400,
+"headerName": "亚伊欧城区",
+"walkable": 85352
+},
+"705": {
+"w": 400,
+"h": 400,
+"headerName": "伊甸大陆东方",
+"walkable": 82545
+},
+"706": {
+"w": 400,
+"h": 400,
+"headerName": "弗烈顿城区",
+"walkable": 50734
+},
+"707": {
+"w": 400,
+"h": 400,
+"headerName": "伊甸大陆北方",
+"walkable": 40990
+},
+"708": {
+"w": 400,
+"h": 400,
+"headerName": "塔耳塔城区",
+"walkable": 66112
+},
+"777": {
+"w": 50,
+"h": 50,
+"headerName": "测试用地图",
+"walkable": 2092
+},
+"800": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家２楼",
+"walkable": 400
+},
+"801": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家３楼",
+"walkable": 400
+},
+"802": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家４楼",
+"walkable": 400
+},
+"803": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家５楼",
+"walkable": 400
+},
+"804": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家６楼",
+"walkable": 400
+},
+"805": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家７楼",
+"walkable": 400
+},
+"806": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家８楼",
+"walkable": 400
+},
+"807": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家９楼",
+"walkable": 400
+},
+"808": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１０楼",
+"walkable": 400
+},
+"809": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１１楼",
+"walkable": 400
+},
+"810": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１２楼",
+"walkable": 222
+},
+"811": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１楼",
+"walkable": 211
+},
+"812": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜大师认定场",
+"walkable": 226
+},
+"815": {
+"w": 80,
+"h": 70,
+"headerName": "新手村",
+"walkable": 2126
+},
+"816": {
+"w": 180,
+"h": 180,
+"headerName": "新手岛",
+"walkable": 10974
+},
+"817": {
+"w": 400,
+"h": 600,
+"headerName": "泪之海海底",
+"walkable": 100484
+},
+"820": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家２楼",
+"walkable": 400
+},
+"821": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家３楼",
+"walkable": 400
+},
+"822": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家４楼",
+"walkable": 400
+},
+"823": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家５楼",
+"walkable": 400
+},
+"824": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家６楼",
+"walkable": 400
+},
+"825": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家７楼",
+"walkable": 400
+},
+"826": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家８楼",
+"walkable": 400
+},
+"827": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家９楼",
+"walkable": 400
+},
+"828": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１０楼",
+"walkable": 400
+},
+"829": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１１楼",
+"walkable": 400
+},
+"830": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１２楼",
+"walkable": 222
+},
+"831": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１楼",
+"walkable": 211
+},
+"840": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家２楼",
+"walkable": 400
+},
+"841": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家３楼",
+"walkable": 400
+},
+"842": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家４楼",
+"walkable": 400
+},
+"843": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家５楼",
+"walkable": 400
+},
+"844": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家６楼",
+"walkable": 400
+},
+"845": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家７楼",
+"walkable": 400
+},
+"846": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家８楼",
+"walkable": 400
+},
+"847": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家９楼",
+"walkable": 400
+},
+"848": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１０楼",
+"walkable": 400
+},
+"849": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１１楼",
+"walkable": 400
+},
+"850": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１２楼",
+"walkable": 222
+},
+"851": {
+"w": 50,
+"h": 50,
+"headerName": "猜谜三兄弟的家１楼",
+"walkable": 211
+},
+"887": {
+"w": 70,
+"h": 30,
+"headerName": "接待中心",
+"walkable": 639
+},
+"888": {
+"w": 30,
+"h": 30,
+"headerName": "封印之洞",
+"walkable": 220
+},
+"889": {
+"w": 80,
+"h": 80,
+"headerName": "圣兽宫",
+"walkable": 2332
+},
+"890": {
+"w": 30,
+"h": 30,
+"headerName": "神之领域",
+"walkable": 603
+},
+"899": {
+"w": 50,
+"h": 80,
+"headerName": "远古坟地",
+"walkable": 1193
+},
+"900": {
+"w": 40,
+"h": 40,
+"headerName": "克隆人研究中心",
+"walkable": 747
+},
+"901": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[地]",
+"walkable": 719
+},
+"902": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[地]",
+"walkable": 756
+},
+"903": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[水]",
+"walkable": 719
+},
+"904": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[水]",
+"walkable": 756
+},
+"905": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[火]",
+"walkable": 719
+},
+"906": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[火]",
+"walkable": 756
+},
+"907": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[风]",
+"walkable": 719
+},
+"908": {
+"w": 50,
+"h": 50,
+"headerName": "精神结界[风]",
+"walkable": 756
+},
+"989": {
+"w": 90,
+"h": 90,
+"headerName": "麒麟之洞穴",
+"walkable": 2074
+},
+"990": {
+"w": 70,
+"h": 80,
+"headerName": "神秘之洞窟地下四楼",
+"walkable": 1678
+},
+"991": {
+"w": 70,
+"h": 80,
+"headerName": "神秘之洞窟地下四楼",
+"walkable": 1678
+},
+"992": {
+"w": 70,
+"h": 80,
+"headerName": "神秘之洞窟地下四楼",
+"walkable": 1678
+},
+"993": {
+"w": 70,
+"h": 60,
+"headerName": "神秘之洞窟地下三楼",
+"walkable": 1518
+},
+"994": {
+"w": 60,
+"h": 50,
+"headerName": "神秘之洞窟地下二楼",
+"walkable": 1092
+},
+"995": {
+"w": 70,
+"h": 80,
+"headerName": "神秘之洞窟地下一楼",
+"walkable": 1771
+},
+"996": {
+"w": 180,
+"h": 180,
+"headerName": "神秘之岛",
+"walkable": 11216
+},
+"997": {
+"w": 30,
+"h": 30,
+"headerName": "至尊石器会员商城",
+"walkable": 209
+},
+"998": {
+"w": 40,
+"h": 40,
+"headerName": "神秘之境",
+"walkable": 1389
+},
+"999": {
+"w": 200,
+"h": 200,
+"headerName": "迷失之海",
+"walkable": 0
+},
+"1000": {
+"w": 160,
+"h": 160,
+"headerName": "萨姆吉尔村",
+"walkable": 13943
+},
+"1001": {
+"w": 30,
+"h": 30,
+"headerName": "萨姆吉尔的武器店",
+"walkable": 57
+},
+"1002": {
+"w": 30,
+"h": 30,
+"headerName": "萨姆吉尔的道具店",
+"walkable": 58
+},
+"1003": {
+"w": 30,
+"h": 30,
+"headerName": "萨姆吉尔的宠物店",
+"walkable": 71
+},
+"1004": {
+"w": 30,
+"h": 30,
+"headerName": "萨姆吉尔的肉店",
+"walkable": 59
+},
+"1005": {
+"w": 30,
+"h": 30,
+"headerName": "萨姆吉尔的医院",
+"walkable": 110
+},
+"1006": {
+"w": 30,
+"h": 40,
+"headerName": "萨姆吉尔的村长家",
+"walkable": 128
+},
+"1007": {
+"w": 100,
+"h": 100,
+"headerName": "萨姆吉尔竞技场",
+"walkable": 1237
+},
+"1008": {
+"w": 40,
+"h": 40,
+"headerName": "师傅的房间",
+"walkable": 276
+},
+"1009": {
+"w": 40,
+"h": 60,
+"headerName": "萨姆吉尔的便利商店",
+"walkable": 614
+},
+"1011": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 56
+},
+"1012": {
+"w": 30,
+"h": 30,
+"headerName": "聊天室柜台",
+"walkable": 66
+},
+"1013": {
+"w": 30,
+"h": 30,
+"headerName": "老爷爷的家",
+"walkable": 84
+},
+"1014": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 56
+},
+"1020": {
+"w": 25,
+"h": 25,
+"headerName": "萨姆吉尔道场柜台",
+"walkable": 95
+},
+"1021": {
+"w": 407,
+"h": 144,
+"headerName": "百人联手道场",
+"walkable": 12931
+},
+"1022": {
+"w": 15,
+"h": 15,
+"headerName": "萨姆吉尔道场的医务室",
+"walkable": 140
+},
+"1040": {
+"w": 80,
+"h": 80,
+"headerName": "萨姆吉尔庄园",
+"walkable": 5526
+},
+"1041": {
+"w": 20,
+"h": 20,
+"headerName": "萨姆吉尔庄园族长家",
+"walkable": 289
+},
+"1042": {
+"w": 32,
+"h": 32,
+"headerName": "萨姆吉尔庄园竞技场",
+"walkable": 793
+},
+"1043": {
+"w": 12,
+"h": 12,
+"headerName": "萨姆吉尔庄园聊天柜台",
+"walkable": 90
+},
+"1044": {
+"w": 32,
+"h": 32,
+"headerName": "萨姆吉尔庄园聊天室",
+"walkable": 797
+},
+"1045": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店二",
+"walkable": 83
+},
+"1046": {
+"w": 12,
+"h": 12,
+"headerName": "通用物品贩卖店",
+"walkable": 81
+},
+"1047": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店一",
+"walkable": 89
+},
+"1048": {
+"w": 12,
+"h": 12,
+"headerName": "庄园素材贩售店",
+"walkable": 85
+},
+"1090": {
+"w": 80,
+"h": 80,
+"headerName": "市集",
+"walkable": 2285
+},
+"1100": {
+"w": 130,
+"h": 150,
+"headerName": "柯奥村",
+"walkable": 12374
+},
+"1101": {
+"w": 30,
+"h": 30,
+"headerName": "柯奥的武器店",
+"walkable": 77
+},
+"1102": {
+"w": 30,
+"h": 30,
+"headerName": "柯奥的道具店",
+"walkable": 74
+},
+"1103": {
+"w": 30,
+"h": 30,
+"headerName": "柯奥的宠物店",
+"walkable": 86
+},
+"1104": {
+"w": 30,
+"h": 30,
+"headerName": "柯奥的肉店",
+"walkable": 55
+},
+"1105": {
+"w": 30,
+"h": 30,
+"headerName": "柯奥的医院",
+"walkable": 90
+},
+"1106": {
+"w": 40,
+"h": 30,
+"headerName": "柯奥的长老家",
+"walkable": 147
+},
+"1108": {
+"w": 40,
+"h": 40,
+"headerName": "柯奥的道场",
+"walkable": 305
+},
+"1112": {
+"w": 30,
+"h": 30,
+"headerName": "柯奥的民家",
+"walkable": 82
+},
+"1200": {
+"w": 130,
+"h": 150,
+"headerName": "柯尔克村",
+"walkable": 3960
+},
+"1201": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克的武器店",
+"walkable": 75
+},
+"1202": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克的道具店",
+"walkable": 73
+},
+"1203": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克的宠物店",
+"walkable": 84
+},
+"1204": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克的肉店",
+"walkable": 55
+},
+"1205": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克的医院",
+"walkable": 98
+},
+"1206": {
+"w": 40,
+"h": 30,
+"headerName": "柯尔克的村长家",
+"walkable": 133
+},
+"1208": {
+"w": 40,
+"h": 40,
+"headerName": "柯尔克的道场",
+"walkable": 305
+},
+"1209": {
+"w": 40,
+"h": 60,
+"headerName": "柯尔克的便利商店",
+"walkable": 392
+},
+"1210": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克的石屋",
+"walkable": 60
+},
+"1212": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克坑道管理事务所",
+"walkable": 128
+},
+"1214": {
+"w": 50,
+"h": 50,
+"headerName": "普拓洞穴地下一楼",
+"walkable": 744
+},
+"1215": {
+"w": 50,
+"h": 50,
+"headerName": "斯特帕洞窑",
+"walkable": 249
+},
+"1300": {
+"w": 100,
+"h": 100,
+"headerName": "霍特尔村",
+"walkable": 5133
+},
+"1301": {
+"w": 30,
+"h": 30,
+"headerName": "霍特尔的武器店",
+"walkable": 77
+},
+"1302": {
+"w": 30,
+"h": 30,
+"headerName": "霍特尔的道具店",
+"walkable": 75
+},
+"1303": {
+"w": 30,
+"h": 30,
+"headerName": "霍特尔的宠物店",
+"walkable": 81
+},
+"1304": {
+"w": 30,
+"h": 30,
+"headerName": "霍特尔的肉店",
+"walkable": 63
+},
+"1305": {
+"w": 30,
+"h": 30,
+"headerName": "霍特尔的医院",
+"walkable": 94
+},
+"1306": {
+"w": 40,
+"h": 30,
+"headerName": "霍特尔的长老家",
+"walkable": 153
+},
+"1308": {
+"w": 40,
+"h": 40,
+"headerName": "霍特尔的道场",
+"walkable": 300
+},
+"1310": {
+"w": 30,
+"h": 30,
+"headerName": "营养剂名人的家",
+"walkable": 83
+},
+"1400": {
+"w": 150,
+"h": 150,
+"headerName": "卡坦村",
+"walkable": 20164
+},
+"1401": {
+"w": 30,
+"h": 30,
+"headerName": "卡坦的武器店",
+"walkable": 49
+},
+"1402": {
+"w": 30,
+"h": 30,
+"headerName": "卡坦的道具店",
+"walkable": 50
+},
+"1403": {
+"w": 30,
+"h": 30,
+"headerName": "卡坦的宠物店",
+"walkable": 55
+},
+"1404": {
+"w": 30,
+"h": 30,
+"headerName": "卡坦的肉店",
+"walkable": 46
+},
+"1405": {
+"w": 30,
+"h": 30,
+"headerName": "卡坦的医院",
+"walkable": 87
+},
+"1406": {
+"w": 35,
+"h": 35,
+"headerName": "卡坦的村长家",
+"walkable": 139
+},
+"1408": {
+"w": 40,
+"h": 40,
+"headerName": "卡坦的道场",
+"walkable": 286
+},
+"1987": {
+"w": 30,
+"h": 30,
+"headerName": "恶魔商店",
+"walkable": 69
+},
+"1995": {
+"w": 30,
+"h": 30,
+"headerName": "老石器-厨师的房间",
+"walkable": 76
+},
+"1996": {
+"w": 25,
+"h": 25,
+"headerName": "魔法道场冰窖",
+"walkable": 92
+},
+"1997": {
+"w": 50,
+"h": 50,
+"headerName": "融合宠研究中心",
+"walkable": 1631
+},
+"1998": {
+"w": 20,
+"h": 20,
+"headerName": "玛丽娜丝的秘室",
+"walkable": 216
+},
+"1999": {
+"w": 30,
+"h": 30,
+"headerName": "疗养屋",
+"walkable": 88
+},
+"2000": {
+"w": 150,
+"h": 150,
+"headerName": "玛丽那斯村",
+"walkable": 7007
+},
+"2001": {
+"w": 30,
+"h": 30,
+"headerName": "玛丽娜丝的武器店",
+"walkable": 56
+},
+"2002": {
+"w": 30,
+"h": 30,
+"headerName": "玛丽娜丝的道具店",
+"walkable": 79
+},
+"2003": {
+"w": 30,
+"h": 30,
+"headerName": "玛丽娜丝的宠物店",
+"walkable": 61
+},
+"2004": {
+"w": 30,
+"h": 30,
+"headerName": "玛丽娜丝的肉店",
+"walkable": 63
+},
+"2005": {
+"w": 30,
+"h": 30,
+"headerName": "789渔村医院",
+"walkable": 781
+},
+"2006": {
+"w": 40,
+"h": 30,
+"headerName": "渔村村长家",
+"walkable": 258
+},
+"2007": {
+"w": 100,
+"h": 100,
+"headerName": "玛丽娜丝竞技场",
+"walkable": 1364
+},
+"2008": {
+"w": 40,
+"h": 40,
+"headerName": "玛丽娜丝的道场",
+"walkable": 312
+},
+"2009": {
+"w": 40,
+"h": 60,
+"headerName": "玛丽娜丝的便利商店",
+"walkable": 578
+},
+"2010": {
+"w": 50,
+"h": 50,
+"headerName": "魔王NO.7房间",
+"walkable": 841
+},
+"2011": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 76
+},
+"2012": {
+"w": 30,
+"h": 30,
+"headerName": "聊天室柜台",
+"walkable": 75
+},
+"2013": {
+"w": 30,
+"h": 30,
+"headerName": "石器会员室",
+"walkable": 189
+},
+"2014": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 76
+},
+"2015": {
+"w": 60,
+"h": 60,
+"headerName": "魔王No,1",
+"walkable": 197
+},
+"2016": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.3的房间",
+"walkable": 657
+},
+"2017": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.8房间",
+"walkable": 657
+},
+"2018": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.2房间",
+"walkable": 657
+},
+"2019": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.5房间",
+"walkable": 657
+},
+"2020": {
+"w": 25,
+"h": 25,
+"headerName": "玛丽娜丝道场柜台",
+"walkable": 95
+},
+"2021": {
+"w": 15,
+"h": 25,
+"headerName": "秘室内部",
+"walkable": 108
+},
+"2022": {
+"w": 35,
+"h": 15,
+"headerName": "秘密通道",
+"walkable": 134
+},
+"2023": {
+"w": 15,
+"h": 25,
+"headerName": "秘室内部",
+"walkable": 108
+},
+"2024": {
+"w": 15,
+"h": 25,
+"headerName": "秘室内部",
+"walkable": 108
+},
+"2025": {
+"w": 40,
+"h": 40,
+"headerName": "牛魔王的居室",
+"walkable": 189
+},
+"2026": {
+"w": 25,
+"h": 40,
+"headerName": "阎王宫",
+"walkable": 568
+},
+"2027": {
+"w": 20,
+"h": 20,
+"headerName": "太上老君的房间",
+"walkable": 108
+},
+"2028": {
+"w": 25,
+"h": 40,
+"headerName": "阎王宫",
+"walkable": 439
+},
+"2029": {
+"w": 25,
+"h": 40,
+"headerName": "阎王宫",
+"walkable": 568
+},
+"2030": {
+"w": 80,
+"h": 80,
+"headerName": "玛丽娜丝的庄园",
+"walkable": 3436
+},
+"2031": {
+"w": 20,
+"h": 20,
+"headerName": "玛丽娜丝庄园族长家",
+"walkable": 286
+},
+"2032": {
+"w": 32,
+"h": 32,
+"headerName": "玛丽娜丝庄园PK场",
+"walkable": 810
+},
+"2033": {
+"w": 12,
+"h": 12,
+"headerName": "玛丽娜丝庄园聊天柜台",
+"walkable": 80
+},
+"2034": {
+"w": 20,
+"h": 20,
+"headerName": "玛丽娜丝庄园聊天室",
+"walkable": 255
+},
+"2035": {
+"w": 12,
+"h": 12,
+"headerName": "庄园素材贩售店",
+"walkable": 86
+},
+"2036": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店二",
+"walkable": 80
+},
+"2037": {
+"w": 12,
+"h": 12,
+"headerName": "通用物品贩卖店",
+"walkable": 87
+},
+"2038": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店一",
+"walkable": 86
+},
+"2039": {
+"w": 60,
+"h": 60,
+"headerName": "战斗地图",
+"walkable": 297
+},
+"2040": {
+"w": 25,
+"h": 40,
+"headerName": "阎王宫",
+"walkable": 439
+},
+"2041": {
+"w": 30,
+"h": 30,
+"headerName": "至尊石器-会员素材屋",
+"walkable": 194
+},
+"2042": {
+"w": 30,
+"h": 30,
+"headerName": "魔王NO.4房间",
+"walkable": 657
+},
+"2051": {
+"w": 407,
+"h": 144,
+"headerName": "百人联手道场",
+"walkable": 12931
+},
+"2052": {
+"w": 407,
+"h": 144,
+"headerName": "百人联手道场",
+"walkable": 12931
+},
+"2053": {
+"w": 407,
+"h": 144,
+"headerName": "百人联手道场",
+"walkable": 12931
+},
+"2054": {
+"w": 407,
+"h": 144,
+"headerName": "百人联手道场",
+"walkable": 12931
+},
+"2055": {
+"w": 407,
+"h": 144,
+"headerName": "百人联手道场",
+"walkable": 12931
+},
+"2600": {
+"w": 26,
+"h": 22,
+"headerName": "合成工作室",
+"walkable": 477
+},
+"2601": {
+"w": 60,
+"h": 60,
+"headerName": "狂妄低谷",
+"walkable": 976
+},
+"3000": {
+"w": 150,
+"h": 150,
+"headerName": "加加村",
+"walkable": 8173
+},
+"3001": {
+"w": 30,
+"h": 30,
+"headerName": "加加的武器店",
+"walkable": 59
+},
+"3002": {
+"w": 30,
+"h": 30,
+"headerName": "加加的道具店",
+"walkable": 53
+},
+"3003": {
+"w": 30,
+"h": 30,
+"headerName": "加加的宠物店",
+"walkable": 59
+},
+"3004": {
+"w": 30,
+"h": 30,
+"headerName": "加加的肉店",
+"walkable": 61
+},
+"3005": {
+"w": 30,
+"h": 30,
+"headerName": "加加的医院",
+"walkable": 72
+},
+"3006": {
+"w": 40,
+"h": 30,
+"headerName": "加加的村长家",
+"walkable": 166
+},
+"3007": {
+"w": 100,
+"h": 100,
+"headerName": "加加的竞技场",
+"walkable": 1496
+},
+"3008": {
+"w": 40,
+"h": 40,
+"headerName": "师傅的房间",
+"walkable": 244
+},
+"3009": {
+"w": 40,
+"h": 60,
+"headerName": "加加的便利商店",
+"walkable": 612
+},
+"3011": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 74
+},
+"3012": {
+"w": 30,
+"h": 30,
+"headerName": "聊天室柜台",
+"walkable": 75
+},
+"3014": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 74
+},
+"3015": {
+"w": 30,
+"h": 10,
+"headerName": "水井地下通道",
+"walkable": 76
+},
+"3016": {
+"w": 35,
+"h": 55,
+"headerName": "水井地下洞窟",
+"walkable": 825
+},
+"3020": {
+"w": 25,
+"h": 25,
+"headerName": "加加的道场柜台",
+"walkable": 91
+},
+"3021": {
+"w": 407,
+"h": 144,
+"headerName": "百人联手道场",
+"walkable": 12931
+},
+"3022": {
+"w": 15,
+"h": 15,
+"headerName": "加加的道场医务室",
+"walkable": 150
+},
+"3030": {
+"w": 80,
+"h": 80,
+"headerName": "加加村的庄园",
+"walkable": 5522
+},
+"3031": {
+"w": 20,
+"h": 20,
+"headerName": "加加村庄园族长家",
+"walkable": 236
+},
+"3032": {
+"w": 32,
+"h": 32,
+"headerName": "加加村庄园PK场",
+"walkable": 658
+},
+"3033": {
+"w": 12,
+"h": 12,
+"headerName": "加加村庄园聊天柜台",
+"walkable": 64
+},
+"3034": {
+"w": 18,
+"h": 18,
+"headerName": "加加村庄园聊天室",
+"walkable": 214
+},
+"3035": {
+"w": 12,
+"h": 12,
+"headerName": "通用物品贩卖店店",
+"walkable": 61
+},
+"3036": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店一",
+"walkable": 81
+},
+"3037": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店二",
+"walkable": 84
+},
+"3038": {
+"w": 12,
+"h": 12,
+"headerName": "庄园素材贩售店",
+"walkable": 93
+},
+"3100": {
+"w": 120,
+"h": 120,
+"headerName": "塔姆塔姆村",
+"walkable": 10680
+},
+"3103": {
+"w": 30,
+"h": 30,
+"headerName": "塔姆塔姆的宠物店",
+"walkable": 63
+},
+"3104": {
+"w": 30,
+"h": 30,
+"headerName": "塔姆塔姆的肉店",
+"walkable": 61
+},
+"3105": {
+"w": 30,
+"h": 30,
+"headerName": "塔姆塔姆的医院",
+"walkable": 81
+},
+"3106": {
+"w": 30,
+"h": 40,
+"headerName": "塔姆塔姆的村长家",
+"walkable": 120
+},
+"3109": {
+"w": 40,
+"h": 60,
+"headerName": "塔姆塔姆的便利商店",
+"walkable": 357
+},
+"3110": {
+"w": 30,
+"h": 30,
+"headerName": "塔姆塔姆的民家",
+"walkable": 81
+},
+"3200": {
+"w": 120,
+"h": 120,
+"headerName": "多多村",
+"walkable": 12849
+},
+"3203": {
+"w": 30,
+"h": 30,
+"headerName": "多多的宠物店",
+"walkable": 65
+},
+"3204": {
+"w": 30,
+"h": 30,
+"headerName": "多多的肉店",
+"walkable": 60
+},
+"3205": {
+"w": 30,
+"h": 30,
+"headerName": "多多的医院",
+"walkable": 103
+},
+"3206": {
+"w": 30,
+"h": 40,
+"headerName": "多多的村长家",
+"walkable": 124
+},
+"3208": {
+"w": 40,
+"h": 40,
+"headerName": "多多的道场",
+"walkable": 294
+},
+"3209": {
+"w": 40,
+"h": 60,
+"headerName": "多多的便利商店",
+"walkable": 373
+},
+"3300": {
+"w": 120,
+"h": 120,
+"headerName": "乌鲁力村",
+"walkable": 2730
+},
+"3303": {
+"w": 30,
+"h": 30,
+"headerName": "乌鲁力的宠物店",
+"walkable": 42
+},
+"3304": {
+"w": 30,
+"h": 30,
+"headerName": "乌鲁力的肉店",
+"walkable": 39
+},
+"3305": {
+"w": 30,
+"h": 30,
+"headerName": "乌鲁力的医院",
+"walkable": 117
+},
+"3306": {
+"w": 30,
+"h": 30,
+"headerName": "乌鲁力的村长家",
+"walkable": 71
+},
+"3308": {
+"w": 30,
+"h": 30,
+"headerName": "乌鲁力的道场",
+"walkable": 110
+},
+"3309": {
+"w": 30,
+"h": 30,
+"headerName": "乌鲁力的便利商店",
+"walkable": 93
+},
+"3400": {
+"w": 120,
+"h": 120,
+"headerName": "奇喀喀村",
+"walkable": 3907
+},
+"3403": {
+"w": 30,
+"h": 30,
+"headerName": "奇喀喀的宠物店",
+"walkable": 81
+},
+"3404": {
+"w": 30,
+"h": 30,
+"headerName": "奇喀喀的肉店",
+"walkable": 77
+},
+"3405": {
+"w": 30,
+"h": 30,
+"headerName": "奇喀喀的医院",
+"walkable": 92
+},
+"3406": {
+"w": 40,
+"h": 30,
+"headerName": "奇喀喀的村长家",
+"walkable": 134
+},
+"3409": {
+"w": 40,
+"h": 60,
+"headerName": "奇喀喀的便利商店",
+"walkable": 382
+},
+"3412": {
+"w": 30,
+"h": 30,
+"headerName": "奇喀喀的民家",
+"walkable": 78
+},
+"3413": {
+"w": 30,
+"h": 30,
+"headerName": "森林的独栋房屋",
+"walkable": 75
+},
+"4000": {
+"w": 150,
+"h": 150,
+"headerName": "卡鲁它那村",
+"walkable": 3626
+},
+"4001": {
+"w": 30,
+"h": 30,
+"headerName": "卡鲁它那的武器店",
+"walkable": 45
+},
+"4002": {
+"w": 30,
+"h": 30,
+"headerName": "卡鲁它那的道具店",
+"walkable": 78
+},
+"4003": {
+"w": 30,
+"h": 30,
+"headerName": "卡鲁它那的宠物店",
+"walkable": 54
+},
+"4004": {
+"w": 30,
+"h": 30,
+"headerName": "卡鲁它那的肉店",
+"walkable": 75
+},
+"4005": {
+"w": 30,
+"h": 30,
+"headerName": "卡鲁它那的医院",
+"walkable": 96
+},
+"4006": {
+"w": 30,
+"h": 40,
+"headerName": "卡鲁它那的村长家",
+"walkable": 129
+},
+"4007": {
+"w": 100,
+"h": 100,
+"headerName": "卡鲁它那的竞技场",
+"walkable": 1326
+},
+"4008": {
+"w": 40,
+"h": 40,
+"headerName": "卡鲁它那的道场",
+"walkable": 296
+},
+"4009": {
+"w": 40,
+"h": 60,
+"headerName": "卡鲁它那的便利商店",
+"walkable": 572
+},
+"4011": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 74
+},
+"4012": {
+"w": 30,
+"h": 30,
+"headerName": "聊天室柜台",
+"walkable": 66
+},
+"4014": {
+"w": 30,
+"h": 30,
+"headerName": "长毛象快递",
+"walkable": 74
+},
+"4020": {
+"w": 25,
+"h": 25,
+"headerName": "卡鲁他那道场柜台",
+"walkable": 95
+},
+"4030": {
+"w": 80,
+"h": 80,
+"headerName": "卡鲁它那庄园",
+"walkable": 3315
+},
+"4031": {
+"w": 20,
+"h": 20,
+"headerName": "卡鲁它那庄园族长家",
+"walkable": 286
+},
+"4032": {
+"w": 32,
+"h": 32,
+"headerName": "卡鲁它那庄园PK场",
+"walkable": 715
+},
+"4033": {
+"w": 12,
+"h": 12,
+"headerName": "卡鲁它那庄园聊天柜台",
+"walkable": 78
+},
+"4034": {
+"w": 18,
+"h": 18,
+"headerName": "卡鲁它那庄园聊天室",
+"walkable": 228
+},
+"4035": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店一",
+"walkable": 84
+},
+"4036": {
+"w": 12,
+"h": 12,
+"headerName": "庄园素材贩卖店",
+"walkable": 82
+},
+"4037": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店二",
+"walkable": 75
+},
+"4038": {
+"w": 12,
+"h": 12,
+"headerName": "通用物品贩卖店",
+"walkable": 85
+},
+"5000": {
+"w": 90,
+"h": 90,
+"headerName": "福尔德村",
+"walkable": 1678
+},
+"5001": {
+"w": 40,
+"h": 30,
+"headerName": "福尔德的杂货店",
+"walkable": 121
+},
+"5003": {
+"w": 40,
+"h": 30,
+"headerName": "福尔德的宠物店兼肉店",
+"walkable": 106
+},
+"5005": {
+"w": 40,
+"h": 30,
+"headerName": "福尔德的长老家",
+"walkable": 169
+},
+"5030": {
+"w": 80,
+"h": 80,
+"headerName": "伊甸庄园",
+"walkable": 2825
+},
+"5031": {
+"w": 20,
+"h": 20,
+"headerName": "伊甸庄园族长家",
+"walkable": 264
+},
+"5032": {
+"w": 40,
+"h": 40,
+"headerName": "伊甸庄园竞技场",
+"walkable": 1112
+},
+"5033": {
+"w": 20,
+"h": 20,
+"headerName": "伊甸庄园聊天室柜台",
+"walkable": 109
+},
+"5034": {
+"w": 35,
+"h": 35,
+"headerName": "伊甸庄园聊天室",
+"walkable": 973
+},
+"5035": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专用贩售店一",
+"walkable": 97
+},
+"5036": {
+"w": 15,
+"h": 15,
+"headerName": "庄园专用贩卖店二",
+"walkable": 128
+},
+"5037": {
+"w": 12,
+"h": 12,
+"headerName": "庄园素材贩卖店",
+"walkable": 84
+},
+"5038": {
+"w": 12,
+"h": 12,
+"headerName": "通用物品贩卖店",
+"walkable": 88
+},
+"5100": {
+"w": 90,
+"h": 90,
+"headerName": "达那村",
+"walkable": 3844
+},
+"5101": {
+"w": 50,
+"h": 50,
+"headerName": "大厅 西",
+"walkable": 669
+},
+"5103": {
+"w": 30,
+"h": 30,
+"headerName": "大厅 东",
+"walkable": 189
+},
+"5105": {
+"w": 30,
+"h": 30,
+"headerName": "达那的医院",
+"walkable": 230
+},
+"5106": {
+"w": 30,
+"h": 50,
+"headerName": "长老房间",
+"walkable": 305
+},
+"5107": {
+"w": 15,
+"h": 15,
+"headerName": "长老房间",
+"walkable": 97
+},
+"5500": {
+"w": 50,
+"h": 30,
+"headerName": "避难洞窟",
+"walkable": 561
+},
+"5501": {
+"w": 60,
+"h": 60,
+"headerName": "水坝南方洞窟",
+"walkable": 963
+},
+"5502": {
+"w": 60,
+"h": 60,
+"headerName": "水坝南方洞窟地下一楼",
+"walkable": 982
+},
+"5503": {
+"w": 60,
+"h": 100,
+"headerName": "水坝南方洞窟地下二楼",
+"walkable": 866
+},
+"5504": {
+"w": 20,
+"h": 200,
+"headerName": "水坝洞窟底层",
+"walkable": 1070
+},
+"5505": {
+"w": 60,
+"h": 100,
+"headerName": "水坝北方洞窟地下二楼",
+"walkable": 860
+},
+"5506": {
+"w": 60,
+"h": 60,
+"headerName": "水坝北方洞窟地下一楼",
+"walkable": 1214
+},
+"5507": {
+"w": 100,
+"h": 100,
+"headerName": "波拉山谷",
+"walkable": 5773
+},
+"5508": {
+"w": 60,
+"h": 60,
+"headerName": "波拉山顶通道",
+"walkable": 1152
+},
+"5509": {
+"w": 50,
+"h": 70,
+"headerName": "波拉山顶",
+"walkable": 1272
+},
+"5510": {
+"w": 60,
+"h": 60,
+"headerName": "龙穴门口",
+"walkable": 743
+},
+"5511": {
+"w": 30,
+"h": 30,
+"headerName": "龙穴",
+"walkable": 373
+},
+"5530": {
+"w": 60,
+"h": 60,
+"headerName": "海底洞窟",
+"walkable": 1617
+},
+"5532": {
+"w": 40,
+"h": 40,
+"headerName": "泰坦的部队驻地",
+"walkable": 893
+},
+"5533": {
+"w": 60,
+"h": 60,
+"headerName": "爱丽儿部队驻地",
+"walkable": 3226
+},
+"5534": {
+"w": 15,
+"h": 20,
+"headerName": "爱丽儿部队士兵房间",
+"walkable": 184
+},
+"5535": {
+"w": 12,
+"h": 12,
+"headerName": "爱丽儿房间",
+"walkable": 89
+},
+"5536": {
+"w": 60,
+"h": 60,
+"headerName": "米兰达部队驻地",
+"walkable": 2010
+},
+"5537": {
+"w": 12,
+"h": 12,
+"headerName": "米兰达房间",
+"walkable": 87
+},
+"5538": {
+"w": 20,
+"h": 15,
+"headerName": "米兰达部队士兵房间",
+"walkable": 188
+},
+"5540": {
+"w": 800,
+"h": 800,
+"headerName": "波拉岛",
+"walkable": 99015
+},
+"5541": {
+"w": 50,
+"h": 40,
+"headerName": "泰坦洞穴",
+"walkable": 1109
+},
+"5542": {
+"w": 60,
+"h": 60,
+"headerName": "爱丽考古队驻地",
+"walkable": 3177
+},
+"5543": {
+"w": 60,
+"h": 60,
+"headerName": "米兰达机场",
+"walkable": 2291
+},
+"5560": {
+"w": 200,
+"h": 200,
+"headerName": "迷失之海",
+"walkable": 7000
+},
+"5561": {
+"w": 200,
+"h": 200,
+"headerName": "浩瀚之洋",
+"walkable": 0
+},
+"5570": {
+"w": 60,
+"h": 60,
+"headerName": "水坝遗迹南方洞窟",
+"walkable": 963
+},
+"5571": {
+"w": 60,
+"h": 60,
+"headerName": "水坝遗迹南方洞窟地下一楼",
+"walkable": 982
+},
+"5572": {
+"w": 60,
+"h": 100,
+"headerName": "水坝遗迹南方洞窟地下二楼",
+"walkable": 866
+},
+"5573": {
+"w": 20,
+"h": 200,
+"headerName": "水坝遗迹洞窟底层",
+"walkable": 1070
+},
+"5574": {
+"w": 60,
+"h": 100,
+"headerName": "水坝遗迹北方洞窟地下二楼",
+"walkable": 860
+},
+"5575": {
+"w": 60,
+"h": 60,
+"headerName": "水坝遗迹北方洞窟地下一楼",
+"walkable": 1214
+},
+"5576": {
+"w": 100,
+"h": 100,
+"headerName": "波拉山谷",
+"walkable": 5838
+},
+"5577": {
+"w": 50,
+"h": 50,
+"headerName": "训练师的住所",
+"walkable": 1815
+},
+"5578": {
+"w": 50,
+"h": 50,
+"headerName": "训练师的住所",
+"walkable": 1815
+},
+"5579": {
+"w": 30,
+"h": 30,
+"headerName": "伊尼机场",
+"walkable": 186
+},
+"5580": {
+"w": 100,
+"h": 100,
+"headerName": "波拉山谷",
+"walkable": 5845
+},
+"5581": {
+"w": 150,
+"h": 150,
+"headerName": "天空之境",
+"walkable": 0
+},
+"5582": {
+"w": 100,
+"h": 100,
+"headerName": "波拉山谷",
+"walkable": 5845
+},
+"6000": {
+"w": 92,
+"h": 117,
+"headerName": "奇努伊村",
+"walkable": 3680
+},
+"6004": {
+"w": 30,
+"h": 30,
+"headerName": "奇努伊的肉店",
+"walkable": 69
+},
+"6005": {
+"w": 30,
+"h": 30,
+"headerName": "奇努伊的医院",
+"walkable": 137
+},
+"6006": {
+"w": 30,
+"h": 40,
+"headerName": "奇努伊的村长家",
+"walkable": 149
+},
+"6009": {
+"w": 40,
+"h": 60,
+"headerName": "奇努伊的便利商店",
+"walkable": 467
+},
+"6012": {
+"w": 30,
+"h": 30,
+"headerName": "奇努伊的民家",
+"walkable": 68
+},
+"6030": {
+"w": 80,
+"h": 80,
+"headerName": "塔耳塔庄园",
+"walkable": 2331
+},
+"6031": {
+"w": 20,
+"h": 20,
+"headerName": "塔耳塔庄园族长家",
+"walkable": 179
+},
+"6032": {
+"w": 32,
+"h": 32,
+"headerName": "塔耳塔庄园竞技场",
+"walkable": 657
+},
+"6033": {
+"w": 12,
+"h": 12,
+"headerName": "塔耳塔庄园聊天柜台",
+"walkable": 57
+},
+"6034": {
+"w": 32,
+"h": 32,
+"headerName": "塔耳塔庄园聊天室",
+"walkable": 367
+},
+"6035": {
+"w": 15,
+"h": 10,
+"headerName": "通用物品贩卖店",
+"walkable": 73
+},
+"6036": {
+"w": 20,
+"h": 12,
+"headerName": "庄园专用贩卖店一",
+"walkable": 152
+},
+"6037": {
+"w": 15,
+"h": 10,
+"headerName": "庄园专用贩卖店二",
+"walkable": 79
+},
+"6039": {
+"w": 16,
+"h": 10,
+"headerName": "庄园防具贩卖店",
+"walkable": 80
+},
+"6040": {
+"w": 15,
+"h": 15,
+"headerName": "庄园素材贩卖店",
+"walkable": 105
+},
+"6041": {
+"w": 15,
+"h": 15,
+"headerName": "塔耳塔庄园民房",
+"walkable": 100
+},
+"7000": {
+"w": 200,
+"h": 200,
+"headerName": "伊甸园",
+"walkable": 28168
+},
+"7001": {
+"w": 50,
+"h": 60,
+"headerName": "动物园",
+"walkable": 2198
+},
+"7002": {
+"w": 60,
+"h": 80,
+"headerName": "伊甸游乐场",
+"walkable": 2544
+},
+"7003": {
+"w": 30,
+"h": 30,
+"headerName": "轮盘游乐间",
+"walkable": 558
+},
+"7005": {
+"w": 50,
+"h": 50,
+"headerName": "竞速场",
+"walkable": 1906
+},
+"7006": {
+"w": 40,
+"h": 40,
+"headerName": "宠物竞技场",
+"walkable": 1173
+},
+"7007": {
+"w": 50,
+"h": 50,
+"headerName": "格斗竞技场",
+"walkable": 1805
+},
+"7008": {
+"w": 25,
+"h": 25,
+"headerName": "骰子游乐间",
+"walkable": 448
+},
+"7009": {
+"w": 18,
+"h": 16,
+"headerName": "宠物店",
+"walkable": 188
+},
+"7010": {
+"w": 20,
+"h": 18,
+"headerName": "医院",
+"walkable": 250
+},
+"7011": {
+"w": 12,
+"h": 15,
+"headerName": "肉店",
+"walkable": 99
+},
+"7012": {
+"w": 30,
+"h": 25,
+"headerName": "旅馆",
+"walkable": 479
+},
+"7013": {
+"w": 30,
+"h": 20,
+"headerName": "伊甸员工宿舍",
+"walkable": 384
+},
+"7014": {
+"w": 20,
+"h": 25,
+"headerName": "伊甸员工宿舍",
+"walkable": 312
+},
+"7015": {
+"w": 25,
+"h": 20,
+"headerName": "林务局",
+"walkable": 351
+},
+"7016": {
+"w": 20,
+"h": 18,
+"headerName": "伊甸训练所",
+"walkable": 221
+},
+"7017": {
+"w": 18,
+"h": 15,
+"headerName": "民房",
+"walkable": 175
+},
+"7018": {
+"w": 18,
+"h": 15,
+"headerName": "民房",
+"walkable": 173
+},
+"7019": {
+"w": 18,
+"h": 15,
+"headerName": "民房",
+"walkable": 171
+},
+"7020": {
+"w": 18,
+"h": 15,
+"headerName": "王子的房间",
+"walkable": 142
+},
+"7021": {
+"w": 50,
+"h": 50,
+"headerName": "伊甸乐园主人官邸",
+"walkable": 1605
+},
+"7022": {
+"w": 25,
+"h": 40,
+"headerName": "艾巴登地下宫殿",
+"walkable": 568
+},
+"7023": {
+"w": 25,
+"h": 40,
+"headerName": "艾巴登地下宫殿",
+"walkable": 556
+},
+"7024": {
+"w": 25,
+"h": 20,
+"headerName": "林务局",
+"walkable": 351
+},
+"7025": {
+"w": 150,
+"h": 150,
+"headerName": "饲养丛林",
+"walkable": 14997
+},
+"7030": {
+"w": 88,
+"h": 88,
+"headerName": "尼克斯庄园",
+"walkable": 3622
+},
+"7031": {
+"w": 20,
+"h": 20,
+"headerName": "尼克斯庄园族长家",
+"walkable": 272
+},
+"7032": {
+"w": 32,
+"h": 32,
+"headerName": "尼克斯庄园竞技场",
+"walkable": 841
+},
+"7033": {
+"w": 12,
+"h": 12,
+"headerName": "尼克斯庄园聊天柜台",
+"walkable": 89
+},
+"7034": {
+"w": 30,
+"h": 30,
+"headerName": "尼克斯庄园聊天室",
+"walkable": 417
+},
+"7035": {
+"w": 15,
+"h": 15,
+"headerName": "庄园专用贩卖店二",
+"walkable": 100
+},
+"7036": {
+"w": 11,
+"h": 11,
+"headerName": "庄园素材贩卖店",
+"walkable": 53
+},
+"7037": {
+"w": 15,
+"h": 19,
+"headerName": "庄园专用贩卖店一",
+"walkable": 154
+},
+"7038": {
+"w": 11,
+"h": 11,
+"headerName": "通用物品贩卖店",
+"walkable": 57
+},
+"7100": {
+"w": 30,
+"h": 30,
+"headerName": "塔耳塔地城入口",
+"walkable": 346
+},
+"7101": {
+"w": 25,
+"h": 25,
+"headerName": "道场柜台",
+"walkable": 93
+},
+"7102": {
+"w": 15,
+"h": 15,
+"headerName": "道场的医务室",
+"walkable": 136
+},
+"7103": {
+"w": 40,
+"h": 40,
+"headerName": "师傅的房间",
+"walkable": 269
+},
+"7104": {
+"w": 407,
+"h": 144,
+"headerName": "魔法道场",
+"walkable": 12931
+},
+"7105": {
+"w": 40,
+"h": 40,
+"headerName": "塔耳塔地城东南区",
+"walkable": 453
+},
+"7106": {
+"w": 10,
+"h": 20,
+"headerName": "塔耳塔地城东方通道",
+"walkable": 44
+},
+"7107": {
+"w": 30,
+"h": 30,
+"headerName": "塔耳塔地城东北区",
+"walkable": 240
+},
+"7108": {
+"w": 25,
+"h": 15,
+"headerName": "塔耳塔地城北方通道",
+"walkable": 115
+},
+"7109": {
+"w": 30,
+"h": 30,
+"headerName": "塔耳塔地城西北区",
+"walkable": 243
+},
+"7110": {
+"w": 10,
+"h": 20,
+"headerName": "塔耳塔地城西方通道",
+"walkable": 45
+},
+"7111": {
+"w": 40,
+"h": 40,
+"headerName": "塔耳塔地城西南区",
+"walkable": 489
+},
+"7112": {
+"w": 30,
+"h": 30,
+"headerName": "塔耳塔地城中央区",
+"walkable": 244
+},
+"7116": {
+"w": 15,
+"h": 15,
+"headerName": "塔耳塔肉店",
+"walkable": 90
+},
+"7117": {
+"w": 20,
+"h": 20,
+"headerName": "塔耳塔武器店",
+"walkable": 198
+},
+"7118": {
+"w": 30,
+"h": 40,
+"headerName": "塔耳塔便利商店",
+"walkable": 662
+},
+"7119": {
+"w": 35,
+"h": 25,
+"headerName": "塔耳塔旅馆",
+"walkable": 434
+},
+"7120": {
+"w": 20,
+"h": 20,
+"headerName": "塔耳塔医院",
+"walkable": 215
+},
+"7121": {
+"w": 15,
+"h": 10,
+"headerName": "塔耳塔宠物店",
+"walkable": 72
+},
+"7122": {
+"w": 15,
+"h": 15,
+"headerName": "塔耳塔民房",
+"walkable": 119
+},
+"7123": {
+"w": 12,
+"h": 12,
+"headerName": "塔耳塔民房",
+"walkable": 69
+},
+"7124": {
+"w": 15,
+"h": 15,
+"headerName": "塔耳塔民房",
+"walkable": 104
+},
+"7125": {
+"w": 20,
+"h": 12,
+"headerName": "塔耳塔民房",
+"walkable": 121
+},
+"7126": {
+"w": 16,
+"h": 10,
+"headerName": "塔耳塔民房",
+"walkable": 65
+},
+"7127": {
+"w": 12,
+"h": 12,
+"headerName": "塔耳塔民房",
+"walkable": 80
+},
+"7129": {
+"w": 40,
+"h": 40,
+"headerName": "塔耳塔战士团",
+"walkable": 676
+},
+"7130": {
+"w": 20,
+"h": 20,
+"headerName": "塔耳塔战士团餐厅",
+"walkable": 153
+},
+"7131": {
+"w": 20,
+"h": 20,
+"headerName": "塔耳塔战士团餐厅",
+"walkable": 153
+},
+"7132": {
+"w": 20,
+"h": 20,
+"headerName": "塔耳塔战士团餐厅",
+"walkable": 153
+},
+"7133": {
+"w": 20,
+"h": 20,
+"headerName": "英嘉的房间",
+"walkable": 105
+},
+"7134": {
+"w": 40,
+"h": 40,
+"headerName": "贫民窟",
+"walkable": 729
+},
+"7135": {
+"w": 15,
+"h": 15,
+"headerName": "贫民洞窟地下通道",
+"walkable": 52
+},
+"7136": {
+"w": 40,
+"h": 40,
+"headerName": "贫民窟",
+"walkable": 761
+},
+"7200": {
+"w": 120,
+"h": 120,
+"headerName": "尼克斯水城",
+"walkable": 5853
+},
+"7201": {
+"w": 15,
+"h": 15,
+"headerName": "尼克斯肉店",
+"walkable": 135
+},
+"7202": {
+"w": 30,
+"h": 20,
+"headerName": "尼克斯便利商店",
+"walkable": 289
+},
+"7203": {
+"w": 40,
+"h": 40,
+"headerName": "尼克斯旅馆",
+"walkable": 696
+},
+"7204": {
+"w": 18,
+"h": 18,
+"headerName": "尼克斯医院",
+"walkable": 152
+},
+"7205": {
+"w": 15,
+"h": 15,
+"headerName": "尼克斯宠物店",
+"walkable": 110
+},
+"7206": {
+"w": 30,
+"h": 30,
+"headerName": "尼克斯特产店",
+"walkable": 216
+},
+"7207": {
+"w": 11,
+"h": 11,
+"headerName": "尼克斯民房",
+"walkable": 48
+},
+"7208": {
+"w": 14,
+"h": 14,
+"headerName": "尼克斯民房",
+"walkable": 83
+},
+"7209": {
+"w": 15,
+"h": 15,
+"headerName": "尼克斯民房",
+"walkable": 135
+},
+"7210": {
+"w": 11,
+"h": 11,
+"headerName": "尼克斯民房",
+"walkable": 65
+},
+"7211": {
+"w": 30,
+"h": 30,
+"headerName": "尼克斯民房",
+"walkable": 171
+},
+"7212": {
+"w": 30,
+"h": 30,
+"headerName": "尼克斯民房",
+"walkable": 181
+},
+"7213": {
+"w": 11,
+"h": 11,
+"headerName": "尼克斯民房",
+"walkable": 48
+},
+"7214": {
+"w": 11,
+"h": 11,
+"headerName": "尼克斯民房",
+"walkable": 65
+},
+"7215": {
+"w": 50,
+"h": 50,
+"headerName": "尼克斯王宫",
+"walkable": 1564
+},
+"7217": {
+"w": 30,
+"h": 30,
+"headerName": "水灵神殿",
+"walkable": 366
+},
+"7300": {
+"w": 150,
+"h": 150,
+"headerName": "弗烈顿火城",
+"walkable": 13473
+},
+"7301": {
+"w": 100,
+"h": 150,
+"headerName": "火山道场",
+"walkable": 5408
+},
+"7302": {
+"w": 45,
+"h": 45,
+"headerName": "火山祭坛",
+"walkable": 434
+},
+"7303": {
+"w": 20,
+"h": 20,
+"headerName": "弗烈顿火城的民房",
+"walkable": 114
+},
+"7304": {
+"w": 20,
+"h": 20,
+"headerName": "弗烈顿火城的武器店",
+"walkable": 219
+},
+"7305": {
+"w": 30,
+"h": 25,
+"headerName": "弗烈顿火城的旅馆",
+"walkable": 486
+},
+"7306": {
+"w": 18,
+"h": 16,
+"headerName": "弗烈顿火城的宠物店",
+"walkable": 199
+},
+"7307": {
+"w": 18,
+"h": 15,
+"headerName": "弗烈顿火城的民房",
+"walkable": 160
+},
+"7308": {
+"w": 12,
+"h": 15,
+"headerName": "弗烈顿火城的肉店",
+"walkable": 105
+},
+"7309": {
+"w": 30,
+"h": 30,
+"headerName": "弗烈顿火城的便利店",
+"walkable": 525
+},
+"7310": {
+"w": 20,
+"h": 18,
+"headerName": "弗烈顿火城的医院",
+"walkable": 220
+},
+"7350": {
+"w": 110,
+"h": 110,
+"headerName": "蒙达村",
+"walkable": 5149
+},
+"7351": {
+"w": 110,
+"h": 110,
+"headerName": "12年前蒙达村",
+"walkable": 5508
+},
+"7352": {
+"w": 100,
+"h": 100,
+"headerName": "蒙达山",
+"walkable": 2564
+},
+"7353": {
+"w": 20,
+"h": 34,
+"headerName": "蒙达村村长家",
+"walkable": 308
+},
+"7354": {
+"w": 20,
+"h": 20,
+"headerName": "蒙达村的花店",
+"walkable": 135
+},
+"7355": {
+"w": 20,
+"h": 20,
+"headerName": "蒙达村肉店",
+"walkable": 62
+},
+"7356": {
+"w": 20,
+"h": 20,
+"headerName": "蒙达村的民房",
+"walkable": 125
+},
+"7357": {
+"w": 20,
+"h": 20,
+"headerName": "蒙达村的民房",
+"walkable": 141
+},
+"7358": {
+"w": 20,
+"h": 25,
+"headerName": "蒙达村的民房",
+"walkable": 93
+},
+"7359": {
+"w": 20,
+"h": 20,
+"headerName": "蒙达村的民房",
+"walkable": 134
+},
+"7400": {
+"w": 160,
+"h": 160,
+"headerName": "亚伊欧风城",
+"walkable": 15501
+},
+"7401": {
+"w": 50,
+"h": 50,
+"headerName": "亚伊欧王宫",
+"walkable": 2013
+},
+"7402": {
+"w": 200,
+"h": 150,
+"headerName": "凯菈村",
+"walkable": 15734
+},
+"7403": {
+"w": 30,
+"h": 30,
+"headerName": "亚伊欧的民房",
+"walkable": 216
+},
+"7404": {
+"w": 30,
+"h": 30,
+"headerName": "亚伊欧的民房",
+"walkable": 258
+},
+"7405": {
+"w": 30,
+"h": 30,
+"headerName": "亚伊欧风城的宠物店",
+"walkable": 82
+},
+"7406": {
+"w": 40,
+"h": 30,
+"headerName": "亚伊欧风城的医院",
+"walkable": 148
+},
+"7407": {
+"w": 40,
+"h": 30,
+"headerName": "亚伊欧风城的旅馆",
+"walkable": 405
+},
+"7408": {
+"w": 30,
+"h": 30,
+"headerName": "亚伊欧风城的武器店",
+"walkable": 69
+},
+"7409": {
+"w": 40,
+"h": 60,
+"headerName": "亚伊欧风城便利店",
+"walkable": 315
+},
+"7410": {
+"w": 30,
+"h": 30,
+"headerName": "亚伊欧风城的肉店",
+"walkable": 78
+},
+"7411": {
+"w": 50,
+"h": 50,
+"headerName": "亚伊欧王宫",
+"walkable": 2013
+},
+"7412": {
+"w": 50,
+"h": 50,
+"headerName": "亚伊欧王宫",
+"walkable": 2013
+},
+"7420": {
+"w": 15,
+"h": 15,
+"headerName": "凯菈村的民房",
+"walkable": 106
+},
+"7421": {
+"w": 18,
+"h": 18,
+"headerName": "凯菈村的民房",
+"walkable": 188
+},
+"7422": {
+"w": 16,
+"h": 18,
+"headerName": "凯菈村的民房",
+"walkable": 158
+},
+"7423": {
+"w": 12,
+"h": 12,
+"headerName": "凯菈村的民房",
+"walkable": 75
+},
+"7424": {
+"w": 12,
+"h": 12,
+"headerName": "凯菈村的民房",
+"walkable": 90
+},
+"7425": {
+"w": 40,
+"h": 30,
+"headerName": "凯菈村的民房",
+"walkable": 155
+},
+"7450": {
+"w": 100,
+"h": 100,
+"headerName": "迷雾森林",
+"walkable": 1917
+},
+"7451": {
+"w": 100,
+"h": 100,
+"headerName": "迷雾森林",
+"walkable": 1917
+},
+"7452": {
+"w": 60,
+"h": 60,
+"headerName": "小猪森林",
+"walkable": 1398
+},
+"7453": {
+"w": 15,
+"h": 15,
+"headerName": "伐木工头的房间",
+"walkable": 106
+},
+"7454": {
+"w": 15,
+"h": 15,
+"headerName": "伐木工头的房间",
+"walkable": 106
+},
+"7455": {
+"w": 100,
+"h": 150,
+"headerName": "十二年前凯菈村",
+"walkable": 9178
+},
+"7456": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船底层",
+"walkable": 32
+},
+"7457": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船底层",
+"walkable": 109
+},
+"7458": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船底层",
+"walkable": 77
+},
+"7459": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船上层",
+"walkable": 161
+},
+"7460": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船上层",
+"walkable": 143
+},
+"7461": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船上层",
+"walkable": 83
+},
+"7462": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船上层",
+"walkable": 173
+},
+"7463": {
+"w": 18,
+"h": 18,
+"headerName": "海盗船上层",
+"walkable": 32
+},
+"7500": {
+"w": 100,
+"h": 100,
+"headerName": "瑞尔亚斯之都",
+"walkable": 4643
+},
+"7501": {
+"w": 30,
+"h": 30,
+"headerName": "瑞尔亚斯的武器店",
+"walkable": 89
+},
+"7502": {
+"w": 30,
+"h": 30,
+"headerName": "瑞尔亚斯的道具店\r\n",
+"walkable": 96
+},
+"7503": {
+"w": 30,
+"h": 30,
+"headerName": "瑞尔亚斯的训练所",
+"walkable": 207
+},
+"7504": {
+"w": 30,
+"h": 30,
+"headerName": "瑞尔亚斯的肉店",
+"walkable": 83
+},
+"7505": {
+"w": 30,
+"h": 30,
+"headerName": "瑞尔亚斯的医院",
+"walkable": 188
+},
+"7506": {
+"w": 30,
+"h": 40,
+"headerName": "瑞尔亚斯的首长家",
+"walkable": 191
+},
+"7507": {
+"w": 30,
+"h": 30,
+"headerName": "瑞尔亚斯的学习厅",
+"walkable": 211
+},
+"7508": {
+"w": 50,
+"h": 50,
+"headerName": "瑞尔亚斯的议会厅",
+"walkable": 1583
+},
+"7509": {
+"w": 40,
+"h": 60,
+"headerName": "瑞尔亚斯的便利商店",
+"walkable": 692
+},
+"7511": {
+"w": 30,
+"h": 30,
+"headerName": "瑞尔亚斯的研究院",
+"walkable": 182
+},
+"7512": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 72
+},
+"7513": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 69
+},
+"7514": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 73
+},
+"7515": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 106
+},
+"7516": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 76
+},
+"7517": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 72
+},
+"7518": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 72
+},
+"7519": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 69
+},
+"7520": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 69
+},
+"7521": {
+"w": 30,
+"h": 30,
+"headerName": "民房",
+"walkable": 67
+},
+"7530": {
+"w": 100,
+"h": 100,
+"headerName": "瑞尔亚斯庄园",
+"walkable": 3910
+},
+"7531": {
+"w": 20,
+"h": 20,
+"headerName": "瑞尔亚斯庄园族长家",
+"walkable": 264
+},
+"7532": {
+"w": 32,
+"h": 32,
+"headerName": "瑞尔亚斯庄园竞技场",
+"walkable": 644
+},
+"7535": {
+"w": 12,
+"h": 12,
+"headerName": "庄园素材贩售店",
+"walkable": 90
+},
+"7536": {
+"w": 12,
+"h": 12,
+"headerName": "庄园专卖店一",
+"walkable": 82
+},
+"7537": {
+"w": 12,
+"h": 12,
+"headerName": "庄园素通用售店",
+"walkable": 81
+},
+"7538": {
+"w": 30,
+"h": 30,
+"headerName": "庄园专卖店二",
+"walkable": 95
+},
+"7600": {
+"w": 300,
+"h": 300,
+"headerName": "无息之境",
+"walkable": 68722
+},
+"8000": {
+"w": 60,
+"h": 60,
+"headerName": "史东尔换气道",
+"walkable": 749
+},
+"8001": {
+"w": 70,
+"h": 80,
+"headerName": "史东尔洞窟地下一楼",
+"walkable": 1771
+},
+"8002": {
+"w": 60,
+"h": 50,
+"headerName": "史东尔洞窟地下二楼",
+"walkable": 1092
+},
+"8003": {
+"w": 80,
+"h": 60,
+"headerName": "史东尔洞窟地下三楼",
+"walkable": 1704
+},
+"8004": {
+"w": 70,
+"h": 80,
+"headerName": "史东尔洞窟地下四楼",
+"walkable": 2189
+},
+"8005": {
+"w": 70,
+"h": 60,
+"headerName": "史东尔洞窟地下五楼",
+"walkable": 1518
+},
+"8006": {
+"w": 70,
+"h": 80,
+"headerName": "史东尔洞窟地下六楼",
+"walkable": 1678
+},
+"8007": {
+"w": 60,
+"h": 60,
+"headerName": "沉船",
+"walkable": 516
+},
+"8008": {
+"w": 40,
+"h": 40,
+"headerName": "动物园",
+"walkable": 1011
+},
+"8009": {
+"w": 60,
+"h": 60,
+"headerName": "沙己夫换气道",
+"walkable": 727
+},
+"8010": {
+"w": 80,
+"h": 70,
+"headerName": "沙己夫洞窟地下一楼",
+"walkable": 2033
+},
+"8011": {
+"w": 90,
+"h": 70,
+"headerName": "沙己夫洞窟地下二楼",
+"walkable": 2230
+},
+"8012": {
+"w": 70,
+"h": 50,
+"headerName": "沙己夫洞窟地下三楼",
+"walkable": 1096
+},
+"8013": {
+"w": 70,
+"h": 80,
+"headerName": "沙己夫洞窟地下四楼",
+"walkable": 1628
+},
+"8014": {
+"w": 80,
+"h": 90,
+"headerName": "沙己夫洞窟地下五楼",
+"walkable": 2213
+},
+"8015": {
+"w": 20,
+"h": 20,
+"headerName": "海底洞窟",
+"walkable": 84
+},
+"8016": {
+"w": 60,
+"h": 60,
+"headerName": "新手试练洞窟地下一楼",
+"walkable": 1218
+},
+"8017": {
+"w": 50,
+"h": 50,
+"headerName": "新手试练洞窟地下二楼",
+"walkable": 703
+},
+"8018": {
+"w": 30,
+"h": 30,
+"headerName": "新手村的宠物店",
+"walkable": 71
+},
+"8019": {
+"w": 30,
+"h": 30,
+"headerName": "大媽的家",
+"walkable": 47
+},
+"8020": {
+"w": 30,
+"h": 30,
+"headerName": "VIP房间",
+"walkable": 136
+},
+"8021": {
+"w": 60,
+"h": 50,
+"headerName": "战斗训练场",
+"walkable": 379
+},
+"8022": {
+"w": 30,
+"h": 30,
+"headerName": "工匠的家",
+"walkable": 170
+},
+"8023": {
+"w": 30,
+"h": 30,
+"headerName": "恶霸居",
+"walkable": 106
+},
+"8024": {
+"w": 30,
+"h": 30,
+"headerName": "组队交友训练房间",
+"walkable": 211
+},
+"8025": {
+"w": 30,
+"h": 30,
+"headerName": "恶霸居",
+"walkable": 106
+},
+"8027": {
+"w": 20,
+"h": 20,
+"headerName": "海底洞窟",
+"walkable": 84
+},
+"8028": {
+"w": 20,
+"h": 20,
+"headerName": "海底洞窟",
+"walkable": 84
+},
+"8029": {
+"w": 20,
+"h": 20,
+"headerName": "海底洞窟",
+"walkable": 84
+},
+"8030": {
+"w": 80,
+"h": 80,
+"headerName": "弗烈顿庄园",
+"walkable": 5451
+},
+"8031": {
+"w": 20,
+"h": 34,
+"headerName": "弗烈顿庄园族长家",
+"walkable": 317
+},
+"8032": {
+"w": 60,
+"h": 60,
+"headerName": "弗烈顿庄园竞技场",
+"walkable": 3060
+},
+"8033": {
+"w": 12,
+"h": 12,
+"headerName": "弗烈顿庄园聊天室柜台",
+"walkable": 68
+},
+"8034": {
+"w": 18,
+"h": 18,
+"headerName": "弗烈顿庄园聊天室",
+"walkable": 213
+},
+"8035": {
+"w": 35,
+"h": 20,
+"headerName": "庄园专属贩卖店二",
+"walkable": 235
+},
+"8036": {
+"w": 20,
+"h": 20,
+"headerName": "庄园专属贩卖店一",
+"walkable": 128
+},
+"8037": {
+"w": 20,
+"h": 20,
+"headerName": "通用物品贩卖店",
+"walkable": 60
+},
+"8038": {
+"w": 20,
+"h": 20,
+"headerName": "武器贩卖店",
+"walkable": 215
+},
+"8100": {
+"w": 60,
+"h": 60,
+"headerName": "沉船",
+"walkable": 516
+},
+"8101": {
+"w": 60,
+"h": 60,
+"headerName": "沉船",
+"walkable": 515
+},
+"8102": {
+"w": 40,
+"h": 70,
+"headerName": "深海通道",
+"walkable": 972
+},
+"8103": {
+"w": 60,
+"h": 60,
+"headerName": "深海通道",
+"walkable": 1242
+},
+"8104": {
+"w": 50,
+"h": 50,
+"headerName": "深海通道",
+"walkable": 619
+},
+"8105": {
+"w": 20,
+"h": 20,
+"headerName": "深海通道",
+"walkable": 89
+},
+"8106": {
+"w": 40,
+"h": 60,
+"headerName": "浅海通道",
+"walkable": 570
+},
+"8107": {
+"w": 40,
+"h": 60,
+"headerName": "浅冰通道",
+"walkable": 552
+},
+"8108": {
+"w": 40,
+"h": 60,
+"headerName": "冰颤通道",
+"walkable": 373
+},
+"8109": {
+"w": 30,
+"h": 30,
+"headerName": "冰颤通道",
+"walkable": 163
+},
+"8110": {
+"w": 30,
+"h": 30,
+"headerName": "冰颤通道",
+"walkable": 222
+},
+"8111": {
+"w": 30,
+"h": 30,
+"headerName": "冰颤通道",
+"walkable": 267
+},
+"8112": {
+"w": 50,
+"h": 60,
+"headerName": "冰封通道",
+"walkable": 976
+},
+"8113": {
+"w": 80,
+"h": 90,
+"headerName": "旋涡通道",
+"walkable": 712
+},
+"8116": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-东",
+"walkable": 4928
+},
+"8117": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-北",
+"walkable": 5073
+},
+"8118": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-南",
+"walkable": 4985
+},
+"8119": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-西",
+"walkable": 4754
+},
+"8120": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-中",
+"walkable": 4927
+},
+"8121": {
+"w": 40,
+"h": 40,
+"headerName": "黄泉之境",
+"walkable": 49
+},
+"8122": {
+"w": 100,
+"h": 100,
+"headerName": "黄泉之境",
+"walkable": 2078
+},
+"8123": {
+"w": 100,
+"h": 100,
+"headerName": "黄泉之境底层",
+"walkable": 493
+},
+"8124": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-中一",
+"walkable": 4949
+},
+"8125": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-中二",
+"walkable": 3059
+},
+"8126": {
+"w": 100,
+"h": 100,
+"headerName": "沉睡洞窟-中三",
+"walkable": 3295
+},
+"8127": {
+"w": 100,
+"h": 100,
+"headerName": "黄泉之境底层",
+"walkable": 493
+},
+"8128": {
+"w": 100,
+"h": 100,
+"headerName": "黄泉之境贼窝",
+"walkable": 495
+},
+"8200": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 4002
+},
+"8201": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 4836
+},
+"8202": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 5151
+},
+"8203": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 4500
+},
+"8204": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 3272
+},
+"8205": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 4103
+},
+"8206": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 2708
+},
+"8207": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 3486
+},
+"8208": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 3562
+},
+"8209": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 3190
+},
+"8210": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 1780
+},
+"8211": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 2176
+},
+"8212": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 2151
+},
+"8213": {
+"w": 220,
+"h": 160,
+"headerName": "英雄战场",
+"walkable": 1792
+},
+"8215": {
+"w": 40,
+"h": 40,
+"headerName": "秘密花园",
+"walkable": 1389
+},
+"8216": {
+"w": 40,
+"h": 40,
+"headerName": "白狼勇士公会",
+"walkable": 705
+},
+"8217": {
+"w": 40,
+"h": 40,
+"headerName": "追猎者公会",
+"walkable": 569
+},
+"8218": {
+"w": 40,
+"h": 40,
+"headerName": "暗灵法师公会",
+"walkable": 294
+},
+"8219": {
+"w": 160,
+"h": 100,
+"headerName": "白狼勇士试练洞窟",
+"walkable": 2453
+},
+"8220": {
+"w": 160,
+"h": 100,
+"headerName": "追猎者试练洞窟",
+"walkable": 3115
+},
+"8221": {
+"w": 160,
+"h": 100,
+"headerName": "暗灵法师试练洞窟",
+"walkable": 3075
+},
+"8230": {
+"w": 70,
+"h": 60,
+"headerName": "香普尔山山洞第一层",
+"walkable": 575
+},
+"8231": {
+"w": 50,
+"h": 50,
+"headerName": "香普尔山山洞第二层",
+"walkable": 645
+},
+"8232": {
+"w": 40,
+"h": 40,
+"headerName": "香普尔山山洞第三层",
+"walkable": 588
+},
+"8233": {
+"w": 40,
+"h": 40,
+"headerName": "香普尔山山洞第三层",
+"walkable": 588
+},
+"8253": {
+"w": 60,
+"h": 60,
+"headerName": "月之幻境地下第二层",
+"walkable": 1172
+},
+"8254": {
+"w": 60,
+"h": 60,
+"headerName": "月之幻境地下第一层",
+"walkable": 782
+},
+"8255": {
+"w": 60,
+"h": 70,
+"headerName": "月之幻境",
+"walkable": 1070
+},
+"8256": {
+"w": 100,
+"h": 100,
+"headerName": "皓月之境",
+"walkable": 2512
+},
+"8257": {
+"w": 80,
+"h": 80,
+"headerName": "魔法都市",
+"walkable": 1423
+},
+"8258": {
+"w": 50,
+"h": 30,
+"headerName": "狼人一族的栖息地",
+"walkable": 574
+},
+"8259": {
+"w": 250,
+"h": 180,
+"headerName": "迷宫",
+"walkable": 8396
+},
+"8260": {
+"w": 250,
+"h": 180,
+"headerName": "封印的迷宫",
+"walkable": 8977
+},
+"8261": {
+"w": 250,
+"h": 180,
+"headerName": "封印的迷宫",
+"walkable": 8977
+},
+"8262": {
+"w": 30,
+"h": 40,
+"headerName": "魔法都市市长家",
+"walkable": 191
+},
+"8263": {
+"w": 30,
+"h": 30,
+"headerName": "市民家",
+"walkable": 69
+},
+"8264": {
+"w": 40,
+"h": 60,
+"headerName": "魔法商店",
+"walkable": 692
+},
+"8265": {
+"w": 30,
+"h": 30,
+"headerName": "魔法之家",
+"walkable": 183
+},
+"8268": {
+"w": 50,
+"h": 50,
+"headerName": "天塔通道",
+"walkable": 744
+},
+"8269": {
+"w": 50,
+"h": 50,
+"headerName": "天塔塔顶",
+"walkable": 261
+},
+"8270": {
+"w": 50,
+"h": 50,
+"headerName": "结界层",
+"walkable": 261
+},
+"8271": {
+"w": 50,
+"h": 50,
+"headerName": "结界层",
+"walkable": 261
+},
+"8272": {
+"w": 50,
+"h": 50,
+"headerName": "结界层",
+"walkable": 261
+},
+"8273": {
+"w": 50,
+"h": 50,
+"headerName": "结界层",
+"walkable": 261
+},
+"8274": {
+"w": 50,
+"h": 50,
+"headerName": "结界层",
+"walkable": 261
+},
+"8275": {
+"w": 50,
+"h": 50,
+"headerName": "结界层",
+"walkable": 261
+},
+"8276": {
+"w": 50,
+"h": 50,
+"headerName": "瑞尔亚斯之都",
+"walkable": 261
+},
+"8277": {
+"w": 50,
+"h": 50,
+"headerName": "天塔塔顶",
+"walkable": 249
+},
+"8278": {
+"w": 15,
+"h": 15,
+"headerName": "魔法饲育屋",
+"walkable": 143
+},
+"8504": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 559
+},
+"8505": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 554
+},
+"8506": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 549
+},
+"8507": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 546
+},
+"8508": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 547
+},
+"8509": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 555
+},
+"8510": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 554
+},
+"8511": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 551
+},
+"8512": {
+"w": 40,
+"h": 40,
+"headerName": "地牢",
+"walkable": 551
+},
+"8513": {
+"w": 30,
+"h": 30,
+"headerName": "牢房",
+"walkable": 338
+},
+"8514": {
+"w": 60,
+"h": 60,
+"headerName": "地精灵洞窟",
+"walkable": 777
+},
+"8515": {
+"w": 35,
+"h": 35,
+"headerName": "水精灵洞窟",
+"walkable": 261
+},
+"8516": {
+"w": 45,
+"h": 35,
+"headerName": "火精灵火山洞窟",
+"walkable": 385
+},
+"8517": {
+"w": 100,
+"h": 100,
+"headerName": "风精灵住所",
+"walkable": 1921
+},
+"8518": {
+"w": 50,
+"h": 50,
+"headerName": "伊甸乐园主人官邸",
+"walkable": 1605
+},
+"8519": {
+"w": 50,
+"h": 50,
+"headerName": "伊甸乐园主人官邸",
+"walkable": 1605
+},
+"8520": {
+"w": 50,
+"h": 50,
+"headerName": "伊甸乐园主人官邸",
+"walkable": 1605
+},
+"8521": {
+"w": 50,
+"h": 50,
+"headerName": "伊甸乐园主人官邸",
+"walkable": 1605
+},
+"8522": {
+"w": 18,
+"h": 15,
+"headerName": "民房",
+"walkable": 175
+},
+"9030": {
+"w": 120,
+"h": 120,
+"headerName": "亚伊欧庄园",
+"walkable": 8815
+},
+"9031": {
+"w": 30,
+"h": 30,
+"headerName": "亚伊欧庄园族长家",
+"walkable": 260
+},
+"9032": {
+"w": 60,
+"h": 60,
+"headerName": "亚伊欧庄园竞技场",
+"walkable": 2953
+},
+"9033": {
+"w": 13,
+"h": 13,
+"headerName": "亚伊欧庄园聊天室柜台",
+"walkable": 84
+},
+"9034": {
+"w": 35,
+"h": 35,
+"headerName": "亚伊欧庄园聊天室",
+"walkable": 959
+},
+"9035": {
+"w": 18,
+"h": 18,
+"headerName": "庄园专用贩卖店一",
+"walkable": 237
+},
+"9036": {
+"w": 12,
+"h": 12,
+"headerName": "通用物品贩卖店",
+"walkable": 91
+},
+"9037": {
+"w": 14,
+"h": 14,
+"headerName": "庄园素材贩卖店",
+"walkable": 98
+},
+"9038": {
+"w": 18,
+"h": 18,
+"headerName": "庄园专用贩卖店二",
+"walkable": 167
+},
+"9355": {
+"w": 35,
+"h": 15,
+"headerName": "达那密道",
+"walkable": 134
+},
+"9356": {
+"w": 15,
+"h": 25,
+"headerName": "蛇王巢穴",
+"walkable": 108
+},
+"9357": {
+"w": 35,
+"h": 15,
+"headerName": "达那密道",
+"walkable": 134
+},
+"10001": {
+"w": 50,
+"h": 50,
+"headerName": "阿布的洞窟地下１楼",
+"walkable": 1072
+},
+"10002": {
+"w": 50,
+"h": 50,
+"headerName": "阿布的洞窟地下２楼",
+"walkable": 1003
+},
+"10003": {
+"w": 50,
+"h": 50,
+"headerName": "阿布的洞窟地下３楼",
+"walkable": 736
+},
+"10004": {
+"w": 50,
+"h": 50,
+"headerName": "阿布的洞窟地下４楼",
+"walkable": 457
+},
+"10005": {
+"w": 50,
+"h": 50,
+"headerName": "阿布的洞窟地下５楼",
+"walkable": 612
+},
+"10006": {
+"w": 50,
+"h": 100,
+"headerName": "阿布的洞窟地下６楼",
+"walkable": 2278
+},
+"10007": {
+"w": 60,
+"h": 60,
+"headerName": "阿布的洞窟地下７楼",
+"walkable": 484
+},
+"10008": {
+"w": 50,
+"h": 50,
+"headerName": "阿布的洞窟地下１楼",
+"walkable": 1072
+},
+"10030": {
+"w": 80,
+"h": 70,
+"headerName": "瑞尔亚斯－新手村",
+"walkable": 2188
+},
+"10032": {
+"w": 40,
+"h": 40,
+"headerName": "瑞尔亚斯族战场",
+"walkable": 1389
+},
+"10101": {
+"w": 50,
+"h": 50,
+"headerName": "往柯尔克的道路１楼",
+"walkable": 759
+},
+"10102": {
+"w": 50,
+"h": 50,
+"headerName": "往柯尔克的道路２楼",
+"walkable": 689
+},
+"10103": {
+"w": 50,
+"h": 50,
+"headerName": "往柯尔克的道路３楼",
+"walkable": 572
+},
+"10201": {
+"w": 40,
+"h": 60,
+"headerName": "海底通路地下１楼",
+"walkable": 690
+},
+"10202": {
+"w": 40,
+"h": 60,
+"headerName": "海底通路地下２楼",
+"walkable": 743
+},
+"10203": {
+"w": 40,
+"h": 60,
+"headerName": "海底通路地下１楼",
+"walkable": 826
+},
+"10204": {
+"w": 200,
+"h": 50,
+"headerName": "海底通路地下２楼",
+"walkable": 3077
+},
+"10301": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟１楼",
+"walkable": 529
+},
+"10302": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟２楼",
+"walkable": 647
+},
+"10303": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟３楼",
+"walkable": 619
+},
+"10304": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟４楼",
+"walkable": 609
+},
+"10305": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟５楼",
+"walkable": 691
+},
+"10306": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟６楼",
+"walkable": 751
+},
+"10307": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟７楼",
+"walkable": 738
+},
+"10308": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥的洞窟８楼",
+"walkable": 757
+},
+"10402": {
+"w": 50,
+"h": 50,
+"headerName": "迷幻洞窟",
+"walkable": 659
+},
+"10403": {
+"w": 50,
+"h": 50,
+"headerName": "迷幻洞窟",
+"walkable": 659
+},
+"10404": {
+"w": 50,
+"h": 50,
+"headerName": "迷幻洞窟",
+"walkable": 659
+},
+"10405": {
+"w": 50,
+"h": 50,
+"headerName": "迷幻洞窟",
+"walkable": 660
+},
+"10406": {
+"w": 50,
+"h": 50,
+"headerName": "迷幻洞窟",
+"walkable": 659
+},
+"10407": {
+"w": 50,
+"h": 50,
+"headerName": "迷幻洞窟",
+"walkable": 659
+},
+"10408": {
+"w": 50,
+"h": 50,
+"headerName": "迷幻洞窟最底层",
+"walkable": 712
+},
+"10601": {
+"w": 50,
+"h": 50,
+"headerName": "东柯尔克的坑道１楼",
+"walkable": 770
+},
+"10602": {
+"w": 50,
+"h": 50,
+"headerName": "东柯尔克的坑道２楼",
+"walkable": 832
+},
+"10603": {
+"w": 50,
+"h": 50,
+"headerName": "东柯尔克的坑道３楼",
+"walkable": 865
+},
+"10604": {
+"w": 50,
+"h": 50,
+"headerName": "东柯尔克的坑道４楼",
+"walkable": 937
+},
+"10605": {
+"w": 50,
+"h": 50,
+"headerName": "东柯尔克的坑道５楼",
+"walkable": 674
+},
+"10701": {
+"w": 80,
+"h": 80,
+"headerName": "盗贼的洞窟地下１楼",
+"walkable": 2110
+},
+"10702": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的洞窟地下２楼",
+"walkable": 767
+},
+"10703": {
+"w": 80,
+"h": 80,
+"headerName": "盗贼的洞窟地下３楼",
+"walkable": 1572
+},
+"10704": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的洞窟地下４楼",
+"walkable": 697
+},
+"10705": {
+"w": 80,
+"h": 80,
+"headerName": "盗贼的洞窟地下５楼",
+"walkable": 1784
+},
+"10801": {
+"w": 50,
+"h": 50,
+"headerName": "霍特尔的洞窟１楼",
+"walkable": 774
+},
+"10802": {
+"w": 20,
+"h": 20,
+"headerName": "霍特尔的洞窟２楼",
+"walkable": 95
+},
+"10803": {
+"w": 40,
+"h": 50,
+"headerName": "霍特尔的洞窟２楼",
+"walkable": 708
+},
+"10804": {
+"w": 50,
+"h": 50,
+"headerName": "霍特尔的洞窟３楼",
+"walkable": 991
+},
+"10805": {
+"w": 50,
+"h": 40,
+"headerName": "霍特尔的洞窟４楼",
+"walkable": 684
+},
+"10806": {
+"w": 60,
+"h": 40,
+"headerName": "霍特尔的洞窟５楼",
+"walkable": 1050
+},
+"10807": {
+"w": 50,
+"h": 50,
+"headerName": "霍特尔的洞窟６楼",
+"walkable": 1093
+},
+"10808": {
+"w": 40,
+"h": 60,
+"headerName": "霍特尔的洞窟７楼",
+"walkable": 961
+},
+"10809": {
+"w": 50,
+"h": 50,
+"headerName": "霍特尔的洞窟８楼",
+"walkable": 1055
+},
+"10901": {
+"w": 50,
+"h": 50,
+"headerName": "柯尔克的大坑道１楼",
+"walkable": 927
+},
+"10902": {
+"w": 50,
+"h": 30,
+"headerName": "柯尔克的大坑道地下１楼",
+"walkable": 571
+},
+"10903": {
+"w": 30,
+"h": 50,
+"headerName": "柯尔克的大坑道地下２楼",
+"walkable": 611
+},
+"10904": {
+"w": 50,
+"h": 50,
+"headerName": "柯尔克的大坑道地下３楼",
+"walkable": 874
+},
+"10905": {
+"w": 50,
+"h": 50,
+"headerName": "柯尔克的大坑道地下４楼",
+"walkable": 994
+},
+"10906": {
+"w": 20,
+"h": 60,
+"headerName": "柯尔克的大坑道地下５楼",
+"walkable": 473
+},
+"10907": {
+"w": 20,
+"h": 60,
+"headerName": "柯尔克的大坑道地下６楼",
+"walkable": 382
+},
+"10908": {
+"w": 50,
+"h": 50,
+"headerName": "柯尔克的大坑道地下７楼",
+"walkable": 914
+},
+"10909": {
+"w": 80,
+"h": 80,
+"headerName": "柯尔克的大坑道地下８楼",
+"walkable": 2488
+},
+"10910": {
+"w": 80,
+"h": 80,
+"headerName": "柯尔克的大坑道地下９楼",
+"walkable": 2971
+},
+"10911": {
+"w": 50,
+"h": 50,
+"headerName": "柯尔克的大坑道地下１０楼",
+"walkable": 845
+},
+"10912": {
+"w": 40,
+"h": 40,
+"headerName": "柯尔克的大坑道２楼",
+"walkable": 694
+},
+"10913": {
+"w": 50,
+"h": 50,
+"headerName": "柯尔克的大坑道３楼",
+"walkable": 1109
+},
+"10914": {
+"w": 40,
+"h": 60,
+"headerName": "柯尔克的大坑道４楼",
+"walkable": 904
+},
+"10915": {
+"w": 60,
+"h": 40,
+"headerName": "柯尔克的大坑道５楼",
+"walkable": 1175
+},
+"10916": {
+"w": 20,
+"h": 80,
+"headerName": "柯尔克的大坑道６楼",
+"walkable": 628
+},
+"10917": {
+"w": 100,
+"h": 30,
+"headerName": "柯尔克的大坑道７楼",
+"walkable": 1250
+},
+"10918": {
+"w": 30,
+"h": 30,
+"headerName": "柯尔克的大坑道８楼",
+"walkable": 360
+},
+"10919": {
+"w": 20,
+"h": 20,
+"headerName": "审查室",
+"walkable": 110
+},
+"10920": {
+"w": 100,
+"h": 100,
+"headerName": "SBC本部",
+"walkable": 6206
+},
+"11001": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥山的小洞窟１楼",
+"walkable": 456
+},
+"11002": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥山的小洞窟２楼",
+"walkable": 550
+},
+"11003": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥山的小洞窟３楼",
+"walkable": 658
+},
+"11004": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥山的小洞窟４楼",
+"walkable": 660
+},
+"11005": {
+"w": 50,
+"h": 50,
+"headerName": "柯奥山的小洞窟５楼",
+"walkable": 391
+},
+"11006": {
+"w": 50,
+"h": 50,
+"headerName": "博士的研究所",
+"walkable": 911
+},
+"11101": {
+"w": 70,
+"h": 70,
+"headerName": "盗贼的基地地下１楼",
+"walkable": 1238
+},
+"11102": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的基地地下２楼",
+"walkable": 781
+},
+"11103": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的基地地下３楼",
+"walkable": 821
+},
+"11104": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的基地地下４楼",
+"walkable": 870
+},
+"11105": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的基地地下５楼",
+"walkable": 630
+},
+"11106": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的基地地下６楼",
+"walkable": 658
+},
+"11107": {
+"w": 50,
+"h": 50,
+"headerName": "盗贼的基地最底层",
+"walkable": 718
+},
+"11201": {
+"w": 80,
+"h": 80,
+"headerName": "玄黄的洞窟地下１楼",
+"walkable": 1748
+},
+"11202": {
+"w": 80,
+"h": 80,
+"headerName": "玄黄的洞窟地下２楼",
+"walkable": 2105
+},
+"11203": {
+"w": 70,
+"h": 70,
+"headerName": "玄黄的洞窟地下３楼",
+"walkable": 1526
+},
+"11204": {
+"w": 70,
+"h": 70,
+"headerName": "玄黄的洞窟地下４楼",
+"walkable": 1587
+},
+"11205": {
+"w": 70,
+"h": 70,
+"headerName": "玄黄的洞窟地下５楼",
+"walkable": 1546
+},
+"11206": {
+"w": 60,
+"h": 60,
+"headerName": "玄黄的洞窟地下６楼",
+"walkable": 1221
+},
+"11207": {
+"w": 60,
+"h": 60,
+"headerName": "玄黄的洞窟地下７楼",
+"walkable": 1317
+},
+"11208": {
+"w": 60,
+"h": 60,
+"headerName": "玄黄的洞窟地下８楼",
+"walkable": 1023
+},
+"11209": {
+"w": 60,
+"h": 60,
+"headerName": "玄黄的洞窟地下９楼",
+"walkable": 1006
+},
+"11210": {
+"w": 50,
+"h": 50,
+"headerName": "玄黄的洞窟地下１０楼",
+"walkable": 879
+},
+"11211": {
+"w": 50,
+"h": 50,
+"headerName": "玄黄的洞窟地下１１楼",
+"walkable": 947
+},
+"11212": {
+"w": 50,
+"h": 50,
+"headerName": "玄黄的洞窟地下１２楼",
+"walkable": 744
+},
+"11213": {
+"w": 50,
+"h": 50,
+"headerName": "玄黄的洞窟地下１３楼",
+"walkable": 947
+},
+"11214": {
+"w": 50,
+"h": 50,
+"headerName": "玄黄的洞窟地下１４楼",
+"walkable": 755
+},
+"11215": {
+"w": 20,
+"h": 20,
+"headerName": "玄黄的洞窟地下１５楼",
+"walkable": 122
+},
+"11300": {
+"w": 50,
+"h": 50,
+"headerName": "ＰＣ团本部１楼",
+"walkable": 724
+},
+"11301": {
+"w": 50,
+"h": 50,
+"headerName": "ＰＣ团本部１楼",
+"walkable": 724
+},
+"11302": {
+"w": 50,
+"h": 50,
+"headerName": "ＰＣ团本部地下１楼",
+"walkable": 812
+},
+"11303": {
+"w": 50,
+"h": 50,
+"headerName": "ＰＣ团本部地下２楼",
+"walkable": 1021
+},
+"11304": {
+"w": 59,
+"h": 50,
+"headerName": "ＰＣ团本部地下３楼",
+"walkable": 1174
+},
+"11305": {
+"w": 59,
+"h": 50,
+"headerName": "ＰＣ团本部地下３楼",
+"walkable": 1174
+},
+"20001": {
+"w": 80,
+"h": 80,
+"headerName": "拉多拉山岭洞窟１楼",
+"walkable": 1875
+},
+"20002": {
+"w": 50,
+"h": 100,
+"headerName": "拉多拉山岭洞窟２楼",
+"walkable": 1673
+},
+"20003": {
+"w": 100,
+"h": 50,
+"headerName": "拉多拉山岭洞窟３楼",
+"walkable": 1522
+},
+"20004": {
+"w": 80,
+"h": 80,
+"headerName": "拉多拉山岭洞窟４楼",
+"walkable": 2118
+},
+"20005": {
+"w": 60,
+"h": 90,
+"headerName": "拉多拉山岭洞窟５楼",
+"walkable": 1620
+},
+"20006": {
+"w": 80,
+"h": 40,
+"headerName": "拉多拉山岭洞窟６楼",
+"walkable": 1053
+},
+"20007": {
+"w": 80,
+"h": 80,
+"headerName": "拉多拉山岭洞窟７楼",
+"walkable": 2641
+},
+"20008": {
+"w": 80,
+"h": 80,
+"headerName": "拉多拉山岭洞窟８楼",
+"walkable": 1686
+},
+"20009": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉山岭洞窟９楼",
+"walkable": 2674
+},
+"20010": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉山岭洞窟１０楼",
+"walkable": 2822
+},
+"20011": {
+"w": 25,
+"h": 25,
+"headerName": "拉多拉山岭洞窟１０楼",
+"walkable": 202
+},
+"20012": {
+"w": 20,
+"h": 20,
+"headerName": "拉多拉山岭洞窟１０楼",
+"walkable": 108
+},
+"20013": {
+"w": 20,
+"h": 20,
+"headerName": "拉多拉山岭洞窟１０楼",
+"walkable": 97
+},
+"20101": {
+"w": 50,
+"h": 70,
+"headerName": "森林洞窟１楼",
+"walkable": 612
+},
+"20102": {
+"w": 40,
+"h": 70,
+"headerName": "森林洞窟２楼",
+"walkable": 722
+},
+"20103": {
+"w": 50,
+"h": 50,
+"headerName": "森林洞窟３楼",
+"walkable": 581
+},
+"20104": {
+"w": 40,
+"h": 40,
+"headerName": "森林洞窟４楼",
+"walkable": 388
+},
+"20105": {
+"w": 50,
+"h": 70,
+"headerName": "森林洞窟山顶",
+"walkable": 1255
+},
+"20301": {
+"w": 300,
+"h": 150,
+"headerName": "拉多拉的回廊",
+"walkable": 11965
+},
+"20302": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉洞窟１楼",
+"walkable": 3090
+},
+"20303": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉洞窟２楼",
+"walkable": 3087
+},
+"20304": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉洞窟３楼",
+"walkable": 3060
+},
+"20305": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉洞窟３楼",
+"walkable": 3060
+},
+"20306": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉洞窟２楼",
+"walkable": 3084
+},
+"20307": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉洞窟３楼",
+"walkable": 3063
+},
+"20308": {
+"w": 100,
+"h": 100,
+"headerName": "拉多拉洞窟３楼",
+"walkable": 3068
+},
+"20309": {
+"w": 120,
+"h": 140,
+"headerName": "拉多拉山山顶",
+"walkable": 2177
+},
+"20401": {
+"w": 50,
+"h": 50,
+"headerName": "哥亚山洞窟１楼",
+"walkable": 705
+},
+"20402": {
+"w": 50,
+"h": 50,
+"headerName": "哥亚山洞窟２楼",
+"walkable": 803
+},
+"20403": {
+"w": 50,
+"h": 50,
+"headerName": "哥亚山洞窟３楼",
+"walkable": 695
+},
+"20404": {
+"w": 50,
+"h": 50,
+"headerName": "哥亚山洞窟４楼",
+"walkable": 581
+},
+"20405": {
+"w": 50,
+"h": 50,
+"headerName": "哥亚山洞窟５楼",
+"walkable": 514
+},
+"20406": {
+"w": 50,
+"h": 70,
+"headerName": "哥亚山的洞窟山顶",
+"walkable": 1380
+},
+"20501": {
+"w": 60,
+"h": 60,
+"headerName": "阿鲁姆山的洞窟地下１楼",
+"walkable": 1287
+},
+"20502": {
+"w": 60,
+"h": 60,
+"headerName": "阿鲁姆山的洞窟地下２楼",
+"walkable": 1232
+},
+"20503": {
+"w": 60,
+"h": 60,
+"headerName": "阿鲁姆山的洞窟地下３楼",
+"walkable": 1287
+},
+"20504": {
+"w": 60,
+"h": 60,
+"headerName": "阿鲁姆山的洞窟地下４楼",
+"walkable": 1232
+},
+"20505": {
+"w": 60,
+"h": 60,
+"headerName": "阿鲁姆山的洞窟地下５楼",
+"walkable": 1287
+},
+"20506": {
+"w": 60,
+"h": 60,
+"headerName": "阿鲁姆山的洞窟地下６楼",
+"walkable": 1232
+},
+"20507": {
+"w": 60,
+"h": 60,
+"headerName": "阿鲁姆山的洞窟地下７楼",
+"walkable": 1292
+},
+"20508": {
+"w": 25,
+"h": 25,
+"headerName": "哈恩的锻冶场",
+"walkable": 192
+},
+"20601": {
+"w": 60,
+"h": 60,
+"headerName": "强恩一族的洞窟１楼",
+"walkable": 1050
+},
+"20602": {
+"w": 70,
+"h": 50,
+"headerName": "强恩一族的洞窟２楼",
+"walkable": 891
+},
+"20603": {
+"w": 50,
+"h": 70,
+"headerName": "强恩一族的洞窟３楼",
+"walkable": 780
+},
+"20604": {
+"w": 60,
+"h": 60,
+"headerName": "强恩一族的洞窟４楼",
+"walkable": 1102
+},
+"20605": {
+"w": 60,
+"h": 80,
+"headerName": "强恩一族的洞窟５楼",
+"walkable": 1111
+},
+"20606": {
+"w": 70,
+"h": 50,
+"headerName": "强恩一族的洞窟６楼",
+"walkable": 1217
+},
+"20607": {
+"w": 80,
+"h": 60,
+"headerName": "强恩一族的洞窟７楼",
+"walkable": 1511
+},
+"20608": {
+"w": 15,
+"h": 15,
+"headerName": "沙拉的房间",
+"walkable": 97
+},
+"20701": {
+"w": 50,
+"h": 50,
+"headerName": "拉多拉的大洞窟１楼",
+"walkable": 714
+},
+"20702": {
+"w": 60,
+"h": 70,
+"headerName": "拉多拉的大洞窟２楼",
+"walkable": 1255
+},
+"20703": {
+"w": 30,
+"h": 30,
+"headerName": "拉多拉的大洞窟３楼",
+"walkable": 287
+},
+"20704": {
+"w": 20,
+"h": 20,
+"headerName": "拉多拉的大洞窟３楼",
+"walkable": 116
+},
+"20705": {
+"w": 20,
+"h": 40,
+"headerName": "拉多拉的大洞窟３楼",
+"walkable": 226
+},
+"20706": {
+"w": 50,
+"h": 50,
+"headerName": "拉多拉的大洞窟４楼",
+"walkable": 832
+},
+"20707": {
+"w": 60,
+"h": 40,
+"headerName": "拉多拉的大洞窟５楼",
+"walkable": 823
+},
+"20708": {
+"w": 40,
+"h": 70,
+"headerName": "拉多拉的大洞窟６楼",
+"walkable": 1003
+},
+"20709": {
+"w": 60,
+"h": 60,
+"headerName": "拉多拉的大洞窟７楼",
+"walkable": 1226
+},
+"20710": {
+"w": 50,
+"h": 50,
+"headerName": "拉多拉的大洞窟８楼",
+"walkable": 844
+},
+"20711": {
+"w": 30,
+"h": 40,
+"headerName": "审查室",
+"walkable": 509
+},
+"20712": {
+"w": 50,
+"h": 50,
+"headerName": "JBA本部",
+"walkable": 877
+},
+"20801": {
+"w": 70,
+"h": 70,
+"headerName": "龙的巢穴１楼",
+"walkable": 1559
+},
+"20802": {
+"w": 50,
+"h": 50,
+"headerName": "龙的巢穴２楼",
+"walkable": 805
+},
+"20803": {
+"w": 50,
+"h": 50,
+"headerName": "龙的巢穴３楼",
+"walkable": 828
+},
+"20804": {
+"w": 50,
+"h": 50,
+"headerName": "龙的巢穴４楼",
+"walkable": 790
+},
+"20805": {
+"w": 50,
+"h": 50,
+"headerName": "龙的巢穴５楼",
+"walkable": 766
+},
+"20806": {
+"w": 50,
+"h": 50,
+"headerName": "龙的巢穴６楼",
+"walkable": 837
+},
+"20807": {
+"w": 50,
+"h": 50,
+"headerName": "龙的巢穴７楼",
+"walkable": 740
+},
+"20901": {
+"w": 70,
+"h": 70,
+"headerName": "卡鲁它那的洞窟１楼",
+"walkable": 1332
+},
+"20902": {
+"w": 60,
+"h": 60,
+"headerName": "卡鲁它那的洞窟２楼",
+"walkable": 767
+},
+"20903": {
+"w": 50,
+"h": 50,
+"headerName": "卡鲁它那的洞窟２楼",
+"walkable": 653
+},
+"21001": {
+"w": 85,
+"h": 85,
+"headerName": "琉璃的洞窟１楼",
+"walkable": 2574
+},
+"21002": {
+"w": 75,
+"h": 75,
+"headerName": "琉璃的洞窟２楼",
+"walkable": 1851
+},
+"21003": {
+"w": 70,
+"h": 70,
+"headerName": "琉璃的洞窟３楼",
+"walkable": 1322
+},
+"21004": {
+"w": 70,
+"h": 70,
+"headerName": "琉璃的洞窟４楼",
+"walkable": 1987
+},
+"21005": {
+"w": 65,
+"h": 65,
+"headerName": "琉璃的洞窟５楼",
+"walkable": 1143
+},
+"21006": {
+"w": 65,
+"h": 65,
+"headerName": "琉璃的洞窟６楼",
+"walkable": 1327
+},
+"21007": {
+"w": 60,
+"h": 60,
+"headerName": "琉璃的洞窟７楼",
+"walkable": 1139
+},
+"21008": {
+"w": 60,
+"h": 60,
+"headerName": "琉璃的洞窟８楼",
+"walkable": 1742
+},
+"21009": {
+"w": 55,
+"h": 55,
+"headerName": "琉璃的洞窟９楼",
+"walkable": 861
+},
+"21010": {
+"w": 55,
+"h": 55,
+"headerName": "琉璃的洞窟１０楼",
+"walkable": 808
+},
+"21011": {
+"w": 50,
+"h": 50,
+"headerName": "琉璃的洞窟１１楼",
+"walkable": 896
+},
+"21012": {
+"w": 40,
+"h": 40,
+"headerName": "琉璃的洞窟１２楼",
+"walkable": 583
+},
+"21013": {
+"w": 40,
+"h": 40,
+"headerName": "琉璃的洞窟１３楼",
+"walkable": 535
+},
+"21014": {
+"w": 30,
+"h": 30,
+"headerName": "琉璃的洞窟１４楼",
+"walkable": 291
+},
+"21015": {
+"w": 20,
+"h": 20,
+"headerName": "琉璃的洞窟１５楼",
+"walkable": 120
+},
+"21016": {
+"w": 40,
+"h": 40,
+"headerName": "琉璃的洞窟１２楼",
+"walkable": 535
+},
+"21103": {
+"w": 50,
+"h": 70,
+"headerName": "拉多拉洞窟山顶",
+"walkable": 1311
+},
+"21106": {
+"w": 50,
+"h": 70,
+"headerName": "拉多拉洞窟山顶",
+"walkable": 1361
+},
+"21108": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下８楼",
+"walkable": 1360
+},
+"21109": {
+"w": 50,
+"h": 70,
+"headerName": "拉多拉洞窟山顶",
+"walkable": 1361
+},
+"21110": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１０楼",
+"walkable": 1461
+},
+"21111": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１１楼",
+"walkable": 1375
+},
+"21112": {
+"w": 50,
+"h": 70,
+"headerName": "拉多拉洞窟山顶",
+"walkable": 1311
+},
+"21113": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１３楼",
+"walkable": 1223
+},
+"21201": {
+"w": 120,
+"h": 120,
+"headerName": "碧青的洞窟地下１楼",
+"walkable": 2973
+},
+"21202": {
+"w": 120,
+"h": 120,
+"headerName": "碧青的洞窟地下２楼",
+"walkable": 3446
+},
+"21203": {
+"w": 120,
+"h": 120,
+"headerName": "碧青的洞窟地下３楼",
+"walkable": 3459
+},
+"21204": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下４楼",
+"walkable": 1091
+},
+"21205": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下５楼",
+"walkable": 1087
+},
+"21206": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下６楼",
+"walkable": 1087
+},
+"21207": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下７楼",
+"walkable": 1036
+},
+"21208": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下８楼",
+"walkable": 1357
+},
+"21209": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下９楼",
+"walkable": 1238
+},
+"21210": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１０楼",
+"walkable": 1461
+},
+"21211": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１１楼",
+"walkable": 1375
+},
+"21212": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１２楼",
+"walkable": 1361
+},
+"21213": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１３楼",
+"walkable": 1227
+},
+"21214": {
+"w": 60,
+"h": 60,
+"headerName": "碧青的洞窟地下１４楼",
+"walkable": 1098
+},
+"21215": {
+"w": 50,
+"h": 100,
+"headerName": "碧青的洞窟地下１５楼",
+"walkable": 786
+},
+"21301": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下1楼",
+"walkable": 543
+},
+"21302": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下2楼",
+"walkable": 651
+},
+"21303": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下3楼",
+"walkable": 580
+},
+"21304": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下4楼",
+"walkable": 641
+},
+"21305": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下5楼",
+"walkable": 647
+},
+"21306": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下6楼",
+"walkable": 642
+},
+"21307": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下7楼",
+"walkable": 703
+},
+"21308": {
+"w": 40,
+"h": 40,
+"headerName": "水苍的洞窟 地下8楼",
+"walkable": 715
+},
+"21309": {
+"w": 60,
+"h": 60,
+"headerName": "水苍的洞窟 地下9楼",
+"walkable": 1470
+},
+"21310": {
+"w": 60,
+"h": 60,
+"headerName": "水苍的洞窟 地下10楼",
+"walkable": 1471
+},
+"21311": {
+"w": 60,
+"h": 60,
+"headerName": "水苍的洞窟 地下11楼",
+"walkable": 1391
+},
+"21312": {
+"w": 60,
+"h": 60,
+"headerName": "水苍的洞窟 地下12楼",
+"walkable": 1723
+},
+"21313": {
+"w": 60,
+"h": 60,
+"headerName": "水苍的洞窟 地下13楼",
+"walkable": 1751
+},
+"21314": {
+"w": 60,
+"h": 60,
+"headerName": "水苍的洞窟 地下14楼",
+"walkable": 1657
+},
+"21315": {
+"w": 60,
+"h": 60,
+"headerName": "水苍的洞窟 地下15楼",
+"walkable": 1646
+},
+"30001": {
+"w": 50,
+"h": 50,
+"headerName": "深红的洞窟地下１楼",
+"walkable": 766
+},
+"30002": {
+"w": 30,
+"h": 50,
+"headerName": "深红的洞窟地下２楼",
+"walkable": 467
+},
+"30003": {
+"w": 30,
+"h": 70,
+"headerName": "深红的洞窟地下３楼",
+"walkable": 639
+},
+"30004": {
+"w": 60,
+"h": 20,
+"headerName": "深红的洞窟地下４楼",
+"walkable": 324
+},
+"30005": {
+"w": 60,
+"h": 60,
+"headerName": "深红的洞窟地下５楼",
+"walkable": 1186
+},
+"30006": {
+"w": 40,
+"h": 40,
+"headerName": "深红的洞窟地下６楼",
+"walkable": 504
+},
+"30007": {
+"w": 20,
+"h": 20,
+"headerName": "深红的洞窟地下７楼",
+"walkable": 127
+},
+"30008": {
+"w": 100,
+"h": 100,
+"headerName": "深红的洞窟地下８楼",
+"walkable": 2049
+},
+"30009": {
+"w": 50,
+"h": 30,
+"headerName": "深红的洞窟地下７楼",
+"walkable": 334
+},
+"30010": {
+"w": 30,
+"h": 50,
+"headerName": "深红的洞窟地下６楼",
+"walkable": 455
+},
+"30011": {
+"w": 60,
+"h": 40,
+"headerName": "深红的洞窟地下５楼",
+"walkable": 904
+},
+"30012": {
+"w": 40,
+"h": 60,
+"headerName": "深红的洞窟地下４楼",
+"walkable": 932
+},
+"30013": {
+"w": 20,
+"h": 70,
+"headerName": "深红的洞窟地下３楼",
+"walkable": 465
+},
+"30014": {
+"w": 70,
+"h": 20,
+"headerName": "深红的洞窟地下２楼",
+"walkable": 429
+},
+"30015": {
+"w": 80,
+"h": 100,
+"headerName": "深红的洞窟地下１楼",
+"walkable": 2967
+},
+"30016": {
+"w": 50,
+"h": 100,
+"headerName": "深红的洞窟地下９楼",
+"walkable": 853
+},
+"30017": {
+"w": 49,
+"h": 99,
+"headerName": "火山裂缝通道",
+"walkable": 1220
+},
+"30022": {
+"w": 50,
+"h": 50,
+"headerName": "水晶洞窟",
+"walkable": 639
+},
+"30023": {
+"w": 50,
+"h": 50,
+"headerName": "水晶洞窟",
+"walkable": 805
+},
+"30024": {
+"w": 50,
+"h": 50,
+"headerName": "水晶洞窟",
+"walkable": 821
+},
+"30025": {
+"w": 50,
+"h": 50,
+"headerName": "水晶洞窟",
+"walkable": 859
+},
+"30026": {
+"w": 30,
+"h": 30,
+"headerName": "水晶洞窟核心",
+"walkable": 352
+},
+"30101": {
+"w": 100,
+"h": 100,
+"headerName": "东吉鲁山岭１楼",
+"walkable": 2144
+},
+"30102": {
+"w": 40,
+"h": 40,
+"headerName": "东吉鲁山岭２楼",
+"walkable": 471
+},
+"30103": {
+"w": 70,
+"h": 70,
+"headerName": "东吉鲁山岭地下１楼",
+"walkable": 1426
+},
+"30104": {
+"w": 50,
+"h": 50,
+"headerName": "东吉鲁山岭１楼",
+"walkable": 588
+},
+"30105": {
+"w": 30,
+"h": 30,
+"headerName": "东吉鲁山岭１楼",
+"walkable": 212
+},
+"30106": {
+"w": 50,
+"h": 50,
+"headerName": "东吉鲁山岭１楼",
+"walkable": 695
+},
+"30107": {
+"w": 50,
+"h": 70,
+"headerName": "东吉鲁山岭地下１楼",
+"walkable": 819
+},
+"30108": {
+"w": 30,
+"h": 30,
+"headerName": "东吉鲁山岭１楼",
+"walkable": 204
+},
+"30201": {
+"w": 50,
+"h": 50,
+"headerName": "北吉鲁的通路地下１楼",
+"walkable": 834
+},
+"30202": {
+"w": 50,
+"h": 50,
+"headerName": "北吉鲁的通路地下2楼",
+"walkable": 738
+},
+"30203": {
+"w": 100,
+"h": 100,
+"headerName": "北吉鲁的通路地下３楼",
+"walkable": 1288
+},
+"30204": {
+"w": 50,
+"h": 50,
+"headerName": "北吉鲁的通路地下２楼",
+"walkable": 746
+},
+"30205": {
+"w": 50,
+"h": 50,
+"headerName": "北吉鲁的通路地下１楼",
+"walkable": 793
+},
+"30301": {
+"w": 50,
+"h": 50,
+"headerName": "地下1楼",
+"walkable": 752
+},
+"30302": {
+"w": 50,
+"h": 50,
+"headerName": "地下2楼",
+"walkable": 731
+},
+"30303": {
+"w": 50,
+"h": 50,
+"headerName": "地下1楼",
+"walkable": 621
+},
+"30304": {
+"w": 50,
+"h": 50,
+"headerName": "地下2楼",
+"walkable": 500
+},
+"30305": {
+"w": 70,
+"h": 70,
+"headerName": "地下3楼",
+"walkable": 607
+},
+"30306": {
+"w": 50,
+"h": 50,
+"headerName": "地下2楼",
+"walkable": 596
+},
+"30307": {
+"w": 50,
+"h": 50,
+"headerName": "地下1楼",
+"walkable": 721
+},
+"30401": {
+"w": 50,
+"h": 50,
+"headerName": "北吉鲁山岭地下１楼",
+"walkable": 781
+},
+"30402": {
+"w": 50,
+"h": 50,
+"headerName": "北吉鲁山岭地下２楼",
+"walkable": 769
+},
+"30403": {
+"w": 50,
+"h": 50,
+"headerName": "北吉鲁山岭地下１楼",
+"walkable": 821
+},
+"30501": {
+"w": 40,
+"h": 40,
+"headerName": "巴那姆的洞窟地下１楼",
+"walkable": 466
+},
+"30502": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟地下２楼",
+"walkable": 861
+},
+"30503": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟地下２楼",
+"walkable": 753
+},
+"30504": {
+"w": 30,
+"h": 30,
+"headerName": "巴那姆的洞窟地下１楼",
+"walkable": 176
+},
+"30505": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟１楼",
+"walkable": 947
+},
+"30506": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟地下１楼",
+"walkable": 443
+},
+"30507": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟地下２楼",
+"walkable": 887
+},
+"30508": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟地下３楼",
+"walkable": 567
+},
+"30509": {
+"w": 100,
+"h": 50,
+"headerName": "巴那姆的洞窟地下２楼",
+"walkable": 1531
+},
+"30510": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟地下３楼",
+"walkable": 723
+},
+"30511": {
+"w": 50,
+"h": 50,
+"headerName": "巴那姆的洞窟地下３楼",
+"walkable": 779
+},
+"30600": {
+"w": 30,
+"h": 30,
+"headerName": "库伊爷的家",
+"walkable": 140
+},
+"30601": {
+"w": 100,
+"h": 100,
+"headerName": "蛙洞地下1楼",
+"walkable": 3033
+},
+"30602": {
+"w": 100,
+"h": 100,
+"headerName": "蛙洞地下2楼",
+"walkable": 2377
+},
+"30603": {
+"w": 100,
+"h": 100,
+"headerName": "蛙洞地下3楼",
+"walkable": 2935
+},
+"30604": {
+"w": 100,
+"h": 100,
+"headerName": "蛙洞地下4楼",
+"walkable": 2353
+},
+"30605": {
+"w": 15,
+"h": 25,
+"headerName": "蛙洞地下5楼",
+"walkable": 102
+},
+"30606": {
+"w": 35,
+"h": 15,
+"headerName": "蛙洞通道",
+"walkable": 129
+},
+"30607": {
+"w": 15,
+"h": 25,
+"headerName": "蛙洞地下5楼",
+"walkable": 102
+},
+"30611": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下一楼",
+"walkable": 1121
+},
+"30612": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下二楼",
+"walkable": 1067
+},
+"30613": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下三楼",
+"walkable": 1025
+},
+"30614": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下四楼",
+"walkable": 1030
+},
+"30615": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下五楼",
+"walkable": 1121
+},
+"30616": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下六楼",
+"walkable": 1067
+},
+"30617": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下七楼",
+"walkable": 1025
+},
+"30618": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下八楼",
+"walkable": 1030
+},
+"30619": {
+"w": 40,
+"h": 40,
+"headerName": "封印之间",
+"walkable": 710
+},
+"30620": {
+"w": 40,
+"h": 40,
+"headerName": "封印之间",
+"walkable": 699
+},
+"30621": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下一楼",
+"walkable": 1141
+},
+"30622": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下二楼",
+"walkable": 1074
+},
+"30623": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下三楼",
+"walkable": 1026
+},
+"30624": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下四楼",
+"walkable": 1037
+},
+"30625": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下五楼",
+"walkable": 1142
+},
+"30626": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下六楼",
+"walkable": 1101
+},
+"30627": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下七楼",
+"walkable": 1034
+},
+"30628": {
+"w": 50,
+"h": 50,
+"headerName": "封印迷宫地下八楼",
+"walkable": 1041
+},
+"30669": {
+"w": 30,
+"h": 30,
+"headerName": "天空之岛暗之间",
+"walkable": 246
+},
+"30670": {
+"w": 30,
+"h": 30,
+"headerName": "天空之岛暗之间",
+"walkable": 246
+},
+"30689": {
+"w": 60,
+"h": 60,
+"headerName": "虚空之界",
+"walkable": 473
+},
+"30691": {
+"w": 100,
+"h": 100,
+"headerName": "天空之岛地之界",
+"walkable": 3673
+},
+"30692": {
+"w": 80,
+"h": 80,
+"headerName": "天空之岛水之界",
+"walkable": 1872
+},
+"30693": {
+"w": 80,
+"h": 80,
+"headerName": "天空之岛火之界",
+"walkable": 2438
+},
+"30694": {
+"w": 90,
+"h": 90,
+"headerName": "天空之岛风之界",
+"walkable": 2990
+},
+"30695": {
+"w": 60,
+"h": 60,
+"headerName": "天空之岛暗之界",
+"walkable": 1244
+},
+"30696": {
+"w": 30,
+"h": 30,
+"headerName": "天空之岛地之间",
+"walkable": 214
+},
+"30697": {
+"w": 30,
+"h": 30,
+"headerName": "天空之岛水之间",
+"walkable": 218
+},
+"30698": {
+"w": 30,
+"h": 30,
+"headerName": "天空之岛火之间",
+"walkable": 181
+},
+"30699": {
+"w": 30,
+"h": 30,
+"headerName": "天空之岛风之间",
+"walkable": 186
+},
+"30701": {
+"w": 60,
+"h": 60,
+"headerName": "地下１楼",
+"walkable": 751
+},
+"30702": {
+"w": 60,
+"h": 60,
+"headerName": "地下２楼",
+"walkable": 970
+},
+"30703": {
+"w": 60,
+"h": 60,
+"headerName": "地下１楼",
+"walkable": 977
+},
+"30901": {
+"w": 60,
+"h": 60,
+"headerName": "地下１楼",
+"walkable": 1150
+},
+"30902": {
+"w": 60,
+"h": 60,
+"headerName": "地下２楼",
+"walkable": 1121
+},
+"30903": {
+"w": 70,
+"h": 70,
+"headerName": "地下３楼",
+"walkable": 834
+},
+"30904": {
+"w": 60,
+"h": 60,
+"headerName": "地下２楼",
+"walkable": 941
+},
+"30905": {
+"w": 60,
+"h": 60,
+"headerName": "地下１楼",
+"walkable": 829
+},
+"31001": {
+"w": 50,
+"h": 50,
+"headerName": "加都洛的洞窟１楼",
+"walkable": 758
+},
+"31002": {
+"w": 50,
+"h": 50,
+"headerName": "加特洛的洞窟２楼",
+"walkable": 977
+},
+"31003": {
+"w": 25,
+"h": 25,
+"headerName": "族长的房间",
+"walkable": 165
+},
+"31101": {
+"w": 50,
+"h": 50,
+"headerName": "美鲁娜的洞窟１楼",
+"walkable": 704
+},
+"31102": {
+"w": 50,
+"h": 50,
+"headerName": "美鲁娜的洞窟２楼",
+"walkable": 829
+},
+"31103": {
+"w": 25,
+"h": 25,
+"headerName": "族长的房间",
+"walkable": 228
+},
+"31201": {
+"w": 50,
+"h": 50,
+"headerName": "没落的矿坑１楼",
+"walkable": 710
+},
+"31202": {
+"w": 40,
+"h": 60,
+"headerName": "没落的矿坑２楼",
+"walkable": 732
+},
+"31203": {
+"w": 50,
+"h": 50,
+"headerName": "没落的矿坑３楼",
+"walkable": 725
+},
+"31204": {
+"w": 60,
+"h": 60,
+"headerName": "没落的矿坑４楼",
+"walkable": 1348
+},
+"31205": {
+"w": 25,
+"h": 25,
+"headerName": "没落的矿坑５楼",
+"walkable": 260
+},
+"31301": {
+"w": 40,
+"h": 120,
+"headerName": "吉鲁的海底通路",
+"walkable": 1298
+},
+"31302": {
+"w": 60,
+"h": 60,
+"headerName": "吉鲁的海底通道",
+"walkable": 1155
+},
+"31401": {
+"w": 120,
+"h": 40,
+"headerName": "奇努伊的海底通路",
+"walkable": 1627
+},
+"31501": {
+"w": 40,
+"h": 120,
+"headerName": "奇努伊的海底通路",
+"walkable": 1545
+},
+"31601": {
+"w": 70,
+"h": 70,
+"headerName": "方位的祠",
+"walkable": 1697
+},
+"31602": {
+"w": 70,
+"h": 70,
+"headerName": "方位的祠",
+"walkable": 1811
+},
+"31603": {
+"w": 100,
+"h": 100,
+"headerName": "方位的祠",
+"walkable": 1961
+},
+"31604": {
+"w": 70,
+"h": 70,
+"headerName": "方位的祠",
+"walkable": 2167
+},
+"31605": {
+"w": 70,
+"h": 70,
+"headerName": "方位的祠",
+"walkable": 1811
+},
+"31606": {
+"w": 100,
+"h": 100,
+"headerName": "方位的祠",
+"walkable": 1961
+},
+"31607": {
+"w": 70,
+"h": 70,
+"headerName": "方位的祠",
+"walkable": 2167
+},
+"31608": {
+"w": 70,
+"h": 70,
+"headerName": "方位的祠",
+"walkable": 1811
+},
+"31609": {
+"w": 100,
+"h": 100,
+"headerName": "方位的祠",
+"walkable": 1979
+},
+"31610": {
+"w": 50,
+"h": 50,
+"headerName": "方位的祠",
+"walkable": 1551
+},
+"31701": {
+"w": 50,
+"h": 50,
+"headerName": "五兄弟的山寨地下１楼",
+"walkable": 913
+},
+"31702": {
+"w": 50,
+"h": 50,
+"headerName": "五兄弟的山寨地下２楼",
+"walkable": 835
+},
+"31703": {
+"w": 50,
+"h": 50,
+"headerName": "五兄弟的山寨地下３楼",
+"walkable": 1025
+},
+"31704": {
+"w": 50,
+"h": 50,
+"headerName": "五兄弟的山寨地下４楼",
+"walkable": 803
+},
+"31705": {
+"w": 50,
+"h": 70,
+"headerName": "五兄弟的山寨地下５楼",
+"walkable": 1272
+},
+"31706": {
+"w": 50,
+"h": 80,
+"headerName": "五兄弟的山寨地下６楼",
+"walkable": 1193
+},
+"31801": {
+"w": 50,
+"h": 50,
+"headerName": "阿斯玛鲁矿山１楼",
+"walkable": 750
+},
+"31802": {
+"w": 50,
+"h": 50,
+"headerName": "阿斯玛鲁矿山２楼",
+"walkable": 824
+},
+"31803": {
+"w": 50,
+"h": 50,
+"headerName": "阿斯玛鲁矿山３楼",
+"walkable": 864
+},
+"31804": {
+"w": 50,
+"h": 50,
+"headerName": "阿斯玛鲁矿山４楼",
+"walkable": 716
+},
+"31805": {
+"w": 50,
+"h": 50,
+"headerName": "阿斯玛鲁矿山５楼",
+"walkable": 1043
+},
+"31806": {
+"w": 50,
+"h": 50,
+"headerName": "阿斯玛鲁矿山６楼",
+"walkable": 764
+},
+"31901": {
+"w": 80,
+"h": 80,
+"headerName": "吉鲁采石场１楼",
+"walkable": 1926
+},
+"31902": {
+"w": 15,
+"h": 10,
+"headerName": "采石场事务所",
+"walkable": 97
+},
+"31903": {
+"w": 80,
+"h": 80,
+"headerName": "吉鲁采石场２楼",
+"walkable": 2132
+},
+"31904": {
+"w": 60,
+"h": 70,
+"headerName": "吉鲁采石场３楼",
+"walkable": 1246
+},
+"31905": {
+"w": 60,
+"h": 60,
+"headerName": "吉鲁采石场４楼",
+"walkable": 1230
+},
+"31906": {
+"w": 60,
+"h": 60,
+"headerName": "吉鲁采石场５楼",
+"walkable": 1002
+},
+"31907": {
+"w": 60,
+"h": 50,
+"headerName": "吉鲁采石场６楼",
+"walkable": 833
+},
+"31908": {
+"w": 60,
+"h": 60,
+"headerName": "吉鲁采石场７楼",
+"walkable": 1103
+},
+"31909": {
+"w": 20,
+"h": 30,
+"headerName": "吉鲁采石场８楼",
+"walkable": 197
+},
+"31910": {
+"w": 20,
+"h": 20,
+"headerName": "真知之间",
+"walkable": 174
+},
+"31911": {
+"w": 20,
+"h": 20,
+"headerName": "精灵之间",
+"walkable": 131
+},
+"31912": {
+"w": 20,
+"h": 20,
+"headerName": "精灵之间",
+"walkable": 131
+},
+"32001": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下1楼",
+"walkable": 1125
+},
+"32002": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下2楼",
+"walkable": 1082
+},
+"32003": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下3楼",
+"walkable": 1002
+},
+"32004": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下4楼",
+"walkable": 934
+},
+"32005": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下5楼",
+"walkable": 1068
+},
+"32006": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下6楼",
+"walkable": 1196
+},
+"32007": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下7楼",
+"walkable": 1193
+},
+"32008": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下8楼",
+"walkable": 909
+},
+"32009": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下9楼",
+"walkable": 909
+},
+"32010": {
+"w": 100,
+"h": 100,
+"headerName": "漆黑的洞窟 地下10楼",
+"walkable": 3343
+},
+"32011": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下11楼",
+"walkable": 1314
+},
+"32012": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下12楼",
+"walkable": 720
+},
+"32013": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下13楼",
+"walkable": 1333
+},
+"32014": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下14楼",
+"walkable": 1015
+},
+"32015": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下15楼",
+"walkable": 1427
+},
+"32016": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下16楼",
+"walkable": 1221
+},
+"32017": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下17楼",
+"walkable": 1264
+},
+"32018": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下18楼",
+"walkable": 1165
+},
+"32019": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下19楼",
+"walkable": 1347
+},
+"32020": {
+"w": 100,
+"h": 100,
+"headerName": "漆黑的洞窟 地下20楼",
+"walkable": 1805
+},
+"32021": {
+"w": 60,
+"h": 60,
+"headerName": "漆黑的洞窟 地下20楼",
+"walkable": 1471
+},
+"40001": {
+"w": 30,
+"h": 30,
+"headerName": "地狱一层",
+"walkable": 657
+},
+"40002": {
+"w": 30,
+"h": 30,
+"headerName": "地狱二层",
+"walkable": 657
+},
+"40003": {
+"w": 30,
+"h": 30,
+"headerName": "地狱三层",
+"walkable": 657
+},
+"40004": {
+"w": 30,
+"h": 30,
+"headerName": "地狱四层",
+"walkable": 657
+},
+"40005": {
+"w": 30,
+"h": 30,
+"headerName": "地狱5层",
+"walkable": 657
+},
+"40006": {
+"w": 30,
+"h": 30,
+"headerName": "地狱六层",
+"walkable": 657
+},
+"40007": {
+"w": 30,
+"h": 30,
+"headerName": "地狱七层",
+"walkable": 657
+},
+"40008": {
+"w": 30,
+"h": 30,
+"headerName": "地狱八层",
+"walkable": 657
+},
+"40009": {
+"w": 30,
+"h": 30,
+"headerName": "地狱九层",
+"walkable": 657
+},
+"40010": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十层",
+"walkable": 657
+},
+"40011": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十一层",
+"walkable": 657
+},
+"40012": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十二层",
+"walkable": 657
+},
+"40013": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十三层",
+"walkable": 657
+},
+"40014": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十四层",
+"walkable": 657
+},
+"40015": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十五层",
+"walkable": 657
+},
+"40016": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十六层",
+"walkable": 657
+},
+"40017": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十七层",
+"walkable": 657
+},
+"40018": {
+"w": 30,
+"h": 30,
+"headerName": "地狱十八层",
+"walkable": 657
+},
+"41001": {
+"w": 60,
+"h": 60,
+"headerName": "东皇天",
+"walkable": 473
+},
+"41002": {
+"w": 60,
+"h": 60,
+"headerName": "墨云天",
+"walkable": 473
+},
+"41003": {
+"w": 60,
+"h": 60,
+"headerName": "紫霄天",
+"walkable": 473
+},
+"41004": {
+"w": 60,
+"h": 60,
+"headerName": "中极天",
+"walkable": 473
+},
+"41005": {
+"w": 60,
+"h": 60,
+"headerName": "青霄天",
+"walkable": 473
+},
+"41006": {
+"w": 60,
+"h": 60,
+"headerName": "大罗天",
+"walkable": 473
+},
+"41007": {
+"w": 60,
+"h": 60,
+"headerName": "南极天",
+"walkable": 473
+},
+"41008": {
+"w": 60,
+"h": 60,
+"headerName": "赤北天",
+"walkable": 473
+},
+"41009": {
+"w": 60,
+"h": 60,
+"headerName": "妖皇天",
+"walkable": 473
+},
+"42000": {
+"w": 30,
+"h": 30,
+"headerName": "拉斯维加斯",
+"walkable": 657
+},
+"50000": {
+"w": 150,
+"h": 150,
+"headerName": "史前玛丽那斯",
+"walkable": 7007
+},
+"50001": {
+"w": 160,
+"h": 160,
+"headerName": "史前萨姆吉尔",
+"walkable": 13943
+},
+"50002": {
+"w": 150,
+"h": 150,
+"headerName": "史前加加村",
+"walkable": 8173
+},
+"50007": {
+"w": 30,
+"h": 30,
+"headerName": "尼斯湖水底",
+"walkable": 352
+},
+"50008": {
+"w": 30,
+"h": 30,
+"headerName": "雅典娜的寝室",
+"walkable": 352
+},
+"51000": {
+"w": 300,
+"h": 300,
+"headerName": "西风冰原",
+"walkable": 68722
+},
+"60001": {
+"w": 40,
+"h": 40,
+"headerName": "北方沙漠洞穴内通道",
+"walkable": 520
+},
+"60002": {
+"w": 40,
+"h": 40,
+"headerName": "北方沙漠洞穴外通道",
+"walkable": 550
+},
+"60003": {
+"w": 50,
+"h": 50,
+"headerName": "西方沙漠洞穴内通道",
+"walkable": 1139
+},
+"60004": {
+"w": 50,
+"h": 50,
+"headerName": "西方沙漠洞穴外通道",
+"walkable": 1061
+},
+"60005": {
+"w": 50,
+"h": 50,
+"headerName": "东方沙漠洞穴内通道",
+"walkable": 843
+},
+"60006": {
+"w": 50,
+"h": 50,
+"headerName": "东方沙漠洞穴外通道",
+"walkable": 761
+},
+"60007": {
+"w": 50,
+"h": 50,
+"headerName": "南方沙漠洞穴内通道",
+"walkable": 618
+},
+"60008": {
+"w": 50,
+"h": 50,
+"headerName": "南方沙漠洞穴外通道",
+"walkable": 934
+},
+"60009": {
+"w": 60,
+"h": 128,
+"headerName": "水龙洞窟",
+"walkable": 3174
+},
+"60010": {
+"w": 50,
+"h": 50,
+"headerName": "水龙洞窟之一",
+"walkable": 781
+},
+"60011": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第一层",
+"walkable": 278
+},
+"60012": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第二层",
+"walkable": 282
+},
+"60013": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第二层",
+"walkable": 282
+},
+"60014": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第二层",
+"walkable": 282
+},
+"60015": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第二层",
+"walkable": 282
+},
+"60016": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60017": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60018": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60019": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60020": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60021": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60022": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60023": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60024": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60025": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60026": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60027": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60028": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60029": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60030": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60031": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第三层",
+"walkable": 282
+},
+"60032": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第四层",
+"walkable": 180
+},
+"60033": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第五层",
+"walkable": 250
+},
+"60034": {
+"w": 25,
+"h": 25,
+"headerName": "幻影之界第五层",
+"walkable": 246
+},
+"60035": {
+"w": 50,
+"h": 100,
+"headerName": "水龙洞窟之三",
+"walkable": 1721
+},
+"60036": {
+"w": 50,
+"h": 50,
+"headerName": "水龙洞窟之二",
+"walkable": 1127
+},
+"60037": {
+"w": 50,
+"h": 60,
+"headerName": "碧霄洞窟第一层",
+"walkable": 1452
+},
+"60038": {
+"w": 60,
+"h": 70,
+"headerName": "碧霄洞窟第二层",
+"walkable": 1740
+},
+"60039": {
+"w": 70,
+"h": 70,
+"headerName": "碧霄洞窟第三层",
+"walkable": 2177
+},
+"60040": {
+"w": 25,
+"h": 20,
+"headerName": "伊甸地下通道第一层",
+"walkable": 195
+},
+"60041": {
+"w": 50,
+"h": 40,
+"headerName": "伊甸地下通道第二层",
+"walkable": 920
+},
+"60042": {
+"w": 40,
+"h": 50,
+"headerName": "伊甸地下通道第三层",
+"walkable": 967
+},
+"60043": {
+"w": 40,
+"h": 40,
+"headerName": "伊甸地下通道第四层",
+"walkable": 740
+},
+"60044": {
+"w": 20,
+"h": 20,
+"headerName": "伊甸地下通道第五层",
+"walkable": 179
+},
+"60045": {
+"w": 20,
+"h": 20,
+"headerName": "伊甸地下通道第五层",
+"walkable": 179
+},
+"60046": {
+"w": 40,
+"h": 40,
+"headerName": "伊甸地牢",
+"walkable": 189
+},
+"60047": {
+"w": 80,
+"h": 60,
+"headerName": "地下秘密通道",
+"walkable": 775
+},
+"60048": {
+"w": 80,
+"h": 40,
+"headerName": "碧霄洞窟第四层",
+"walkable": 1031
+},
+"60049": {
+"w": 70,
+"h": 70,
+"headerName": "库塔伊洞窟地下一楼",
+"walkable": 1987
+},
+"60050": {
+"w": 70,
+"h": 70,
+"headerName": "库塔伊洞窟地下一楼",
+"walkable": 1987
+},
+"60051": {
+"w": 120,
+"h": 90,
+"headerName": "库塔伊洞窟地下三楼",
+"walkable": 2971
+},
+"60052": {
+"w": 60,
+"h": 70,
+"headerName": "库塔伊洞窟地下四楼",
+"walkable": 1048
+},
+"60053": {
+"w": 80,
+"h": 80,
+"headerName": "帕拉火洞窟",
+"walkable": 2447
+},
+"60054": {
+"w": 90,
+"h": 90,
+"headerName": "帕拉火之眼",
+"walkable": 2076
+},
+"60055": {
+"w": 60,
+"h": 100,
+"headerName": "帕拉火之星洞窟",
+"walkable": 2220
+},
+"60056": {
+"w": 60,
+"h": 100,
+"headerName": "帕拉火之流洞窟",
+"walkable": 1176
+},
+"60057": {
+"w": 30,
+"h": 30,
+"headerName": "斯洛克洞窟第一层",
+"walkable": 259
+},
+"60058": {
+"w": 40,
+"h": 40,
+"headerName": "斯洛克洞窟第二层",
+"walkable": 515
+},
+"60059": {
+"w": 40,
+"h": 40,
+"headerName": "斯洛克洞窟第三层",
+"walkable": 330
+},
+"60060": {
+"w": 50,
+"h": 50,
+"headerName": "斯洛克洞窟第四层",
+"walkable": 403
+},
+"60061": {
+"w": 90,
+"h": 90,
+"headerName": "斯洛克洞窟第四层之一",
+"walkable": 1370
+},
+"60062": {
+"w": 50,
+"h": 40,
+"headerName": "斯洛克洞窟第五层",
+"walkable": 328
+},
+"60063": {
+"w": 90,
+"h": 90,
+"headerName": "萨伊洛山洞第一层",
+"walkable": 3507
+},
+"60064": {
+"w": 60,
+"h": 60,
+"headerName": "萨伊洛山洞第二层",
+"walkable": 1164
+},
+"60065": {
+"w": 80,
+"h": 70,
+"headerName": "萨伊洛山洞第三层",
+"walkable": 1537
+},
+"60066": {
+"w": 60,
+"h": 60,
+"headerName": "萨伊洛山洞第四层",
+"walkable": 586
+},
+"60067": {
+"w": 130,
+"h": 130,
+"headerName": "萨伊洛山洞第五层",
+"walkable": 5156
+},
+"60068": {
+"w": 50,
+"h": 70,
+"headerName": "萨伊洛山顶",
+"walkable": 1159
+},
+"60069": {
+"w": 60,
+"h": 60,
+"headerName": "萨伊洛山洞第四层",
+"walkable": 586
+},
+"60070": {
+"w": 50,
+"h": 50,
+"headerName": "斯洛克洞窟第五层之二",
+"walkable": 521
+},
+"60071": {
+"w": 50,
+"h": 50,
+"headerName": "斯洛克洞窟第六层",
+"walkable": 476
+},
+"60072": {
+"w": 90,
+"h": 90,
+"headerName": "库沙达洞窟第一层",
+"walkable": 1486
+},
+"60073": {
+"w": 90,
+"h": 90,
+"headerName": "库沙达洞窟第二层",
+"walkable": 1486
+},
+"60074": {
+"w": 90,
+"h": 90,
+"headerName": "库沙达洞窟第三层",
+"walkable": 1486
+},
+"60075": {
+"w": 80,
+"h": 80,
+"headerName": "库沙达洞窟第四层",
+"walkable": 1565
+},
+"60076": {
+"w": 70,
+"h": 100,
+"headerName": "库沙达洞窟第五层",
+"walkable": 2150
+},
+"60077": {
+"w": 80,
+"h": 80,
+"headerName": "库沙达洞窟第四层",
+"walkable": 1565
+},
+"60078": {
+"w": 50,
+"h": 50,
+"headerName": "水龙洞窟之一",
+"walkable": 782
+},
+"60079": {
+"w": 50,
+"h": 100,
+"headerName": "水龙洞窟之三",
+"walkable": 1721
+},
+"60080": {
+"w": 25,
+"h": 25,
+"headerName": "监牢通道",
+"walkable": 195
+},
+"60081": {
+"w": 25,
+"h": 25,
+"headerName": "监牢通道",
+"walkable": 195
+},
+"60082": {
+"w": 25,
+"h": 25,
+"headerName": "监牢",
+"walkable": 261
+},
+"60083": {
+"w": 25,
+"h": 25,
+"headerName": "监牢",
+"walkable": 261
+},
+"60084": {
+"w": 40,
+"h": 40,
+"headerName": "伊甸地下通道",
+"walkable": 587
+},
+"60085": {
+"w": 40,
+"h": 40,
+"headerName": "伊甸地下通道",
+"walkable": 495
+},
+"60086": {
+"w": 40,
+"h": 40,
+"headerName": "伊甸地下通道",
+"walkable": 451
+},
+"60087": {
+"w": 40,
+"h": 40,
+"headerName": "伊甸地下通道",
+"walkable": 508
+},
+"60088": {
+"w": 30,
+"h": 30,
+"headerName": "伊甸通道底层",
+"walkable": 527
+},
+"60089": {
+"w": 30,
+"h": 30,
+"headerName": "魔军伊甸仓库",
+"walkable": 292
+},
+"60100": {
+"w": 70,
+"h": 70,
+"headerName": "塔耳塔盐矿",
+"walkable": 1391
+},
+"60101": {
+"w": 60,
+"h": 60,
+"headerName": "地精灵洞窟",
+"walkable": 794
+},
+"60102": {
+"w": 60,
+"h": 60,
+"headerName": "地精灵洞窟",
+"walkable": 766
+},
+"60103": {
+"w": 60,
+"h": 60,
+"headerName": "地精灵洞窟",
+"walkable": 766
+},
+"60201": {
+"w": 60,
+"h": 60,
+"headerName": "地下水路第1层",
+"walkable": 1226
+},
+"60202": {
+"w": 60,
+"h": 60,
+"headerName": "地下水路第2层",
+"walkable": 1756
+},
+"60203": {
+"w": 60,
+"h": 60,
+"headerName": "地下水路第3层",
+"walkable": 1444
+},
+"60204": {
+"w": 60,
+"h": 60,
+"headerName": "地下水路第4层",
+"walkable": 1397
+},
+"60205": {
+"w": 60,
+"h": 60,
+"headerName": "地下水路第5层",
+"walkable": 1399
+},
+"60206": {
+"w": 60,
+"h": 60,
+"headerName": "地下水路第6层",
+"walkable": 1447
+},
+"60207": {
+"w": 60,
+"h": 60,
+"headerName": "地下水路第7层",
+"walkable": 1528
+},
+"60208": {
+"w": 35,
+"h": 35,
+"headerName": "地下水路第八层",
+"walkable": 181
+},
+"60209": {
+"w": 20,
+"h": 20,
+"headerName": "动物园仓库",
+"walkable": 179
+},
+"60210": {
+"w": 20,
+"h": 20,
+"headerName": "动物园仓库",
+"walkable": 179
+},
+"60211": {
+"w": 20,
+"h": 20,
+"headerName": "动物园仓库",
+"walkable": 179
+},
+"60212": {
+"w": 20,
+"h": 20,
+"headerName": "动物园仓库",
+"walkable": 179
+},
+"60213": {
+"w": 35,
+"h": 35,
+"headerName": "地下水路第八层",
+"walkable": 181
+},
+"60215": {
+"w": 35,
+"h": 35,
+"headerName": "水精灵洞窟",
+"walkable": 261
+},
+"60216": {
+"w": 35,
+"h": 35,
+"headerName": "水精灵洞窟",
+"walkable": 261
+},
+"60300": {
+"w": 60,
+"h": 40,
+"headerName": "蒙达村地下通路",
+"walkable": 606
+},
+"60301": {
+"w": 100,
+"h": 40,
+"headerName": "蒙达山海底通道",
+"walkable": 970
+},
+"60302": {
+"w": 30,
+"h": 30,
+"headerName": "蒙达山洞窟",
+"walkable": 338
+},
+"60303": {
+"w": 10,
+"h": 30,
+"headerName": "蒙达山山洞通道",
+"walkable": 65
+},
+"60304": {
+"w": 10,
+"h": 30,
+"headerName": "蒙达山山洞通道",
+"walkable": 65
+},
+"60305": {
+"w": 30,
+"h": 30,
+"headerName": "蒙达山洞窟",
+"walkable": 338
+},
+"60306": {
+"w": 30,
+"h": 40,
+"headerName": "伊塔工作室",
+"walkable": 514
+},
+"60307": {
+"w": 30,
+"h": 30,
+"headerName": "卡罗的精神结界",
+"walkable": 603
+},
+"60308": {
+"w": 50,
+"h": 50,
+"headerName": "试炼洞窟第一层",
+"walkable": 637
+},
+"60309": {
+"w": 50,
+"h": 50,
+"headerName": "试炼洞窟第二层",
+"walkable": 786
+},
+"60310": {
+"w": 50,
+"h": 50,
+"headerName": "试炼洞窟第三层",
+"walkable": 937
+},
+"60311": {
+"w": 80,
+"h": 60,
+"headerName": "试炼洞窟第四层",
+"walkable": 1013
+},
+"60312": {
+"w": 30,
+"h": 40,
+"headerName": "伊塔工作室",
+"walkable": 514
+},
+"60313": {
+"w": 45,
+"h": 35,
+"headerName": "火精灵火山洞窟",
+"walkable": 385
+},
+"60314": {
+"w": 40,
+"h": 60,
+"headerName": "火山道场通道",
+"walkable": 440
+},
+"60315": {
+"w": 45,
+"h": 35,
+"headerName": "火精灵火山洞窟",
+"walkable": 385
+},
+"60316": {
+"w": 45,
+"h": 35,
+"headerName": "火精灵火山洞窟",
+"walkable": 385
+},
+"60317": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第一层",
+"walkable": 113
+},
+"60318": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第二层",
+"walkable": 113
+},
+"60319": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第三层",
+"walkable": 113
+},
+"60320": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第四层",
+"walkable": 113
+},
+"60321": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第五层",
+"walkable": 113
+},
+"60322": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第六层",
+"walkable": 113
+},
+"60323": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第七层",
+"walkable": 113
+},
+"60324": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第八层",
+"walkable": 113
+},
+"60325": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第九层",
+"walkable": 113
+},
+"60326": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十层",
+"walkable": 113
+},
+"60327": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十一层",
+"walkable": 113
+},
+"60328": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十二层",
+"walkable": 113
+},
+"60329": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十三层",
+"walkable": 113
+},
+"60330": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十四层",
+"walkable": 113
+},
+"60331": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十五层",
+"walkable": 113
+},
+"60332": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十六层",
+"walkable": 113
+},
+"60333": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十七层",
+"walkable": 113
+},
+"60334": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十八层",
+"walkable": 113
+},
+"60335": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第十九层",
+"walkable": 113
+},
+"60336": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第二十层",
+"walkable": 113
+},
+"60337": {
+"w": 25,
+"h": 25,
+"headerName": "火灵道场柜台",
+"walkable": 148
+},
+"60338": {
+"w": 50,
+"h": 50,
+"headerName": "火山洞窟第一层",
+"walkable": 674
+},
+"60339": {
+"w": 50,
+"h": 50,
+"headerName": "火山洞窟第二层",
+"walkable": 634
+},
+"60340": {
+"w": 50,
+"h": 50,
+"headerName": "火山洞窟第三层",
+"walkable": 577
+},
+"60341": {
+"w": 50,
+"h": 50,
+"headerName": "火山洞窟第四层",
+"walkable": 756
+},
+"60342": {
+"w": 25,
+"h": 20,
+"headerName": "火山道场第二十一层",
+"walkable": 110
+},
+"60343": {
+"w": 30,
+"h": 40,
+"headerName": "伊塔工作室",
+"walkable": 514
+},
+"60344": {
+"w": 15,
+"h": 15,
+"headerName": "火山道场医务室",
+"walkable": 141
+},
+"61000": {
+"w": 400,
+"h": 400,
+"headerName": "焦热之地",
+"walkable": 48148
+},
+"61001": {
+"w": 400,
+"h": 400,
+"headerName": "魔域前哨营地",
+"walkable": 1658
+},
+"61002": {
+"w": 80,
+"h": 80,
+"headerName": "炙热洞窟",
+"walkable": 2811
+},
+"61003": {
+"w": 80,
+"h": 80,
+"headerName": "炙热洞窟",
+"walkable": 2428
+},
+"61004": {
+"w": 80,
+"h": 80,
+"headerName": "炙热洞窟",
+"walkable": 1501
+},
+"61005": {
+"w": 60,
+"h": 100,
+"headerName": "熔核洞窟",
+"walkable": 1444
+},
+"61006": {
+"w": 20,
+"h": 18,
+"headerName": "魔域前哨营地医院",
+"walkable": 212
+},
+"61007": {
+"w": 80,
+"h": 80,
+"headerName": "炙热洞窟",
+"walkable": 1924
+},
+"61008": {
+"w": 60,
+"h": 60,
+"headerName": "诡异洞窟",
+"walkable": 1341
+},
+"61009": {
+"w": 60,
+"h": 60,
+"headerName": "诡异洞窟",
+"walkable": 1172
+},
+"61010": {
+"w": 60,
+"h": 60,
+"headerName": "诡异洞窟",
+"walkable": 1199
+},
+"61011": {
+"w": 15,
+"h": 15,
+"headerName": "神秘的铁匠铺",
+"walkable": 139
+},
+"61100": {
+"w": 600,
+"h": 600,
+"headerName": "魔域边境",
+"walkable": 26618
+},
+"61101": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔一楼",
+"walkable": 703
+},
+"61102": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔二楼",
+"walkable": 682
+},
+"61103": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 581
+},
+"61104": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔一楼",
+"walkable": 752
+},
+"61105": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔二楼",
+"walkable": 697
+},
+"61106": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 581
+},
+"61107": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔一楼",
+"walkable": 698
+},
+"61108": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔二楼",
+"walkable": 669
+},
+"61109": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 581
+},
+"61110": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔一楼",
+"walkable": 706
+},
+"61111": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔二楼",
+"walkable": 682
+},
+"61112": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 581
+},
+"61113": {
+"w": 20,
+"h": 20,
+"headerName": "营地管理处",
+"walkable": 121
+},
+"61114": {
+"w": 50,
+"h": 50,
+"headerName": "艾巴登魔城大厅",
+"walkable": 1599
+},
+"61115": {
+"w": 20,
+"h": 20,
+"headerName": "营地战务室",
+"walkable": 216
+},
+"61116": {
+"w": 50,
+"h": 50,
+"headerName": "艾巴登魔城大厅",
+"walkable": 1599
+},
+"61117": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 581
+},
+"61118": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 649
+},
+"61119": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 577
+},
+"61120": {
+"w": 50,
+"h": 50,
+"headerName": "结界塔三楼",
+"walkable": 583
+},
+"65501": {
+"w": 200,
+"h": 200,
+"headerName": "西风群岛",
+"walkable": 12439
+},
+"65502": {
+"w": 50,
+"h": 50,
+"headerName": "西风地穴一层",
+"walkable": 583
+},
+"65503": {
+"w": 25,
+"h": 25,
+"headerName": "西风地穴二层",
+"walkable": 289
+},
+"65504": {
+"w": 50,
+"h": 50,
+"headerName": "西风地穴三层",
+"walkable": 820
+},
+"65505": {
+"w": 60,
+"h": 60,
+"headerName": "西风神秘洞穴",
+"walkable": 473
+},
+"65506": {
+"w": 60,
+"h": 60,
+"headerName": "西风神秘洞穴",
+"walkable": 473
+},
+"65507": {
+"w": 60,
+"h": 60,
+"headerName": "西风神秘洞穴",
+"walkable": 473
+},
+"65508": {
+"w": 60,
+"h": 60,
+"headerName": "西风神秘洞穴",
+"walkable": 473
+},
+"65509": {
+"w": 300,
+"h": 300,
+"headerName": "西风冰原",
+"walkable": 68722
+},
+"66001": {
+"w": 50,
+"h": 50,
+"headerName": "魔王NO.7房间",
+"walkable": 841
+},
+"66002": {
+"w": 50,
+"h": 50,
+"headerName": "魔王NO.7房间",
+"walkable": 841
+},
+"66003": {
+"w": 50,
+"h": 50,
+"headerName": "魔王NO.7房间",
+"walkable": 841
+},
+"66004": {
+"w": 50,
+"h": 50,
+"headerName": "魔王NO.7房间",
+"walkable": 841
+},
+"66005": {
+"w": 50,
+"h": 50,
+"headerName": "魔王NO.7房间",
+"walkable": 841
+},
+"66011": {
+"w": 30,
+"h": 30,
+"headerName": "伊甸通道底层",
+"walkable": 527
+},
+"66012": {
+"w": 30,
+"h": 30,
+"headerName": "伊甸通道底层",
+"walkable": 527
+},
+"66013": {
+"w": 30,
+"h": 30,
+"headerName": "伊甸通道底层",
+"walkable": 527
+},
+"66014": {
+"w": 30,
+"h": 30,
+"headerName": "伊甸通道底层",
+"walkable": 527
+},
+"66015": {
+"w": 30,
+"h": 30,
+"headerName": "伊甸通道底层",
+"walkable": 527
+},
+"66021": {
+"w": 32,
+"h": 32,
+"headerName": "塔耳塔庄园竞技场",
+"walkable": 657
+},
+"66022": {
+"w": 32,
+"h": 32,
+"headerName": "塔耳塔庄园竞技场",
+"walkable": 657
+},
+"66023": {
+"w": 32,
+"h": 32,
+"headerName": "塔耳塔庄园竞技场",
+"walkable": 657
+},
+"66024": {
+"w": 32,
+"h": 32,
+"headerName": "塔耳塔庄园竞技场",
+"walkable": 657
+},
+"66025": {
+"w": 32,
+"h": 32,
+"headerName": "塔耳塔庄园竞技场",
+"walkable": 657
+},
+"67001": {
+"w": 50,
+"h": 50,
+"headerName": "方位的祠",
+"walkable": 1551
+},
+"67002": {
+"w": 60,
+"h": 60,
+"headerName": "亚伊欧庄园竞技场",
+"walkable": 2953
+},
+"70001": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70002": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70003": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70004": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70005": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70006": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70007": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70008": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70009": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"70010": {
+"w": 30,
+"h": 30,
+"headerName": "武斗场PK竞技场",
+"walkable": 643
+},
+"80001": {
+"w": 40,
+"h": 43,
+"headerName": "(�\t\u0014;b",
+"walkable": 1157
+},
+"80002": {
+"w": 80,
+"h": 80,
+"headerName": "瑞尔亚斯之都",
+"walkable": 909
+},
+"80003": {
+"w": 150,
+"h": 150,
+"headerName": "瑞尔亚斯之都",
+"walkable": 11237
+},
+"81001": {
+"w": 50,
+"h": 50,
+"headerName": "西风地穴一层",
+"walkable": 583
+},
+"81002": {
+"w": 50,
+"h": 50,
+"headerName": "西风地穴一层",
+"walkable": 583
+},
+"81003": {
+"w": 50,
+"h": 50,
+"headerName": "西风地穴一层",
+"walkable": 583
+},
+"81004": {
+"w": 50,
+"h": 50,
+"headerName": "西风地穴一层",
+"walkable": 583
+},
+"81005": {
+"w": 50,
+"h": 50,
+"headerName": "西风地穴一层",
+"walkable": 583
+},
+"82001": {
+"w": 300,
+"h": 300,
+"headerName": "无息之境",
+"walkable": 68722
+},
+"82002": {
+"w": 50,
+"h": 73,
+"headerName": "骽顋0",
+"walkable": 1754
+},
+"82003": {
+"w": 160,
+"h": 160,
+"headerName": "鑏_1000",
+"walkable": 14056
+},
+"82004": {
+"w": 80,
+"h": 80,
+"headerName": "魔法都市",
+"walkable": 1423
+},
+"82005": {
+"w": 110,
+"h": 110,
+"headerName": "骽1.17",
+"walkable": 2956
+},
+"82006": {
+"w": 86,
+"h": 46,
+"headerName": "癪'�<",
+"walkable": 1738
+},
+"82007": {
+"w": 47,
+"h": 90,
+"headerName": "0^'�<",
+"walkable": 837
+},
+"82008": {
+"w": 61,
+"h": 105,
+"headerName": "4^'�<",
+"walkable": 1448
+},
+"82009": {
+"w": 60,
+"h": 120,
+"headerName": "k^'�<",
+"walkable": 1813
+},
+"82010": {
+"w": 50,
+"h": 110,
+"headerName": "蝆'�<",
+"walkable": 1618
+},
+"82011": {
+"w": 200,
+"h": 200,
+"headerName": "200鳙",
+"walkable": 31763
+},
+"82012": {
+"w": 250,
+"h": 250,
+"headerName": "250X2501",
+"walkable": 49945
+},
+"82013": {
+"w": 90,
+"h": 130,
+"headerName": "�b",
+"walkable": 2504
+},
+"82014": {
+"w": 80,
+"h": 80,
+"headerName": "骽鲢4.27",
+"walkable": 2243
+},
+"82015": {
+"w": 50,
+"h": 60,
+"headerName": ",2 �",
+"walkable": 1058
+},
+"82016": {
+"w": 68,
+"h": 60,
+"headerName": "�1",
+"walkable": 612
+},
+"82017": {
+"w": 90,
+"h": 80,
+"headerName": "�22",
+"walkable": 962
+},
+"82018": {
+"w": 95,
+"h": 80,
+"headerName": "�3",
+"walkable": 1479
+},
+"82021": {
+"w": 95,
+"h": 80,
+"headerName": "�3",
+"walkable": 1479
+}
+}
