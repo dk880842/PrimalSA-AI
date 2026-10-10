@@ -23,15 +23,8 @@ import watchstate
 import winenv
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
-# 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；見 .claude/skills/psa-game-ui/ui/transfer.md
-SPOTS = {
-    '柯奧4F龜洞': (859, 356, 11004),
-    '波拉島': (1100, 231, 500),
-    '波拉島2': (1165, 326, 502),
-    '地雷區': (1165, 400, 60049),
-    '地雷區2': (1165, 468, 60050),
-    '海主人隧道': (862, 656, 31401),
-}
+# 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；唯一來源 spots.py（= ui/transfer.md 表，9 點含柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟）
+from spots import HEAL_SPOTS as SPOTS  # noqa: E402
 SPOT_XY = {500: (212, 344), 31401: (91, 29)}   # 練級傳送抵達點（31401 於 2026-10-09 實測兩次）
 TELEPORT_BTN = (1340, 65)            # 主畫面右上圓形傳送鈕
 TAB_TOWN, TAB_LEVEL = (259, 196), (259, 314)

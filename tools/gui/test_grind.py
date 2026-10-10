@@ -60,7 +60,7 @@ check('auto 1 轉以上拒絕 / 0 級無', a(1, 50) is None and a(2, 130) is Non
 check('too_low：0 轉預判、1 轉不預判', spots.too_low('地雷區', 0, 119) and not spots.too_low('地雷區', 0, 120) and not spots.too_low('地雷區', 1, 1))
 check('parse_level', spots.parse_level('0轉130級') == (0, 130) and spots.parse_level('一0轉128級') == (0, 128) and spots.parse_level('abc') is None)
 check('spot_of_map / same_tier', spots.spot_of_map(60050) == '地雷區2' and spots.spot_of_map(1) is None and spots.same_tier('地雷區', '地雷區2') and not spots.same_tier('柯奧龜洞', '阿布龜洞'))
-check('HEAL_SPOTS 涵蓋 heal.SPOTS 6 點且座標一致', all(spots.HEAL_SPOTS[k] == v for k, v in grind.heal.SPOTS.items()) and len(spots.HEAL_SPOTS) == 9)
+check('heal.SPOTS = spots.HEAL_SPOTS 9 點（含柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟）', grind.heal.SPOTS == spots.HEAL_SPOTS and len(grind.heal.SPOTS) == 9 and {'柯奧龜洞', '阿布龜洞', '五兄弟洞窟'} <= set(grind.heal.SPOTS))
 ns, err = grind.choose_spot('auto', 0, 130, 60050)
 check('choose_spot：auto 在同檔點（地雷區2）不傳送', ns is None and not err)
 ns, err = grind.choose_spot('地雷區', 0, 130, 60050)
@@ -151,6 +151,11 @@ def install(g, stat_missing=False):
             g.chk[role][i] = v
         return 0, g.chk[role], ''
     A.set_states = setst
+
+    def apply_(role, states, changes):
+        todo = {i: v for i, v in (changes or {}).items() if states.get(i) != v}
+        return setst(role, todo)
+    A._apply_changes = apply_
     A.get_states = lambda role, no_wait=False: g.log.append(f'get:{role}') or (0, g.chk[role], '')
 
     def rs():
@@ -217,7 +222,8 @@ g.screens = good_screens()
 rc, j, _ = run('ensure')
 sets = [e for e in g.log if e.startswith('set:')]
 check('只改不對的人 / 項目', rc == 0 and sets == ['set:DKBO3:快速戰鬥', 'set:DKBO5:自動戰鬥'], str(sets))
-check('改完收尾選回 DKBO（get:DKBO）', 'get:DKBO' in g.log and g.log.index('get:DKBO') > g.log.index('set:DKBO5:自動戰鬥'))
+check('一次開面板：只 open / close 各 1 次（set_many），隊長在最後', g.log.count('open') == 1 and g.log.count('close') == 1 and g.sel == 'DKBO')
+check('info.fixed 記錄誰被改', j['fixed'] == {'DKBO3': ['快速戰鬥'], 'DKBO5': ['自動戰鬥']}, str(j.get('fixed')))
 check('遇敵在外掛修正之後才開', g.log.index('enc:True') > g.log.index('set:DKBO5:自動戰鬥'))
 
 # 3) 地圖禁止快速戰鬥 → 53
@@ -376,8 +382,14 @@ g.heal_fail = True
 rc, j, _ = run('start', spot='地雷區2', do_heal=True)
 check('heal 失敗 → 57', rc == 57)
 g = install(Game(cur_map=11001, level='0轉5級'))
+g.screens = good_screens()
 rc, j, _ = run('start', spot='柯奧龜洞', do_heal=True)
-check('--heal 但點不在 heal.SPOTS → 1（明說）', rc == 1)
+check('--heal 柯奧龜洞（P8 起在 heal.SPOTS）→ heal_trip 成功', rc == 0 and 'heal_trip:柯奧龜洞' in g.log, str(g.log))
+g = install(Game(cur_map=11001, level='0轉5級'))
+grind.heal.SPOTS = {k: v for k, v in grind.heal.SPOTS.items() if k != '柯奧龜洞'}
+rc, j, _ = run('start', spot='柯奧龜洞', do_heal=True)
+check('--heal 但點不在 heal.SPOTS（模擬 1920 版面）→ 1（明說）', rc == 1)
+grind.heal.SPOTS = dict(spots.HEAL_SPOTS)
 g = install(Game(cur_map=60050, hp=30))
 g.screens = good_screens()
 rc, j, _ = run('start', spot='地雷區2')

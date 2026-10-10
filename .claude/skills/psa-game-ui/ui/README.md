@@ -24,6 +24,17 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 網路異常提示、斷線、登入畫面 | [network.md](network.md) | 確定 715,557、登錄 590,585、一鍵全登 740,640 | 已實測（登錄 → 選角 → 全登 → 進遊戲；使用者授權只按登錄）|
 | 尚未實測（NPC、戰鬥、移動、驗證視窗） | [todo.md](todo.md) | — | 待補 |
 
+## 腳本工具一覽（固定流程先跑腳本，非 0 才手動；退出碼 / 細節見各檔開頭或對應 ui/*.md）
+| 工具（`uv run --no-project python tools/gui/…`） | 做什麼 | 文件 |
+|---|---|---|
+| `team.py status / check / form / disband` | 隊伍唯讀 / 檢查 / 快速組隊（已組好不點）/ 解散；退出碼 40～47 | [team.md](team.md) |
+| `char.py current / switch / ensure` | 當前角色讀取 / 切換並驗證；退出碼 60～65 | [team.md](team.md) |
+| `grind.py start / ensure / check` | 開始 / 恢復練功（選點傳送、外掛 5 人 `ass.set_many`、開遇敵、2 次 EXP 確認）；退出碼 50～58；`--heal` 支援 `spots.py` 全部 9 點 | `../psa-grind-start/SKILL.md`、[transfer.md](transfer.md) |
+| `pet.py list / set-state / rest-all / store / take` | 寵物面板讀 / 狀態 / 存取（硬性擋騎寵）；退出碼 70～78；**store / take 掛機中要加 `--pause-encounter`**（戰鬥中操作會被吃掉） | [pet.md](pet.md) |
+| `ass.py get / set / pet`（API：`set_many`） | 外掛面板讀 / 設四項勾選與戰寵動作；`select_role` 內建等遮擋 + 重試 | [ass.md](ass.md) |
+| `netwatch.py`（`guard` 已接進 quest / petwatch / heal --watch） | 斷線重連 / 自動登錄；重登後清 charstate、`team.form`、自動 `grind.ensure` | [network.md](network.md) |
+| 共用模組（不直接跑）：`spots.py`（練級傳送點表，唯一來源，heal 也用）、`uikit.py`（面板規格 / safe_click / preflight / 退出碼）、`charstate.py`（當前角色旁路檔）、`namematch.py`（角色名整名樣板）、`petmatch.py`（寵物名 / 等級樣板）、`digitmatch.py`（HUD 數字樣板） | 判斷畫面、比對名字 / 數字、禁區保護 | 各檔開頭 |
+
 ## 依情境找
 | 想做的事 | 去哪 |
 |---|---|

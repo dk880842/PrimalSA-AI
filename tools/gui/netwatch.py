@@ -3,7 +3,7 @@
 
 實測（2026-10-10）：點確定後遊戲**直接回到登入畫面**（帳號 / 密碼欄由遊戲自動帶入、登錄 / 註冊鈕），不會自動重連。
 使用者授權（2026-10-10，AGENTS.md 鐵則 2 的例外，只限這樣）：登入畫面**只點「登錄」**（用遊戲自動帶入的帳密），
-之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 檢查隊伍 / 原地遇敵。絕不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、
+之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。絕不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、
 不讀 savepwd.txt 或登錄檔、不把帳號寫進任何 log。帳密欄空的 / 登錄後出現提示視窗 / 連續 3 次登錄失敗 / 看不懂的畫面 → halt 停手通知使用者。
 
   import netwatch
@@ -66,8 +66,6 @@ ALL_LOGIN_BTN = (740, 640)           # 選擇角色面板「一鍵全登」
 # 選擇角色面板：全登鈕橘、面板米色、右上紅 X、角色列棕
 SIG_CHARSEL = screen_sigs.sig_str(screen_sigs.NET_CHARSEL)
 SWITCH_ALL_BTN = (716, 578)          # 切換角色面板「全部登錄」
-QUICK_TEAM_SEQ = ('click 520 578; wait 500; click 549 320; wait 400; click 549 520; wait 150; click 682 520; wait 150; '
-                  'click 815 520; wait 150; click 948 520; wait 300; click 720 665; wait 1500')
 LOGIN_TIMEOUT = 120                  # 登錄後等進遊戲的上限（秒）
 CARDS_BOX = (560, 280, 450, 230)     # 切換角色面板的角色卡片（讀「單人 / 隊長 / 隊員」）
 
@@ -280,32 +278,66 @@ def team_report() -> dict:
 
 
 def fix_team(t: dict) -> dict:
-    """隊伍不全：先「全部登錄」讓離線角色上線；若全員單人再快速組隊（/psa-quick-team 流程）。回傳新的 team_report"""
+    """隊伍不全：先「全部登錄」讓離線角色上線；若全員單人再 team.form 快速組隊（P8：取代舊的盲點座標序列，
+    form 會逐步驗證、組好才按、最後確認，失敗不亂點）。回傳新的 team_report"""
     log('netwatch：隊伍不全，點「全部登錄」並視情況快速組隊')
     gui('seq', f'key {{ESC}}; wait 300; click {SWITCH_BTN[0]} {SWITCH_BTN[1]}; wait 900; '
                f'click {SWITCH_ALL_BTN[0]} {SWITCH_ALL_BTN[1]}; wait 4000; key {{ESC}}', note='全部登錄')
     t = team_report()
     if t['solo'] >= 4 and t['leader'] + t['member'] == 0:
-        gui('seq', f'key {{ESC}}; wait 300; click {SWITCH_BTN[0]} {SWITCH_BTN[1]}; wait 900; {QUICK_TEAM_SEQ}; key {{ESC}}',
-            note='快速組隊')
+        try:
+            import team as team_mod            # 延後 import：team → uikit → netwatch（避免循環）
+            rc = team_mod.form()
+        except SystemExit:
+            raise
+        except Exception as e:
+            rc = f'例外 {e}'
+        log(f'netwatch：team.form 退出碼 {rc}')
+        if rc != 0:
+            errlog.add(f'netwatch 重登後 team.form 失敗（{rc}）', source='netwatch')
         t = team_report()
     return t
 
 
-def recover(src: str, encounter: bool = True, team: bool = True) -> dict:
-    """人類登入 / 重連完成後：確認原地遇敵、檢查隊伍。回傳摘要（也會 log）"""
+def _forget_char() -> None:
+    """重登後當前角色未知（實測重登後當前會變 DKBO5）→ 清 current-char.json；之後 char.ensure 現場讀切換面板"""
+    try:
+        import charstate
+        charstate.clear()
+    except Exception:
+        pass
+
+
+def run_grind_ensure(src: str) -> dict:
+    """重登 / 人類登入回來後自動跑 grind.ensure（重設 5 人快速 + 自動戰鬥、隊長當前、開遇敵、確認 EXP）。
+    只跑一次：失敗只記 errlog + 印警告，不重試、不 halt（SystemExit 停手訊號照常往外丟）。
+    grind 已在跑（巢狀）→ 略過；quest 的 battle.lock 有效 → grind 自己回 8（不搶畫面、不動遇敵）。"""
+    try:
+        import grind
+    except Exception as e:
+        return {'rc': None, 'error': f'import grind 失敗：{e}'}
+    if getattr(grind, 'ACTIVE', False):
+        return {'rc': None, 'skipped': 'grind 執行中'}
+    log('netwatch：重登後自動跑 grind.py ensure（約 25 秒）')
+    try:
+        rc = grind.run('ensure', ignore_watchers=True)
+    except SystemExit:
+        raise
+    except Exception as e:
+        rc = None
+        errlog.add(f'netwatch 重登後 grind.ensure 例外：{e}', source='netwatch')
+        print(f'!!! 重登後 grind ensure 例外：{e}；請手動跑 grind.py ensure', flush=True)
+        return {'rc': None, 'error': str(e)}
+    if rc != 0:
+        errlog.add(f'netwatch 重登後 grind.ensure 失敗（退出碼 {rc}）', source='netwatch')
+        print(f'!!! 重登後 grind ensure 失敗（退出碼 {rc}，見 grind.py 檔頭 / tools/.cache/grind.json）；請手動處理，netwatch 不重試', flush=True)
+    return {'rc': rc}
+
+
+def recover(src: str, encounter: bool = True, team: bool = True, grind_ensure: bool = False) -> dict:
+    """人類登入 / 重連完成後：檢查隊伍、（grind_ensure）跑 grind.ensure、確認原地遇敵。回傳摘要（也會 log）。
+    grind_ensure（只有重登 / 人類登入回來時開）：重登必定重設快速戰鬥 → 自動跑 grind.ensure 一次（它自己會處理隊長 / 遇敵）"""
     info: dict = {}
-    if encounter:
-        try:
-            import heal
-            if not heal.encounter_on():
-                log('netwatch：原地遇敵沒開，重新開啟')
-                heal.set_encounter(True)
-                info['encounter'] = 'reopened'
-            else:
-                info['encounter'] = 'on'
-        except Exception as e:      # 不讓恢復流程拖垮呼叫端
-            info['encounter'] = f'error {e}'
     if team:
         try:
             info['team'] = team_report()
@@ -317,10 +349,25 @@ def recover(src: str, encounter: bool = True, team: bool = True) -> dict:
                 print('!!! 隊伍可能散了：請看截圖確認，不同隊就照 /psa-quick-team 組回（組隊前先確認真的散了）', flush=True)
         except Exception as e:
             info['team'] = f'error {e}'
+    if grind_ensure:
+        info['grind'] = run_grind_ensure(src)
+        if info['grind'].get('rc') == 0:
+            encounter = False                       # ensure 已確認遇敵開著且有 EXP
+    if encounter:
+        try:
+            import heal
+            if not heal.encounter_on():
+                log('netwatch：原地遇敵沒開，重新開啟')
+                heal.set_encounter(True)
+                info['encounter'] = 'reopened'
+            else:
+                info['encounter'] = 'on'
+        except Exception as e:      # 不讓恢復流程拖垮呼叫端
+            info['encounter'] = f'error {e}'
     return info
 
 
-def relogin(src: str) -> dict:
+def relogin(src: str, grind_ensure: bool = True) -> dict:
     """登入畫面 → 檢查帳密欄有內容 → 點「登錄」→ 處理選擇角色 / 載入 → 回到遊戲 → recover。
     失敗規則：欄位空 / 出現提示視窗（密碼錯誤、封停、維護、驗證）/ 看不懂的畫面逾時 / 連續 3 次 → halt（不重試）"""
     if not _take(ACT_LOCK, 300):
@@ -359,8 +406,9 @@ def relogin(src: str) -> dict:
                 errlog.fix(i, '登錄 → 一鍵全登 → 進遊戲成功，已做恢復檢查（netwatch.relogin）')
                 actlog.add('netwatch', '自動登錄成功')
                 log(f'netwatch：登錄成功，{int(time.time() - t0)} 秒回到遊戲')
+                _forget_char()
                 time.sleep(2)
-                return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, True, True)}
+                return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, True, True, grind_ensure=grind_ensure)}
             if _match(SIG_CHARSEL) is True:
                 if picked >= 2:
                     break
@@ -380,7 +428,7 @@ def relogin(src: str) -> dict:
 
 
 # ---------------- 主流程 ----------------
-def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True, team: bool = True) -> dict:
+def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True, team: bool = True, grind_ensure: bool = True) -> dict:
     """檢查「網路異常」提示 / 登入畫面；有就處理。shot 參數保留相容（目前自己取樣，不用外部截圖）。
     回傳 {'status': 'ok'|'reconnected'|'halt'|'fatal', ...}；status 為 halt / fatal 時呼叫端必須停手。"""
     if HALT.exists():
@@ -389,13 +437,14 @@ def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True
             _save({'fails': 0})
             log('netwatch：偵測到已重新登入（HUD 回來了），清除 halt，做恢復檢查')
             actlog.add('netwatch', '人類登入後恢復')
-            return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, encounter, team)}
+            _forget_char()
+            return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, encounter, team, grind_ensure=grind_ensure)}
         return {'status': 'halt', 'reason': '已停手等使用者處理（netwatch.halt 存在；處理完刪掉該檔）'}
     kind = detect()
     if kind is None:
         return {'status': 'ok'}
     if kind == 'login':
-        return relogin(src)
+        return relogin(src, grind_ensure=grind_ensure)
     if not _take(ACT_LOCK, 180):
         return {'status': 'ok', 'busy': True}      # 別的腳本正在處理
     try:
@@ -408,7 +457,7 @@ def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True
             time.sleep(2)
             if _match(SIG_LOGIN) is True:
                 _release(ACT_LOCK)                  # relogin 自己會拿鎖
-                return relogin(src)
+                return relogin(src, grind_ensure=grind_ensure)
             if hud_ok() and _match(SIG_DIALOG) is False:     # 讀不到（None）不宣告成功
                 st['fails'] = 0
                 _save(st)
@@ -446,6 +495,7 @@ def main() -> int:
     ap.add_argument('--status', action='store_true')
     ap.add_argument('--no-team', action='store_true', help='恢復時不檢查隊伍')
     ap.add_argument('--no-encounter', action='store_true', help='恢復時不管原地遇敵')
+    ap.add_argument('--no-grind', action='store_true', help='重登後不自動跑 grind.py ensure')
     a = ap.parse_args()
     if a.status:
         print('halt:', HALT.read_text(encoding='utf-8').strip() if HALT.exists() else '無', '| 狀態:', _load())
@@ -453,7 +503,7 @@ def main() -> int:
     if layout.current() != '2880x1659':
         log(f'netwatch 只量過 2880×1659，目前 {layout.current()}')
         return 2
-    kw = {'src': 'netwatch', 'team': not a.no_team, 'encounter': not a.no_encounter}
+    kw = {'src': 'netwatch', 'team': not a.no_team, 'encounter': not a.no_encounter, 'grind_ensure': not a.no_grind}
     if not a.watch:
         r = check_and_reconnect(**kw)
         print(json.dumps(r, ensure_ascii=False, default=str))

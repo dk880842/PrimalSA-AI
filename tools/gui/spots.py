@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """練級傳送點表（只用標準庫）。唯一來源：.claude/skills/psa-game-ui/ui/transfer.md「練級傳送」表（2026-10-09 實測，0 轉）；
 改了那張表要同步改這裡。座標 = 截圖座標（2880×1659 版面，練級傳送分頁 259,314 之下的目的地標籤）。
-heal.SPOTS 只有其中 6 點；P8 整合時 heal.py 改成 `from spots import HEAL_SPOTS as SPOTS`（補柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟）。
+heal.SPOTS 就是 HEAL_SPOTS（P8 起 heal.py `from spots import HEAL_SPOTS as SPOTS`，9 點全支援；1920×1017 版面除外，另有自己的 6 點座標）。
 用法：給 grind.py 選點 / 預判等級門檻；`python spots.py` 印表。
 """
 import re

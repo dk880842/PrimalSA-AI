@@ -21,7 +21,7 @@
 
 流程（與計畫 §3.3 的差異：外掛設定「先讀 5 人、只改不對的」，不是 5 人全點）：
   preflight → char.ensure(隊長) → 關遇敵 + 等戰鬥結束 → team.check / form → [start：選點 / 補血 / 傳送]
-  → 一次開外掛面板逐人讀快速戰鬥 + 自動戰鬥 → 只對不對的人 ass.set_states → 隊長開遇敵（主畫面鈕，紅龍頭確認）
+  → 一次開外掛面板（ass.set_many）逐人讀快速戰鬥 + 自動戰鬥、只點不對的 → 隊長開遇敵（主畫面鈕，紅龍頭確認）
   → 確認視窗（1 s 一次 pixel）：EXP 橫幅 ≥2 次 → 成功；完整戰鬥連 2 次 → 56（--fix 重設一次）；unknown 連 3 次 → 9。
 外掛只動 快速戰鬥 / 自動戰鬥 兩項；傳送、遇敵鈕屬紅區，使用者要求練功 / 掛機就等於授權（psa-grind-start）。
 鎖：tools/.cache/grind.lock（pid）；battle.lock（quest）有效 / petwatch.lock 的 pid 活著 / 另一支 heal --watch（Linux /proc 掃描，盡力偵測）→ 退出 8。
@@ -52,7 +52,6 @@ SRC = 'grind'
 EXIT_TEAM, EXIT_TELEPORT, EXIT_ASS, EXIT_NO_FAST, EXIT_ENC, EXIT_NO_EXP, EXIT_FULL_BATTLE, EXIT_HEAL, EXIT_CHAR = 50, 51, 52, 53, 54, 55, 56, 57, 58
 LEADER = 'DKBO'                       # 真名字母 O（DKB0 同義）
 ROLE_ORDER = ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO']      # 讀 / 改順序：隊長最後，結束時外掛面板選在隊長
-SELECT_TRIES, SELECT_GAP = 4, 0.3
 BANNER_WAIT = 8.0
 WANT = {'快速戰鬥': True, '自動戰鬥': True}
 CACHE = uikit.CACHE
@@ -84,11 +83,15 @@ FULL_N = 2                            # 完整戰鬥連幾次 → 56
 UNKNOWN_N = 3                         # unknown 連幾次 → 9
 ENC_OFF_N = 3                         # 遇敵鈕連幾次是關的 → 54
 POLL = 1.0
+ACTIVE = False                        # grind.run 執行中（netwatch.recover 巢狀時不重入）
 sleep = time.sleep                    # 測試替換
 clock = time.time
 
 _marks: list = []
 _t0 = 0.0
+
+
+ass.wait_cover_hook = lambda timeout=BANNER_WAIT: wait_banner_gone(timeout)     # ass.select_role 頭像被遮住時，先用 EXP 橫幅偵測等
 
 
 def lap(label: str) -> None:
@@ -149,39 +152,10 @@ def release_lock() -> None:
 
 # ---- 外掛 5 人讀 / 改 ----
 def read_all(no_wait: bool = False) -> tuple:
-    """一次開外掛面板，逐人選角色讀 快速戰鬥 / 自動戰鬥 / 原地遇敵（只讀，不點勾選）。
+    """一次開外掛面板，逐人選角色讀 快速戰鬥 / 自動戰鬥 / 原地遇敵（只讀，不點勾選）= ass.set_many 全部 None。
     回 (ass 退出碼, {角色: 狀態 dict}, 訊息, {角色: 秒})；面板中途消失 / 選不到角色 → 非 0 且已讀到的照回"""
-    ok_, why = ass.wait_not_battle(no_wait)
-    if not ok_:
-        return ass.EXIT_IN_BATTLE, {}, why, {}
-    if not ass.open_panel():
-        return ass.EXIT_NO_PANEL, {}, '外掛面板打不開（戰鬥 / 對話 / 載入中擋住？）；沒點任何面板內座標', {}
-    states, secs, retries = {}, {}, {}
-    try:
-        for role in ROLE_ORDER:
-            t = clock()
-            for k in range(SELECT_TRIES):           # 遇敵開著時 EXP 橫幅可能蓋住頭像 → 選不到就等橫幅消失再重試（面板還開著才重點）
-                if ass.select_role(role):
-                    break
-                retries[role] = k + 1
-                if not ass.panel_open():
-                    return ass.EXIT_PANEL_LOST, states, f'選 {role} 時面板消失', secs
-                wait_banner_gone(4.0)               # 橫幅（約 2～4 s）消失再點
-                sleep(SELECT_GAP)
-            else:
-                uikit.snap(f'grind-select-fail-{role}')
-                return ass.EXIT_NO_ROLE, states, f'選不到角色 {role}（重試 {SELECT_TRIES} 次）', secs
-            st = ass.read_checks()
-            if st is None:
-                return ass.EXIT_PANEL_LOST, states, f'{role} 讀不到勾選框', secs
-            states[role] = st
-            secs[role] = round(clock() - t, 2)
-        if retries:
-            log(f'選角色重試：{retries}')
-        return ass.EXIT_OK, states, '', secs
-    finally:
-        if not ass.close_panel():
-            print('警告：外掛面板沒關成功（請 shot 看畫面，手動點 X 1318,90）', flush=True)
+    rc, states, msg, info = ass.set_many({r: None for r in ROLE_ORDER}, no_wait=no_wait)
+    return rc, states, msg, info['secs']
 
 
 def wrong_of(states: dict) -> dict:
@@ -280,30 +254,24 @@ def wait_banner_gone(timeout: float = BANNER_WAIT) -> bool:
 
 
 def fix_settings(info: dict) -> int:
-    """5 人讀一次，只對不對的人 ass.set_states；回 0 或 52 / 53 / ass 的 8"""
+    """一次開面板：5 人逐人讀、只點不對的項目（ass.set_many）；回 0 或 52 / 53 / ass 的 8。隊長在最後，結束時面板選在隊長"""
     wait_banner_gone()
-    rc, states, msg, secs = read_all()
-    info['role_secs'] = secs
-    lap('外掛讀 5 人')
+    rc, states, msg, ainfo = ass.set_many({r: dict(WANT) for r in ROLE_ORDER})
+    info['role_secs'] = ainfo['secs']
+    fixed = info.setdefault('fixed', {})
+    fixed.update(ainfo['changed'])
+    for role, items in ainfo['changed'].items():
+        log(f'{role}：{"、".join(items)} 沒開 → 已設定')
+    lap('外掛修正' if fixed else '外掛讀 5 人（無需修正）')
     if rc:
         info['ass_rc'] = rc
-        return rc if rc == ass.EXIT_IN_BATTLE else uikit.fail(SRC, EXIT_ASS, f'讀外掛失敗（ass 退出碼 {rc}）：{msg}')
-    bad = wrong_of(states)
-    fixed = info.setdefault('fixed', {})
-    for role, items in bad.items():
-        log(f'{role}：{"、".join(items)} 沒開 → 設定')
-        rc, st, msg = ass.set_states(role, {i: True for i in items})
-        fixed[role] = items
-        if rc:
-            info.update(role=role, ass_rc=rc)
-            if rc == ass.EXIT_IN_BATTLE:
-                return rc
-            if rc == ass.EXIT_CONFIRM and '快速戰鬥' in items:
-                return uikit.fail(SRC, EXIT_NO_FAST, f'{role} 快速戰鬥點了沒變：此地圖可能禁止快速戰鬥（{msg}）')
-            return uikit.fail(SRC, EXIT_ASS, f'{role} 外掛設定失敗（ass 退出碼 {rc}）：{msg}')
-    if fixed and 'DKBO' not in bad:
-        ass.get_states(LEADER)                      # 收尾面板選在隊長（記憶規則：最後選 DKBO）
-    lap('外掛修正' if bad else '外掛無需修正')
+        if ainfo['role']:
+            info['role'] = ainfo['role']
+        if rc == ass.EXIT_IN_BATTLE:
+            return rc
+        if rc == ass.EXIT_CONFIRM and '快速戰鬥' in ainfo['changed'].get(ainfo['role'], []):
+            return uikit.fail(SRC, EXIT_NO_FAST, f'{ainfo["role"]} 快速戰鬥點了沒變：此地圖可能禁止快速戰鬥（{msg}）')
+        return uikit.fail(SRC, EXIT_ASS, f'外掛設定失敗（ass 退出碼 {rc}，{ainfo["role"] or "?"}）：{msg}')
     return 0
 
 
@@ -346,23 +314,28 @@ def finish(rc: int, mode: str, info: dict, t_start: float) -> int:
     return rc
 
 
-def run(mode: str, spot: str | None = None, confirm_secs: float = CONFIRM_SECS, fix: bool = True, do_heal: bool = False) -> int:
-    global _t0
+def run(mode: str, spot: str | None = None, confirm_secs: float = CONFIRM_SECS, fix: bool = True, do_heal: bool = False,
+        ignore_watchers: bool = False) -> int:
+    """ignore_watchers：呼叫端本身就是 petwatch / heal --watch / netwatch（正卡在 guard 裡、不會同時動），略過它們的偵測；
+    quest 的 battle.lock 仍然有效（由 uikit.preflight 擋）"""
+    global _t0, ACTIVE
     t_start = _t0 = clock()
     _marks.clear()
     info: dict = {}
-    other = _other_running()
+    other = None if ignore_watchers else _other_running()
     if other:
         print(f'{SRC}：{other} 在跑，會搶畫面 → 不動作', file=sys.stderr)
         return finish(uikit.EXIT_IN_BATTLE, mode, info, t_start)
     if not take_lock():
         return finish(uikit.EXIT_IN_BATTLE, mode, info, t_start)
+    ACTIVE = True
     try:
         return finish(_run(mode, spot, confirm_secs, fix, do_heal, info), mode, info, t_start)
     except SystemExit as e:                  # netwatch.guard 停手（10）
         finish(int(e.code or 0) or uikit.EXIT_HALT, mode, info, t_start)
         raise
     finally:
+        ACTIVE = False
         release_lock()
 
 
@@ -426,7 +399,7 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
                 heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')
                 lap('補血')
             elif do_heal:
-                return uikit.fail(SRC, uikit.EXIT_USAGE, f'{target} 不在 heal.SPOTS（P8 才補），--heal 暫不支援；要補血請先跑 heal.py')
+                return uikit.fail(SRC, uikit.EXIT_USAGE, f'{target} 不在 heal.SPOTS（目前版面沒有這點的傳送座標），--heal 不支援；要補血請先跑 heal.py')
             else:
                 log(f'警告：血量 {s.get("hpPct")}% < 40 但 {target} 不在 heal.SPOTS，不自動補血')
         if name and not info.get('healed'):

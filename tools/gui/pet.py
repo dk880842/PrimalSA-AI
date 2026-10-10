@@ -712,6 +712,18 @@ def thumb_same(a, b) -> bool:
     return ok >= THUMB_NEED
 
 
+def mount_same(a, b) -> bool:
+    """騎寵位縮圖比對：只比內側 3 欄（x 250 / 265 / 280），不比最右欄 x 292 —— 那欄會被「選中框」的橘色光暈蓋到
+    （2026-10-11 P8 實機：存走第 2 格後選取移到騎寵格，x 292 那 4 點 (167,55,10)→(209,119,5)，其餘 12 點逐位元組相同，
+    舊的 14 / 16 門檻誤報 76）。12 點至少 11 點相符"""
+    if not a or not b or len(a) != len(b) or len(a) % len(THUMB_X):
+        return False
+    n = len(THUMB_X)
+    pairs = [(c, d) for k, (c, d) in enumerate(zip(a, b)) if k % n < n - 1]
+    ok = sum(1 for c, d in pairs if all(abs(u - v) <= THUMB_TOL for u, v in zip(c, d)))
+    return ok >= len(pairs) - 1
+
+
 def _card_pts() -> list:
     pts = []
     for cy in CARD_Y:
@@ -1019,7 +1031,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     if nm != want:
         return bad(EXIT_DEPOT, f'倉庫分頁中選取的是 {nm}（要 {want}），不點存入')
     now_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
-    if now_cols is None or not thumb_same(pre_t, now_cols[:16]) or (i != 0 and not thumb_same(pre_mount, now_cols[16:])):
+    if now_cols is None or not thumb_same(pre_t, now_cols[:16]) or (i != 0 and not mount_same(pre_mount, now_cols[16:])):
         uikit.snap('pet-store-thumb')
         return bad(EXIT_DEPOT, '縮圖簽名與切分頁前不符（寵物欄變動 / 補位換人？），不點存入')
     ok, why = btn_ready('store')
@@ -1037,7 +1049,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
         return bad(EXIT_VERIFY, f'點了存入但寵物欄 / 倉庫張數沒照預期變（寵物空格 {f2 and sum(f2["empty"])}→要 {pets_empty + 1}；倉庫 {d2 and 20 - sum(d2["empty"])}→要 {depot_before + 1}）：可能戰鬥中被擋或倉庫滿；不重點，請人看截圖{"：" + path if path else ""}')
     # 事後：騎寵位沒動；新倉庫格的名字 = want
     m_cols = uikit.px(thumb_pts(0))
-    if i != 0 and (m_cols is None or not thumb_same(pre_mount, m_cols)):        # 存第 1 格（--allow-slot1）時後面的寵物會補位上來，不比
+    if i != 0 and (m_cols is None or not mount_same(pre_mount, m_cols)):        # 存第 1 格（--allow-slot1）時後面的寵物會補位上來，不比
         uikit.snap('pet-store-mount')
         return bad(EXIT_VERIFY, '存入後第 1 格（騎寵）縮圖變了！請人立刻看截圖確認')
     new_idx = next((k for k in range(20) if not d2['empty'][k] and d['empty'][k]), free_idx)

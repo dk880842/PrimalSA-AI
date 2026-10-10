@@ -26,9 +26,9 @@ netwatch.actlog.add = lambda *a, **k: None
 fails = 0
 
 
-def check(name, cond):
+def check(name, cond, extra=''):
     global fails
-    print(('PASS ' if cond else 'FAIL ') + name)
+    print(('PASS ' if cond else 'FAIL ') + name + (' ' + extra if extra and not cond else ''))
     if not cond:
         fails += 1
 
@@ -175,6 +175,7 @@ def ps_dialog_then_blind(script, *args, **kw):
 netwatch.winenv.run_ps = ps_dialog_then_blind
 walk.stat = lambda: {'ok': True, 'pos': '1000:1,1', 'level': 'x'}
 clicks.clear()
+REAL_RECOVER = netwatch.recover
 netwatch.recover = lambda *a, **k: {'stub': 1}
 r = netwatch.check_and_reconnect()
 check('點確定後一直讀不到 → 不宣告 reconnected', r.get('status') != 'reconnected')
@@ -186,6 +187,105 @@ use(R(1))
 r = netwatch.check_and_reconnect()
 check('HALT 存在且讀不到畫面 → 仍 halt、不清 halt 檔', r['status'] == 'halt' and netwatch.HALT.exists())
 netwatch.HALT.unlink()
+
+# ---- P8：重登成功 → 清 charstate → recover(grind_ensure=True)；recover 跑 grind.ensure 一次；fix_team 用 team.form ----
+import types
+import charstate  # noqa: E402
+ORD: list = []
+orig = {k: getattr(netwatch, k) for k in ('login_fields_filled', 'hud_ok', 'recover', '_match', 'team_report', 'fix_team')}
+orig_clear = charstate.clear
+charstate.clear = lambda path=None: ORD.append('charstate.clear') or True
+netwatch.login_fields_filled = lambda: True
+netwatch.hud_ok = lambda: True
+netwatch._match = lambda sig: False
+netwatch.recover = lambda src, enc=True, team=True, grind_ensure=False: ORD.append(f'recover:grind={grind_ensure}') or {'stub': 1}
+netwatch.STATE.write_text('{"fails": 0}')
+clicks.clear()
+r = netwatch.relogin('t')
+check('relogin 成功：status reconnected、只點了登錄鈕', r['status'] == 'reconnected' and clicks == [('click', str(netwatch.LOGIN_BTN[0]), str(netwatch.LOGIN_BTN[1]))], str(clicks))
+check('  先清 charstate 再 recover(grind_ensure=True)', ORD == ['charstate.clear', 'recover:grind=True'], str(ORD))
+ORD.clear()
+r = netwatch.relogin('t', grind_ensure=False)
+check('relogin(grind_ensure=False) 把旗標傳給 recover（--no-grind）', ORD[-1] == 'recover:grind=False', str(ORD))
+ORD.clear()
+netwatch.HALT.write_text('x')
+r = netwatch.check_and_reconnect()
+check('人類登入回來（HALT + HUD）也清 charstate 並 grind_ensure', r['status'] == 'reconnected' and ORD == ['charstate.clear', 'recover:grind=True'], str(ORD))
+netwatch.recover = REAL_RECOVER
+
+# recover：grind.ensure 流程（假 grind / heal / team_report）
+fake_grind = types.ModuleType('grind')
+fake_grind.ACTIVE = False
+fake_grind.calls = []
+fake_grind.rc = 0
+
+
+def _gr(mode, *a, **k):
+    fake_grind.calls.append((mode, k))
+    if fake_grind.rc == 'exit':
+        raise SystemExit(10)
+    return fake_grind.rc
+
+
+fake_grind.run = _gr
+sys.modules['grind'] = fake_grind
+fake_heal = types.ModuleType('heal')
+fake_heal.encounter_on = lambda: ORD.append('enc_on?') or True
+fake_heal.set_encounter = lambda on: ORD.append(f'set_enc:{on}')
+sys.modules['heal'] = fake_heal
+netwatch.team_report = lambda: {'leader': 1, 'member': 4, 'solo': 0, 'unknown': 0, 'shot': 'x'}
+ORD.clear()
+ERR.clear()
+info = netwatch.recover('t', True, True, grind_ensure=True)
+check('recover：grind.ensure 只跑 1 次（ignore_watchers=True）、成功就不再碰遇敵', fake_grind.calls == [('ensure', {'ignore_watchers': True})] and info['grind'] == {'rc': 0} and 'enc_on?' not in ORD, str(info))
+fake_grind.calls.clear()
+info = netwatch.recover('t', True, True, grind_ensure=False)
+check('recover(grind_ensure=False)：不跑 grind，走舊的遇敵檢查', not fake_grind.calls and 'grind' not in info and info['encounter'] == 'on')
+fake_grind.rc = 55
+ERR.clear()
+info = netwatch.recover('t', True, True, grind_ensure=True)
+check('grind.ensure 失敗：只記 errlog + 警告、不重試（1 次呼叫）、仍做舊的遇敵檢查', len(fake_grind.calls) == 1 and info['grind'] == {'rc': 55} and [e[0] for e in ERR] == ['add'] and 'encounter' in info, str(ERR))
+fake_grind.calls.clear()
+fake_grind.rc = 0
+fake_grind.ACTIVE = True
+info = netwatch.recover('t', True, False, grind_ensure=True)
+check('grind 已在執行（巢狀）→ 略過不重入', not fake_grind.calls and info['grind'].get('skipped'))
+fake_grind.ACTIVE = False
+fake_grind.rc = 'exit'
+try:
+    netwatch.recover('t', True, False, grind_ensure=True)
+    check('grind 停手（SystemExit）要往外丟', False)
+except SystemExit:
+    check('grind 停手（SystemExit）要往外丟', True)
+for k in ('login_fields_filled', 'hud_ok', '_match', 'team_report'):
+    setattr(netwatch, k, orig[k])
+charstate.clear = orig_clear
+
+# fix_team：全員單人 → 全部登錄 + team.form（不再有盲點座標序列）
+fake_team = types.ModuleType('team')
+fake_team.calls = []
+fake_team.rc = 0
+fake_team.form = lambda *a, **k: fake_team.calls.append((a, k)) or fake_team.rc
+sys.modules['team'] = fake_team
+reports = [{'leader': 0, 'member': 0, 'solo': 5, 'unknown': 0, 'shot': 'x'}, {'leader': 1, 'member': 4, 'solo': 0, 'unknown': 0, 'shot': 'x'}]
+netwatch.team_report = lambda: reports.pop(0)
+clicks.clear()
+t = netwatch.fix_team({'solo': 5})
+check('fix_team：全單人 → team.form 1 次，回新報告', len(fake_team.calls) == 1 and t['leader'] == 1, str(fake_team.calls))
+allclicks = ' '.join(' '.join(map(str, c)) for c in clicks)
+check('  gui 只有「全部登錄」序列，沒有舊 QUICK_TEAM_SEQ 的盲點座標（549 520 / 720 665）', '716 578' in allclicks and '720 665' not in allclicks and '549 520' not in allclicks and not hasattr(netwatch, 'QUICK_TEAM_SEQ'), allclicks)
+fake_team.calls.clear()
+reports[:] = [{'leader': 1, 'member': 2, 'solo': 2, 'unknown': 0, 'shot': 'x'}] * 2
+netwatch.fix_team({'solo': 2})
+check('fix_team：已有隊伍（非全單人）→ 不 form', not fake_team.calls)
+fake_team.rc = 41
+ERR.clear()
+reports[:] = [{'leader': 0, 'member': 0, 'solo': 5, 'unknown': 0, 'shot': 'x'}] * 2
+netwatch.fix_team({'solo': 5})
+check('team.form 失敗 → errlog 一筆、不重試', len(fake_team.calls) == 1 and [e[0] for e in ERR] == ['add'])
+netwatch.team_report = orig['team_report']
+for m in ('grind', 'heal', 'team'):
+    del sys.modules[m]
 
 # ---- gui.ps1 / 呼叫點靜態檢查 ----
 src = Path(netwatch.__file__).read_text(encoding='utf-8')

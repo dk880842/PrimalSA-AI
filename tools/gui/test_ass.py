@@ -323,5 +323,116 @@ print('(20) 面板已開著時不算戰鬥（戰鬥中外掛面板開不起來�
 g = BGame(battle_until=10 ** 9, panel=True)
 setup(g)
 check('panel_open → in_battle() 為 None', ass.in_battle() is None)
+print('(21) select_role：頭像被遮住（EXP 橫幅 / 成功浮字）→ 等到消失才點；沒選中會重試')
+
+
+class CGame(Game):
+    """cover = {角色: 遮到哪個時間為止}；ignore = 頭像點擊前 N 次無效；label_only = 只有點名字標籤才有效"""
+    def __init__(self, *a, cover=None, ignore=0, label_only=False, **k):
+        super().__init__(*a, **k)
+        self.cover, self.ignore, self.label_only = dict(cover or {}), ignore, label_only
+
+    def color(self, x, y):
+        for r, xy in ass.ROLES.items():
+            if (x, y) == xy and self.panel and self.t < self.cover.get(r, -1):
+                return (150, 90, 200)       # 紫色橫幅 / 浮字
+        return super().color(x, y)
+
+    def click(self, x, y):
+        for r, (rx, ry) in ass.ROLES.items():
+            if y == ry and rx <= x <= rx + ass.LABEL_DX and self.panel:
+                self.clicks.append((x, y))
+                if self.t < self.cover.get(r, -1):
+                    return                  # 被蓋住：點了沒反應
+                if self.label_only and x == rx:
+                    return
+                if (x == rx) and self.ignore > 0:
+                    self.ignore -= 1
+                    return
+                self.role = r
+                return
+        super().click(x, y)
+
+
+g = CGame(role='DKBO2', cover={'DKBO3': 6.0})
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+check('不透明遮到 t=6：先等（每圈最多 4 s）、之後重試成功 rc 0', rc == 0 and g.t >= 6.0, f'rc={rc} t={g.t} clicks={g.clicks}')
+g = CGame(role='DKBO2', cover={'DKBO3': 10 ** 9})
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+check('一直遮住 → rc 3、有上限（<= 30 s）、面板關、沒點到面板外', rc == ass.EXIT_NO_ROLE and g.t <= 30 and not g.panel and g.ground_clicks == 0, f'rc={rc} t={g.t}')
+
+
+class DimGame(CGame):
+    def color(self, x, y):
+        if (x, y) == ass.ROLES['DKBO3'] and self.panel and self.role != 'DKBO3':
+            return (189, 219, 243)          # 半透明橫幅蓋著的未選中頭像（實測）
+        return super().color(x, y)
+
+
+g = DimGame(role='DKBO2')
+setup(g)
+check('avatar_state：半透明蓋著 = dim', (g.panel or setattr(g, 'panel', True) or True) and ass.avatar_state('DKBO3') == 'dim')
+g.panel = False
+g = DimGame(role='DKBO2')
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+check('dim 不用等：直接點、第一次就選中（面板開著 <= 1.5 s）', rc == 0 and g.clicks.count(ass.ROLES['DKBO3']) == 1 and g.t < 3, f'rc={rc} t={g.t}')
+g = CGame(role='DKBO2', ignore=2)
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+n = len([c for c in g.clicks if c[1] == ass.ROLES['DKBO3'][1]])
+check('點了沒選中 → 重試，第 3 次（名字標籤備援）選中', rc == 0 and n == 3, f'rc={rc} n={n}')
+g = CGame(role='DKBO2', label_only=True)
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+check('頭像點不動 → 第 3 次起點名字標籤（備援）選中', rc == 0 and (ass.ROLES['DKBO3'][0] + ass.LABEL_DX, ass.ROLES['DKBO3'][1]) in g.clicks, str(g.clicks))
+hook_calls = []
+ass.wait_cover_hook = lambda timeout: hook_calls.append(timeout)
+g = CGame(role='DKBO2', cover={'DKBO3': 3.0})
+setup(g)
+rc, _, _ = ass.get_states('DKBO3')
+check('被不透明遮住時先呼叫 wait_cover_hook（grind 的橫幅偵測）一次', rc == 0 and len(hook_calls) == 1, str(hook_calls))
+ass.wait_cover_hook = None
+g = CGame(role='DKBO2')
+setup(g)
+rc, _, _ = ass.get_states('DKBO3')
+check('沒遮住：不呼叫 hook、只點 1 次', rc == 0 and g.clicks.count(ass.ROLES['DKBO3']) == 1)
+
+print('(22) set_many：一次開面板逐人讀 / 改，順序照 plan，最後選到隊長')
+g = Game(role='DKBO', checks={'自動戰鬥': True, '快速戰鬥': True})
+g.checks['DKBO3']['自動戰鬥'] = False
+g.checks['DKBO3']['快速戰鬥'] = False
+setup(g)
+plan = {r: {'快速戰鬥': True, '自動戰鬥': True} for r in ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO']}
+rc, sts, msg, info = ass.set_many(plan)
+opens = g.clicks.count(ass.ASS_BTN)
+check('rc 0、5 人狀態都回', rc == 0 and list(sts) == list(plan) and all(sts[r]['快速戰鬥'] and sts[r]['自動戰鬥'] for r in sts), str(sts))
+check('只改 DKBO3 的兩項（其餘 0 次勾選點擊）', info['changed'] == {'DKBO3': ['快速戰鬥', '自動戰鬥']} and len([c for c in g.clicks if c in ass.ITEMS.values()]) == 2, str(info))
+check('只開 1 次面板 / 關 1 次、結束選在 DKBO、沒點到地面', opens == 1 and g.clicks.count(ass.CLOSE_BTN) == 1 and g.role == 'DKBO' and not g.panel and g.ground_clicks == 0)
+check('info.secs 5 人都有', len(info['secs']) == 5)
+g = Game(role='DKBO')
+setup(g)
+rc, sts, msg, info = ass.set_many({r: None for r in ass.ROLES})
+check('plan 全 None = 只讀：不點任何勾選', rc == 0 and len(sts) == 5 and not [c for c in g.clicks if c in ass.ITEMS.values()] and info['changed'] == {})
+g = CGame(role='DKBO', cover={'DKBO4': 10 ** 9})
+setup(g)
+rc, sts, msg, info = ass.set_many({r: None for r in ass.ROLES})
+check('中途選不到 DKBO4 → rc 3、info.role、前面讀到的保留、面板仍關', rc == ass.EXIT_NO_ROLE and info['role'] == 'DKBO4' and list(sts) == ['DKBO', 'DKBO2', 'DKBO3'] and not g.panel, f'rc={rc} {list(sts)}')
+g = Game(role='DKBO', stuck=[], checks={})
+g.stuck = {'快速戰鬥'}
+setup(g)
+rc, sts, msg, info = ass.set_many({'DKBO2': {'快速戰鬥': True}, 'DKBO3': {'快速戰鬥': True}})
+check('確認失敗 → rc 4、info.role = DKBO2、不往下做 DKBO3、不補點', rc == ass.EXIT_CONFIRM and info['role'] == 'DKBO2' and 'DKBO3' not in sts and not g.panel, f'rc={rc} {msg}')
+g = BGame(battle_until=10 ** 9)
+setup(g)
+rc, sts, msg, info = ass.set_many({'DKBO': None}, no_wait=True)
+check('戰鬥中 --no-wait → 8、沒點', rc == ass.EXIT_IN_BATTLE and g.clicks == [])
+g = Game(hud=False)
+setup(g)
+rc, sts, msg, info = ass.set_many({'DKBO': None})
+check('面板打不開 → 2', rc == ass.EXIT_NO_PANEL and g.ground_clicks == 0)
+
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

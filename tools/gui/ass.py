@@ -22,7 +22,9 @@
   --no-wait：戰鬥中不等，直接回退出碼 8（排程 / 腳本不想卡住時用）。面板已經開著時視為不在戰鬥（外掛面板戰鬥中打不開）。
 勾選判讀（2026-10-10 實測）：未勾 = 框心 255,255,255；已勾 = 其他值（30,30,30 / 151 / 223 視打勾筆劃而定）。
 只動點到的角色；不改其他角色，不碰其他項目。外掛面板不能用 ESC 關。
-給其他腳本 import：ass.get_states(role) / ass.set_states(role, {項目: bool}) → (ok, 狀態 dict 或 None, 訊息)。
+給其他腳本 import：ass.get_states(role) / ass.set_states(role, {項目: bool}) → (rc, 狀態 dict 或 None, 訊息)；
+ass.set_many({角色: {項目: bool} 或 None}) 一次開面板逐人讀 / 改 → (rc, {角色: 狀態}, 訊息, info)（P8，grind 用）。
+選角色（select_role）頭像被不透明東西（EXP 橫幅文字）蓋住會先等一下、沒選中會重試、第 3 次起改點名字標籤（2026-10-11 DKBO3 選不到的修正；失敗時面板開著存 tools/.cache/ass-select-fail-<角色>.png）。
 """
 import argparse
 import sys
@@ -161,14 +163,73 @@ def selected_role() -> str | None:
     return sel[0] if len(sel) == 1 else None
 
 
-def select_role(role: str) -> bool:
+SELECT_TRIES = 4                 # 選角色最多點幾次
+SELECT_TIMEOUT = 25.0            # 選角色總上限（含等遮擋消失）
+COVER_WAIT = 4.0                 # 頭像被不透明東西遮住時，每圈最多等幾秒（等不到也照點：點在面板內，無害）
+LABEL_DX = 50                    # 頭像右邊的名字標籤（備援點擊；點在自己那列的標籤上）
+DIM_MAX = 45                     # 半透明橫幅蓋住時頭像顏色比正常暗多少以內仍算「dim」（實測 off 197,227,255 → 189,219,243）
+wait_cover_hook = None           # 呼叫端可設 fn(timeout)：等 EXP 橫幅消失（grind 的偵測；ass 不能 import grind）
+
+
+def avatar_state(role: str) -> str | None:
+    """該角色頭像圓鈕：'sel' 選中 / 'off' 沒選中 / 'dim' 被半透明橫幅蓋著但看得出是未選中（實測點得穿，可以直接點）/
+    'cover' 被不透明的東西蓋住（EXP 橫幅文字 / 「NEW」/ 浮字）/ None 讀不到"""
+    cols = _px([ROLES[role]])
+    if not cols:
+        return None
+    c = cols[0]
+    if _close(c, AVATAR_SEL, 8):
+        return 'sel'
+    if _close(c, AVATAR_OFF, 8):
+        return 'off'
+    if all(-8 <= r - v <= DIM_MAX for r, v in zip(AVATAR_OFF, c)) and c[2] > c[1] > c[0]:
+        return 'dim'
+    return 'cover'
+
+
+def wait_uncovered(role: str, timeout: float = COVER_WAIT) -> bool:
+    """頭像被不透明東西蓋住就等（先呼叫 wait_cover_hook 等 EXP 橫幅，再輪詢頭像像素）；
+    回 True = 可以點了（sel / off / dim）；面板消失 / 逾時回 False。
+    2026-10-11 實機：EXP 橫幅（一場戰鬥 3 行疊在 x 450～1000、y 130～270）剛好蓋住 DKBO3 頭像（461,151），
+    半透明部分點得穿（實測 dim 時點擊選得中），不透明部分 / 「成功」浮字 點不到；掛機中橫幅幾乎接連出現，所以不能死等乾淨。"""
+    end = clock() + timeout
+    hooked = False
+    while True:
+        st = avatar_state(role)
+        if st in ('sel', 'off', 'dim'):
+            return True
+        if not panel_open():
+            return False
+        if clock() >= end:
+            return False
+        if st == 'cover' and wait_cover_hook and not hooked:
+            hooked = True
+            wait_cover_hook(min(4.0, timeout))
+            continue
+        sleep(0.4)
+
+
+def select_role(role: str, tries: int = SELECT_TRIES, timeout: float = SELECT_TIMEOUT) -> bool:
+    """選外掛面板角色並驗證。內建：頭像被不透明東西蓋住先等一下（EXP 橫幅 / 浮字，等不到也照點）；
+    點了沒選中就重試（面板還開著才重點）；第 3 次起改點頭像右邊的名字標籤（備援）。回 False = 選不到（面板消失 / 逾時）"""
     if selected_role() == role:
         return True
-    if not panel_open():
-        return False
+    end = clock() + timeout
     x, y = ROLES[role]
-    gui('seq', f'click {x} {y}; wait 600', note=f'ass.py 選角色 {role}')
-    return selected_role() == role
+    for k in range(tries):
+        if not panel_open():
+            return False
+        wait_uncovered(role, min(COVER_WAIT, max(0.0, end - clock())))
+        if not panel_open():
+            return False
+        cx = x + LABEL_DX if k >= 2 else x
+        gui('seq', f'click {cx} {y}; wait 600', note=f'ass.py 選角色 {role}')
+        if selected_role() == role:
+            return True
+        if clock() >= end:
+            break
+        sleep(0.3)
+    return False
 
 
 def read_checks(items=None) -> dict | None:
@@ -191,6 +252,29 @@ def norm_role(name: str) -> str | None:
     return next((r for r in ROLES if r.replace('O', '0') == n), None)
 
 
+def _apply_changes(role: str, states: dict, changes: dict | None):
+    """面板開著、角色已選好、已讀到 states：只點與目標不同的項目並逐項讀回確認（不補點）。回 (退出碼, 狀態 dict, 訊息)"""
+    for item, want in (changes or {}).items():
+        if states[item] == want:
+            continue
+        if not panel_open() or selected_role() != role:
+            return EXIT_PANEL_LOST, states, f'點 {item} 前面板已不在 / 角色不對 → 不點'
+        x, y = ITEMS[item]
+        gui('seq', f'click {x} {y}; wait 300', note=f'ass.py {role} {item} → {"開" if want else "關"}')
+        for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
+            sleep(w)
+            if not panel_open():
+                return EXIT_PANEL_LOST, states, f'點 {item} 後面板消失'
+            now = read_checks([item])
+            if now and now[item] == want:
+                break
+        else:
+            return EXIT_CONFIRM, read_checks(), f'{item} 點了仍是 {"開" if states[item] else "關"}（可能是地圖禁止快速戰鬥等；不補點）'
+        states = read_checks() or states
+        log(f'ass：{role} {item} → {"開" if want else "關"}（已確認）')
+    return EXIT_OK, states, ''
+
+
 def _session(role: str, changes: dict | None, items=None, no_wait: bool = False):
     """（戰鬥保護）開面板 → 選角色 → 讀 →（有 changes 就設定並確認）→ 關面板。回 (退出碼, 狀態 dict 或 None, 訊息)"""
     ok_, why = wait_not_battle(no_wait)
@@ -205,24 +289,7 @@ def _session(role: str, changes: dict | None, items=None, no_wait: bool = False)
         states = read_checks()
         if states is None:
             return EXIT_PANEL_LOST, None, '讀不到勾選框像素'
-        for item, want in (changes or {}).items():
-            if states[item] == want:
-                continue
-            if not panel_open() or selected_role() != role:
-                return EXIT_PANEL_LOST, states, f'點 {item} 前面板已不在 / 角色不對 → 不點'
-            x, y = ITEMS[item]
-            gui('seq', f'click {x} {y}; wait 300', note=f'ass.py {role} {item} → {"開" if want else "關"}')
-            for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
-                sleep(w)
-                if not panel_open():
-                    return EXIT_PANEL_LOST, states, f'點 {item} 後面板消失'
-                now = read_checks([item])
-                if now and now[item] == want:
-                    break
-            else:
-                return EXIT_CONFIRM, read_checks(), f'{item} 點了仍是 {"開" if states[item] else "關"}（可能是地圖禁止快速戰鬥等；不補點）'
-            states = read_checks() or states
-            log(f'ass：{role} {item} → {"開" if want else "關"}（已確認）')
+        rc, states, msg = _apply_changes(role, states, changes)
         return rc, states, msg
     finally:
         if not close_panel():
@@ -347,6 +414,46 @@ def get_states(role: str, no_wait: bool = False):
 
 def set_states(role: str, changes: dict, no_wait: bool = False):
     return _session(role, changes, None, no_wait)
+
+
+def set_many(plan: dict, no_wait: bool = False) -> tuple:
+    """一次開外掛面板，依 plan 的順序逐人選角色、讀勾選、（有 changes 就只點不對的並確認）、最後關面板。
+    plan = {角色: {項目: bool} 或 None（只讀）}；選角色走 select_role（內建等遮擋 + 重試）。
+    回 (退出碼, {角色: 狀態 dict}, 訊息, info)；info = {'secs': {角色: 秒}, 'changed': {角色: [項目]}, 'role': 出錯的角色或 None}。
+    出錯時已讀到的照回、不再往下；面板一律關。最後選到的角色 = plan 最後一個（呼叫端把隊長放最後）。"""
+    info = {'secs': {}, 'changed': {}, 'role': None}
+    ok_, why = wait_not_battle(no_wait)
+    if not ok_:
+        return EXIT_IN_BATTLE, {}, why, info
+    if not open_panel():
+        return EXIT_NO_PANEL, {}, f'外掛面板 {OPEN_TIMEOUT:.0f} 秒內打不開（戰鬥 / 對話 / 載入中擋住？）；沒點任何面板內座標', info
+    out: dict = {}
+    try:
+        for role, changes in plan.items():
+            t = clock()
+            if not select_role(role):
+                info['role'] = role
+                gui('shot', f'ass-select-fail-{role}.png')      # 面板還開著時的畫面（tools/.cache/；之後看是什麼蓋住）
+                return EXIT_NO_ROLE, out, f'選不到角色 {role}（頭像 {avatar_state(role)}；被遮住 / 重試 {SELECT_TRIES} 次仍沒選中，或面板消失）', info
+            st = read_checks()
+            if st is None:
+                info['role'] = role
+                return EXIT_PANEL_LOST, out, f'{role} 讀不到勾選框像素', info
+            todo = [i for i, w in (changes or {}).items() if st.get(i) != w]
+            if todo:
+                rc, st, msg = _apply_changes(role, st, changes)
+                info['changed'][role] = todo
+                if rc:
+                    info['role'] = role
+                    if st:
+                        out[role] = st
+                    return rc, out, msg, info
+            out[role] = st
+            info['secs'][role] = round(clock() - t, 2)
+        return EXIT_OK, out, '', info
+    finally:
+        if not close_panel():
+            print('警告：外掛面板沒關成功（請 shot 看畫面，手動點 X 1318,90）', flush=True)
 
 
 def fmt(states: dict, items=None) -> str:

@@ -154,3 +154,7 @@ uv run --no-project python tools/gui/ass.py pet DKB0 first 攻擊 first off norm
 - 安全：開面板並驗證 → 選角色並驗證 → OCR「戰寵動作」標題確認右半在頂端（否則退出碼 7、不點）→ 只點與目標不同的 → 讀回確認（不補點）→ 關面板。
 - 退出碼同上；7 = 右半面板被捲離頂端。耗時約 30 秒（OCR 慢）。
 - 實測（DKB0，地雷區 60049 掛機中）：原值 首次 不勾/攻擊、一般 攻擊 → 設 勾/防禦（shot 確認）→ 改回 不勾/攻擊（get 確認），掛機不受影響。
+
+## 腳本 API：`ass.set_many` / `select_role`（P8，2026-10-11）
+- `ass.set_many({角色: {項目: bool} 或 None}, no_wait=False)` → `(rc, {角色: 狀態}, 訊息, info)`：一次開面板、依 plan 順序逐人選角色 + 讀勾選 + 只點不對的、最後關面板（隊長放最後）。`grind.py` 用它（5 人讀 + 修約 10 s）。
+- `select_role` 內建：頭像像素 `avatar_state`（sel / off / dim / cover）；**EXP 橫幅會蓋住 DKBO3 頭像（461,151）**——半透明（dim，頭像略暗 189,219,243）點得穿，不透明 / 浮字會吃掉點擊，所以 cover 時先等（最多 4 s，先叫 grind 的橫幅偵測）再點、沒選中重試 4 次、第 3 次起點名字標籤（頭像右 50 px）。失敗時面板開著存 `tools/.cache/ass-select-fail-<角色>.png`。

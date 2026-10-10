@@ -587,5 +587,19 @@ except uikit.ForbiddenClick:
     ok = True
 check('垃圾桶 708,565 真的會被 safe_click 擋', ok)
 
+# ---- P8 實機：存走第 2 格後選取移到騎寵格，最右欄 x 292 變橘色（光暈）不能誤報 ----
+base = [(221, 50, 0), (207, 195, 180), (232, 59, 1), (167, 55, 10),
+        (123, 110, 100), (225, 112, 14), (180, 132, 118), (167, 74, 10),
+        (128, 104, 70), (187, 159, 102), (246, 235, 232), (142, 69, 10),
+        (197, 191, 188), (249, 233, 198), (183, 170, 167), (141, 74, 10)]
+glow = [c if k % 4 != 3 else (209, 125, 5) for k, c in enumerate(base)]
+check('mount_same：x 292 欄選取光暈（實測值）→ 相同', pet.mount_same(base, glow) and not pet.thumb_same(base, glow))
+inner = [c if k % 4 == 3 or k > 4 else (10, 200, 10) for k, c in enumerate(base)]
+check('mount_same：內側欄真的換了（補位換人）→ 不同', not pet.mount_same(base, inner))
+one = list(base)
+one[0] = (0, 0, 0)
+check('mount_same：內側 1 點雜訊可容忍、2 點不行', pet.mount_same(base, one) and not pet.mount_same(base, [(0, 0, 0)] * 2 + base[2:]))
+check('mount_same：長度不符 / 空 → False', not pet.mount_same(base, base[:8]) and not pet.mount_same(None, base))
+
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)
