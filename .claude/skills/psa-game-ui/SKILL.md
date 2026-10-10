@@ -46,6 +46,7 @@ uv run --no-project python tools/gui/heal.py --no-return   # 補完血停在醫�
 uv run --no-project python tools/gui/quest.py --solo --task 任務名   # 單人逃跑：遇怪按逃跑，到 NPC ESC 對話框退出碼 20，被打飛退出碼 21；--fight = 戰鬥步按自動戰鬥，退出碼 0 才是打贏（35 沒贏 / 36 不確定 / 33 對話無進展 / 34 不同圖，見 /psa-quest-solo）
 uv run --no-project python tools/gui/team.py status|check|disband   # 隊伍狀態（唯讀）/ 檢查 1 隊長 + 4 隊員（0 = 符合）/ `form` 快速組隊（0 = 已組好，已組好時不點；41 要 `--regroup`、42 要 `--login-all`）/ 解散（當前須為隊長）；退出碼 40～47 見 ui/team.md；名字用 namematch.py 整名樣板比對（`namematch.py learn|read|list`，見 ui/team.md）
 uv run --no-project python tools/gui/char.py current|switch DKBO2|ensure DKBO   # 當前角色：唯讀讀取 / 切過去並驗證（點前 namematch 確認名字 + 線上，點後等加載 → HUD → 重開面板確認；成功寫 current-char.json；最後一行 JSON 含 changed）；退出碼 60～65 見 ui/team.md；不會自動切回 DKBO，呼叫端負責 ensure；`--timing` 看分段、ensure 有 watch 名牌快路徑（1.1 s）、可 import（char.LAST）；耗時與條件見 ui/team.md；離線測試 test_char.py（假面板在 fake_switch.py，test_team 共用）
+uv run --no-project python tools/gui/grind.py start --spot 地雷區2|auto|here [--heal] | ensure | check   # 開始 / 恢復練功：char.ensure 隊長 → 關遇敵 → team.check/form → [start：選點傳送] → 外掛一次讀 5 人（快速 + 自動戰鬥）、只改不對的 → 開遇敵 → 30 s 內看到 2 次 EXP 橫幅才算成功；check 唯讀；ensure 約 25 s；退出碼 50～58 見 grind.py 檔頭；點表 spots.py（唯一來源 ui/transfer.md）；最後一行 JSON + tools/.cache/grind.json；不要和 heal --watch / petwatch / quest 同跑（退 8）
 uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--target-level 77]   # 監測 5 人金布伊等級，≥ 門檻換回迪基格斯（內含補血檢查 + 維持原地遇敵，不要和 heal.py --watch 同跑）
 ```
 
@@ -84,7 +85,7 @@ uv run --no-project python tools/gui/errlog.py list
 |---|---|
 | 認主畫面按鈕、收合、面板關不掉 | [ui/home.md](ui/home.md) |
 | 5 個角色組一隊 | **先跑 `team.py form`**，非 0 再 **`/psa-quick-team` skill**（介面參考 [ui/team.md](ui/team.md)） |
-| 開始 / 恢復練功（選練功區、傳送、開遇敵、5 人快速 + 自動戰鬥檢查） | **`/psa-grind-start` skill** |
+| 開始 / 恢復練功（選練功區、傳送、開遇敵、5 人快速 + 自動戰鬥檢查） | **先跑 `grind.py start|ensure|check`**，非 0 再 **`/psa-grind-start` skill**（手動流程當退路） |
 | 解散隊伍 | **先跑 `team.py disband`**，非 0 再 **`/psa-disband-team` skill**（介面參考 [ui/team.md](ui/team.md)） |
 | 確認誰是「當前」角色 | [ui/team.md](ui/team.md) |
 | 看角色屬性 / 抗性 / 潛力點 | [ui/role.md](ui/role.md) |

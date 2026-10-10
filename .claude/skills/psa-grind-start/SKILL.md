@@ -8,7 +8,19 @@ description: Use when the PrimalSA (精靈王石器) party must start or resume 
 **REQUIRED BACKGROUND:** 先載入 psa-game-ui（工具、紅區、驗證視窗立刻停手、不花鑽石）。座標是截圖座標（客戶區 2880×1659）。`G="bash tools/gui/gui.sh"`，在專案根目錄執行。
 外掛勾選 / 傳送屬紅區：**使用者要求練功 / 掛機就等於授權**；否則先問。外掛面板細節 `../psa-game-ui/ui/ass.md`，傳送 `ui/transfer.md`。
 
-## 1. 讀目前等級與位置
+
+## 0. 先跑腳本（推薦；下面 1～6 是手動退路）
+```bash
+uv run --no-project python tools/gui/grind.py start --spot 地雷區2     # 換點 / 第一次練功：選點 → 傳送 → 外掛 → 遇敵 → 確認
+uv run --no-project python tools/gui/grind.py ensure                     # 不傳送：補血回來 / 任務後 / 斷線重登後，重查並補好（約 25 s）
+uv run --no-project python tools/gui/grind.py check                      # 唯讀：5 人快速 / 自動戰鬥 + 遇敵鈕（約 9 s）
+```
+- `--spot`：點名（`tools/gui/spots.py`，資料唯一來源是 `ui/transfer.md`）、`auto`（依隊長等級，**僅 0 轉**；1 轉以上要明確指定）、`here`（不傳送）。已在該點（或 auto 的同檔點，例 地雷區 / 地雷區2）不會傳送；0 轉等級不夠依表預判就擋（退出碼 51）。目前隊伍掛機點 = 庫塔伊洞窟地下二樓：`start --spot 地雷區2`。
+- `--heal`：先回村補血（點需在 heal.SPOTS，柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟暫不支援）；血量 < 40% 也會自動補。`--no-fix`：看到完整戰鬥時不自動重設 5 人。
+- 成功 = 退出碼 0 且 30 秒內看到 ≥2 次 EXP 橫幅。非 0：50 隊伍不全且組不起來 / 51 傳送失敗或等級不夠 / 52 外掛設定失敗 / 53 此地圖禁止快速戰鬥 / 54 遇敵開不起來 / 55 沒看到 EXP / 56 仍看到完整戰鬥 / 57 補血失敗 / 58 切不回隊長；8 別的工具在用畫面 / 9 疑似驗證視窗（**立刻停手通知使用者**）/ 10 netwatch halt。最後一行 JSON 看細節。
+- 只動快速戰鬥 / 自動戰鬥 / 主畫面遇敵鈕，先讀再改（已開不點）；不要和 `heal.py --watch`、`petwatch.py`、`quest.py` 同跑。
+
+## 1. 讀目前等級與位置（手動退路）
 ```bash
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$(wslpath -w tools/gui/stat.ps1)"   # Windows 原生：直接給 Windows 路徑
 ```

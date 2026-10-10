@@ -5,6 +5,7 @@
 用法：uv run --no-project python tools/gui/make_fixtures.py
 注意：來源是舊截圖（新帳號 Lv1、別的地圖），各值要在對應實機量測時重確認。"""
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -26,15 +27,12 @@ PET_PTS = [(345, 702), (360, 685), (480, 702), (620, 702)] + [(83, cy - 36) for 
 # 倉庫：存入 / 取出鈕文字區（粗取樣）+ 倉庫格（5 欄 × 4 列）
 DEPOT_PTS = [(x, y) for y in range(675, 721, 15) for x in range(440, 621, 30)] + \
             [(x, y) for y in (275, 380, 487, 593) for x in (818, 924, 1030, 1136, 1242)]
-# EXP 橫幅：掃 3 排，x 450～1000 每 3 px
-EXP_ROWS = (165, 212, 252)
-EXP_XS = list(range(450, 1001, 3))
-
-
-def is_exp_purple(c) -> bool:
-    """EXP 紫色圖示：r 120～190、g < 100、b > 190（計畫 §3.3）"""
-    r, g, b = c
-    return 120 <= r <= 190 and g < 100 and b > 190
+# EXP 橫幅：掃描點與紫色判定都用 grind.py 的（P-R1 實測：矩形稀疏掃），不在這裡複製
+os.environ.setdefault('PSA_LAYOUT', '2880x1659')       # grind → heal → walk 載入時會問版面；離線不碰遊戲
+import grind  # noqa: E402
+EXP_SRC = [(f'watch-m0/p{i}.png', f'p{i}') for i in range(1, 21)] + [(f'exp-r1/r{i:02d}.png', f'r{i:02d}') for i in range(1, 41)] + [('exp-r1/now.png', 'now')]
+# 人工確認有橫幅的張（舊 p14 p16 p19；P-R1 的 now 與 r07 r10 r12 r15 r18 r20 r22 r25 r27 r30 r32 r35 r37 r40）
+EXP_POSITIVE = ['p14', 'p16', 'p19', 'now'] + [f'r{i:02d}' for i in (7, 10, 12, 15, 18, 20, 22, 25, 27, 30, 32, 35, 37, 40)]
 
 
 def load(path: Path):
@@ -86,21 +84,21 @@ def main() -> int:
                                 'q567': grab(ps[0], DEPOT_PTS), 'q5': grab(ps[1], DEPOT_PTS)})
         done.append('depot_px.json')
 
-    pts = [(x, y) for y in EXP_ROWS for x in EXP_XS]
     imgs, miss_exp = {}, []
-    for i in range(1, 21):
-        p = CACHE / 'watch-m0' / f'p{i}.png'
+    for rel, tag in EXP_SRC:
+        p = CACHE / rel
         if not p.exists():
-            miss_exp.append(f'watch-m0/p{i}.png')
+            miss_exp.append(rel)
             continue
-        px = grab(p, pts)
-        purple = {k: v for k, v in px.items() if is_exp_purple(v)}
-        imgs[f'p{i}'] = {'purple_n': len(purple), 'purple': purple}
+        px = grab(p, grind.EXP_PTS)
+        purple = {k: v for k, v in px.items() if grind.is_exp_purple(v)}
+        imgs[tag] = {'purple_n': len(purple), 'purple': purple}
     if not imgs:
         skipped.append(('exp_px.json', miss_exp))
     else:
-        write('exp_px.json', {'note': 'EXP 橫幅偵測樣本：每張只存紫點（r120~190,g<100,b>190）；掃描點 = rows × xs；p14 / p16 / p19 有橫幅，其餘沒有（人工確認）',
-                              'rows': list(EXP_ROWS), 'xs': [EXP_XS[0], EXP_XS[-1], 3], 'positive': ['p14', 'p16', 'p19'], 'images': imgs})
+        write('exp_px.json', {'note': 'EXP 橫幅偵測樣本（P-R1，2026-10-11）：每張只存紫點（grind.is_exp_purple）；掃描點 = grind.EXP_PTS（y 140～262 每 6、x 450～1000 每 4）；positive 為人工確認有橫幅，其餘沒有',
+                              'rows': [grind.EXP_YS[0], grind.EXP_YS[-1], 6], 'xs': [grind.EXP_XS[0], grind.EXP_XS[-1], 4],
+                              'positive': [t for t in EXP_POSITIVE if t in imgs], 'images': imgs})
         done.append('exp_px.json' + (f'（缺 {miss_exp}）' if miss_exp else ''))
 
     print('完成：', done)
