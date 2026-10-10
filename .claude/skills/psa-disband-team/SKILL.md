@@ -8,7 +8,14 @@ description: Use when the PrimalSA (精靈王石器) party needs to be broken up
 **REQUIRED BACKGROUND:** 先載入 psa-game-ui（工具、操作迴圈、紅區）。介面細節見 `../psa-game-ui/ui/team.md`。
 座標是截圖座標，只在客戶區 2880×1659 有效。工具：`G="bash tools/gui/gui.sh"`（在專案根目錄執行）。
 
-## 步驟（左側組隊分頁就能解散＋驗證，最快）
+## 先跑腳本（2026-10-11 起）
+```bash
+uv run --no-project python tools/gui/team.py disband
+```
+- **退出碼 0 = 已解散或本來就沒隊伍**（實測約 8 s：先確認當前是隊長，再 `quest.disband_team`，最後開切換面板確認全員單人）。46 = 當前角色不是隊長（先 `char.py ensure DKBO`）、45 = 解散沒做成、40 面板打不開。
+- **非 0 才走下面的手動流程**（原步驟保留當退路）。
+
+## 步驟（手動退路；左側組隊分頁就能解散＋驗證，最快）
 1. **檢查點 1**：`$G seq "info; click 260 236; wait 300; shot"` → 主畫面左側切到「組隊」分頁。
    - 不是 2880×1659 → `$G max` 後重來；左側面板不在（被收合或有面板擋住）→ `$G end` 後先問使用者。
    - 只有藍色「**創建隊伍**」→ 本來就沒隊伍，`$G end` 後回報。

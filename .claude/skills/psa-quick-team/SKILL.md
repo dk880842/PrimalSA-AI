@@ -8,7 +8,15 @@ description: Use when the PrimalSA (精靈王石器) characters need to be group
 **REQUIRED BACKGROUND:** 先載入 psa-game-ui（工具、操作迴圈、紅區）。介面細節見 `../psa-game-ui/ui/team.md`。
 座標是截圖座標，只在客戶區 2880×1659 有效。工具：`G="bash tools/gui/gui.sh"`（在專案根目錄執行）。
 
-## 步驟（遊戲響應很快：用 `seq` 一次送多個動作，只在兩個檢查點截圖）
+## 先跑腳本（2026-10-11 起）
+```bash
+uv run --no-project python tools/gui/team.py form [--leader DKBO] [--regroup] [--login-all]
+```
+- **退出碼 0 = 已組好**（本來就組好時 0 次點擊；實測重組約 8.3 s；成功後隊長 = 當前，已寫 current-char.json）。每步先讀再點、確認失敗就關提示不按「組隊」。
+- 41 已有不完整隊伍（要解散重組加 `--regroup`）、42 有角色離線（要按「全部登錄」加 `--login-all`，紅區，先問）、43 最後確認不符（含 33231 地圖禁止）、44 提示視窗 / 隊長 / 隊員標籤沒出現、45～47 見 ui/team.md；8 / 9 / 10 依共用規則停手。出現驗證視窗（9）立刻通知使用者。
+- **非 0 才走下面的手動流程**（原步驟保留當退路）。
+
+## 步驟（手動退路；遊戲響應很快：用 `seq` 一次送多個動作，只在兩個檢查點截圖）
 1. **檢查點 1（看現況）**：
    ```bash
    $G seq "info; click 763 760; wait 400; shot"

@@ -207,6 +207,12 @@ TEAMPANEL = Panel('TEAMPANEL', (850, 760),
                   [(1250, 77, 197, 72, 48, screen_sigs.TOL), (720, 75, 147, 89, 57, screen_sigs.TOL), (600, 60, 149, 92, 60, screen_sigs.TOL),
                    (1300, 400, 255, 229, 191, screen_sigs.TOL), (720, 670, 187, 73, 43, screen_sigs.TOL)],
                   (1250, 77), forbidden={'disband': rect(720, 670, 60)})
+# 快速組隊「提示」視窗（P-I2 實測 2026-10-11）：疊在切換面板上方（切換面板的 SIG_PANEL 此時被暗化而不成立）。
+# 特徵 = ✕ 紅圓 (1052,167) + 下方藍色「組隊」鈕兩點 + 左側「隊長」標籤米色；ESC 只關提示（切換面板仍在，再 ESC 才關它）。
+# 沒有自己的開啟鈕（在切換面板內點 520,578 開）；close_panel 會點 ✕ 1052,167 並等它消失。
+QTEAM = Panel('QTEAM', None,
+              [(1052, 167, 195, 73, 49, screen_sigs.TOL), (720, 665, 66, 113, 171, screen_sigs.TOL), (448, 325, 251, 223, 187, screen_sigs.TOL)],
+              (1052, 167))
 ASS = Panel('ASS', None, None, None)                                          # 見 _ass_panel()
 
 
