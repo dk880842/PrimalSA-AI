@@ -47,6 +47,7 @@ uv run --no-project python tools/gui/quest.py --solo --task 任務名   # 單人
 uv run --no-project python tools/gui/team.py status|check|disband   # 隊伍狀態（唯讀）/ 檢查 1 隊長 + 4 隊員（0 = 符合）/ `form` 快速組隊（0 = 已組好，已組好時不點；41 要 `--regroup`、42 要 `--login-all`）/ 解散（當前須為隊長）；退出碼 40～47 見 ui/team.md；名字用 namematch.py 整名樣板比對（`namematch.py learn|read|list`，見 ui/team.md）
 uv run --no-project python tools/gui/char.py current|switch DKBO2|ensure DKBO   # 當前角色：唯讀讀取 / 切過去並驗證（點前 namematch 確認名字 + 線上，點後等加載 → HUD → 重開面板確認；成功寫 current-char.json；最後一行 JSON 含 changed）；退出碼 60～65 見 ui/team.md；不會自動切回 DKBO，呼叫端負責 ensure；`--timing` 看分段、ensure 有 watch 名牌快路徑（1.1 s）、可 import（char.LAST）；耗時與條件見 ui/team.md；離線測試 test_char.py（假面板在 fake_switch.py，test_team 共用）
 uv run --no-project python tools/gui/grind.py start --spot 地雷區2|auto|here [--heal] | ensure | check   # 開始 / 恢復練功：char.ensure 隊長 → 關遇敵 → team.check/form → [start：選點傳送] → 外掛一次讀 5 人（快速 + 自動戰鬥）、只改不對的 → 開遇敵 → 30 s 內看到 2 次 EXP 橫幅才算成功；check 唯讀；ensure 約 25 s；退出碼 50～58 見 grind.py 檔頭；點表 spots.py（唯一來源 ui/transfer.md）；最後一行 JSON + tools/.cache/grind.json；不要和 heal --watch / petwatch / quest 同跑（退 8）
+uv run --no-project python tools/gui/pet.py list [--role DKBO|all] | set-state DKBO 迪基格斯 出戰|等待|騎乘 | rest-all [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]   # 寵物面板：list 唯讀（5 人 × 每格 名字 / 狀態 / 等級，約 13 s；掛機中有 EXP 橫幅蓋住會自動等 0.8 s 重讀，約 15～18 s）/ set-state 只點 1 次狀態鈕並讀回確認 / rest-all 交寵物任務前「出戰的非騎寵」全改等待（`--dry-run` 只列不點）；騎寵（瑪斯貝卡 / 名字像它 / 狀態=騎乘）一律不動（73，要動加 `--allow-mount`）；鎖定戰寵 → 74（不自動去外掛解鎖）；戰鬥中 → 78（`--pause-encounter` 才關遇敵等戰鬥結束再開回）；名字對不上 → 72；退出碼 70～78 見 pet.py 檔頭；名字 / 等級用 petmatch.py 圖樣板（學出來的，存 tools/.cache/pet-tpl/；`--no-learn` 不學）；離線測試 test_pet.py（假面板 fake_pet.py）；store / take 尚未實作（P7，仍照 psa-pet-quest 手動）
 uv run --no-project python tools/gui/petwatch.py [--once] [--interval 30] [--target-level 77]   # 監測 5 人金布伊等級，≥ 門檻換回迪基格斯（內含補血檢查 + 維持原地遇敵，不要和 heal.py --watch 同跑）
 ```
 
@@ -92,6 +93,7 @@ uv run --no-project python tools/gui/errlog.py list
 | 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則 OCR 核對追蹤列表任務名再點；`ocr.ps1` / `findmark.ps1`） | [ui/quest.md](ui/quest.md) |
 | **單人逃跑解任務**（DKB0 單人跑 NPC、遇怪逃跑 → 組隊對話 / 打；紅暴 2031；`quest.py --solo / --fight`、`psa.py steps`、`heal.py --no-return`） | **`/psa-quest-solo` skill**（介面參考 [ui/quest.md](ui/quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
+| 看 / 改寵物出戰 · 等待（不碰存倉） | **先跑 `pet.py list` / `set-state` / `rest-all`**（介面參考 [ui/pet.md](ui/pet.md)） |
 | **交寵物類任務**（恐龍博士 2016 / 卡坦的願望 2019：外掛自動抓寵、共用倉庫分配、練寵、交任務；轉生 / 封印書後要重做） | **`/psa-pet-quest` skill** |
 | 寵物出戰 / 騎乘 / 休息、寵物技能 | [ui/pet.md](ui/pet.md) |
 | 傳送到別的地圖 / 練級點 | [ui/transfer.md](ui/transfer.md) |

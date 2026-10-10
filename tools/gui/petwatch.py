@@ -72,14 +72,42 @@ def ocr(box, *opts) -> list:
 
 
 def ocr_name(box=NAME_BOX) -> str:
-    """名字是深色底淺色字，-Dark 120 實測讀得到（-Light 讀不到）"""
-    t = ocr(box, '-Dark', 120, '-Zooms', '2,3')
-    return t[0] if t else ''
+    """寵物名。選中寵物的名字框先用 petmatch 整塊圖樣板（同名 IoU 1.000，約 0.2 s）；沒樣板才 OCR：
+    -Dark 0 -Zooms 2,3,4（不二值化直接放大，P-I5 實測 6/6 精確；舊的 -Dark 120 約一半讀成空字串或少字）→ 沒結果再退回 -Dark 120"""
+    if tuple(box) == NAME_BOX:
+        try:
+            import petmatch
+            rows, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
+            if rows:
+                label, _, _ = petmatch.match_whole('name', rows[0], petmatch.load_tpl())
+                if label:
+                    return label
+        except Exception:
+            pass
+    for opts in (('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 120, '-Zooms', '2,3')):
+        t = ocr(box, *opts)
+        if t:
+            return t[0]
+    return ''
 
 
 def ocr_level(slot: int | None = None) -> int | None:
-    """讀「目前選中寵物」模型下方黃字「0轉70」的等級（-Dark 90、放大 2 倍實測穩；單位數也讀得到）。
+    """讀「目前選中寵物」模型下方黃字「0轉70」的等級。順序：petmatch 單字樣板（0.1 s、不會把 128 讀成 28）→
+    pet.ocr_level_consensus（三組 OCR 設定共識）→ 舊的單組重試（-Dark 90 / 120 / 70；單組會把 128 讀成 28，只當最後手段）。
     寵物格右下白色數字單位數 OCR 讀不出來，所以不用它（slot 參數保留給呼叫端相容，沒用到）。"""
+    try:
+        import petmatch
+        rows, _ = petmatch.grab([petmatch.BOX_LVL + ('lvl',)])
+        if rows:
+            v = petmatch.read_level(rows[0], petmatch.load_tpl())
+            if v is not None:
+                return v
+        import pet
+        v = pet.ocr_level_consensus()
+        if v is not None:
+            return v
+    except Exception:
+        pass
     for dark, zooms in ((90, '2'), (120, '2,3'), (70, '2,3,4')):   # 同一張畫面換門檻 / 倍數重試（實測單次偶爾讀不到）
         for t in ocr(LEVEL_BOX, '-Dark', dark, '-Zooms', zooms):
             m = re.search(r'轉(\d{1,3})', t)

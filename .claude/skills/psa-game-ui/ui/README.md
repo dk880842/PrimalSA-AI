@@ -33,7 +33,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 解散隊伍 | `/psa-disband-team` skill（介面參考 [team.md](team.md#解散隊伍)） |
 | 面板 ESC 關不掉 | [home.md](home.md#關閉方式) |
 | 看目前操作的是哪個角色 | [team.md](team.md#切換角色) |
-| 設定寵物出戰 / 騎乘（多角色） | [pet.md](pet.md#操作設定出戰--騎乘2026-10-09-實測) |
+| 設定寵物出戰 / 騎乘（多角色） | 先跑 `pet.py list / set-state / rest-all`；手動流程 [pet.md](pet.md#操作設定出戰--騎乘2026-10-09-實測)、像素判斷 [pet.md](pet.md#腳本化-pety-像素--樣板判斷p-i5-實測2026-10-11) |
 | 道具存倉庫（公共 / 個人） | [bag.md](bag.md#倉庫2026-10-09-實測) |
 | 丟棄道具（紅區，使用者授權才做） | [bag.md](bag.md#丟棄物品2026-10-09-實測使用者授權丟新手棍棒) |
 | 自動戰鬥的動作、對象、補血 / 回魔 / 復活門檻 | [ass.md](ass.md#戰鬥設置分頁2026-10-09-實測只看沒改) |
