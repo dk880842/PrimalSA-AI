@@ -40,6 +40,12 @@ def current() -> str | None:
     return _cache[0]
 
 
+def prime(value: str) -> None:
+    """已有可信來源（例：watch state 的 game.layout 剛讀到、≤2 s）時預先填快取，省掉 gui.ps1 info 那次呼叫（約 0.6 s）。已有快取就不蓋"""
+    if not _cache and value:
+        _cache.append(value)
+
+
 def resolve() -> str:
     """給腳本選常數用：支援的版面原樣回傳；遊戲沒開 / 不支援的大小回 DEFAULT（維持原本行為）"""
     cur = current()

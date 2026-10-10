@@ -232,8 +232,9 @@ def read_state(ocr: bool = True, keep_open: bool = False) -> dict:
     面板打不開 / 讀圖中途消失 → ok=False（呼叫端回 40）。不點任何面板內座標（開關只用 open_panel / close_panel 的開啟鈕與 ✕）"""
     res = {'ok': False, 'cards': [], 'summary': {}, 'err': '', 'ms': {}}
     t0 = time.time()
-    was_open = uikit.is_open(uikit.SWITCH)
-    if not uikit.open_panel(uikit.SWITCH):
+    opened, was_open = uikit.open_panel_ex(uikit.SWITCH)
+    uikit.mark('open')
+    if not opened:
         res['err'] = '切換面板打不開（HUD 不在或特徵沒出現）'
         return res
     res['ms']['open'] = int((time.time() - t0) * 1000)
@@ -241,11 +242,9 @@ def read_state(ocr: bool = True, keep_open: bool = False) -> dict:
         t1 = time.time()
         cols = read_pixels()
         res['ms']['pixel'] = int((time.time() - t1) * 1000)
+        uikit.mark('pixel')
         if cols is None:
             res['err'] = '讀不到面板像素'
-            return res
-        if not uikit.is_open(uikit.SWITCH):
-            res['err'] = '讀圖中面板消失'
             return res
         n = len(build_cards(cols))
         matched = {}
@@ -253,24 +252,28 @@ def read_state(ocr: bool = True, keep_open: bool = False) -> dict:
             t3 = time.time()
             matched = namematch.read_names()
             res['ms']['tpl'] = int((time.time() - t3) * 1000)
+            uikit.mark('namematch')
         texts = None
         if ocr:
             need = [i for i in range(n) if not matched.get(i)]
-            if need:                              # 樣板沒命中的卡才 OCR
+            if need:                              # 樣板沒命中的卡才 OCR（全命中就完全不跑 OCR）
                 t2 = time.time()
                 texts = ocr_names(n, only=need)
                 res['ms']['ocr'] = int((time.time() - t2) * 1000)
+                uikit.mark('ocr')
             else:
                 texts = {}
-        if not uikit.is_open(uikit.SWITCH):
+        if not uikit.is_open(uikit.SWITCH):       # 像素 + 名字都讀完才確認一次面板還在（讀的過程中被關 = 資料不可信）
             res['err'] = '讀名字中面板消失'
             return res
+        uikit.mark('verify-open')
         cards = build_cards(cols, texts, matched)
         res.update(ok=True, cards=cards, summary=summarize(cards))
         return res
     finally:
         if not was_open and not (keep_open and res['ok']):
-            uikit.close_panel(uikit.SWITCH)
+            uikit.close_panel(uikit.SWITCH, known_open=res['ok'])
+            uikit.mark('close')
 
 
 def _line(c: Card) -> str:

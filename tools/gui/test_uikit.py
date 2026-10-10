@@ -155,6 +155,8 @@ netwatch.guard = lambda src, **kw: {'status': 'ok'}
 battleguard.LOCK_FILE = Path(tempfile.mkdtemp()) / 'battle.lock'
 
 g = install(Game(hud=True))
+uikit.watch_state = lambda max_age=1.0: None            # 預設 watch 不可用 → 走完整檢查
+uikit.watch_screen = lambda max_age=1.0: None
 check('preflight 主畫面 = 0', uikit.preflight('t') == 0)
 g = install(Game(unknown=True))
 rc = uikit.preflight('t')
@@ -180,6 +182,69 @@ battleguard.LOCK_FILE.write_text(json.dumps({'pid': __import__('os').getpid(), '
 g = install(Game())
 check('preflight battle.lock 有效 → 8', uikit.preflight('t') == 8)
 battleguard.LOCK_FILE.unlink()
+
+# ---- preflight 快路徑（watch 狀態夠新才採用）----
+import time as _t  # noqa: E402
+
+
+def wst(state='idle', annot=None, alerts=None, verify=False, layout_='2880x1659', running=True):
+    return ({'flags': {'verify_suspect': verify}, 'alerts': alerts or [], 'game': {'layout': layout_, 'running': running}},
+            {'state': state, 'annot': annot or []})
+
+
+def fastcase(label, want, **kw):
+    st, sc = wst(**kw)
+    uikit.watch_state = lambda max_age=1.0: st
+    uikit.watch_screen = lambda max_age=1.0: sc
+    g = install(Game(hud=False, unknown=True))      # 畫面全是 unknown：走完整檢查會退 9；走快路徑不讀圖
+    rc = uikit.preflight('t')
+    check(f'preflight 快路徑 {label}', (rc == 0 and g.reads == 0) if want else (rc == 9), f'rc={rc} reads={g.reads}')
+
+
+fastcase('idle 且無警報 → 採用、0 次讀圖', True)
+fastcase('panel 也可', True, state='panel')
+fastcase('unknown → 不採用', False, state='unknown')
+fastcase('battle → 不採用', False, state='battle')
+fastcase('有 annot（登入 / 提示視窗）→ 不採用', False, annot=['login'])
+fastcase('verify_suspect → 不採用', False, verify=True)
+fastcase('alerts 非空 → 不採用', False, alerts=[{'kind': 'verify'}])
+fastcase('版面不符 → 不採用', False, layout_='1920x1017')
+fastcase('遊戲沒跑 → 不採用', False, running=False)
+uikit.watch_state = lambda max_age=1.0: None
+g = install(Game(hud=False, unknown=True))
+check('watch 不在 → 完整檢查（退 9）', uikit.preflight('t') == 9)
+st, sc = wst()
+uikit.watch_state = lambda max_age=1.0: st
+uikit.watch_screen = lambda max_age=1.0: sc
+battleguard.LOCK_FILE.write_text(json.dumps({'pid': __import__('os').getpid(), 'start': _t.time(), 'note': 'x'}), encoding='utf-8')
+check('快路徑也檢查 battle.lock → 8', uikit.preflight('t') == 8)
+battleguard.LOCK_FILE.unlink()
+uikit.watch_state = lambda max_age=1.0: None
+uikit.watch_screen = lambda max_age=1.0: None
+
+# ---- open / close 用 waitpix 取代固定等待 ----
+class WaitGame(Game):
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.seqs = []
+
+    def gui(self, *args, note=''):
+        if args[0] == 'seq':
+            self.seqs.append(args[1])
+        return super().gui(*args, note=note)
+
+
+g = install(WaitGame(hud=True))
+check('open_panel_ex 回 (True, 本來沒開)', uikit.open_panel_ex(uikit.SWITCH) == (True, False))
+check('開面板 seq 用 waitpix、不再 wait 700', any('waitpix' in q and 'click 763 760' in q for q in g.seqs) and not any('wait 700' in q for q in g.seqs), str(g.seqs))
+g.seqs.clear()
+check('close_panel(known_open) 用 waitpix ✕ 消失、成功', uikit.close_panel(uikit.SWITCH, known_open=True) is True and not g.panel and any('waitpix' in q and '!' in q for q in g.seqs), str(g.seqs))
+g = install(WaitGame(hud=True, panel=True))
+check('已開著 open_panel_ex → (True, True)、不點', uikit.open_panel_ex(uikit.SWITCH) == (True, True) and g.clicks == [])
+uikit.timing_start()
+uikit.mark('a')
+check('mark 記分段', uikit.timing_get()[0][0] == 'a')
+uikit._stages = None
 
 # ---- fail / snap 檔清理 ----
 import errlog  # noqa: E402

@@ -19,6 +19,8 @@ import char  # noqa: E402
 errlog.LOG = Path(tempfile.mkdtemp()) / 'errlog.jsonl'
 namematch.TPL_DIR = Path(tempfile.mkdtemp())          # 不讀真實樣板（走順序 + OCR 交叉確認）
 watchstate.CURCHAR_FILE = Path(tempfile.mkdtemp()) / 'current-char.json'     # 不動真實旁路檔
+uikit.watch_state = lambda max_age=1.0: None          # 預設不讀真實 watch（快路徑測試自己給）
+uikit.watch_screen = lambda max_age=1.0: None
 fails = 0
 
 
@@ -155,6 +157,65 @@ rc, out = run(char.switch, 'DKBO2')
 check('讀圖後面板消失 → 60、不點', rc == 60 and g.inner_clicks() == [])
 # 失敗有寫 errlog
 check('失敗有寫 errlog', errlog.LOG.exists() and errlog.LOG.read_text(encoding='utf-8').count('"source"') >= 5)
+
+# ---- ensure 快路徑（watch 名牌 + current-char.json）----
+import time as _time  # noqa: E402
+
+
+def wstate(name='DKBO', src='both', age=0.5, stale=False):
+    return {'hud': {'name': {'v': name, 'ts': _time.time() - age, 'src': src, 'stale': stale}}}
+
+
+def fast_case(label, st, cur_name='DKBO', cur_age=0.0, want_fast=True, target='DKBO', fn=None, since_ago=100.0):
+    g = install(Game(mk()))
+    uikit.watch_state = lambda max_age=1.0: st
+    uikit.watch_screen = lambda max_age=1.0: {'state': 'idle', 'since': _time.time() - since_ago}
+    charstate.clear()
+    if cur_name:
+        watchstate.write_current_char(cur_name, src='char.py', now=lambda: _time.time() - cur_age)
+    rc, out = run(fn or char.ensure, target)
+    j = last_json(out)
+    fast = j.get('via') == 'watch'
+    check(f'快路徑 {label}：{"走" if want_fast else "不走"}', rc == 0 and fast == want_fast and (g.clicks == [] if want_fast else True) and g.inner_clicks() == [], out.strip()[-120:])
+    uikit.watch_state = lambda max_age=1.0: None
+    uikit.watch_screen = lambda max_age=1.0: None
+
+
+fast_case('名牌 both + 旁路檔一致', wstate())
+fast_case('名牌 ocr 也可', wstate(src='ocr'))
+fast_case('名牌 6 s 前核對仍可', wstate(age=6))
+fast_case('名牌過舊 > 8 s', wstate(age=12), want_fast=False)
+fast_case('名牌核對早於畫面狀態開始（切換 / 轉場後的舊名牌）', wstate(age=5), want_fast=False, since_ago=2.0)
+fast_case('名牌 stale', wstate(stale=True), want_fast=False)
+fast_case('名牌 src=None', wstate(src=None), want_fast=False)
+fast_case('名牌是別人（與旁路檔不一致）', wstate(name='DKBO2'), want_fast=False)
+fast_case('旁路檔是別人', wstate(), cur_name='DKBO2', want_fast=False)
+fast_case('旁路檔過舊', wstate(), cur_age=4000, want_fast=False)
+fast_case('沒有旁路檔', wstate(), cur_name=None, want_fast=False)
+fast_case('watch 不在（None）', None, want_fast=False)
+fast_case('目標是別人（名牌 DKBO、要 DKBO2）→ 不走快路徑、要點', wstate(), target='DKBO2', want_fast=False) if False else None
+g = install(Game(mk()))
+uikit.watch_state = lambda max_age=1.0: wstate()
+uikit.watch_screen = lambda max_age=1.0: {'state': 'idle', 'since': _time.time() - 100}
+charstate.write('DKBO', src='char.py')
+fake_time(g)
+rc, out = run(char.ensure, 'DKBO2')
+check('快路徑：目標不是當前 → 照舊開面板點卡片', rc == 0 and last_json(out).get('via') is None and g.inner_clicks() != [], str(g.clicks))
+uikit.watch_state = lambda max_age=1.0: wstate()
+uikit.watch_screen = lambda max_age=1.0: {'state': 'idle', 'since': _time.time() - 100}
+charstate.write('DKBO', src='char.py')
+g = install(Game(mk()))
+rc, out = run(char.switch, 'DKBO')
+check('switch（非 ensure）已是 DKBO 仍開面板確認、不走 watch', rc == 0 and last_json(out).get('via') is None and g.clicks != [])
+uikit.watch_state = lambda max_age=1.0: None
+uikit.watch_screen = lambda max_age=1.0: None
+g = install(Game(mk()))
+fake_time(g)
+uikit.timing_start()
+rc, out = run(char.switch, 'DKBO')
+check('timing：_out 帶 t 分段', 't' in last_json(out) and any(k == 'open' for k, _ in last_json(out)['t']), str(last_json(out).get('t')))
+uikit._stages = None
+check('LAST 帶最後一次結果', char.LAST.get('ok') is True and char.LAST.get('target') == 'DKBO')
 
 print('失敗', fails)
 sys.exit(1 if fails else 0)

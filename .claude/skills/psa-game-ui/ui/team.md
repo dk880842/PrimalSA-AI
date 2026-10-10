@@ -10,7 +10,11 @@
 - **切換角色優先用 `char.py`**（P3，2026-10-11 實測）：`uv run --no-project python tools/gui/char.py current|switch DKBO2|ensure DKBO`。
   點卡片前先用 namematch 確認名字 + 狀態線上（命中不了 → 61，不猜），點完等「加載中」→ HUD 回來 → 重開面板用「當前藍框 + 名字」驗證，成功才寫 current-char.json；最後一行印 JSON（`changed`、`current`…）。
   退出碼 60 面板打不開 / 61 目標卡找不到或名字沒確認 / 62 點了但當前沒變（不重點）/ 63 當前框 ≠ 1 / 64 名字矛盾 / 65 點了但 HUD 6 s 沒回來，加共用 1 / 2 / 8 / 9 / 10。
-  **不會自動切回 DKBO**，呼叫端用完要 `ensure DKBO`。實測耗時：current ≈ 4.5 s、ensure（已是）≈ 4.3 s、switch ≈ 7.5～8 s（含 preflight + 兩次開面板讀名字；點擊到 HUD 回來 0.8～1.3 s）。
+  **不會自動切回 DKBO**，呼叫端用完要 `ensure DKBO`。加 `--timing` 在最後一行 JSON 多一個 `t`（各階段毫秒，含 import、server-start）。
+  **實測耗時（2026-10-11 加速後，整個 uv 行程 wall）**：current 4.2 → **2.3 s**；switch 7.0～7.3 → **4.4～4.5 s**；ensure 已是目標 **1.1 s**（watch 快路徑，見下）或 2.3 s（開面板確認）。
+  其中約 0.85～0.9 s 是「本行程第一次呼叫遊戲時起 serve.ps1」（每個 python 行程各起一次，CLI 逃不掉）→ **要連續呼叫的腳本（grind.py / pet.py…）直接 `import char` 用 `char.current()` / `char.switch(name)` / `char.ensure(name)`，同一行程只付一次**；回傳退出碼，結果 dict 在 `char.LAST`（同最後一行 JSON）。
+  加速做法：preflight 在 watch 狀態夠新（≤2 s、畫面 idle / panel / walking、無 annot / alerts / verify_suspect、版面與遊戲在跑、無 netwatch.halt）時不再連讀畫面（0.36 s → 0.01 s；battle.lock 仍檢查）；開 / 關面板用 `waitpix`（面板特徵出現 / ✕ 消失）取代固定 wait 700 / 500 + 輪詢 0.5 s（開 1.2 → 0.45 s、關 0.9 → 0.33 s）；讀名字全由 namematch 命中就不跑 OCR；點卡片後 seq 只等 100 ms，加載畫面與 HUD 一次 pixel 同讀（每圈 60 ms）。
+  **ensure 快路徑**（只有 `ensure`，`switch` 不走）：watch 頭頂名牌（hud.name 非 stale、src = both / ocr、≤8 s、核對時間晚於目前畫面狀態開始時間 `screen.since`）與 current-char.json（≤30 分）**都**等於目標才不開面板、不點（JSON 有 `"via": "watch"`）；`since` 條件讓「切換 / 轉場前的舊名牌」不會被採用，所以切換之後第一次 ensure 會走面板確認。任何一項不符 / watch 不在 / 跨平台 → 照舊開面板。**要點卡片時一律現場開面板確認名字 + 線上，不看 watch。**
   以下手動流程只當退路。
 - **點角色卡片就切成「當前」角色**（無確認框，約 1.5 秒；2026-10-09 實測；點後面板自己關、會出現全螢幕「加載中」）。卡片：DKB0 620,300 / DKB02 930,300 / DKB03 620,385 / DKB04 930,385 / DKB05 620,470。組隊中切換不影響隊長 / 隊員身分。
 - 按鈕：快速組隊 **520,578** / 全部登錄 716,578 / 刷新角色 910,578。

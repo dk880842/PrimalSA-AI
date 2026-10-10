@@ -5,7 +5,8 @@
   uv run --no-project python tools/gui/char.py current [--json]    # 唯讀：開切換面板讀「當前」是誰（讀得到名字就更新 current-char.json）
   uv run --no-project python tools/gui/char.py switch DKBO2        # 切過去並確認；已經是就不點
   uv run --no-project python tools/gui/char.py ensure DKBO         # 同 switch（語意：是就不動、不是才切；grind / pet-quest 收尾用）
-  最後一行一律印 JSON：{"ok", "rc", "current", "target", "changed", "ms", ...}
+  最後一行一律印 JSON：{"ok", "rc", "current", "target", "changed", "ms", ...}；加 --timing 多一個 "t"（各階段毫秒）；ensure 走 watch 快路徑時有 "via": "watch"
+  給其他腳本 import：char.current() / char.switch(name) / char.ensure(name) 回退出碼，結果 dict 在 char.LAST（同一行程只付一次起 server 的 0.85 s）
 
 不會自動切回 DKBO（計畫 §9 第 10 條）：切到別人之後由呼叫端負責 `ensure DKBO`。
 切換後畫面換成那個角色的位置（可能不同地圖），之後的走路 / 點擊以新角色為準；隊伍身分不變（P-I3 實測）。
@@ -21,12 +22,15 @@
 流程（P-I3 實測 2026-10-11）：點卡片後切換面板一定自己關；加載畫面約 0.25～0.5 s，HUD 在點擊返回後約 0.6 s 回來（整體約 1.2～1.4 s）。
 所以：點卡片前 team.read_state(keep_open) 讀一次，名字確認 + 狀態線上才點；點完先等加載特徵出現（≤1.5 s）再等 SIG_HUD（≤6 s）；
 最後重開面板（read_state）以「當前框 + 名字」驗證，沒到就再等 1.5 s 重讀一次（唯讀，不重點）。成功才寫 charstate。
+加速（2026-10-11）：preflight 用 watch 快路徑、waitpix 開關面板、namematch 全命中不 OCR；ensure 在 watch 名牌與旁路檔都已是目標且夠新（見 watch_confirms）時完全不開面板。耗時見 ui/team.md。
 """
-import argparse
-import json
-import sys
 import time
-from pathlib import Path
+
+_T_START = time.time()                # --timing 的「import」段起點（含 uv 啟動後的模組載入）
+import argparse  # noqa: E402
+import json  # noqa: E402
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -37,11 +41,16 @@ import uikit  # noqa: E402
 
 SRC = 'char'
 EXIT_PANEL, EXIT_NO_CARD, EXIT_NOT_SWITCHED, EXIT_CUR_COUNT, EXIT_CONFLICT, EXIT_NO_HUD = 60, 61, 62, 63, 64, 65
+CLICK_WAIT_MS = 100                  # 點卡片後 seq 內固定等待（舊 300；之後有 wait_switched 等 HUD）
 CLICK_DX = 204                       # 點卡片中段（左欄 620、右欄 930；ui/team.md 的卡片座標）
 LOADING_SEEN_S = 1.5                 # 點完最多等這麼久看加載畫面出現
 HUD_TIMEOUT_S = 6.0
 VERIFY_RETRY_S = 1.5
-POLL_S = 0.15
+POLL_S = 0.05
+LOADING_GRACE_S = 1.0                # 沒看到加載畫面時，點擊後這麼久才接受 HUD（避免面板剛自關、加載還沒出現那一瞬間的 HUD）
+FAST_NAME_MAX_AGE_S = 8.0            # ensure 快路徑：頭頂名牌多新才採用（watch 名牌每 3～9 s 才核對一次；另外要求名牌核對時間在目前畫面狀態開始之後）
+FAST_CHAR_MAX_AGE_S = 1800.0         # ensure 快路徑：current-char.json 多新才採用
+LAST: dict = {}                      # 最近一次 current / switch / ensure 的結果 dict（可 import 的呼叫端讀這個，同最後一行 JSON）
 
 
 def confirmed(c) -> bool:
@@ -67,20 +76,25 @@ def analyse(r: dict, target=None) -> dict:
 
 
 def wait_switched(loading_s: float = LOADING_SEEN_S, hud_s: float = HUD_TIMEOUT_S) -> tuple:
-    """點卡片後：先等加載畫面出現（≤ loading_s；太快錯過也沒關係），再等 SIG_HUD（≤ hud_s）。→ (看到加載, HUD 回來, 秒數)"""
+    """點卡片後：一次 pixel 同時讀「加載畫面」與 SIG_HUD 的點（每圈約 60 ms）。
+    加載畫面出現過後 HUD 回來 = 切換完成；一直沒看到加載畫面（太快錯過）→ 點擊後 LOADING_GRACE_S 才接受 HUD。
+    → (看到加載, HUD 回來, 秒數)；hud_s 內 HUD 沒回來 → (seen, False, 秒數)"""
     t0 = uikit.clock()
+    load_pts = [(x, y) for x, y, *_ in screen_sigs.SIG_LOADING]
+    hud_pts = [(x, y) for x, y, *_ in screen_sigs.SIG_HUD]
+    nl = len(load_pts)
     seen = False
-    while uikit.clock() - t0 < loading_s:
-        if uikit.sig_match(screen_sigs.SIG_LOADING):
-            seen = True
-            break
-        uikit.sleep(POLL_S)
-    end = uikit.clock() + hud_s
     while True:
-        if uikit.hud_visible():
-            return seen, True, uikit.clock() - t0
-        if uikit.clock() >= end:
-            return seen, False, uikit.clock() - t0
+        cols = uikit.px(load_pts + hud_pts)
+        el = uikit.clock() - t0
+        if cols:
+            if all(screen_sigs.close(c, (r, g, b), t) for c, (_, _, r, g, b, t) in zip(cols[:nl], screen_sigs.SIG_LOADING)):
+                seen = True
+            elif all(screen_sigs.close(c, (r, g, b), t) for c, (_, _, r, g, b, t) in zip(cols[nl:], screen_sigs.SIG_HUD)):
+                if seen or el >= min(loading_s, LOADING_GRACE_S):
+                    return seen, True, el
+        if el >= hud_s:
+            return seen, False, el
         uikit.sleep(POLL_S)
 
 
@@ -89,6 +103,10 @@ def _out(rc: int, info: dict, t0: float, msg: str = '') -> int:
     info.update(ok=rc == 0, rc=rc, ms=int((time.time() - t0) * 1000))
     if msg:
         info['msg'] = msg
+    if uikit._stages is not None:
+        info['t'] = uikit.timing_get()
+    LAST.clear()
+    LAST.update(info)
     print(json.dumps(info, ensure_ascii=False))
     return rc
 
@@ -120,8 +138,31 @@ def current(as_json: bool = False) -> int:
     return _out(0, {'current': a['current']}, t0)
 
 
-def switch(target_text: str) -> int:
-    """切到 target（已是就不點）。回退出碼；最後一行 JSON"""
+def watch_confirms(target: str) -> bool:
+    """ensure 快路徑條件：watch 頭頂名牌（hud.name 非 stale、src = both / ocr、≤8 s、核對時間晚於目前畫面狀態的開始時間 screen.since
+    ——切換角色會經過加載畫面使 since 重置，所以「換人之前的舊名牌」不會被採用）與 current-char.json（≤30 分）都等於 target。
+    任一不符 / watch 不在 / 太舊 → False（呼叫端照舊開面板確認）。只讀檔，不碰遊戲"""
+    try:
+        st = uikit.watch_state()
+        sc = uikit.watch_screen() if st else None
+    except Exception:
+        return False
+    since = (sc or {}).get('since')
+    if not isinstance(since, (int, float)):
+        return False
+    nm = ((st or {}).get('hud') or {}).get('name') or {}
+    ts = nm.get('ts')
+    if nm.get('stale') or nm.get('src') not in ('both', 'ocr') or not isinstance(ts, (int, float)) or time.time() - ts > FAST_NAME_MAX_AGE_S:
+        return False
+    if ts < since or not charstate.same(nm.get('v'), target):
+        return False
+    cc = charstate.read(max_age=FAST_CHAR_MAX_AGE_S)
+    return bool(cc) and charstate.same(cc.get('name'), target)
+
+
+def switch(target_text: str, fast: bool = False) -> int:
+    """切到 target（已是就不點）。回退出碼；最後一行 JSON。
+    fast=True（ensure）：watch 名牌與 current-char.json 都已是 target 且夠新就直接回 0（info['via']='watch'，不開面板、不點）；其餘照舊現場開面板確認"""
     t0 = time.time()
     hit = charstate.norm_char(target_text)
     target = charstate.display(hit) if hit else None
@@ -132,6 +173,12 @@ def switch(target_text: str) -> int:
     rc = uikit.preflight(SRC)
     if rc:
         return _out(rc, info, t0)
+    if fast and watch_confirms(target):
+        _record(target)
+        uikit.mark('watch-confirm')
+        info.update(current=target, via='watch')
+        print(f'char：watch 名牌與旁路檔都是 {target}，沒有開面板、沒有點擊')
+        return _out(0, info, t0)
     clicked = False
     try:
         r = team.read_state(True, keep_open=True)
@@ -157,16 +204,20 @@ def switch(target_text: str) -> int:
             uikit.fail(SRC, EXIT_NO_CARD, msg)
             return _out(EXIT_NO_CARD, info, t0, msg)
         x0, y = team.SLOTS[tc.slot]
-        if not uikit.safe_click(x0 + CLICK_DX, y, uikit.SWITCH, note=f'char 切到 {target}（slot{tc.slot}）'):
+        uikit.mark('read-cards')
+        if not uikit.safe_click(x0 + CLICK_DX, y, uikit.SWITCH, note=f'char 切到 {target}（slot{tc.slot}）', wait_ms=CLICK_WAIT_MS):
             msg = '點卡片前切換面板特徵不在，沒點'
             uikit.fail(SRC, EXIT_PANEL, msg)
             return _out(EXIT_PANEL, info, t0, msg)
         clicked = True
+        uikit.mark('click')
     finally:
         if not clicked:
-            uikit.close_panel(uikit.SWITCH)
+            uikit.close_panel(uikit.SWITCH, known_open=True)
+            uikit.mark('close')
     # 面板會自己關；等加載 → HUD → 重開面板驗證（唯讀，絕不重點）
     seen, hud, sec = wait_switched()
+    uikit.mark('wait-load+hud')
     info['loading_seen'] = seen
     info['changed'] = True                             # 已點擊：畫面可能已換角色，呼叫端要知道
     if not hud:
@@ -197,7 +248,9 @@ def switch(target_text: str) -> int:
     return _out(rc, info, t0, msg)
 
 
-ensure = switch
+def ensure(target_text: str) -> int:
+    """是就不動、不是才切（grind / pet-quest 收尾用）；比 switch 多一條 watch 快路徑（見 switch）"""
+    return switch(target_text, fast=True)
 
 
 def main() -> int:
@@ -206,16 +259,23 @@ def main() -> int:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    tp = argparse.ArgumentParser(add_help=False)
+    tp.add_argument('--timing', action='store_true', help='最後一行 JSON 多一個 t 欄位：各階段毫秒（含 import）')
     sub = ap.add_subparsers(dest='cmd', required=True)
-    p = sub.add_parser('current', help='唯讀：當前角色')
+    p = sub.add_parser('current', help='唯讀：當前角色', parents=[tp])
     p.add_argument('--json', action='store_true', help='只印最後一行 JSON')
     for n in ('switch', 'ensure'):
-        p = sub.add_parser(n, help='切到指定角色（已是就不點）')
+        p = sub.add_parser(n, help='切到指定角色（已是就不點）', parents=[tp])
         p.add_argument('name')
     a = ap.parse_args()
+    if a.timing:
+        uikit.timing_start()
+        uikit._stages.append(['import', int((time.time() - _T_START) * 1000)])
+        uikit.gui('pixel', '1,1')                      # 暖機：本程序第一次 gui 呼叫要先起 serve.ps1（約 0.85 s，之後的呼叫才是真正的動作耗時）
+        uikit.mark('server-start')
     if a.cmd == 'current':
         return current(a.json)
-    return switch(a.name)
+    return ensure(a.name) if a.cmd == 'ensure' else switch(a.name)
 
 
 if __name__ == '__main__':

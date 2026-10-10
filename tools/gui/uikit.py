@@ -41,6 +41,29 @@ sleep = time.sleep               # 測試時可替換
 clock = time.time
 
 
+# ---- 分段計時（--timing 用；關著時 mark 幾乎零成本）----
+_stages: list | None = None
+_stage_t = 0.0
+
+
+def timing_start() -> None:
+    global _stages, _stage_t
+    _stages, _stage_t = [], clock()
+
+
+def mark(label: str) -> None:
+    """記下「距上一個 mark（或 timing_start）」的毫秒；沒開計時就什麼都不做"""
+    global _stage_t
+    if _stages is not None:
+        now = clock()
+        _stages.append([label, int((now - _stage_t) * 1000)])
+        _stage_t = now
+
+
+def timing_get() -> list:
+    return list(_stages or [])
+
+
 class ForbiddenClick(AssertionError):
     """要點的座標落在該面板的紅區 / 禁區矩形內（程式 bug，不是執行期狀況）"""
 
@@ -82,22 +105,69 @@ def hud_visible() -> bool:
 
 
 # ---- preflight ----
-def preflight(src: str) -> int:
-    """開跑前檢查，回退出碼（0 = 可以動）：版面不是 2880x1659 → 2；netwatch halt → 直接 sys.exit(10)；
-    battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）"""
+WATCH_MAX_AGE_S = 2.0            # watch 畫面區段夠新才採用（watch 心跳 1 s，畫面取樣 0.5 s，≤1.5 s 才算正常；1.0 會常常落空）
+WATCH_OK_STATES = ('idle', 'panel', 'walking')
+NETWATCH_HALT = CACHE / 'netwatch.halt'
+
+
+def watch_screen(max_age: float = WATCH_MAX_AGE_S):
+    """同平台 watch 的畫面區段（夠新才回；watch 不在 / 太舊 / 跨平台 → None）。測試可替換"""
+    import watchstate
+    return watchstate.screen(max_age=max_age)
+
+
+def watch_state(max_age: float = WATCH_MAX_AGE_S):
+    """同平台 watch 的完整 state（夠新、watcher 在跑才回；不等待）。測試可替換"""
+    import watchstate
+    return watchstate.fresh(max_age, wait=0)
+
+
+def watch_preflight_ok() -> bool:
+    """快路徑：watch 狀態夠新（≤1 s）、畫面是 idle / panel / walking（不是 unknown / 戰鬥 / 對話框）、
+    沒有 verify_suspect / alerts、沒有 annot（登入 / 提示視窗）、版面 2880x1659 且遊戲在跑、netwatch 沒 halt 檔 → True，否則 False（走完整檢查）。
+    只讀 state 檔不碰遊戲；watch 認得的畫面有限，所以只是省掉重複讀圖，不改變停手規則"""
+    try:
+        if NETWATCH_HALT.exists():
+            return False
+        st, sc = watch_state(), watch_screen()
+    except Exception:
+        return False
+    if not st or not sc or sc.get('state') not in WATCH_OK_STATES or sc.get('annot'):
+        return False
+    fl = st.get('flags') or {}
+    if fl.get('verify_suspect') or fl.get('netwatch_halt') or st.get('alerts'):
+        return False
+    g = st.get('game') or {}
+    if g.get('layout') != LAYOUT or not g.get('running'):
+        return False
     import layout
-    if layout.current() != LAYOUT:
-        print(f'{src}：只量過 {LAYOUT}，目前 {layout.current()}', file=sys.stderr)
-        return EXIT_LAYOUT
-    import netwatch
-    netwatch.guard(src)
+    layout.prime(g['layout'])                     # 後面 import walk（uikit.gui 第一次呼叫）時不必再問一次版面
+    return True
+
+
+def preflight(src: str, fast: bool = True) -> int:
+    """開跑前檢查，回退出碼（0 = 可以動）：版面不是 2880x1659 → 2；netwatch halt → 直接 sys.exit(10)；
+    battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）。
+    fast=True 且 watch 狀態夠新時（watch_preflight_ok）省掉 layout / netwatch / 畫面連讀（約 0.36 s → 約 0.02 s）；battle.lock 一律檢查"""
     import battleguard
+    fast_ok = fast and watch_preflight_ok()
+    if not fast_ok:
+        import layout
+        if layout.current() != LAYOUT:
+            print(f'{src}：只量過 {LAYOUT}，目前 {layout.current()}', file=sys.stderr)
+            return EXIT_LAYOUT
+        import netwatch
+        netwatch.guard(src)
     lk = battleguard.locked()
     if lk:
         print(f'{src}：battle.lock 有效（{lk.get("note", "")} pid {lk.get("pid")}），別的腳本在用畫面，不搶', file=sys.stderr)
         return EXIT_IN_BATTLE
+    if fast_ok:
+        mark('preflight(watch)')
+        return EXIT_OK
     for i in range(UNKNOWN_N):
         if screen().get('state') not in ('unknown', 'error'):
+            mark('preflight')
             return EXIT_OK
         if i < UNKNOWN_N - 1:
             sleep(UNKNOWN_GAP_S)
@@ -152,36 +222,96 @@ def is_open(p: Panel) -> bool:
     return bool(p.sig) and sig_match(p.sig)
 
 
-def open_panel(p: Panel, timeout: float = 4.0) -> bool:
-    """開面板並驗證；已開著就成功。**只在主畫面（SIG_HUD）看得到時才點開啟鈕**；面板特徵沒出現就回 False，絕不點面板內座標"""
+POLL_S = 0.1                     # 等面板 / 畫面的輪詢間隔（舊 0.5 s）
+WAIT_OPEN_MS = 1500
+
+
+def _uniform_tol(sig) -> int | None:
+    tols = {t for *_, t in sig}
+    return tols.pop() if len(tols) == 1 else None
+
+
+def _seq_ok(out: str) -> bool:
+    """gui seq 輸出裡有 waitpix 成功行（ok <ms>）"""
+    return any(ln.startswith('ok') for ln in (out or '').splitlines())
+
+
+def _probe(p: Panel) -> tuple:
+    """一次 pixel 讀 → (面板開著, HUD 在)；讀不到 = (False, False)"""
+    pts = [(x, y) for x, y, *_ in p.sig] + [(x, y) for x, y, *_ in screen_sigs.SIG_HUD]
+    cols = px(pts)
+    if not cols:
+        return False, False
+    n = len(p.sig)
+    return (all(screen_sigs.close(c, (r, g, b), t) for c, (_, _, r, g, b, t) in zip(cols[:n], p.sig)),
+            all(screen_sigs.close(c, (r, g, b), t) for c, (_, _, r, g, b, t) in zip(cols[n:], screen_sigs.SIG_HUD)))
+
+
+def open_panel_ex(p: Panel, timeout: float = 4.0) -> tuple:
+    """開面板並驗證 → (成功, 一開始就開著)。**只在主畫面（SIG_HUD）看得到時才點開啟鈕**；面板特徵沒出現就回 False，絕不點面板內座標。
+    點開啟鈕用 seq「click; waitpix 面板特徵」代替固定等待（面板約 0.1～0.3 s 就出現；舊的固定 wait 700 + 輪詢 0.5 s）"""
     if p.open_fn:
-        return bool(p.open_fn())
+        return bool(p.open_fn()), False
     if p.sig is None or p.open_xy is None:
-        return False
+        return False, False
     end = clock() + timeout
     clicked = 0
+    was_open = None
+    tol = _uniform_tol(p.sig)
     while True:
-        if is_open(p):
-            return True
-        if hud_visible() and clicked < 3:
-            gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; wait {p.settle_ms}', note=f'uikit 開 {p.name} 面板')
-            clicked += 1
-            if is_open(p):
-                return True
+        opened, hud = _probe(p)
+        if was_open is None:
+            was_open = opened
+        if opened:
+            return True, was_open
+        if hud and clicked < 3:
+            if tol is not None:
+                out = gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; waitpix {WAIT_OPEN_MS} {screen_sigs.sig_str(p.sig)} {tol}', note=f'uikit 開 {p.name} 面板')
+                clicked += 1
+                if _seq_ok(out) or is_open(p):
+                    return True, was_open
+            else:
+                gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; wait {p.settle_ms}', note=f'uikit 開 {p.name} 面板')
+                clicked += 1
+                if is_open(p):
+                    return True, was_open
         if clock() >= end:
-            return False
-        sleep(0.5)
+            return False, was_open
+        sleep(POLL_S)
 
 
-def close_panel(p: Panel) -> bool:
-    """關面板並驗證消失：先點 ✕、仍開再 ESC（各最多 2 次）；只在面板確實開著時才送"""
+def open_panel(p: Panel, timeout: float = 4.0) -> bool:
+    """開面板並驗證；已開著就成功（見 open_panel_ex）"""
+    ok = open_panel_ex(p, timeout)[0]
+    mark(f'open {p.name}')
+    return ok
+
+
+def _gone_sig(p: Panel):
+    """關閉後用來確認面板消失的單點特徵（✕ 那一點）；找不到回 None（退回固定等待）"""
+    if p.sig and p.close_xy:
+        for x, y, r, g, b, t in p.sig:
+            if (x, y) == tuple(p.close_xy):
+                return f'{x},{y},{r},{g},{b}!', t
+    return None
+
+
+def close_panel(p: Panel, known_open: bool = False) -> bool:
+    """關面板並驗證消失：先點 ✕（waitpix ✕ 消失，約 0.1 s）、仍開再 ESC（各最多 2 次）；只在面板確實開著時才送。
+    known_open=True 表示呼叫端剛驗證過面板開著，省掉第一次 is_open"""
     if p.close_fn:
         return bool(p.close_fn())
-    for _ in range(2):
-        if not is_open(p):
+    gone = _gone_sig(p)
+    for i in range(2):
+        if not (known_open and i == 0) and not is_open(p):
             return True
         if p.close_xy:
-            gui('seq', f'click {p.close_xy[0]} {p.close_xy[1]}; wait 500', note=f'uikit 關 {p.name} 面板')
+            if gone:
+                out = gui('seq', f'click {p.close_xy[0]} {p.close_xy[1]}; waitpix 800 {gone[0]} {gone[1]}', note=f'uikit 關 {p.name} 面板')
+                if _seq_ok(out):
+                    return True
+            else:
+                gui('seq', f'click {p.close_xy[0]} {p.close_xy[1]}; wait 500', note=f'uikit 關 {p.name} 面板')
             if not is_open(p):
                 return True
         if p.esc_close:
@@ -199,12 +329,12 @@ def check_forbidden(p: Panel, x: int, y: int, allow=()) -> None:
             raise ForbiddenClick(f'{p.name} 面板 ({x},{y}) 落在禁區 {nm} {r}')
 
 
-def safe_click(x: int, y: int, panel: Panel, note: str = '', allow=()) -> bool:
+def safe_click(x: int, y: int, panel: Panel, note: str = '', allow=(), wait_ms: int = 300) -> bool:
     """面板內點擊的唯一入口：禁區 → ForbiddenClick（先檢查，不讀圖）；面板特徵不在 → 不點、回 False；點了回 True"""
     check_forbidden(panel, x, y, allow)
     if not is_open(panel):
         return False
-    gui('seq', f'click {x} {y}; wait 300', note=note or f'uikit {panel.name} 點 ({x},{y})')
+    gui('seq', f'click {x} {y}; wait {wait_ms}', note=note or f'uikit {panel.name} 點 ({x},{y})')
     return True
 
 
