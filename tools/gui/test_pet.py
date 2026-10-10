@@ -378,8 +378,189 @@ fresh_tpl()
 rc, out, err = run(pet.rest_all, 'DKBO', keep=[])
 check('--keep 空清單：騎寵仍因 mountlike / 狀態=騎乘 不動', rc == 0 and g.pets['DKBO'][0]['state'] == '騎乘')
 
+
+# ---------------- store / take（P7）----------------
+DEPOT_X = set(pet.CARD_X)
+
+
+def depot_free(g):
+    """store / take 以外都不該點的存取鈕：回 530,697 點擊數"""
+    return len([c for c in g.clicks if c == pet.DEPOT_BTN_XY])
+
+
+check('退出碼常數 75 / 76 / 77', (pet.EXIT_DEPOT, pet.EXIT_VERIFY, pet.EXIT_FULL) == (75, 76, 77))
+check('常數：存入鈕 530,697 不在 PET 禁區；倉庫頁箭頭 / 擴容在禁區', all(True for _ in [uikit.check_forbidden(uikit.PET, *pet.DEPOT_BTN_XY)])
+      and all(any(uikit.in_rect(*xy, r) for r in uikit.PET.forbidden.values()) for xy in [(805, 703), (1055, 703), (1195, 705)]))
+check('倉庫格點擊座標都不在禁區（20 格）', not any(uikit.in_rect(pet.CARD_X[c], pet.CARD_Y[r] + pet.CARD_CLICK_DY, rr) for c in range(5) for r in range(4) for rr in uikit.PET.forbidden.values()))
+check('按鈕底色：實測紅 / 金', pet.body_kind([(177, 65, 38)] * 8) == 'store' and pet.body_kind([(185, 125, 62)] * 8) == 'take' and pet.body_kind([(245, 225, 192)] * 8) is None
+      and pet.body_kind([(177, 65, 38)] * 7 + [(185, 125, 62)]) is None)
+check('子分頁亮度：亮 (251,219,135)、暗 (171,127,84)', pet.is_tab_on((251, 219, 135)) and pet.is_tab_on((255, 217, 131)) and not pet.is_tab_on((171, 127, 84)))
+check('倉庫格選中色 (209,151,13) ～ (249,185,1)（呼吸閃動）三點兩點即可；暗棕 / 米色不算', pet.is_card_sel([(209, 151, 13), (205, 151, 14), (106, 70, 45)]) and pet.is_card_sel([(249, 185, 1), (245, 185, 1), (249, 189, 1)])
+      and not pet.is_card_sel([(106, 70, 45)] * 3) and not pet.is_card_sel([(225, 197, 147)] * 3))
+a16 = [(100 + i, 80, 60) for i in range(16)]
+check('縮圖簽名：相同 / 小差異 OK、差很多不同', pet.thumb_same(a16, a16) and pet.thumb_same(a16, [(c[0] + 8, c[1], c[2]) for c in a16]) and not pet.thumb_same(a16, [(10, 200, 10)] * 16))
+check('guard_store：騎乘 / 像騎寵 / 第 1 格 / 名字 None / 狀態 None 都拒絕；第 2 格出戰放行',
+      all(pet.guard_store(x, False) for x in [sl(2, '魯尼帖斯', '騎乘'), sl(2, '瑪斯貝卡', '等待'), sl(2, '瑪斯貝卞', '等待', mountlike=True), sl(1, '迪基格斯', '出戰'), sl(2, None, '出戰'), sl(2, '迪基格斯', None)])
+      and pet.guard_store(sl(2, '迪基格斯', '出戰'), False) is None and pet.guard_store(sl(1, '迪基格斯', '出戰'), True) is None
+      and pet.guard_store(sl(1, '瑪斯貝卡', '騎乘'), True))
+
+# --- store 成功（個人倉庫，騎寵不動）---
+fresh_tpl()
+g = new()
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+j = last_json(out)
+check('store 迪基格斯 → rc 0；寵物欄只剩瑪斯貝卡（騎乘不動）；個人倉庫第 4 格有迪基格斯', rc == 0 and [p and p['name'] for p in g.pets['DKBO'][:2]] == ['瑪斯貝卡', None]
+      and g.pets['DKBO'][0]['state'] == '騎乘' and g.depot['DKBO']['personal'][3]['name'] == '迪基格斯', f'rc={rc} {err[-200:]}')
+check('store：存入鈕只點 1 次、沒有任何狀態鈕被點到（沒換騎寵）、depot_index = 4', depot_free(g) == 1 and g.state_clicks == [] and len(g.store_clicks) == 1 and j.get('depot_index') == 4, str(j.get('depot_index')))
+j_store = j
+check('store：結束回寵物分頁、第 1 格從沒被選取點擊', g.view == 'pet' and (pet.SLOT_X, pet.SLOT_Y[0]) not in g.clicks[g.clicks.index(pet.DEPOT_TAB_XY):], str(g.view))
+check('store：點擊順序 = 倉庫分頁 → 存入鈕 → 驗證倉庫格 → 切回寵物分頁', g.clicks.index(pet.DEPOT_TAB_XY) < g.clicks.index(pet.DEPOT_BTN_XY) < len(g.clicks) - 1)
+check('store 迪基格斯（出戰）會跳確認視窗：確定只點 1 次、存入鈕 1 次', g.dialog_clicks == [pet.CONFIRM_OK_XY] and j_store.get('confirm_clicked') is True, str(g.dialog_clicks))
+fresh_tpl()
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 128}, {'name': '迪基格斯', 'state': '等待', 'level': 130}, None, None, None]))
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('store 等待中的寵物：不跳視窗、不點確定', rc == 0 and g.dialog_clicks == [] and depot_free(g) == 1, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.confirm_text = ['這是別的視窗，請點取消']
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('確認視窗文字不是存入倉庫 → 點取消（不點確定）、76、寵物沒動', rc == 76 and g.dialog_clicks == [pet.CONFIRM_CANCEL_XY] and g.pets['DKBO'][1] is not None, f'rc={rc} {g.dialog_clicks}')
+fresh_tpl()
+g = new()
+g.confirm_text = []                                              # OCR 讀不出視窗文字：特徵吻合 + 事前驗過非騎寵 → 照樣點確定（軟檢查）
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('確認視窗 OCR 讀不出字 → 仍單擊確定完成存入', rc == 0 and g.dialog_clicks == [pet.CONFIRM_OK_XY], f'rc={rc}')
+# --- 騎寵保護：零倉庫點擊 ---
+for label, text in [('瑪斯貝卡', '瑪斯貝卡'), ('讀成瑪斯貝卞', '瑪斯貝卞')]:
+    fresh_tpl()
+    g = new()
+    rc, out, err = run(pet.store, 'DKBO', text, 'personal')
+    check(f'store {label} → 73、零點擊（連面板都不開）', rc == 73 and g.clicks == [] and depot_free(g) == 0, f'rc={rc} clicks={g.clicks[:3]}')
+fresh_tpl()
+g = new()
+g.ocr_name_override = ['瑪斯貝卞'] * 3                      # 面板上名字讀成錯字（沒樣板）：要存迪基格斯 → 找不到名字，絕不存
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('名字 OCR 讀成「瑪斯貝卞」→ 不存（72），倉庫 / 存入鈕 0 次', rc == 72 and not g.depot_clicks and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+pets = mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '等待', 'level': 128}, {'name': '迪基格斯', 'state': '出戰', 'level': 130}, {'name': '魯尼帖斯', 'state': '騎乘', 'level': 20}, None, None])
+g = new(pets=pets)
+rc, out, err = run(pet.store, 'DKBO', '魯尼帖斯', 'personal')
+check('狀態 = 騎乘的別隻 → 73、倉庫零點擊', rc == 73 and not g.depot_clicks and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+pets = mk_pets(DKBO=[{'name': '迪基格斯', 'state': '出戰', 'level': 130}, {'name': '瑪斯貝卡', 'state': '騎乘', 'level': 128}, None, None, None])
+g = new(pets=pets)
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('第 1 格（名字不像騎寵）→ 73、倉庫零點擊', rc == 73 and not g.depot_clicks and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = new(pets=mk_pets(DKBO=[{'name': '迪基格斯', 'state': '出戰', 'level': 130}, {'name': '瑪斯貝卡', 'state': '騎乘', 'level': 128}, None, None, None]))
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal', allow_slot1=True)
+check('--allow-slot1 → 放行（rc 0），騎乘寵仍在', rc == 0 and g.pets['DKBO'][0]['name'] == '瑪斯貝卡' and g.pets['DKBO'][0]['state'] == '騎乘' and depot_free(g) == 1, f'rc={rc}')
+fresh_tpl()
+g = new()
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal', slot_no=1)
+check('--slot 1 指到瑪斯貝卡但名字不符 → 72、零倉庫點擊', rc == 72 and not g.depot_clicks, f'rc={rc}')
+# --- 按鈕 / 分頁 / 簽名驗證 ---
+fresh_tpl()
+g = new()
+g.btn_ocr_override = ['取出寵物']
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('按鈕文字是「取出寵物」→ 75、存入鈕 0 次、寵物沒動', rc == 75 and depot_free(g) == 0 and g.pets['DKBO'][1] is not None, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.btn_ocr_override = ['存入', '取出寵物']                       # 兩種字都出現 = 不確定
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('按鈕文字兩種都出現（不確定）→ 75、0 次', rc == 75 and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.btn_ocr_override = []
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('按鈕 OCR 讀不出 → 75、0 次', rc == 75 and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.on_depot = lambda gm: gm.pets['DKBO'][1].update(level=99)    # 進倉庫分頁時寵物欄被改（名字同、縮圖變）：模擬補位換人
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('補位 / 縮圖簽名不符 → 75、存入鈕 0 次', rc == 75 and depot_free(g) == 0 and g.depot['DKBO']['personal'][3] is None, f'rc={rc} {err[-120:]}')
+fresh_tpl()
+g = new()
+
+
+def swap(gm):
+    p = gm.pets['DKBO']
+    p[1], p[2] = None, p[1]                                     # 迪基格斯被移到第 3 格（選取的第 2 格變空）
+g.on_depot = swap
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('寵物欄位移（原選取格變空）→ 不存、存入鈕 0 次', rc != 0 and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.depot_dead = True
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('倉庫分頁打不開 → 75；存入鈕 0 次、沒有狀態鈕被點（530,697 在寵物分頁是「騎乘」鈕附近）', rc == 75 and depot_free(g) == 0 and g.state_clicks == [], f'rc={rc}')
+fresh_tpl()
+g = new()
+g.store_dead = True
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('存入鈕沒反應 → 76，且只點 1 次（不重點）', rc == 76 and depot_free(g) == 1 and len(g.store_clicks) == 1, f'rc={rc} 點={depot_free(g)}')
+fresh_tpl()
+g = new(depot=fake_pet.mk_depot(DKBO={'personal': ['摩娜西普'] * 20}))
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('個人倉庫滿 → 77、存入鈕 0 次', rc == 77 and depot_free(g) == 0 and g.pets['DKBO'][1] is not None, f'rc={rc}')
+fresh_tpl()
+g = new(depot=fake_pet.mk_depot(DKBO={'personal': ['摩娜西普'] * 20}))
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'public')
+check('--depot public：切公共子分頁後存入（個人滿不影響）', rc == 0 and g.depot['DKBO']['public'][0]['name'] == '迪基格斯' and g.dtab == 'public' and pet.SUBTAB_XY['public'] in g.clicks, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.battle = True
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('戰鬥中（面板外判斷）→ 78 / 沒有任何點擊', rc == 78 or g.clicks == [], f'rc={rc}')
+# --- take ---
+fresh_tpl()
+g = new()
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '摩娜西普')
+check('take index 1 --expect 摩娜西普 → rc 0；寵物欄第 3 格 = 摩娜西普（等待）；倉庫第 1 格清空', rc == 0 and g.pets['DKBO'][2] and g.pets['DKBO'][2]['name'] == '摩娜西普' and g.pets['DKBO'][2]['state'] == '等待'
+      and g.depot['DKBO']['personal'][0] is None and depot_free(g) == 1 and g.state_clicks == [], f'rc={rc} {err[-200:]}')
+fresh_tpl()
+g = new()
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '朵拉比斯')
+check('take：倉庫第 1 格是摩娜西普、--expect 朵拉比斯 → 72、取出鈕 0 次、不存回', rc == 72 and depot_free(g) == 0 and g.depot['DKBO']['personal'][0] is not None, f'rc={rc}')
+fresh_tpl()
+g = new()
+rc, out, err = run(pet.take, 'DKBO', 'personal', 5, None)
+check('take 空格 → 72、取出鈕 0 次', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 128}, {'name': '迪基格斯', 'state': '出戰', 'level': 130}, {'name': '魯尼帖斯', 'state': '等待', 'level': 20}, {'name': '魯尼帖斯', 'state': '等待', 'level': 20}, {'name': '魯尼帖斯', 'state': '等待', 'level': 20}]))
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+check('寵物欄滿 → 77、倉庫分頁都不開', rc == 77 and not g.depot_clicks and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.btn_ocr_override = ['存入寵物']
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+check('take：按鈕文字不是「取出寵物」→ 75、0 次', rc == 75 and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.store_dead = True
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+check('取出鈕沒反應 → 76，只點 1 次', rc == 76 and depot_free(g) == 1, f'rc={rc}')
+fresh_tpl()
+g = new()
+g.confirm_on_take = True
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+check('take 遇到未預期的提示視窗 → 點取消（不點確定）、76、取出鈕只點 1 次', rc == 76 and g.dialog_clicks == [pet.CONFIRM_CANCEL_XY] and depot_free(g) == 1, f'rc={rc} {g.dialog_clicks}')
+for bad_idx in (0, 21):
+    g = new()
+    rc, out, err = run(pet.take, 'DKBO', 'personal', bad_idx, None)
+    check(f'take --index {bad_idx} → 1（參數）、零點擊', rc == 1 and g.clicks == [], f'rc={rc}')
+# --- 往返：store → take 回來 ---
+fresh_tpl()
+g = new()
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+idx = last_json(out).get('depot_index')
+rc2, out2, err2 = run(pet.take, 'DKBO', 'personal', idx, '迪基格斯')
+check('往返：store 後 take --index <depot_index> --expect 迪基格斯 → 迪基格斯回到寵物欄第 2 格（等待）、騎寵沒動', rc == 0 and rc2 == 0 and g.pets['DKBO'][1]['name'] == '迪基格斯' and g.pets['DKBO'][1]['state'] == '等待'
+      and g.pets['DKBO'][0]['name'] == '瑪斯貝卡' and g.pets['DKBO'][0]['state'] == '騎乘' and g.state_clicks == [], f'{rc} {rc2} {err2[-200:]}')
+
 # ---------------- 全測試掃：任何點擊都不在禁區、且都在白名單座標 ----------------
-allowed_x = {83, pet.SLOT_X, 390, 532, 672, 318, 1310}
+allowed_x = {83, pet.SLOT_X, 390, 532, 672, 318, 1310, 1365, 897, 1160, 530, 615, 813} | set(pet.CARD_X)
 bad_forbidden, bad_allowed, total = [], [], 0
 for gm in GAMES:
     for c in gm.clicks:
@@ -390,7 +571,7 @@ for gm in GAMES:
         if c[0] not in allowed_x:
             bad_allowed.append(c)
 check(f'FORBIDDEN 全測試掃（{total} 次點擊）：垃圾桶 / 回爐 / 忠誠 / 鎖頭 / 擴容 = 0 次', not bad_forbidden, str(bad_forbidden[:5]))
-check('所有點擊都在白名單 x（頭像 83 / 寵物格 250 / 三顆狀態鈕 / 開關面板）', not bad_allowed, str(bad_allowed[:5]))
+check('所有點擊都在白名單 x（頭像 83 / 寵物格 250 / 三顆狀態鈕 / 開關面板 / 倉庫分頁 / 倉庫格 / 存取鈕）', not bad_allowed, str(bad_allowed[:5]))
 check('常數：PET 禁區涵蓋 垃圾桶 / 回爐 / 忠誠± / 鎖頭 / 擴容', set(uikit.PET.forbidden) >= {'trash', 'recycle', 'loyal_minus', 'loyal_plus', 'lock', 'depot_expand'})
 for nm, xy in pet.BTN_XY.items():
     try:

@@ -86,8 +86,24 @@ def mk_pets(**kw):
 
 
 class Game:
-    def __init__(self, pets=None, hud=True, panel=False):
+    def __init__(self, pets=None, hud=True, panel=False, depot=None):
         self.pets = pets or mk_pets()
+        self.depot = depot or mk_depot(DKBO={'personal': ['摩娜西普', '朵拉比斯', '巴朵蘭恩']})
+        self.view = 'pet'                # pet | depot
+        self.dtab = 'personal'
+        self.sel_kind = 'pet'            # pet | card（最後選的是哪種；右側面板與按鈕依它）
+        self.sel_card = None
+        self.store_dead = False          # 存入 / 取出鈕沒反應
+        self.on_depot = None             # 進倉庫分頁時執行的 callback（模擬寵物欄被別人改動）
+        self.btn_ocr_override = None
+        self.dialog = False              # 「戰鬥 / 騎乘狀態存入確認」視窗
+        self.confirm_on_store = True     # 存入戰鬥 / 騎乘狀態寵物會跳確認視窗（實機行為）
+        self.confirm_on_take = False     # 測試用：取出也跳視窗（未預期）
+        self.confirm_text = ['當前寵物為戰鬥或騎乘狀態，確定要存入倉庫?']
+        self.dialog_clicks = []
+        self.dialog_pending = None
+        self.depot_dead = False          # 點「倉庫」分頁沒反應
+        self.store_clicks, self.depot_clicks = [], []
         self.hud, self.panel = hud, panel
         self.role = 'DKBO'
         self.sel = 0
@@ -119,9 +135,39 @@ class Game:
             return (122, 227, 0) if self.battle and not self.panel else (0, 0, 0)
         if not self.panel:
             return (0, 0, 0)
+        dv = self.view == 'depot'
+        if self.dialog:
+            for sx, sy, sr, sg, sb, _ in pet.CONFIRM_SIG:
+                if (x, y) == (sx, sy):
+                    return (sr, sg, sb)
+        if (x, y) in _special_pts():
+          for sx, sy, sr, sg, sb, _ in pet.DEPOT_SIG:
+              if (x, y) == (sx, sy):
+                  return (sr, sg, sb) if dv else (153, 125, 96)
+          if (x, y) == pet.SUBTAB_PROBE['personal']:
+              return (251, 219, 135) if dv and self.dtab == 'personal' else (171, 127, 84)
+          if (x, y) == pet.SUBTAB_PROBE['public']:
+              return (251, 219, 135) if dv and self.dtab == 'public' else (171, 127, 84)
+          if (x, y) in pet.BTN_BODY:
+              if not dv:
+                  return (245, 225, 192)
+              return (177, 65, 38) if self.sel_kind == 'pet' else (185, 125, 62)
+          for c in range(5):
+              for r in range(4):
+                  cx, cy = pet.CARD_X[c], pet.CARD_Y[r]
+                  idx = r * 5 + c
+                  for px, dy, col in pet.PAW:
+                      if (x, y) == (cx + px - 250, cy + dy):
+                          return col if dv and self.depot[self.role][self.dtab][idx] is None else (30, 60, 90)
+                  for dx, dy in pet.CARD_SEL:
+                      if (x, y) == (cx + dx, cy + dy):
+                          return (209, 151, 13) if dv and self.sel_kind == 'card' and self.sel_card == idx else (106, 70, 45)
+        for i, cy in enumerate(pet.SLOT_Y):
+            if x in pet.THUMB_X and (y - cy) in pet.THUMB_DY:
+                return thumb_color(self.pets[self.role][i])
         for i, cy in enumerate(pet.SLOT_Y):
             if (x, y) == (pet.FRAME_DX, cy + pet.FRAME_DY):
-                return FRAME_SEL if self.sel == i and self.cur() else FRAME_OFF
+                return FRAME_SEL if self.sel == i and self.cur() and self.sel_kind == 'pet' else FRAME_OFF
             for px, dy, col in pet.PAW:
                 if (x, y) == (px, cy + dy):
                     return col if self.pets[self.role][i] is None else (30, 60, 90)
@@ -129,6 +175,8 @@ class Game:
             if (x, y) == (83, petmatch.AVATAR_TOP_Y[r]):
                 return AV_SEL if r == self.role else AV_OFF
         p = self.cur()
+        if dv and self.sel_kind == 'card' and self.sel_card is not None:
+            p = {'name': self.depot[self.role][self.dtab][self.sel_card]['name'], 'state': '等待', 'level': 1}
         for s, pts in pet.BTN_PROBES.items():
             if (x, y) in pts:
                 return BTN_ON if p and p['state'] == s else BTN_OFF
@@ -211,22 +259,58 @@ class Game:
             if xy == uikit.PET.open_xy and self.hud:
                 self.panel = True
             return
+        if self.dialog:
+            self.dialog_clicks.append(xy)
+            if xy == pet.CONFIRM_OK_XY:
+                self.dialog = False
+                fn, self.dialog_pending = self.dialog_pending, None
+                if fn:
+                    fn()
+            elif xy in (pet.CONFIRM_CANCEL_XY, (946, 208)):
+                self.dialog, self.dialog_pending = False, None
+            return
         if xy == uikit.PET.close_xy:
             self.panel = False
             return
+        if xy == pet.DEPOT_TAB_XY:
+            self.depot_clicks.append(xy)
+            if not self.depot_dead:
+                self.view = 'depot'
+                if self.on_depot:
+                    self.on_depot(self)
+            return
+        if xy == pet.PET_TAB_XY:
+            self.view = 'pet'
+            return
+        if self.view == 'depot':
+            self.depot_clicks.append(xy)
+            if xy in pet.SUBTAB_XY.values():
+                self.dtab = 'personal' if xy == pet.SUBTAB_XY['personal'] else 'public'
+                return
+            for c in range(5):
+                for r in range(4):
+                    if abs(x - pet.CARD_X[c]) < 50 and abs(y - pet.CARD_Y[r] - pet.CARD_CLICK_DY) < 50:
+                        if self.depot[self.role][self.dtab][r * 5 + c] is not None:
+                            self.sel_card, self.sel_kind = r * 5 + c, 'card'
+                        return
+            if xy == pet.DEPOT_BTN_XY:
+                self.store_clicks.append((self.role, self.sel_kind, self.sel, self.sel_card))
+                if not self.store_dead and not self.battle:
+                    self._store_or_take()
+                return
         if x == 83:
             for r in ROLES:
                 if abs(y - petmatch.AVATAR_Y[r]) <= 40 and not self.avatar_dead:
                     def f(r=r):
-                        self.role, self.sel = r, 0
+                        self.role, self.sel, self.sel_kind, self.sel_card = r, 0, 'pet', None
                     self._apply(f)
                     return
         if x == pet.SLOT_X and not self.slot_dead:
             for i, cy in enumerate(pet.SLOT_Y):
                 if abs(y - cy) <= 50 and self.pets[self.role][i] is not None:
-                    self._apply(lambda i=i: setattr(self, 'sel', i))
+                    self._apply(lambda i=i: (setattr(self, 'sel', i), setattr(self, 'sel_kind', 'pet')))
                     return
-        if y == 702:
+        if abs(y - 702) <= 8 and self.view == 'pet':       # 寵物分頁的狀態鈕（含 530,697：與倉庫存入鈕同位置，點錯分頁會換騎寵）
             for s, (bx, by) in pet.BTN_XY.items():
                 if abs(x - bx) <= 60:
                     p = self.cur()
@@ -241,10 +325,43 @@ class Game:
                         self._apply(f)
                     return
 
+    def _store_or_take(self):
+        pets, dep = self.pets[self.role], self.depot[self.role][self.dtab]
+        if self.sel_kind == 'pet':
+            p = pets[self.sel]
+            if p is None or None not in dep:
+                return
+
+            def do(p=p):
+                dep[dep.index(None)] = {'name': p['name'], 'level': p['level']}
+                pets.pop(pets.index(p))
+                pets.append(None)
+            if self.confirm_on_store and p['state'] in ('出戰', '騎乘'):
+                self.dialog, self.dialog_pending = True, do
+                return
+            do()
+        elif self.confirm_on_take and self.sel_card is not None:
+            self.dialog, self.dialog_pending = True, None
+        elif self.sel_card is not None and None in pets:
+            c = dep[self.sel_card]
+            pets[pets.index(None)] = {'name': c['name'], 'state': '等待', 'level': c['level']}
+            dep[self.sel_card] = None
+            self.sel_card = None
+
     # ---- OCR ----
     def ocr(self, box, *opts):
         self.ocr_calls.append((tuple(box), opts))
+        if tuple(box) == pet.BTN_BOX:
+            if self.btn_ocr_override is not None:
+                return list(self.btn_ocr_override)
+            if self.view != 'depot':
+                return ['出戰', '騎乘', '休息']
+            return ['存入寵物'] if self.sel_kind == 'pet' else ['取出寵物']
+        if tuple(box) == pet.CONFIRM_BOX:
+            return list(self.confirm_text) if self.dialog else []
         p = self.cur()
+        if self.view == 'depot' and self.sel_kind == 'card' and self.sel_card is not None and tuple(box) == petmatch.BOX_NAME:
+            p = {'name': self.depot[self.role][self.dtab][self.sel_card]['name']}
         if tuple(box) == petmatch.BOX_NAME:
             if self.ocr_name_override is not None:
                 return list(self.ocr_name_override)
@@ -261,6 +378,38 @@ class Game:
                 return [f'0轉{str(lv)[0]}', f'0轉{lv}']
             return [f'0轉{lv}', f'轉{lv}']
         return []
+
+
+def mk_depot(**kw):
+    """每個角色的倉庫：{'personal': 20 格, 'public': 20 格}（None = 空；項目 {'name','level'}）。kw[role] = {'personal': [名字...], 'public': [...]}"""
+    out = {}
+    for r in ROLES:
+        d = kw.get(r, {})
+        out[r] = {t: [({'name': n, 'level': 1} if n else None) for n in (list(d.get(t, [])) + [None] * 20)[:20]] for t in ('personal', 'public')}
+    return out
+
+
+_SPECIAL = None
+
+
+def _special_pts():
+    global _SPECIAL
+    if _SPECIAL is None:
+        pts = {(x, y) for x, y, *_ in pet.DEPOT_SIG} | set(pet.SUBTAB_PROBE.values()) | set(pet.BTN_BODY)
+        for c in range(5):
+            for r in range(4):
+                cx, cy = pet.CARD_X[c], pet.CARD_Y[r]
+                pts |= {(cx + px - 250, cy + dy) for px, dy, _ in pet.PAW} | {(cx + dx, cy + dy) for dx, dy in pet.CARD_SEL}
+        _SPECIAL = pts
+    return _SPECIAL
+
+
+def thumb_color(p):
+    """寵物格縮圖點的顏色：同名同等級固定、不同名差很多；空格 = 爪印底"""
+    if p is None:
+        return (170, 138, 92)
+    h = hashlib.md5(('%s/%s' % (p['name'], p['level'])).encode()).digest()
+    return (40 + h[0] % 180, 40 + h[1] % 180, 40 + h[2] % 180)
 
 
 def install(g):

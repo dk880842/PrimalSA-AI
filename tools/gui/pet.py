@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""寵物面板腳本化（P6：list / set-state / rest-all；store / take 留 P7）。計畫：notes/plan-scriptify.md §5。只用標準函式庫。
+"""寵物面板腳本化（P6：list / set-state / rest-all；P7：store / take）。計畫：notes/plan-scriptify.md §5。只用標準函式庫。
 
 用法（專案根目錄；WSL / Windows 原生指令相同；角色名 DKB0 / DKBO 都收，輸出用真名 DKBO）：
   uv run --no-project python tools/gui/pet.py list [--role DKBO|all] [--json]           # 唯讀：每格 名字 / 狀態 / 等級
   uv run --no-project python tools/gui/pet.py set-state DKBO 迪基格斯 出戰|等待|騎乘 [--slot N] [--allow-mount]
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
+  uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1]
+  uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N [--expect 迪基格斯]
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--timing
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
 
@@ -24,7 +26,12 @@
   73 禁止操作（騎寵 / 目標是騎乘鈕，沒給 --allow-mount）
   74 狀態點了沒變（多半是外掛鎖定戰寵：「你已鎖定戰寵，請取消後再操作」；或戰鬥中）→ 不自動去外掛解鎖（計畫 §9 第 9 條），只點 1 次
   78 戰鬥中（預設不動遇敵；--pause-encounter 才會關遇敵等戰鬥結束）
-  （75～77 留給 P7 store / take）
+  75 倉庫分頁 / 子分頁 / 按鈕文字（存入寵物 / 取出寵物）/ 選取 / 縮圖簽名不符 → 不點存取鈕（零點擊）
+  76 存 / 取後驗證失敗（**不重點**，請人看 snap；take 名字不符也是 76 / 72，不自動存回）
+  77 倉庫滿（store）或寵物欄滿（take）→ 零點擊
+  store 的硬性禁止（73，零存取點擊）：名字是 / 像騎寵（瑪斯貝卡，含 OCR 錯字）、狀態 = 騎乘、第 1 格（要 --allow-slot1 才放行）、名字讀不出來
+  store / take 的存入 / 取出鈕（530,697）每次呼叫最多單擊 1 次；只在「倉庫分頁特徵 + 個人 / 公共分頁 + 按鈕底色 + 按鈕 OCR 文字」全部吻合時才點
+  （注意：寵物分頁的「騎乘」鈕 532,702 與倉庫分頁的存入鈕 530,697 幾乎同位置，點錯分頁會換騎寵，所以按鈕前一定現場驗證）
 """
 import time
 
@@ -42,6 +49,7 @@ import uikit  # noqa: E402
 
 SRC = 'pet'
 EXIT_PANEL, EXIT_SELECT, EXIT_NAME, EXIT_FORBID, EXIT_NOCHANGE, EXIT_BATTLE = 70, 71, 72, 73, 74, 78
+EXIT_DEPOT, EXIT_VERIFY, EXIT_FULL = 75, 76, 77
 
 SLOT_X = 250
 SLOT_Y = [200, 322, 445, 567, 690]                  # 寵物欄 1～5 格
@@ -59,6 +67,29 @@ STATE_WAIT_S = 2.0
 POLL_S = 0.2
 CLICK_WAIT_MS = 250
 LAST: dict = {}
+
+# ---- 倉庫分頁（P-I6 實測 2026-10-11）----
+PET_TAB_XY, DEPOT_TAB_XY = (1365, 265), (1365, 440)            # 右側「寵物」/「倉庫」分頁
+SUBTAB_XY = {'personal': (897, 170), 'public': (1160, 170)}      # 個人 / 公共
+SUBTAB_PROBE = {'personal': (780, 170), 'public': (1250, 170)}   # 子分頁底色：亮 (251,219,135) / 暗 (171,127,84)（文字像素不穩，不要用 897 / 1160）
+DEPOT_SIG = [(1195, 690, 68, 112, 167, 24), (1215, 720, 72, 120, 179, 24)]    # 倉庫頁「擴容」藍鈕兩點（寵物分頁同位置是米色）
+DEPOT_BTN_XY = (530, 697)                                        # 存入寵物 / 取出寵物（同一顆鈕，依選取對象變字）；舊 skill 的取出 675,703 是錯的
+BTN_BOX = (440, 670, 180, 55)                                    # 按鈕文字 OCR 框：`-Light 150 -Zooms 2,3,4` 實測 6 / 6 讀對
+BTN_BODY = [(450, 680), (450, 715), (460, 697), (480, 672), (520, 672), (560, 672), (600, 680), (600, 715)]   # 按鈕本體（避開字）：存入 = 紅 (≈177,65,38)、取出 = 金 (≈185,125,62)
+CARD_X = [818, 924, 1030, 1136, 1242]                            # 倉庫格 5×4（私人倉庫 1/1，20 格）
+CARD_Y = [275, 381, 488, 594]                                    # 倉庫格中心（爪印 / 選取框用）
+CARD_CLICK_DY = 8                                                # 點擊略往下，離忠誠 ± 的禁區矩形（y 204～264）遠一點
+CARD_SEL = [(-43, -25), (-43, 0), (-43, 25)]                     # 選中框：左緣內側三點 ≈ (209,151,13)；沒選 = 暗棕
+THUMB_X, THUMB_DY = [250, 265, 280, 292], [-20, -8, 4, 12]       # 寵物格縮圖簽名點（避開左上狀態標 / 右下等級數字）
+THUMB_TOL, THUMB_NEED = 24, 14                                   # 每通道容差、16 點至少幾點相符
+STORE_WAIT_S = 3.0
+# 存入「戰鬥 / 騎乘狀態」寵物會跳「提示：當前寵物為戰鬥或騎乘狀態，確定要存入倉庫?」（P-I9 實測）：確定 615,557 / 取消 813,557 / ✕ 946,208
+CONFIRM_SIG = [(946, 208, 197, 73, 49, 24), (550, 545, 58, 105, 167, 24), (670, 545, 66, 113, 171, 24), (750, 545, 179, 69, 44, 24),
+               (870, 545, 193, 87, 53, 24), (700, 460, 243, 215, 179, 24)]
+CONFIRM_OK_XY, CONFIRM_CANCEL_XY = (615, 557), (813, 557)
+CONFIRM_BOX = (500, 335, 430, 110)
+CONFIRM = uikit.Panel('PETCONFIRM', None, CONFIRM_SIG, (946, 208))
+TAB_WAIT_S = 2.0
 
 BANNER_RETRIES, BANNER_WAIT_S = 2, 0.8
 OCR_NAME = [('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 120, '-Zooms', '2,3')]
@@ -270,6 +301,22 @@ def ocr_level_consensus():
     return rk[0][0] if rk and rk[0][1] >= 2 and (len(rk) == 1 or rk[0][1] > rk[1][1]) else None
 
 
+def resolve_name(name_rows, ctx: dict) -> tuple:
+    """名字框的點陣 → (名字或 None, 'tpl' / 'ocr' / None, OCR 原文清單)。樣板優先；沒樣板才 OCR（精確命中 Monster 表才學）"""
+    tpl = ctx['tpl']
+    label, sc, _ = petmatch.match_whole('name', name_rows, tpl)
+    if label:
+        return label, 'tpl', None
+    if petmatch.ink(name_rows) >= petmatch.MIN_INK['name']:
+        nm, raw, exact = ocr_pet_name()
+        if nm and exact and ctx['learn']:
+            again, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
+            if again and again[0] == name_rows and petmatch.learn_whole('name', nm, name_rows, tpl, log):    # 前後兩次截圖相同才學（避免畫面還沒換）
+                ctx['dirty'] = True
+        return nm, ('ocr' if nm else None), raw
+    return None, None, None
+
+
 def read_slot(i: int, ctx: dict) -> dict:
     """目前選中的寵物（已確認是第 i 格）→ {'slot','name','via','ocr','state','level','lv_via','mountlike'}"""
     tpl = ctx['tpl']
@@ -289,16 +336,9 @@ def read_slot(i: int, ctx: dict) -> dict:
         return d
     d['state'] = btn_state({s: extra[2 * k:2 * k + 2] for k, s in enumerate(STATES)})
     name_rows, lvl_rows = rows
-    label, sc, _ = petmatch.match_whole('name', name_rows, tpl)
-    if label:
-        d['name'], d['via'] = label, 'tpl'
-    elif petmatch.ink(name_rows) >= petmatch.MIN_INK['name']:
-        nm, raw, exact = ocr_pet_name()
-        d['name'], d['via'], d['ocr'] = nm, ('ocr' if nm else None), raw
-        if nm and exact and ctx['learn']:
-            again, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
-            if again and again[0] == name_rows and petmatch.learn_whole('name', nm, name_rows, tpl, log):    # 前後兩次截圖相同才學（避免畫面還沒換）
-                ctx['dirty'] = True
+    d['name'], d['via'], raw = resolve_name(name_rows, ctx)
+    if raw:
+        d['ocr'] = raw
     lv = petmatch.read_level(lvl_rows, tpl)
     if lv is not None:
         d['level'], d['lv_via'] = lv, 'tpl'
@@ -384,6 +424,9 @@ class Session:
         uikit.mark('open PET')
         if not ok:
             self.rc = uikit_fail(EXIT_PANEL, '寵物面板打不開（沒看到主畫面 HUD 或面板特徵）；沒點任何面板內座標')
+            return self
+        if depot_visible() and not goto_pet_tab():
+            self.rc = uikit_fail(EXIT_PANEL, '面板停在倉庫分頁且切不回寵物分頁')
         return self
 
     def __exit__(self, *exc):
@@ -631,6 +674,482 @@ def rest_all(role_arg: str = 'all', keep=None, only=None, dry_run: bool = False,
     return _out(final_rc, info, t0, '有出戰寵名字讀不出來（72），沒動它' if final_rc else '')
 
 
+# ================= 倉庫：store / take（P7）=================
+def is_tab_on(c) -> bool:
+    return c[0] > 235 and c[1] > 200 and 110 < c[2] < 165
+
+
+def is_card_sel(cols) -> bool:
+    """左緣內側三點至少兩點橘黃；選取框會呼吸閃動，實測在 (209,151,13) ～ (249,185,1) 之間"""
+    return sum(1 for c in cols if c[0] > 195 and 140 < c[1] < 200 and c[2] < 30) >= 2
+
+
+def is_body_store(c) -> bool:
+    return c[0] > 150 and c[1] < 90 and c[2] < 70
+
+
+def is_body_take(c) -> bool:
+    return c[0] > 160 and c[1] > 100 and c[2] < 90
+
+
+def body_kind(cols):
+    """按鈕本體 8 點：全部紅 → 'store'；全部金 → 'take'；其他（混色 / 不是這顆鈕）→ None"""
+    if cols and all(is_body_store(c) for c in cols):
+        return 'store'
+    if cols and all(is_body_take(c) for c in cols):
+        return 'take'
+    return None
+
+
+def thumb_pts(i: int) -> list:
+    return [(x, SLOT_Y[i] + dy) for dy in THUMB_DY for x in THUMB_X]
+
+
+def thumb_same(a, b) -> bool:
+    if not a or not b or len(a) != len(b):
+        return False
+    ok = sum(1 for c, d in zip(a, b) if all(abs(u - v) <= THUMB_TOL for u, v in zip(c, d)))
+    return ok >= THUMB_NEED
+
+
+def _card_pts() -> list:
+    pts = []
+    for cy in CARD_Y:
+        for cx in CARD_X:
+            pts.extend((cx + x - 250, cy + dy) for x, dy, _ in PAW)
+            pts.extend((cx + dx, cy + dy) for dx, dy in CARD_SEL)
+    return pts
+
+
+def scan_depot() -> dict | None:
+    """一次 pixel → {'sig': 倉庫分頁特徵, 'tab': 'personal'/'public'/None, 'btn': 'store'/'take'/None（本體底色）,
+    'empty': [20 格是否空], 'sel': [20 格是否選中]}；讀不到 None。倉庫格依 CARD_Y 列優先排列（index 0 起算）"""
+    pts = [(x, y) for x, y, *_ in DEPOT_SIG] + [SUBTAB_PROBE['personal'], SUBTAB_PROBE['public']] + BTN_BODY + _card_pts()
+    cols = uikit.px(pts)
+    if cols is None:
+        return None
+    k = 0
+    sig = all(uikit.screen_sigs.close(c, (r, g, b), t) for c, (_, _, r, g, b, t) in zip(cols[k:k + len(DEPOT_SIG)], DEPOT_SIG))
+    k += len(DEPOT_SIG)
+    left, right = is_tab_on(cols[k]), is_tab_on(cols[k + 1])
+    k += 2
+    tab = 'personal' if left and not right else 'public' if right and not left else None
+    btn = body_kind(cols[k:k + len(BTN_BODY)])
+    k += len(BTN_BODY)
+    empty, sel = [], []
+    for _ in range(20):
+        empty.append(is_paw(cols[k:k + len(PAW)]))
+        k += len(PAW)
+        sel.append(is_card_sel(cols[k:k + len(CARD_SEL)]))
+        k += len(CARD_SEL)
+    return {'sig': sig, 'tab': tab, 'btn': btn, 'empty': empty, 'sel': sel}
+
+
+def depot_visible() -> bool:
+    d = scan_depot()
+    return bool(d and d['sig'])
+
+
+def btn_text() -> str | None:
+    """按鈕文字 OCR：'store'（存入寵物）/ 'take'（取出寵物）/ None（讀不出、或兩種都出現 = 不確定）。最多讀 2 次"""
+    pw = _petwatch()
+    for _ in range(2):
+        lines = pw.ocr(BTN_BOX, '-Light', 150, '-Zooms', '2,3,4')
+        has_s, has_t = any('存入' in t for t in lines), any('取出' in t for t in lines)
+        if has_s != has_t:
+            return 'store' if has_s else 'take'
+    return None
+
+
+def card_xy(idx: int) -> tuple:
+    return CARD_X[idx % 5], CARD_Y[idx // 5]
+
+
+def click_card(idx: int, note: str) -> bool:
+    x, y = card_xy(idx)
+    return click(x, y + CARD_CLICK_DY, note)
+
+
+def goto_pet_tab() -> bool:
+    """倉庫分頁 → 點「寵物」分頁並等倉庫特徵消失。面板必須開著（click 會驗）；已在寵物分頁不點"""
+    d = scan_depot()
+    if d is None:
+        return False
+    if not d['sig']:
+        return True
+    for _ in range(2):
+        if not click(PET_TAB_XY[0], PET_TAB_XY[1], 'pet 切回寵物分頁'):
+            return False
+        end = uikit.clock() + TAB_WAIT_S
+        while uikit.clock() < end:
+            d = scan_depot()
+            if d is not None and not d['sig']:
+                return True
+            uikit.sleep(POLL_S)
+    return False
+
+
+def open_depot(depot: str) -> tuple:
+    """寵物分頁 → 倉庫分頁 → 指定子分頁（個人 / 公共），每步現場驗證。→ (rc, scan_depot 結果或 None)。rc 75 = 沒切到（此時沒點存取鈕）"""
+    for attempt in range(2):
+        d = scan_depot()
+        if d is not None and d['sig']:
+            break
+        if not click(DEPOT_TAB_XY[0], DEPOT_TAB_XY[1], 'pet 開倉庫分頁'):
+            return uikit_fail(EXIT_PANEL, '寵物面板特徵不在，沒點倉庫分頁'), None
+        end = uikit.clock() + TAB_WAIT_S
+        while uikit.clock() < end:
+            d = scan_depot()
+            if d is not None and d['sig']:
+                break
+            uikit.sleep(POLL_S)
+        if d is not None and d['sig']:
+            break
+    else:
+        uikit.snap('pet-depot-tab')
+        return uikit_fail(EXIT_DEPOT, '點了「倉庫」分頁但看不到倉庫特徵（擴容鈕藍色）；沒點存取鈕'), None
+    if d['tab'] != depot:
+        for attempt in range(2):
+            if not click(SUBTAB_XY[depot][0], SUBTAB_XY[depot][1], f'pet 倉庫 {depot} 子分頁'):
+                return uikit_fail(EXIT_PANEL, '寵物面板特徵不在，沒點子分頁'), None
+            end = uikit.clock() + TAB_WAIT_S
+            while uikit.clock() < end:
+                d = scan_depot()
+                if d is not None and d['sig'] and d['tab'] == depot:
+                    break
+                uikit.sleep(POLL_S)
+            if d is not None and d['sig'] and d['tab'] == depot:
+                break
+        else:
+            uikit.snap('pet-depot-subtab')
+            return uikit_fail(EXIT_DEPOT, f'切不到倉庫「{depot}」子分頁（讀到 {d and d["tab"]}）；沒點存取鈕'), None
+    uikit.mark(f'depot {depot}')
+    return 0, d
+
+
+def read_name_now(ctx: dict, retries: int = BANNER_RETRIES, wait: float = BANNER_WAIT_S):
+    """名字框現在顯示的名字（寵物分頁 = 選中寵物；倉庫分頁 = 選中的寵物 / 倉庫卡）。EXP 橫幅 / 「完成對寵物的操作」浮字蓋住時等 wait 秒重讀。→ (名字或 None, 原文)"""
+    for attempt in range(retries + 1):
+        rows, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
+        if rows is None:
+            return None, None
+        nm, via, raw = resolve_name(rows[0], ctx)
+        if nm or attempt == retries or petmatch.ink(rows[0]) < petmatch.MIN_INK['name']:
+            return nm, raw
+        uikit.sleep(wait)
+    return None, None
+
+
+def guard_store(sl: dict, allow_slot1: bool) -> str | None:
+    """存倉硬性禁止：回拒絕原因（None = 可以）。沒有 --allow-mount 這種旗標：騎寵絕不存"""
+    nm = sl.get('name')
+    if not nm:
+        return '名字讀不出來（不猜，拒絕存倉）'
+    if sl.get('state') == '騎乘':
+        return f'{nm} 正在騎乘中（騎寵），絕不存倉'
+    if sl.get('mountlike') or uikit.is_mount_like(nm) or nm in uikit.MOUNTS:
+        return f'{nm} 是 / 像騎寵（{"/".join(uikit.MOUNTS)}），絕不存倉'
+    if sl.get('slot') == 1 and not allow_slot1:
+        return '第 1 格預設禁止存倉（騎寵位置）；確定要存加 --allow-slot1'
+    if sl.get('state') is None:
+        return f'{nm} 的狀態讀不出來（無法排除騎乘），拒絕存倉'
+    return None
+
+
+def btn_ready(kind: str) -> tuple:
+    """存取鈕按下前最後一關：倉庫特徵 + 按鈕本體底色 + 按鈕 OCR 文字三者一致 = kind（'store'/'take'）。→ (ok, 說明)"""
+    d = scan_depot()
+    if d is None or not d['sig']:
+        return False, '倉庫分頁特徵不在'
+    if d['btn'] != kind:
+        return False, f'按鈕底色是 {d["btn"]}（要 {kind}）'
+    t = btn_text()
+    if t != kind:
+        return False, f'按鈕文字 OCR 是 {t}（要 {kind}）'
+    return True, ''
+
+
+def confirm_text_ok() -> bool:
+    """確認視窗文字軟檢查：讀得到字就必須含「存入」或「倉庫」；讀不到（OCR 空）不擋（視窗特徵 + 事前已確認寵物不是騎寵）"""
+    pw = _petwatch()
+    seen = []
+    for opts in (('-Dark', 120, '-Zooms', '2,3'), ('-Dark', 0, '-Zooms', '2,3,4')):
+        seen += [t for t in pw.ocr(CONFIRM_BOX, *opts) if t.strip()]
+        if any('存入' in t or '倉庫' in t or '戰鬥' in t for t in seen):
+            return True
+    return not seen
+
+
+def handle_confirm(info: dict) -> bool:
+    """存入戰鬥狀態寵物的確認視窗：特徵在 → 驗文字 → 單擊「確定」一次；文字不對就點「取消」。回 True = 這次有處理"""
+    if not uikit.is_open(CONFIRM):
+        return False
+    info['confirm_seen'] = True
+    if confirm_text_ok():
+        if uikit.safe_click(CONFIRM_OK_XY[0], CONFIRM_OK_XY[1], CONFIRM, note='pet 存入確認 → 確定'):
+            info['confirm_clicked'] = True
+    else:
+        uikit.snap('pet-confirm-text')
+        uikit.safe_click(CONFIRM_CANCEL_XY[0], CONFIRM_CANCEL_XY[1], CONFIRM, note='pet 存入確認文字不符 → 取消')
+        info['confirm_cancelled'] = True
+    return True
+
+
+def wait_counts(depot: str, want_pets_empty: int, want_cards_filled: int, info: dict | None = None, allow_confirm: bool = False):
+    """等寵物欄空格數 / 倉庫已用格數同時到目標；→ (成功, 寵物 scan_frames, scan_depot)。
+    allow_confirm=True（store）：看到「戰鬥 / 騎乘狀態存入確認」視窗就處理一次（單擊確定）；take 不預期有視窗 → 看到就取消並失敗"""
+    end = uikit.clock() + STORE_WAIT_S
+    f = d = None
+    handled = False
+    while True:
+        if not handled and info is not None and uikit.is_open(CONFIRM):
+            if allow_confirm:
+                handled = handle_confirm(info)
+                end = uikit.clock() + STORE_WAIT_S
+            else:
+                info['confirm_seen'] = True
+                uikit.snap('pet-take-confirm')
+                uikit.safe_click(CONFIRM_CANCEL_XY[0], CONFIRM_CANCEL_XY[1], CONFIRM, note='pet take 出現未預期的提示 → 取消')
+                info['confirm_cancelled'] = True
+                return False, f, d
+        f, d = scan_frames(), scan_depot()
+        if f and d and d['sig'] and d['tab'] == depot and sum(f['empty']) == want_pets_empty and (20 - sum(d['empty'])) == want_cards_filled:
+            return True, f, d
+        if uikit.clock() >= end:
+            return False, f, d
+        uikit.sleep(POLL_S)
+
+
+def _depot_prologue(role_arg: str, depot: str, cmd: str) -> tuple:
+    roles = role_list(role_arg)
+    info = {'role': roles[0] if roles and len(roles) == 1 else None, 'depot': depot, 'cmd': cmd, 'clicked': False}
+    if not roles or len(roles) != 1:
+        print(f'pet：角色 {role_arg!r} 不認得或不是單一角色', file=sys.stderr)
+        return None, info
+    if depot not in ('personal', 'public'):
+        print(f'pet：--depot {depot!r} 不認得（personal / public）', file=sys.stderr)
+        return None, info
+    return roles[0], info
+
+
+def store(role_arg: str, pet_text: str, depot: str = 'personal', slot_no: int | None = None, allow_slot1: bool = False,
+          pause: bool = False, learn: bool = True) -> int:
+    """寵物 → 倉庫（計畫 §5.3）。硬性禁止（騎寵 / 騎乘 / 第 1 格 / 名字讀不出）→ 73 且完全不碰倉庫與存入鈕；存入鈕每次最多點 1 次"""
+    t0 = time.time()
+    role, info = _depot_prologue(role_arg, depot, 'store')
+    if role is None:
+        return _out(uikit.EXIT_USAGE, info, t0, '角色或倉庫參數不對')
+    want = uikit.snap_pet(pet_text)
+    info['pet'] = want
+    if uikit.is_mount_like(pet_text) or (want and want in uikit.MOUNTS):         # 連名字都像騎寵（含 OCR 錯字「瑪斯貝卞」）→ 完全不開面板
+        rc = uikit_fail(EXIT_FORBID, f'拒絕存倉：{pet_text!r} 是 / 像騎寵（{"/".join(uikit.MOUNTS)}），絕不存倉；零點擊')
+        return _out(rc, info, t0, '騎寵不能存倉')
+    if not want:
+        rc = uikit_fail(EXIT_NAME, f'寵物名 {pet_text!r} 對不到 Monster 表，拒絕')
+        return _out(rc, info, t0, '寵物名對不上')
+    ctx = load_ctx(learn)
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            rc = _store_body(role, want, depot, slot_no, allow_slot1, ctx, info)
+        finally:
+            save_ctx(ctx)
+            _back_to_pet_tab()
+    return _out(rc, info, t0, info.get('msg', ''))
+
+
+def _back_to_pet_tab() -> None:
+    try:
+        if uikit.is_open(uikit.PET):
+            goto_pet_tab()
+    except Exception:
+        pass
+
+
+def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ctx: dict, info: dict) -> int:
+    def bad(rc, msg):
+        info['msg'] = msg
+        return uikit_fail(rc, msg)
+
+    rc, slots = list_role(role, ctx)
+    info['slots'] = slots
+    if rc:
+        return rc
+    sl, why = find_slot(slots, want, slot_no)
+    if sl is None:
+        return bad(EXIT_NAME, why)
+    i = sl['slot'] - 1
+    info['slot'] = sl['slot']
+    reason = guard_store(sl, allow_slot1)
+    if reason:
+        return bad(EXIT_FORBID, f'拒絕存倉：{reason}')
+    pets_empty = sum(1 for x in slots if x.get('empty'))
+    # 離開寵物分頁前：重新選該格、讀名字 / 狀態、記縮圖簽名（目標格 + 第 1 格騎寵位）
+    f = scan_frames()
+    if f is None:
+        return bad(EXIT_PANEL, '讀不到面板像素')
+    rc = select_slot(i, f)
+    if rc:
+        return rc
+    cur = read_slot(i, ctx)
+    reason = guard_store({**sl, **{k: cur.get(k) for k in ('name', 'state', 'mountlike')}}, allow_slot1)
+    if reason or cur.get('name') != want:
+        return bad(EXIT_FORBID if reason else EXIT_NAME, f'選中第 {sl["slot"]} 格後重讀：{reason or "名字是 " + str(cur.get("name"))}，不存')
+    pre_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
+    if pre_cols is None:
+        return bad(EXIT_PANEL, '讀不到縮圖簽名')
+    pre_t, pre_mount = pre_cols[:16], pre_cols[16:]
+    # 倉庫分頁 → 個人 / 公共
+    rc, d = open_depot(depot)
+    if rc:
+        info['msg'] = '倉庫分頁沒切成功'
+        return rc
+    if not any(d['empty']):
+        return bad(EXIT_FULL, f'{depot} 倉庫滿了（20 / 20），沒有點存入鈕')
+    depot_before = 20 - sum(d['empty'])
+    free_idx = d['empty'].index(True)
+    # 按鈕前最後一關：該格被選中、名字仍是目標、縮圖沒變（沒補位換人）、騎寵位沒動、按鈕底色 + 文字 = 存入
+    f = scan_frames()
+    if f is None or not (f['sel'] == [k == i for k in range(5)]):
+        rc = select_slot(i, f or {'sel': [False] * 5})
+        if rc:
+            return rc
+    nm, _ = read_name_now(ctx)
+    if nm != want:
+        return bad(EXIT_DEPOT, f'倉庫分頁中選取的是 {nm}（要 {want}），不點存入')
+    now_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
+    if now_cols is None or not thumb_same(pre_t, now_cols[:16]) or (i != 0 and not thumb_same(pre_mount, now_cols[16:])):
+        uikit.snap('pet-store-thumb')
+        return bad(EXIT_DEPOT, '縮圖簽名與切分頁前不符（寵物欄變動 / 補位換人？），不點存入')
+    ok, why = btn_ready('store')
+    if not ok:
+        uikit.snap('pet-store-btn')
+        return bad(EXIT_DEPOT, f'存入鈕驗證失敗：{why}；不點')
+    # 單擊一次
+    if not click(DEPOT_BTN_XY[0], DEPOT_BTN_XY[1], f'pet store {role} {want} → {depot}'):
+        return bad(EXIT_PANEL, '面板特徵不在，沒點存入鈕')
+    info['clicked'] = True
+    uikit.mark('store click')
+    ok, f2, d2 = wait_counts(depot, pets_empty + 1, depot_before + 1, info, allow_confirm=True)
+    if not ok:
+        path = uikit.snap('pet-store-nochange')
+        return bad(EXIT_VERIFY, f'點了存入但寵物欄 / 倉庫張數沒照預期變（寵物空格 {f2 and sum(f2["empty"])}→要 {pets_empty + 1}；倉庫 {d2 and 20 - sum(d2["empty"])}→要 {depot_before + 1}）：可能戰鬥中被擋或倉庫滿；不重點，請人看截圖{"：" + path if path else ""}')
+    # 事後：騎寵位沒動；新倉庫格的名字 = want
+    m_cols = uikit.px(thumb_pts(0))
+    if i != 0 and (m_cols is None or not thumb_same(pre_mount, m_cols)):        # 存第 1 格（--allow-slot1）時後面的寵物會補位上來，不比
+        uikit.snap('pet-store-mount')
+        return bad(EXIT_VERIFY, '存入後第 1 格（騎寵）縮圖變了！請人立刻看截圖確認')
+    new_idx = next((k for k in range(20) if not d2['empty'][k] and d['empty'][k]), free_idx)
+    info['depot_index'] = new_idx + 1
+    if click_card(new_idx, f'pet 驗證倉庫第 {new_idx + 1} 格名字'):
+        g, okc = wait_for_card(new_idx, depot)
+        nm2, _ = read_name_now(ctx, 4, 1.0) if okc else (None, None)
+        info['depot_name'] = nm2
+        if nm2 and nm2 != want:
+            return bad(EXIT_VERIFY, f'存進倉庫第 {new_idx + 1} 格的是 {nm2}，不是 {want}！請人看截圖')
+    uikit.mark('store verified')
+    print(f'pet：{role} 的 {want}（原第 {sl["slot"]} 格）存入{"個人" if depot == "personal" else "公共"}倉庫第 {new_idx + 1} 格')
+    return 0
+
+
+def wait_for_card(idx: int, depot: str):
+    end = uikit.clock() + SELECT_WAIT_S
+    d = None
+    while True:
+        d = scan_depot()
+        if d and d['sig'] and d['tab'] == depot and d['sel'] == [k == idx for k in range(20)]:
+            return d, True
+        if uikit.clock() >= end:
+            return d, False
+        uikit.sleep(POLL_S)
+
+
+def take(role_arg: str, depot: str = 'personal', index: int | None = None, expect: str | None = None,
+         pause: bool = False, learn: bool = True) -> int:
+    """倉庫第 index 格（1 起算）→ 寵物欄。名字框會顯示選中倉庫卡的名字：有 --expect 時先驗名字（不符不點）、取出後再驗新寵物名字（不符 76，不自動存回）"""
+    t0 = time.time()
+    role, info = _depot_prologue(role_arg, depot, 'take')
+    if role is None:
+        return _out(uikit.EXIT_USAGE, info, t0, '角色或倉庫參數不對')
+    if index is None or not 1 <= index <= 20:
+        print('pet：--index 要 1～20（倉庫格，列優先、1 起算）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '--index 不對')
+    want = None
+    if expect:
+        want = uikit.snap_pet(expect)
+        if not want:
+            rc = uikit_fail(EXIT_NAME, f'--expect {expect!r} 對不到 Monster 表，拒絕')
+            return _out(rc, info, t0, '寵物名對不上')
+    info.update(index=index, expect=want)
+    ctx = load_ctx(learn)
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            rc = _take_body(role, depot, index - 1, want, ctx, info)
+        finally:
+            save_ctx(ctx)
+            _back_to_pet_tab()
+    return _out(rc, info, t0, info.get('msg', ''))
+
+
+def _take_body(role: str, depot: str, idx: int, want, ctx: dict, info: dict) -> int:
+    def bad(rc, msg):
+        info['msg'] = msg
+        return uikit_fail(rc, msg)
+
+    rc, slots = list_role(role, ctx)
+    info['slots'] = slots
+    if rc:
+        return rc
+    free_slots = [x['slot'] for x in slots if x.get('empty')]
+    if not free_slots:
+        return bad(EXIT_FULL, '寵物欄 5 / 5 滿了，沒有點取出鈕')
+    pets_empty = len(free_slots)
+    rc, d = open_depot(depot)
+    if rc:
+        info['msg'] = '倉庫分頁沒切成功'
+        return rc
+    if d['empty'][idx]:
+        return bad(EXIT_NAME, f'{depot} 倉庫第 {idx + 1} 格是空的，沒有點')
+    depot_before = 20 - sum(d['empty'])
+    if not click_card(idx, f'pet 選倉庫第 {idx + 1} 格'):
+        return bad(EXIT_PANEL, '面板特徵不在，沒點倉庫格')
+    g, ok = wait_for_card(idx, depot)
+    if not ok:
+        uikit.snap('pet-take-select')
+        return bad(EXIT_DEPOT, f'點了倉庫第 {idx + 1} 格但選取框沒到那格；不點取出')
+    nm, raw = read_name_now(ctx)
+    info['depot_name'] = nm
+    if want and nm and nm != want:
+        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {want}；沒取出（請人確認 --index）')
+    ok, why = btn_ready('take')
+    if not ok:
+        uikit.snap('pet-take-btn')
+        return bad(EXIT_DEPOT, f'取出鈕驗證失敗：{why}；不點')
+    if not click(DEPOT_BTN_XY[0], DEPOT_BTN_XY[1], f'pet take {role} 倉庫第 {idx + 1} 格 {nm or ""}'):
+        return bad(EXIT_PANEL, '面板特徵不在，沒點取出鈕')
+    info['clicked'] = True
+    uikit.mark('take click')
+    ok, f2, d2 = wait_counts(depot, pets_empty - 1, depot_before - 1, info)
+    if not ok:
+        path = uikit.snap('pet-take-nochange')
+        return bad(EXIT_VERIFY, f'點了取出但寵物欄 / 倉庫張數沒照預期變；不重點，請人看截圖{"：" + path if path else ""}')
+    new_slot = free_slots[0]
+    info['slot'] = new_slot
+    rc = select_slot(new_slot - 1, f2)
+    if rc:
+        return bad(EXIT_VERIFY, f'取出後選不到新寵物所在的第 {new_slot} 格')
+    nm2, _ = read_name_now(ctx, 4, 1.0)
+    info['name'] = nm2
+    if want and nm2 != want:
+        return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {want}！停手交人處理，不自動存回')
+    uikit.mark('take verified')
+    print(f'pet：{role} 倉庫第 {idx + 1} 格 → 寵物欄第 {new_slot} 格：{nm2 or nm or "?"}（取出的寵物預設「等待」）')
+    return 0
+
+
 def main() -> int:
     import winenv
     winenv.enable_server()
@@ -656,6 +1175,17 @@ def main() -> int:
     p.add_argument('--keep', default=None, help='不動的寵物名（逗號分隔；預設 瑪斯貝卡）')
     p.add_argument('--only', default=None, help='只處理這些名字（逗號分隔）')
     p.add_argument('--dry-run', action='store_true', help='只列出會改哪些（會開面板、選取讀名字，不按狀態鈕）')
+    p = sub.add_parser('store', help='寵物 → 倉庫（騎寵 / 第 1 格 / 騎乘中一律拒絕）', parents=[cp])
+    p.add_argument('role')
+    p.add_argument('pet')
+    p.add_argument('--depot', default='personal', choices=['personal', 'public'])
+    p.add_argument('--slot', type=int, default=None, help='同名多隻時指定第幾格（1 起算）')
+    p.add_argument('--allow-slot1', action='store_true', help='允許存第 1 格的寵物（仍擋騎寵 / 騎乘中）')
+    p = sub.add_parser('take', help='倉庫第 N 格 → 寵物欄（取出的寵物預設等待）', parents=[cp])
+    p.add_argument('role')
+    p.add_argument('--depot', default='personal', choices=['personal', 'public'])
+    p.add_argument('--index', type=int, required=True, help='倉庫格 1～20（列優先，每列 5 格）')
+    p.add_argument('--expect', default=None, help='預期的寵物名（取出前 / 後都驗，不符不自動存回）')
     a = ap.parse_args()
     if a.timing:
         uikit.timing_start()
@@ -667,6 +1197,10 @@ def main() -> int:
         return list_roles(a.role, a.json, a.pause_encounter, learn)
     if a.cmd == 'set-state':
         return set_state(a.role, a.pet, a.state, a.slot, a.allow_mount, a.pause_encounter, learn)
+    if a.cmd == 'store':
+        return store(a.role, a.pet, a.depot, a.slot, a.allow_slot1, a.pause_encounter, learn)
+    if a.cmd == 'take':
+        return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn)
     split = lambda t: None if t is None else [x.strip() for x in t.split(',') if x.strip()]    # noqa: E731
     return rest_all(a.role, split(a.keep), split(a.only), a.dry_run, a.pause_encounter, learn)
 
