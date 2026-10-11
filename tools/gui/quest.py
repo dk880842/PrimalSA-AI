@@ -229,6 +229,11 @@ def list_signature() -> list[tuple]:
     return gui('pixel', pts).split()
 
 
+NO_SCROLL_ROWS_MAX = 1               # 目前頁標題列 ≤ 這個數且目標不在 → 列表沒有捲動空間（一頁至少放得下 2 張卡），不捲、一輪判不在
+LAST_SCAN_NO_SCROLL = False          # 最近一次 track_task 是否因「沒有捲動空間」直接判目標不在（呼叫端據此一輪就判任務完成）
+_PAGE_ROWS_N = None                  # 最近一次 OCR 讀到的標題列數
+
+
 class _Interrupted(Exception):
     """掃描途中畫面不再是主畫面（跳出對話 / 戰鬥 / 領獎）"""
 
@@ -253,6 +258,8 @@ def _find_on_page(want: str, mode: str) -> int | None:
         time.sleep(1.0)
         rows = read_list_titles()
     log(f'追蹤列表標題：{[r["texts"][0] for r in rows]}')
+    global _PAGE_ROWS_N
+    _PAGE_ROWS_N = len(rows)
     for row in rows:
         if row['y'] <= LIST_Y_MAX and any(match_title(want, t) for t in row['texts']):
             _tm_learn(want, row['y'])                      # OCR 認出了 → 存標題樣板，下次不必 OCR
@@ -260,11 +267,26 @@ def _find_on_page(want: str, mode: str) -> int | None:
     return None
 
 
+def no_scroll_room(mode: str) -> bool:
+    """目前頁沒找到目標時：列表是否沒有捲動空間（標題列數 1 張以內、且至少讀到 1 張 = 列表有畫出來）。
+    tpl 模式沒讀過標題，補讀一次 OCR 列數（約 3～7 秒，仍比捲兩輪快）。"""
+    n = _PAGE_ROWS_N
+    if n is None:
+        n = len(read_list_titles())
+    return 1 <= n <= NO_SCROLL_ROWS_MAX
+
+
 def _scan_track(want: str, mode: str, max_scrolls: int) -> tuple:
     """掃一遍追蹤列表找 want（先看目前頁 → 往上捲到頂 → 往下捲到底）→ (y 或 None, 上捲格數, 下捲格數)；畫面不是主畫面 → _Interrupted"""
     sig = list_signature()
+    global _PAGE_ROWS_N, LAST_SCAN_NO_SCROLL
+    _PAGE_ROWS_N = None
     y = _find_on_page(want, mode)
     ups = pages = 0
+    if y is None and no_scroll_room(mode):
+        LAST_SCAN_NO_SCROLL = True
+        log(f'追蹤列表只有 {_PAGE_ROWS_N} 張卡且沒有「{want}」→ 沒有捲動空間，不捲')
+        return None, 0, 0
     if y is None:
         while ups < max_scrolls:                       # 往上到頂
             moved, sig = scroll_list(SCROLL_DOWN, f'任務追蹤列表往上捲一格找「{want}」', sig)
@@ -308,6 +330,8 @@ def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | N
     t0 = time.time()
     y = None
     ups = pages = 0
+    global LAST_SCAN_NO_SCROLL
+    LAST_SCAN_NO_SCROLL = False
     try:
         for mode in modes:
             y, ups, pages = _scan_track(want, mode, max_scrolls)
@@ -1618,9 +1642,9 @@ def _main() -> int:
                     tracked, track_t = True, time.time()
                     task_miss = 0
                 else:
-                    if rewards:                      # 領過獎勵又找不到 = 完成
+                    if rewards or LAST_SCAN_NO_SCROLL:   # 領過獎勵又找不到 = 完成；追蹤欄只有別的任務、沒有捲動空間 = 一輪就判完成（2026-10-11 龍的巢穴：捲兩輪浪費 1 分多）
                         shot = snap('task-done')
-                        event(f'追蹤列表整個掃完沒有「{a.task}」，且已領過獎勵 → 任務完成', shot)
+                        event(f'追蹤列表整個掃完沒有「{a.task}」，' + ('且已領過獎勵' if rewards else '追蹤欄無捲動空間') + ' → 任務完成', shot)
                         print(f'任務完成：{a.task}', flush=True)
                         return 0
                     task_miss += 1

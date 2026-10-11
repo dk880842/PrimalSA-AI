@@ -191,3 +191,5 @@
   ①自動走路不計時：quest.py `WalkClock`——Auto Walking（`walking`，中途短暫 unknown 1～2 次又回 walking 也算）不耗 `--max-seconds`，只有連續非 walking 才計；單次連續巡路上限 `WALK_CAP_S` = 900 秒防卡死；結束印「走路不計時 N 秒」，questrun 把 N 加回 t0（不計入 `--max-min`）、子程序逾時改 slice + 900 + 120。②對話 / 領獎結束後第一個動作是點追蹤欄任務卡片（`post_track_try`，標題相符才點）；卡片不在或點了約 5 秒沒反應才改找黃問號（再失敗才 exit 3）；開機 / 一般閒置仍是先找黃問號。③questdetail 一次捲「可見列數 − 1 列」（`page_dy` 5 列 ≈ dy 147，舊 100），捲後上一頁最後一列沒出現在新頁（`overlaps`）就往上捲回、改 dy 100 小步重捲；結果 `fallbacks`。④隊伍檢查開面板後 `read_team_labels_stable`：連 2 次相同且非全「不在隊」才採用，最多 1.5 秒（16:31 5 人全讀成不在隊 → slice 30）。⑤收底部「關閉」列點一下後輪詢約 3 秒（途中戰鬥已結束 → 不再點）；`uikit.open_panel_ex` 點開啟鈕後至少隔 `RECLICK_S` = 2.5 秒才准再點第 2 下（原本 1 秒內連點）。⑥questrun：quest.py 回 0 且 tail 有「時間到」→ 不開詳情，直接下一片；完成由下一片的「任務完成」或回 5 才讀詳情。
   **實機要確認**：WALK 計時是否真能涵蓋整段巡路（`walking` 判斷靠畫面中央「Auto Walking」字樣）、`page_dy` 在實機不漏列（看 questdetail `fallbacks`）、對話後先追蹤是否比先找黃問號順。
 - 離線測試：test_questrun.py / test_questdefs.py / test_questdetail.py（task_status）。
+
+- **追蹤欄無捲動空間 = 一輪判完成（2026-10-11 龍的巢穴）**：`track_task` 目前頁沒有目標且標題列 ≤ 1 張（`NO_SCROLL_ROWS_MAX`；一頁至少放 2 張卡）→ 不捲，`LAST_SCAN_NO_SCROLL` 立旗，quest.py 直接印「任務完成」退出 0（原本上下各捲一輪約 1 分多）。龍的巢穴（questdefs 2024）有 3 場 BOSS 任務戰（疾速 / 剛氣 / 鋼格之龍），舊紀錄「無戰鬥」不對。

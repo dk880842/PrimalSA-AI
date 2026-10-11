@@ -446,6 +446,28 @@ clicks.clear()
 check('track_task：目前頁是別的任務（漆黑洞窟二轉）→ 不點它；沒找到回 False 且不點任何卡片', quest.track_task('漆黑洞窟(二轉)') is False and not any('click 205' in str(c) for c in clicks))
 (quest.gui, quest.ensure_task_tab, quest._tm_has, quest._find_on_page, quest.scroll_list, quest.list_signature, quest.event, quest.log) = _sv
 
+# ---- 追蹤欄只有 1 張別的任務 → 沒有捲動空間：不捲、旗標立起（龍的巢穴完成判斷太慢 2026-10-11）----
+_sv2 = (quest.gui, quest.ensure_task_tab, quest._tm_has, quest._find_on_page, quest.scroll_list, quest.list_signature, quest.event, quest.log, quest.read_list_titles)
+scrolls.clear()
+quest.gui = lambda *a, **k: ''
+quest.ensure_task_tab = lambda: None
+quest._tm_has = lambda w: False
+quest.list_signature = lambda: 'sig'
+quest.event = lambda *a, **k: None
+quest.log = lambda *a, **k: None
+quest.scroll_list = lambda *a, **k: (scrolls.append(a), (True, 'sig2'))[1]
+def _fp(want, mode):
+    quest._PAGE_ROWS_N = 1
+    return None
+quest._find_on_page = _fp
+check('無捲動空間（1 張別的卡）→ False、0 次捲動、旗標 True', quest.track_task('龍的巢穴') is False and not scrolls and quest.LAST_SCAN_NO_SCROLL is True)
+def _fp2(want, mode):
+    quest._PAGE_ROWS_N = 2
+    return None
+quest._find_on_page = _fp2
+check('2 張卡沒目標 → 照舊捲動掃，旗標 False', quest.track_task('龍的巢穴') is False and scrolls and quest.LAST_SCAN_NO_SCROLL is False)
+(quest.gui, quest.ensure_task_tab, quest._tm_has, quest._find_on_page, quest.scroll_list, quest.list_signature, quest.event, quest.log, quest.read_list_titles) = _sv2
+
 # ================= quest.close_stray_panel：誤開的組隊 / 切換面板自動關、不算驗證視窗 =================
 _so = (uikit.is_open, uikit.close_panel, quest.event, quest.log)
 _closed = []
