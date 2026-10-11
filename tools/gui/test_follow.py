@@ -44,6 +44,8 @@ class World:
         self.hp = 100
         self.reads = []               # 若有，read_status 依序吐出（雜訊測試）
         self.heals = []
+        self.enc_on = True
+        self.ens_rc = None
 
 
 def install(w):
@@ -60,10 +62,13 @@ def install(w):
     follow.heal.read_vitals = lambda last=None, **k: ({'ok': True, 'hpPct': w.hp, 'mpPct': 100}, 1.0)
     follow.heal.heal_trip = lambda spot, no_return=False: w.heals.append(spot)
     follow.grind.take_lock = lambda: True
+    follow.watchstate.screen = lambda *a, **k: ({'enc_on': w.enc_on} if w.enc_on != 'none' else None)
     follow.grind.release_lock = lambda: None
 
     def grun(mode, spot=None, **k):
         w.runs.append((mode, spot))
+        if mode == 'ensure' and getattr(w, 'ens_rc', None):
+            return w.ens_rc.pop(0) if isinstance(w.ens_rc, list) else w.ens_rc
         if mode == 'start':
             rc = w.start_rc.get(spot, 0)
             if rc == 0:
@@ -225,5 +230,82 @@ f.good = (1, 45)
 f.cur = '海主人隧道'
 rc = f.switch('五兄弟洞窟')
 check('傳送驗證失敗但地圖名已是目標 → 視為抵達、補 ensure、不修正門檻', rc is None and f.cur == '五兄弟洞窟' and ('ensure', None) in w.runs and not w.errs)
+
+# 11) 掛機未恢復：補血後 ensure 失敗 → 之後重試；連 3 次失敗停
+w = install(World(lv=(1, 5), map_=11001))
+w.hp = 20
+w.ens_rc = [52, 52, 0]
+f = mk(w)
+f.step()
+check('補血後 ensure 失敗 → 記住未恢復', f.unrecovered and f.fails == 1 and w.runs.count(('ensure', None)) == 1)
+w.hp = 100
+f.step()
+check('30 秒內不重試', w.runs.count(('ensure', None)) == 1)
+w.t += follow.RETRY_GAP + 1
+f.step()
+check('過 30 秒重試 ensure（再失敗 2/3）', w.runs.count(('ensure', None)) == 2 and f.fails == 2 and f.unrecovered)
+w.t += follow.RETRY_GAP + 1
+f.step()
+check('再重試成功 → 恢復、失敗計數歸零', w.runs.count(('ensure', None)) == 3 and not f.unrecovered and f.fails == 0)
+w.t += follow.RETRY_GAP + 1
+f.step()
+check('恢復後不再多跑 ensure', w.runs.count(('ensure', None)) == 3)
+
+w = install(World(lv=(1, 5), map_=11001))
+w.hp = 20
+w.ens_rc = 52
+f = mk(w)
+r = [f.step()]
+w.hp = 100
+for _ in range(2):
+    w.t += follow.RETRY_GAP + 1
+    r.append(f.step())
+check('ensure 連 3 次失敗 → 回 52 + errlog', r == [None, None, 52] and any('連續' in e for e in w.errs) and w.runs.count(('ensure', None)) == 3, str(r))
+
+# 12) 遇敵鈕關超過 60 秒 → ensure
+w = install(World(lv=(1, 5), map_=11001))
+w.enc_on = False
+f = mk(w)
+f.step()
+check('剛看到遇敵關：不立刻 ensure', ('ensure', None) not in w.runs)
+w.t += 30
+f.step()
+check('30 秒仍不動作', ('ensure', None) not in w.runs)
+w.t += 31
+f.step()
+check('超過 60 秒 → ensure', w.runs.count(('ensure', None)) == 1 and f.enc_off_since is None)
+w.t += 10
+f.step()
+check('ensure 後重新計時，不連發', w.runs.count(('ensure', None)) == 1)
+
+w = install(World(lv=(1, 5), map_=11001))
+w.enc_on = False
+f = mk(w)
+f.step()
+w.t += 100
+w.busy = 'battle.lock（quest）'
+f.step()
+w.busy = None
+check('有暫停條件（battle.lock）時不觸發', ('ensure', None) not in w.runs)
+w = install(World(lv=(1, 5), map_=11001))
+w.enc_on = 'none'
+f = mk(w)
+for _ in range(5):
+    f.step()
+    w.t += 30
+check('讀不到 enc_on → 略過', ('ensure', None) not in w.runs)
+w = install(World(lv=(1, 5), map_=11001))
+w.enc_on = False
+f = mk(w)
+f.step()
+w.t += 40
+w.enc_on = True
+f.step()
+w.t += 40
+w.enc_on = False
+f.step()
+w.t += 40
+f.step()
+check('遇敵中途打開會重新計時', ('ensure', None) not in w.runs)
 print(f'\n失敗 {fails} 項' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

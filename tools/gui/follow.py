@@ -22,6 +22,7 @@ grind.run('check')，快速 / 自動戰鬥關了或遇敵鈕關了 → grind.run
 
 退出碼（grind 50～59 段；共用 0 / 8 / 9 / 10 見 uikit）：
   0 到 --until-level 或被 --stop    8 已有另一個 follow 在跑    9 疑似驗證視窗    10 netwatch halt
+掛機未恢復（ensure / start 失敗）：每 30 秒重試 ensure 直到成功；另外 watch 讀到遇敵鈕關超過 60 秒也補 ensure；連 3 次失敗才停。
   57 補血失敗    59 連續讀不到等級    其餘 = grind.run 連 3 次失敗的退出碼（50～58）
 """
 import json
@@ -53,6 +54,9 @@ READ_GAP = 3.0                        # 等級兩次讀之間（watch 約 3 s �
 BAD_MAX = 40                          # 連續幾輪讀不到等級就停（每輪 --every 秒；15 s × 40 ≈ 10 分鐘。HUD 偶爾被蓋住 1～2 分鐘，10 輪太容易誤停，2026-10-11 實機）
 FAIL_MAX = 3
 BLOCK_COOLDOWN = 600.0
+RETRY_GAP = 30.0                      # 掛機未恢復（ensure / start 失敗）後，每隔多久再試一次 ensure
+ENC_OFF_SECS = 60.0                   # 練功點上遇敵鈕關超過這麼久（watch 零輸入讀到）就補 ensure
+ENC_MAX_AGE = 5.0                     # state.screen 資料年齡上限
 sleep = time.sleep
 clock = time.time
 
@@ -179,6 +183,9 @@ class Follow:
         self.last_check = clock()
         self.paused_note = None
         self.verify_note = 0.0
+        self.unrecovered = False    # 掛機未恢復：ensure / start 失敗後為 True，每 RETRY_GAP 秒重試 ensure 直到成功
+        self.retry_at = 0.0
+        self.enc_off_since = None   # watch 讀到遇敵鈕關的起點（clock）
 
     # ---- 等級 ----
     def feed(self, lv) -> bool:
@@ -267,7 +274,7 @@ class Follow:
         note(f'{trans}轉{level}級：{old or "?"} → {target}（grind start）')
         rc = self.grind_run('start', target)
         if rc == 0:
-            self.cur, self.last_switch, self.fails = target, int(time.time()), 0
+            self.cur, self.last_switch, self.fails, self.unrecovered = target, int(time.time()), 0, False
             note(f'已換到 {target} 掛機中')
             return None
         if rc in (uikit.EXIT_IN_BATTLE,):
@@ -279,6 +286,7 @@ class Follow:
                 note(f'傳送驗證讀不到座標，但地圖名是 {target}：視為已抵達，補 grind ensure')
                 self.cur, self.last_switch, self.fails = target, int(time.time()), 0
                 rc2 = self.grind_run('ensure')
+                self.unrecovered = bool(rc2)
                 return self.fail(rc2, f'抵達 {target} 後 ensure 失敗（{rc2}）') if rc2 else None
             return self.on_blocked(target, old)
         return self.fail(rc, f'換到 {target} 失敗（grind 退出碼 {rc}）')
@@ -286,7 +294,45 @@ class Follow:
     def fail(self, rc, msg):
         self.fails += 1
         log(f'{msg}（連續 {self.fails}/{FAIL_MAX}）')
+        self.unrecovered, self.retry_at = True, clock() + RETRY_GAP
         return rc if self.fails >= FAIL_MAX else None
+
+    def recover(self, why):
+        """掛機未恢復 / 遇敵鈕關太久 → 再跑 grind ensure。None = 繼續；整數 = 要結束的退出碼（連 FAIL_MAX 次失敗）"""
+        note(f'{why}，重試 grind ensure')
+        rc = self.grind_run('ensure')
+        self.enc_off_since = None
+        if rc == 0:
+            if self.unrecovered:
+                note('grind ensure 重試成功，掛機已恢復')
+            self.unrecovered, self.fails = False, 0
+            return None
+        if rc == uikit.EXIT_IN_BATTLE:
+            self.retry_at = clock() + RETRY_GAP
+            return None
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        r = self.fail(rc, f'重試 ensure 失敗（{rc}）')
+        if r is not None:
+            errlog.add(f'follow：grind ensure 連續 {FAIL_MAX} 次失敗（最後 rc={rc}），掛機未恢復，停止', source=SRC)
+        return r
+
+    def enc_watch(self):
+        """保險：在練功點、無暫停條件，watch 讀到遇敵鈕關超過 ENC_OFF_SECS → ensure。讀不到 enc_on 就略過"""
+        if self.a.dry_run or not self.cur:
+            return None
+        sc = watchstate.screen(ENC_MAX_AGE)
+        on = sc.get('enc_on') if isinstance(sc, dict) else None
+        now = clock()
+        if on is not False:
+            self.enc_off_since = None
+            return None
+        if self.enc_off_since is None:
+            self.enc_off_since = now
+            return None
+        if now - self.enc_off_since < ENC_OFF_SECS:
+            return None
+        return self.recover(f'遇敵鈕關了超過 {int(ENC_OFF_SECS)} 秒（{self.cur}）')
 
     def on_blocked(self, target, old):
         trans, level = self.good
@@ -304,6 +350,7 @@ class Follow:
         rc = self.grind_run('ensure')                 # 失敗的 start 已關遇敵：回原點恢復掛機
         if rc:
             return self.fail(rc, f'留在原點恢復掛機失敗（grind ensure 退出碼 {rc}）')
+        self.unrecovered = False
         return None
 
     # ---- 補血 / 健康 ----
@@ -388,8 +435,12 @@ class Follow:
                 return rc
         else:
             rc = self.heal_check()
+            if rc is None and self.unrecovered and not self.a.dry_run and clock() >= self.retry_at:
+                rc = self.recover('掛機未恢復')
             if rc is None:
                 rc = self.health_check()
+            if rc is None:
+                rc = self.enc_watch()
             if rc is not None:
                 return rc
         self.write_state()
