@@ -77,7 +77,7 @@ for k, lab in fx['labels'].items():
 same = all(digitmatch.segment(fx['fields'][k], k == 'pos') == digitmatch.segment(fx['fields'][k], k == 'pos', 1.0) for k in fx['fields'])
 check('segment(scale=1.0) 與預設呼叫結果相同', same)
 
-# ---- walk 世界倍率守衛：外接縮放視窗不點地面 ----
+# ---- walk 世界倍率守衛：量過的外接尺寸（WORLD_OK_PHYS）放行，沒量過的同比例縮放視窗不點地面 ----
 import os  # noqa: E402
 import walk  # noqa: E402
 env = os.environ.pop('PSA_LAYOUT')
@@ -85,9 +85,15 @@ rl = layout.logical
 layout.current, layout.logical = (lambda: '1728x995'), (lambda: '2880x1659')
 try:
     walk.world_guard()
-    check('walk.world_guard：外接 1728x995 → RuntimeError', False)
+    check('walk.world_guard：外接 1728x995（已量世界倍率）放行', '1728x995' in walk.WORLD_OK_PHYS)
+except RuntimeError:
+    check('walk.world_guard：外接 1728x995（已量世界倍率）放行', False)
+layout.current = lambda: '1584x912'
+try:
+    walk.world_guard()
+    check('walk.world_guard：沒量過的同比例 1584x912 → RuntimeError', False)
 except RuntimeError as e:
-    check('walk.world_guard：外接 1728x995 → RuntimeError', '1728x995' in str(e))
+    check('walk.world_guard：沒量過的同比例 1584x912 → RuntimeError', '1584x912' in str(e))
 layout.current, layout.logical = (lambda: '2880x1659'), (lambda: '2880x1659')
 try:
     walk.world_guard()

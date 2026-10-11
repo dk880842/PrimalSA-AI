@@ -18,6 +18,7 @@ SAMPLES = {'off': 'p0_fit_full.png', 'enc': 'p0_fit_full_enc.png'}
 EXPECT = {'panel_' + n: ('panel', n) for n in ('pet', 'bag', 'quest', 'transfer', 'setting', 'team', 'qteam', 'switch', 'ass', 'role')}
 EXPECT.update({'idle_1': ('idle', None), 'dialog_1': ('dialog', None), 'vs_2': ('battle', None), 'vs_5': ('battle', None),
                'g0': ('battle', None), 'g19': ('battle', None), 'g8': ('idle', None), 'g13': ('idle', None)})   # g* = 掛機中連拍（VS 牌暗色相位 / 戰鬥間空檔）
+EXPECT.update({'idle_village': ('idle', None)})   # 2026-10-11 walk 外接量測時收：薩姆吉爾村 1000:95,101 主畫面（綠地 + 白石，之前的主畫面樣本都在地雷區）
 KEY = '1728x995'
 
 
