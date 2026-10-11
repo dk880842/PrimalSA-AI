@@ -38,8 +38,8 @@ Q182 = [
          steps={}, bag_slots=0, boss=True, est_min=9, live=False,
          note='步 1 任務戰（卡卡金寶）；每轉解一次即可；追蹤清單要先捲到目標（quest.py 已用 titlematch）'),
     dict(id=2024, detail='龍的巢穴(1.82)', track='龍的巢穴', accept_npc='守護者 20801:13,63', steps_total=4,
-         steps={}, bag_slots=1, boss=False, est_min=5, live=False,
-         note='純巡路 + 對話 #1-#8、獲得物品窗 2 個（舊紀錄 2026-10-10 全程無戰鬥，玉由對話直接給）；終點 7 樓 20807:23,7 剛氣龍；追蹤名「龍的巢穴」，漆黑洞窟(二轉) 不可誤點'),
+         steps={}, bag_slots=1, boss=True, est_min=7, live=True,
+         note='巡路 + 對話 + 3 場任務戰（疾速 / 剛氣 / 鋼格之龍，2026-10-11 實測；10-10 舊紀錄「無戰鬥」有誤）；終點 7 樓 20807:23,7 剛氣龍；追蹤名「龍的巢穴」，漆黑洞窟(二轉) 不可誤點'),
 ]
 
 BY_ID = {d['id']: d for d in Q182}
