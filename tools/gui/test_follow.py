@@ -188,10 +188,10 @@ f = mk(w)
 f.step()
 check('血低（連 2 次）→ heal_trip 目前點 + ensure', w.heals == ['柯奧龜洞'] and ('ensure', None) in w.runs)
 w = install(World(lv=(1, 5), map_=11001))
-w.reads = [(None, None)] * 40
+w.reads = [(None, None)] * (follow.BAD_MAX + 5)
 f = mk(w)
 r = None
-for _ in range(12):
+for _ in range(follow.BAD_MAX + 2):
     r = f.step()
     if r is not None:
         break
