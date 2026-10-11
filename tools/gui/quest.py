@@ -25,13 +25,13 @@
   --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
   --step N  --fight 用：明確指定任務第 N 步的 NPC（= --npc auto 但不 OCR 追蹤條目；需 --task）。--npc auto 不給 --step 時，改讀追蹤條目「標題正下方那行說明」
            （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
-  --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過）：--fight 點 NPC 前、預設模式（要點追蹤 / 黃問號時）每次點之前（至少隔 TEAM_CHECK_GAP=20 秒）開切換面板 763,760，
+  --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過）：只在必要時檢查（2026-10-11）：開始前、--fight 點 NPC 前、領獎後（一步結束要去下一步 / 交任務）點追蹤前、任務 / BOSS 戰打完後的下一次點之前；其他點擊（每次點追蹤 / 黃問號）不檢查。開切換面板（uikit.open_panel / close_panel，輪詢驗證；打不開原地重試 CHECK_TEAM_TRIES=3 次、間隔 1 秒、先確認是主畫面）763,760，
            讀 5 張卡片的隊伍標籤，要「1 隊長 + (N-1) 隊員」（N=5 即 5 人都要在隊）；面板上其他卡片是單人 / 不在隊（例如單人 DKB0）不算錯；隊員不夠 / 隊長不是 1 個 / 讀不到 → 不點、事件 log 寫出誰不在隊、關面板（✕ 1064,208）；--fight 開打前退出碼 30、執行中發現脫隊退出碼 32。
            --solo / --fight --no-click 不檢查。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
   戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
   組隊預設模式（非 --solo / --fight）：**每一場戰鬥**（完整戰鬥或快速戰鬥、不分任務 / 路上）都刷新角色；完整戰鬥自動戰鬥鈕是關的 → 先按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   刷新角色規則：--solo / --fight 只有任務 / BOSS 戰（點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）刷新，路上小怪直接逃、不刷新；預設模式每場都刷新（--no-refresh 全關）。同一場最多每 REFRESH_GAP 秒刷新一次。
-           刷新前底部若出現「關閉」直式鈕 + 5 個角色頭像列（上方綠字「如果遇到下指令出錯等問題，可使用下方[切換]按鈕切換至其他角色」）→ 先點左側「關閉」510,745 隱藏（每下等 0.9 秒再輪詢驗證，最多 4 下：745 / 745 / 725 / 765，都在關閉鈕範圍內；收不掉存 snap close-row-stuck，errlog #61），再按切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ 刷新角色 910,578。
+           刷新前底部若出現「關閉」直式鈕 + 5 個角色頭像列（上方綠字「如果遇到下指令出錯等問題，可使用下方[切換]按鈕切換至其他角色」）→ 先點左側「關閉」510,745 隱藏（每下等 0.9 秒再輪詢驗證最多 3 秒，收起後才繼續；沒收起才點下一下，最多 4 下：745 / 745 / 725 / 765，都在關閉鈕範圍內；收不掉存 snap close-row-stuck，errlog #61；按刷新前、每下點「關閉」前都先確認仍是戰鬥畫面，主迴圈剛讀過仍是戰鬥才進來，收列耗時 > 1 秒後與每下點「關閉」前再確認；已回主畫面 / 對話 / 領獎就不按，避免 850,765 點到主畫面「組隊」鈕），再按切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ 刷新角色 910,578。
   選擇對象面板（點 NPC 後右側跳出的米色面板：頭像卡片 + 名字，NPC 是黃 / 金字、隊友白字）：偵測到就依黃字位置點 NPC 那張卡片（不寫死第一格），再等對話框；--fight 點 NPC 後與對話步（--stop-after-dialog 點 NPC / 黃問號）都處理。
   模擬測試：uv run --no-project python tools/gui/test_quest_fight.py
   事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）；啟動時自動刪 tools/.cache/quest-log/ 內超過 3 天的圖檔（cleanup_old_shots）。
@@ -97,7 +97,8 @@ STALL_MAX = 4                        # 對話無進展幾輪就停
 STALL_MARKER_PX = 10                 # 兩次點的黃問號座標差超過這麼多 px = 不同標記（輪數歸零）
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
 NPC_WAIT = 12.0                      # --fight 點 NPC 後最多等幾秒看有沒有反應（走過去 + 開對話框）
-LOG_FILE = ROOT / 'notes' / 'quest-events.log'
+import logpaths  # noqa: E402
+LOG_FILE = logpaths.p(ROOT / 'notes' / 'quest-events.log')
 SHOT_DIR = ROOT / 'tools' / '.cache' / 'quest-log'
 SHOT_KEEP_DAYS = 3                   # 啟動時清掉 SHOT_DIR 內超過幾天的圖檔
 SHOT_EXTS = ('.png', '.jpg', '.jpeg')
@@ -604,8 +605,17 @@ def close_row_visible() -> bool | None:
 
 
 CLOSE_ROW_CLICKS = [(510, 745), (510, 745), (510, 725), (510, 765)]   # 都在「關閉」直式鈕範圍內（約 y 686～783）；errlog #61：BOSS 戰 2 下收不掉，改成最多 4 下、每下等動畫 + 輪詢驗證
-CLOSE_ROW_POLL = 4                   # 每點一下後最多輪詢幾次（每次間隔 CLOSE_ROW_POLL_GAP 秒）等關閉列消失（收起動畫 / 戰鬥播放中可能 > 600ms 才生效）
-CLOSE_ROW_POLL_GAP = 0.4
+CLOSE_ROW_POLL = 6                   # 每點一下後最多輪詢幾次（每次間隔 CLOSE_ROW_POLL_GAP 秒）等關閉列消失（收起動畫 / 戰鬥播放中可能 > 600ms 才生效）
+CLOSE_ROW_POLL_GAP = 0.5
+BATTLE_OVER_STATES = ('idle', 'walking', 'dialog', 'reward')   # 看到這些 = 戰鬥已結束（850,765 / 510,745 這時會點到主畫面的「組隊」鈕 / 地面）
+
+
+def battle_over() -> bool:
+    """現場讀一次畫面：已經回到主畫面 / 對話 / 領獎 / 巡路（戰鬥剛結束）= True；仍在戰鬥或讀不懂（unknown / error）= False（維持舊行為）"""
+    try:
+        return read_screen()['state'] in BATTLE_OVER_STATES
+    except Exception:
+        return False
 
 
 def hide_close_row(max_clicks: int = len(CLOSE_ROW_CLICKS)) -> bool:
@@ -623,9 +633,12 @@ def hide_close_row(max_clicks: int = len(CLOSE_ROW_CLICKS)) -> bool:
     if not close_row_visible():
         return True
     for x, y in CLOSE_ROW_CLICKS[:max_clicks]:
+        if battle_over():
+            event('刷新前戰鬥已結束 → 不再點底部「關閉」列')
+            return False
         gui('seq', f'click {x} {y}; wait 900', note='戰鬥底部列：點「關閉」收起頭像列')
         event(f'刷新前底部有「關閉 + 頭像」列 → 點關閉收起（{x},{y}）')
-        if gone():
+        if gone():                                 # 每下點完先輪詢驗證（最多 CLOSE_ROW_POLL × GAP 秒）沒收起才點下一下
             return True
     try:
         shot = snap('close-row-stuck')
@@ -647,12 +660,17 @@ def panel_visible() -> bool:
 
 def refresh_characters(full: bool = False) -> bool:
     """戰鬥中按「刷新角色」加速：（底部有關閉列先收起）→ 切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ 等面板 → 刷新角色 910,578；面板還開著就點 ✕。
-    關閉列收不掉 → 不點切換（會點到角色頭像換人下指令），回 False"""
+    關閉列收不掉 → 不點切換（會點到角色頭像換人下指令），回 False。
+    按之前先確認仍在戰鬥畫面（戰鬥剛結束時 850,765 會點到主畫面「組隊」鈕，2026-10-11）；已回主畫面 → 不按，回 False"""
+    t0 = time.time()
     if not hide_close_row():
         event('底部「關閉」列收不掉 → 這次不按刷新角色（避免點到頭像）')
         return False
     sw = SWITCH_FULL if full else SWITCH_BTN
     sig = screen_sigs.sig_str(SIG_PANEL)
+    if time.time() - t0 > 1.0 and battle_over():       # 收「關閉」列花了時間：戰鬥可能已結束，再確認一次仍在戰鬥才按（主迴圈剛讀過畫面，沒收列時不重讀）
+        event('收列期間戰鬥已結束（主畫面 / 對話 / 領獎）→ 不按刷新角色（避免點到主畫面按鈕）')
+        return False
     gui('seq', f'click {sw[0]} {sw[1]}; waitpix 1500 {sig} 40; ifok click {REFRESH_BTN[0]} {REFRESH_BTN[1]}; wait 500')
     if panel_visible():
         gui('seq', f'click {PANEL_CLOSE[0]} {PANEL_CLOSE[1]}; wait 500', note='刷新後面板還開著 → 點 ✕ 關')
@@ -708,7 +726,9 @@ PANEL_CLOSE = (1064, 208)            # 切換角色面板右上 ✕
 TEAM_CARDS = {'DKBO': (452, 275), 'DKBO2': (762, 275), 'DKBO3': (452, 360), 'DKBO4': (762, 360), 'DKBO5': (452, 445)}   # 真名字母 O；DKB0… 同義
 TEAM_SAMPLE = [(dx, dy) for dy in range(8, 23, 2) for dx in range(6, 35, 2)]
 TEAM_MIN_PX = 8
-TEAM_CHECK_GAP = 20.0                # 預設模式：兩次隊伍檢查最短間隔（秒；--fight 點 NPC 前一定檢查）
+TEAM_CHECK_GAP = 20.0                # （舊：兩次檢查最短間隔；2026-10-11 起改為只在必要時檢查，不再用這個間隔，保留常數給舊測試 / 文件參照）
+CHECK_TEAM_TRIES = 3                 # check_team 開不起切換面板時原地重試次數（間隔 CHECK_TEAM_GAP 秒，先確認非戰鬥 / 非對話）
+CHECK_TEAM_GAP = 1.0
 
 
 def classify_team_label(cols: list) -> str:
@@ -748,24 +768,36 @@ def judge_team(labels: dict, size: int) -> tuple[bool, str]:
 
 
 def check_team(size: int, tag: str = '') -> tuple[bool | None, str]:
-    """開切換面板（763,760）→ 讀 5 張卡片的隊伍標籤 → 關面板（✕ 1064,208；必要時 ESC）。
-    回 (True 隊伍符合 / False 不符 / None 面板沒開或讀不到, 說明)。只在主畫面（idle）時呼叫；開面板後驗證 SIG_PANEL，沒開就不讀、不點面板內座標。"""
-    sig = screen_sigs.sig_str(SIG_PANEL)
-    gui('seq', f'click {SWITCH_BTN[0]} {SWITCH_BTN[1]}; waitpix 1500 {sig} 40; wait 300', note=f'{tag}隊伍檢查：開切換面板')
+    """開切換面板 → 讀 5 張卡片的隊伍標籤 → 關面板。開 / 關走 uikit.open_panel_ex / close_panel（輪詢驗證，不用固定 wait）。
+    回 (True 隊伍符合 / False 不符 / None 面板沒開或讀不到, 說明)。開不起來（切換面板偶發打不開）原地重試 CHECK_TEAM_TRIES 次、間隔 CHECK_TEAM_GAP 秒，
+    每次重試前確認畫面是主畫面（idle）；戰鬥 / 對話 / 其他畫面不點、等下一次；只在面板特徵出現後才讀面板內座標。"""
+    import uikit
     res: tuple[bool | None, str] = (None, '切換面板沒打開')
-    if read_screen()['state'] == 'panel':
+    for i in range(CHECK_TEAM_TRIES):
+        if i:
+            log(f'{tag}隊伍檢查：切換面板沒打開，{CHECK_TEAM_GAP:.0f} 秒後重試（{i + 1}/{CHECK_TEAM_TRIES}）')
+            time.sleep(CHECK_TEAM_GAP)
+        state = read_screen()['state']
+        if state == 'panel':
+            opened = True                                  # 已開著（殘留）：直接讀
+        elif state != 'idle':
+            res = (None, f'畫面是 {state}（不是主畫面），不開切換面板')
+            continue
+        else:
+            note = f'{tag}隊伍檢查：開切換面板'
+            log(note)
+            opened = uikit.open_panel(uikit.SWITCH, 4.0)
+        if not opened:
+            res = (None, '切換面板沒打開')
+            continue
         labels = read_team_labels()
         if labels is None:
             res = (None, '讀不到隊伍標籤像素')
         else:
-            ok, desc = judge_team(labels, size)
-            res = (ok, desc)
-    for _ in range(2):                                 # 關面板：先點 ✕，仍開著再 ESC
-        if read_screen()['state'] != 'panel':
-            break
-        gui('seq', f'click {PANEL_CLOSE[0]} {PANEL_CLOSE[1]}; wait 500', note='隊伍檢查：關切換面板（✕）')
-    if read_screen()['state'] == 'panel':
-        gui('key', '{ESC}')
+            res = judge_team(labels, size)
+        if not uikit.close_panel(uikit.SWITCH, known_open=True) and read_screen()['state'] == 'panel':
+            gui('key', '{ESC}')
+        return res
     return res
 
 
@@ -1145,6 +1177,7 @@ def _main() -> int:
     team_size = 5 if a.team_size is None else a.team_size
     team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else True)     # --solo 本來就是單人跑；--fight --no-click 不點 NPC。預設模式即使 --no-track 也會按對話框 → 一樣要驗隊伍
     last_team_check = 0.0
+    team_dirty = False           # 任務 / BOSS 戰剛打完（隊伍可能散）→ 下一次點追蹤 / 黃問號前要驗隊伍；平常的點擊不驗
     pre_checked = not team_on    # 第一次點任何東西 / 按對話框之前是否已驗過隊伍（不受 TEAM_CHECK_GAP 限制）
     stall_rounds = 0             # 對話無進展：每次從非對話進入對話 +1（領獎 / 戰鬥 / Auto Walking / 換地圖 / 換黃問號歸零）
     stall_marker = None          # 最後一次點的黃問號 (x, y)；None = 沒點過（沒點問號就不判無進展）
@@ -1159,11 +1192,13 @@ def _main() -> int:
         """點 NPC / 追蹤前的隊伍檢查（脫隊偵測的保底做法：聊天日誌「離開了隊伍」讀不可靠，所以每次要點之前確認隊伍還在）。
         符合（或不檢查 / 剛檢查過）回 0；隊伍不符或讀不到 → 寫事件 log 回 code（呼叫端直接 return）"""
         nonlocal last_team_check
-        if not team_on or (not force and time.time() - last_team_check < TEAM_CHECK_GAP):
-            return 0
+        nonlocal team_dirty
+        if not team_on or (not force and not team_dirty):
+            return 0                                           # 只在必要時檢查（2026-10-11）：開始前 / --fight 點 NPC 前 / 領獎後下一步前 / 任務戰結束後；其他點擊不檢查
         ok_, desc = check_team(team_size, tag)
         last_team_check = time.time()
         if ok_:
+            team_dirty = False
             log(f'隊伍檢查通過：{desc}')
             return 0
         shot = snap('team-mismatch')
@@ -1195,6 +1230,8 @@ def _main() -> int:
         if st in ('idle', 'walking', 'dialog', 'reward'):
             if in_battle:
                 battleguard.release()          # 戰鬥結束 → 刪鎖檔，ass.py 可以動了
+                if quest_battle:
+                    team_dirty = True          # 任務戰打完：下次點之前驗隊伍
             in_battle = False
         in_battle_new = st == 'battle' and not in_battle
         if in_battle_new:
@@ -1434,11 +1471,13 @@ def _main() -> int:
                 pass
             elif rewards > checked_rewards and not a.no_track and a.task:
                 # 領過獎勵後第一次回到主畫面：立刻掃整個追蹤列表。目標任務不在列表 = 任務完成（不空轉）；還在 = 下一步，順便點它
-                if (rc := team_gate('領獎後點追蹤前：', EXIT_TEAM_LOST)):
-                    return rc
                 checked_rewards = rewards
                 time.sleep(1.0)                              # 等獲得物品視窗收掉、列表刷新
-                res = track_task(a.task)
+                res = track_task(a.task, click=False)        # 先只掃不點：任務已不在列表（= 完成）就不必驗隊伍（2026-10-11：最後一步領完獎被隊伍檢查擋下，白跑一輪）
+                if res:
+                    if (rc := team_gate('領獎後點追蹤前：', EXIT_TEAM_LOST, force=True)):      # 還有下一步 / 要去交任務：驗一次
+                        return rc
+                    res = track_task(a.task)
                 if res is None:
                     checked_rewards = rewards - 1            # 被打斷，下次回主畫面再查
                 elif res:

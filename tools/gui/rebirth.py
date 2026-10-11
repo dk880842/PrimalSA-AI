@@ -58,9 +58,10 @@ import uikit  # noqa: E402
 
 SRC = 'rebirth'
 ROOT = uikit.ROOT
-EVENT_LOG = ROOT / 'notes' / 'quest-events.log'
-QUEST_LOG = ROOT / 'notes' / 'quest-log.md'
-PROGRESS = uikit.CACHE / 'rebirth.json'
+import logpaths  # noqa: E402
+EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
+QUEST_LOG = logpaths.p(ROOT / 'notes' / 'quest-log.md')
+PROGRESS = logpaths.p(uikit.CACHE / 'rebirth.json')
 
 EXIT_LEVEL, EXIT_ITEMS, EXIT_SPACE, EXIT_TEAM, EXIT_QUEST, EXIT_BOSS, EXIT_BAG, EXIT_SETUP, EXIT_REBIRTH, EXIT_CONFIRM = 80, 81, 82, 83, 84, 85, 86, 87, 88, 89
 

@@ -17,7 +17,7 @@
 #   -NoRestore 1                      遇到遊戲視窗最小化時不還原（預設會 SW_SHOWNOACTIVATE 還原並等 0.8 秒）：印 minimized、exit 3。
 #                                     只給唯讀監看（watch.py 的 pixel / info）用；送輸入的指令不要帶
 #   -Note "用途"                       任何指令後面可加，附註寫進操作 log（gui.sh 用環境變數 PSA_NOTE）
-#   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 100 行，psa-hud pane 顯示）；shot / pixel / wait* 不記
+#   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 2000 行，psa-hud pane 顯示）；shot / pixel / wait* 不記
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
 # 座標系：縮圖座標 × Scale = 客戶區像素座標。Scale 預設 2。
 # 背景模式（預設，2026-10-09 實測可用）：不把遊戲拉到前景，使用者可以繼續用其他視窗。
@@ -223,7 +223,7 @@ function BgKeys([string]$s) {
   }
 }
 
-# 操作 log：一行「HH:mm:ss 指令 參數 附註」，append 後裁到最新 100 行（失敗不影響操作；多程序偶爾掉一行可接受）
+# 操作 log：一行「HH:mm:ss 指令 參數 附註」，append 後裁到最新 2000 行（失敗不影響操作；多程序偶爾掉一行可接受）
 $actLog = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache\actions.log'))
 function ActLog([string]$msg) {
   try {
@@ -232,7 +232,7 @@ function ActLog([string]$msg) {
     $enc = New-Object System.Text.UTF8Encoding($false)
     [IO.File]::AppendAllText($actLog, "$(Get-Date -Format 'HH:mm:ss') $msg`n", $enc)
     $lines = [IO.File]::ReadAllLines($actLog, $enc)
-    if ($lines.Count -gt 100) { [IO.File]::WriteAllText($actLog, (($lines | Select-Object -Last 100) -join "`n") + "`n", $enc) }
+    if ($lines.Count -gt 2000) { [IO.File]::WriteAllText($actLog, (($lines | Select-Object -Last 2000) -join "`n") + "`n", $enc) }
   } catch { }
 }
 

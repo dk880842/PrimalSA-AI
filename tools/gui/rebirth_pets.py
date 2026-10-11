@@ -64,9 +64,10 @@ import uikit  # noqa: E402
 
 SRC = 'rebirth_pets'
 ROOT = uikit.ROOT
-EVENT_LOG = ROOT / 'notes' / 'quest-events.log'
-QUEST_LOG = ROOT / 'notes' / 'quest-log.md'
-PROGRESS = uikit.CACHE / 'rebirth_pets.json'
+import logpaths  # noqa: E402
+EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
+QUEST_LOG = logpaths.p(ROOT / 'notes' / 'quest-log.md')
+PROGRESS = logpaths.p(uikit.CACHE / 'rebirth_pets.json')
 
 EXIT_PRE, EXIT_BOX, EXIT_STORE, EXIT_CATCH, EXIT_DIST, EXIT_RIDE, EXIT_BATTLE, EXIT_LOCK, EXIT_CLEAN, EXIT_ARGS = 100, 101, 102, 103, 104, 105, 106, 107, 108, 109
 

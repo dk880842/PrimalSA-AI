@@ -17,6 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 os.environ.setdefault('PSA_LAYOUT', '2880x1659')     # heal / walk 匯入時會問版面；測試不碰遊戲
 import charname  # noqa: E402
 import errlog  # noqa: E402

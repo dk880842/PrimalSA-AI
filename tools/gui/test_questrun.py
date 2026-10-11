@@ -11,6 +11,7 @@ from pathlib import Path
 os.environ.setdefault('PSA_LAYOUT', '2880x1659')
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 import errlog  # noqa: E402
 import questdefs  # noqa: E402
 import questhandlers  # noqa: E402
@@ -99,6 +100,10 @@ class Fake:
         self.rec('char_ensure', n)
         self.cur = n
         return 0
+
+    def close_stray(self):
+        self.rec('close_stray')
+        return False
 
     def team_form(self):
         self.rec('team_form')
@@ -306,8 +311,32 @@ check('HP 30% < 50% → 補血後重組隊', 'heal' in f.names() and f.names().i
 f = Fake(status={D17: [questrun.DONE]}, cur='DKBO3')
 go(f, [2017])
 check('當前角色不是 DKBO → char.ensure', ('char_ensure', 'DKBO') in f.calls)
-f = Fake(status={D17: [questrun.DONE]}, team_rcs=[41])
-check('交接 team.form 失敗 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER and 'status' not in f.names())
+f = Fake(status={D17: [questrun.DONE]}, team_rcs=[41, 41, 41])
+check('交接 team.form 連續失敗 3 次 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER and 'status' not in f.names() and f.names().count('team_form') == 3 and f.names().count('close_stray') == 3)
+f = Fake(status={D17: [questrun.DONE]}, team_rcs=[42])
+check('交接 team.form 失敗 1 次 → 關誤開面板後原地重試成功（不退出 111）', go(f, [2017]) == 0 and f.names().count('close_stray') == 1)
+f = Fake(status={D17: [questrun.DONE]}, team_rcs=[9])
+check('team.form 回 9（驗證視窗）→ 立即透傳、不重試', go(f, [2017]) == 9 and f.names().count('team_form') == 1)
+f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(32, []), (0, ['任務完成：x'])], team_rcs=[0, 42, 0])
+rc = go(f, [2017])
+check('接取後 / quest 回 32：原地 form 重試 + 再起一片，整個流程不退出（單次 run 完成）', rc == 0 and f.names().count('quest') == 2 and ('grind_start', '地雷區') in f.calls)
+
+# 進度檔記「已完成」：重啟續跑直接跳過、不開詳情（2 小時內）；超過 / --no-trust-progress 就重讀
+f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, ['任務完成：x'])])
+go(f, [2017])
+f2 = Fake(status={D17: [questrun.DOING]})
+quiet(questrun.run, [2017], tools=f2, after='grind')              # 不 reset：沿用上一輪的進度檔
+check('進度檔已完成 → 重跑直接跳過：不 accept、不 team_form 組隊、不跑 quest、仍恢復掛機', f2.names().count('accept') == 0 and 'quest' not in f2.names() and ('grind_start', '地雷區') in f2.calls)
+f3 = Fake(status={D17: [questrun.DONE]})
+quiet(questrun.run, [2017], tools=f3, after='grind', trust_progress=False)
+check('--no-trust-progress → 仍開詳情讀一次', f3.names().count('accept') == 1)
+import json as _json
+_st = _json.loads(questrun.PROGRESS.read_text(encoding='utf-8'))
+_st['tasks']['2017']['ended_ts'] = 1.0
+questrun.PROGRESS.write_text(_json.dumps(_st), encoding='utf-8')
+f4 = Fake(status={D17: [questrun.DONE]})
+quiet(questrun.run, [2017], tools=f4, after='grind')
+check('完成記錄超過 2 小時 → 不信、開詳情讀一次（可能轉生重置過）', f4.names().count('accept') == 1)
 f = Fake(status={D17: [questrun.DONE]}, pre_rc=9)
 check('uikit.preflight 非 0 → 原碼', go(f, [2017]) == 9)
 

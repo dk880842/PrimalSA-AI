@@ -19,7 +19,9 @@ import sys
 import time
 from pathlib import Path
 
-LOG = Path(__file__).resolve().parents[1] / '.cache' / 'errlog.jsonl'
+import logpaths
+
+LOG = logpaths.p(Path(__file__).resolve().parents[1] / '.cache' / 'errlog.jsonl')
 KEEP = 100
 LOCK_STALE_S = 5.0     # 鎖檔超過這麼久沒釋放 = 殘留（寫入者中途死掉），接管
 LOCK_WAIT_S = 3.0      # 等鎖最久這麼久；等不到也照做（寫入失敗比互蓋好不到哪去，維持「寫入失敗一律忽略」的承諾）

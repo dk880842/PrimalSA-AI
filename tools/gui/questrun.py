@@ -19,11 +19,11 @@
                    龍王的守護（人形圖示不在才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵）
                    → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
                    → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）
-    4 收尾         quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
+    4 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
 quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀一次詳情：已完成 = 結束、進行中 = 下一片；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 → 114 停手（重打流程 P3，現在照 psa-team-check-after-boss 手動）；
-  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → team.form 一次再跑，仍不行 111；
+  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
   33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 114；其他 → 112
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 20～107、120～129；questrun 自己 110～119）：
@@ -57,7 +57,7 @@ SRC = 'questrun'
 ROOT = uikit.ROOT
 EVENT_LOG = rebirth.EVENT_LOG
 QUEST_LOG = rebirth.QUEST_LOG
-PROGRESS = uikit.CACHE / 'questrun.json'
+PROGRESS = rebirth.logpaths.p(uikit.CACHE / 'questrun.json')
 
 (EXIT_PREFLIGHT, EXIT_HANDOVER, EXIT_STEP, EXIT_SLICES, EXIT_TEAM, EXIT_MANUAL,
  EXIT_IRREV, EXIT_STALL, EXIT_BATTLE, EXIT_ACCEPT) = range(110, 120)
@@ -68,6 +68,8 @@ DRAGON = rebirth.DRAGON
 DRAGON_REEAT_S = rebirth.DRAGON_REEAT_S
 SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 300, 12, 30, 50
 DEFAULT_SPOT = '地雷區'
+FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出）
+DONE_TRUST_S = 2 * 3600         # 進度檔記「已完成」且在這段時間內 → 重啟續跑直接跳過（超過視為可能轉生 / 封印書重置過，重新讀一次詳情）
 DONE, DOING, PENDING = '已完成', '進行中', '待接取'
 LAST: dict = {}
 
@@ -137,6 +139,11 @@ class Tools(rebirth.Tools):
         import depot_use
         rc, info = depot_use.run(LEADER, DRAGON, 'public', True, have, False)   # 吃完不開遇敵（跑任務時要關）
         return rc, info
+
+    def close_stray(self):
+        """誤開的組隊 / 切換面板 → 點 ✕ 關（已知面板才關；不認得的畫面不碰）"""
+        import quest
+        return quest.close_stray_panel()
 
     def dragon_active(self):
         """buff 列有龍王的人形圖示嗎（True / False）；讀不到 None"""
@@ -249,6 +256,24 @@ class Run:
             pass
         return rc
 
+    def form(self, what: str, tries: int = FORM_TRIES) -> int:
+        """team.form 原地重試（可恢復的小錯：切換面板偶爾讀到 0 張卡片 rc 42、誤開面板）：失敗 → 關誤開面板 → 等 2 秒 → 再組；
+        9（驗證視窗）/ 10（斷線）立即透傳；超過 tries 次才回最後一個失敗碼"""
+        rc = 0
+        for i in range(tries):
+            rc = self.T.team_form()
+            if not rc or rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            event(f'{what}：team.form 失敗 rc={rc}（{i + 1}/{tries}）→ 關誤開面板、2 秒後原地重試')
+            cs = getattr(self.T, 'close_stray', None)
+            if cs:
+                try:
+                    cs()
+                except Exception as e:
+                    event(f'close_stray 例外：{e}')
+            self.T.sleep(2)
+        return rc
+
     def warn(self, msg: str):
         self.warnings.append(msg)
         event(f'警告：{msg}')
@@ -303,8 +328,10 @@ class Run:
             rc2 = T.char_ensure(LEADER)
             if rc2:
                 return self.fail(EXIT_HANDOVER, f'當前角色不是 {LEADER}（讀到 {cur}），切換失敗 rc={rc2}')
-        rc = T.team_form()
+        rc = self.form('交接')
         if rc:
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc                                               # 驗證視窗 / 斷線透傳
             return self.fail(EXIT_HANDOVER, f'team.form 沒成功 rc={rc}（要滿 5 人）', team_rc=rc)
         return 0
 
@@ -330,7 +357,7 @@ class Run:
                 self.T.heal()
             except RuntimeError as e:
                 return self.fail(EXIT_HANDOVER, f'補血失敗：{e}')
-            rc = self.T.team_form()
+            rc = self.form('補血後')
             if rc:
                 return self.fail(EXIT_HANDOVER, f'補血後 team.form 失敗 rc={rc}')
         return 0
@@ -367,10 +394,13 @@ class Run:
         rc = self.preflight_task(d)
         if rc:
             return rc
-        rc = T.team_form()                                             # 接取 / 對話前一定先快速組隊
-        if rc:                                                         # 切換面板偶爾讀到 0 張卡片（2026-10-11 rc 42 一閃而過）→ 等 2 秒重試一次
-            T.sleep(2)
-            rc = T.team_form()
+        if self.o.get('trust_progress', True) and ts.get('state') == 'done' and time.time() - ts.get('ended_ts', 0) < DONE_TRUST_S:
+            event(f'任務 {tid}「{d["detail"]}」進度檔記錄已完成（{time.strftime("%H:%M:%S", time.localtime(ts["ended_ts"]))}）→ 直接跳過，不開詳情')
+            ts['skipped'] = True
+            ts['detail_opens'] = 0
+            return 0
+        ts.pop('skipped', None)
+        rc = self.form('接取前')                                       # 接取 / 對話前一定先快速組隊；切換面板偶爾讀到 0 張卡片（rc 42）→ form 內原地重試
         if rc:
             return self.fail(EXIT_HANDOVER, f'接取前 team.form 失敗 rc={rc}')
         # 整個任務只開一次詳情：同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 接取）
@@ -382,7 +412,7 @@ class Run:
             return self.fail(EXIT_ACCEPT, f'接取「{d["detail"]}」失敗 questdetail rc={rc}', accept_rc=rc)
         event(f'任務 {tid}「{d["detail"]}」詳情結果：{state}')
         if state == 'done':
-            ts.update(state='done', skipped=True)
+            ts.update(state='done', skipped=True, ended_ts=time.time())
             event(f'任務 {tid} 已完成，跳過')
             self.save()
             return 0
@@ -390,7 +420,7 @@ class Run:
         ts.update(state='running', started=time.strftime('%H:%M:%S'), slices=0)
         self.save()
         if state == 'accepted':
-            rc = T.team_form()                                         # 傳送後確認隊伍還在
+            rc = self.form('接取後')                                    # 傳送後確認隊伍還在
             if rc:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
@@ -437,7 +467,7 @@ class Run:
                 if team_retry >= 3:                                    # 對話剛收起時切換面板偶爾打不開（2026-10-11 小豬愛情故事最後一段），多給幾次
                     return self.fail(EXIT_HANDOVER, f'任務 {tid}：隊伍檢查連續失敗（quest.py {rc}）', quest_rc=rc)
                 team_retry += 1
-                rc2 = T.team_form()
+                rc2 = self.form('隊伍檢查失敗後')
                 if rc2:
                     return self.fail(EXIT_HANDOVER, f'任務 {tid}：team.form 失敗 rc={rc2}')
                 continue
@@ -449,7 +479,7 @@ class Run:
                 return self.fail(EXIT_STEP, f'任務 {tid}：追蹤沒反應（quest.py 3）且目前步驟（{st2}）沒有 walk 設定', quest_rc=rc)
             if act in ('check', 'gone'):
                 if act == 'check' and any('任務完成' in str(x) for x in tail):   # quest.py：領獎後追蹤欄掃完沒有該任務 → 完成，不開詳情
-                    ts.update(state='done', ended=time.strftime('%H:%M:%S'), secs=int(time.time() - t0))
+                    ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
                     self.save()
                     event(f'任務 {tid}「{d["detail"]}」已完成（quest.py 任務完成；{int(time.time() - t0)} 秒、{k + 1} 片）')
                     return 0
@@ -458,7 +488,7 @@ class Run:
                 if rc:
                     return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 完成確認讀狀態失敗 rc={rc}')
                 if s2 == DONE:
-                    ts.update(state='done', ended=time.strftime('%H:%M:%S'), secs=int(time.time() - t0))
+                    ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
                     self.save()
                     event(f'任務 {tid}「{d["detail"]}」已完成（{int(time.time() - t0)} 秒、{k + 1} 片）')
                     return 0
@@ -488,7 +518,7 @@ class Run:
 
 
 def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_dragon: bool = True, spot: str = DEFAULT_SPOT,
-        max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN) -> int:
+        max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True) -> int:
     LAST.clear()
     defs, bad = questdefs.resolve(ids)
     if bad:
@@ -497,7 +527,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     if after not in ('grind', 'none'):
         print('questrun：--after 要 grind 或 none', file=sys.stderr)
         return uikit.EXIT_USAGE
-    opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min)
+    opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -568,13 +598,14 @@ def main() -> int:
     p.add_argument('--slice-s', type=int, default=SLICE_S)
     p.add_argument('--max-min', type=int, default=MAX_MIN)
     p.add_argument('--hp-min', type=int, default=HP_MIN)
+    p.add_argument('--no-trust-progress', action='store_true', help='不信進度檔的「已完成」（預設 2 小時內的完成記錄直接跳過）')
     a = ap.parse_args()
     if a.cmd == 'status':
         return cmd_status(a.ids)
     dry = a.cmd == 'plan' or a.dry_run
     kw = dict(max_slices=getattr(a, 'max_slices', MAX_SLICES), slice_s=getattr(a, 'slice_s', SLICE_S),
               max_min=getattr(a, 'max_min', MAX_MIN), hp_min=getattr(a, 'hp_min', HP_MIN))
-    rc = run(a.ids, dry, a.after, use_dragon=not a.no_dragon, spot=a.spot, **kw)
+    rc = run(a.ids, dry, a.after, use_dragon=not a.no_dragon, spot=a.spot, trust_progress=not getattr(a, 'no_trust_progress', False), **kw)
     if not dry:
         print(json.dumps(LAST, ensure_ascii=False, default=str))
     return rc

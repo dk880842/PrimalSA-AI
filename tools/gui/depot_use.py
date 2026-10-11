@@ -23,10 +23,13 @@ import uikit  # noqa: E402
 # bag.POPUP_SIG 只有單張樣本，量到的 2 倍智慧果倉庫彈窗（多行說明、藍色「取出」鈕）不吻合（2026-10-11 實測 rc 90）。
 # 這裡補一組右下框線 + 彈窗內暗底兩點（倉庫取出彈窗與背包使用彈窗的按鈕列不同，不用按鈕當特徵；沒彈窗時這三點分別是亮棕 / 米色 / 棕）（截圖座標，樣本 tools/.cache/ui-log/110407-bag-depot-nopopup.png），與舊特徵「任一組吻合」就算彈窗開著。
 POPUP_SIG2 = [(968, 500, 183, 127, 64, 25), (730, 230, 38, 28, 22, 22), (600, 600, 35, 26, 22, 22)]
+# 第三組：說明只有 1 行的短彈窗（龍王的守護「使用後可暫時驅散敵人」，標題在 y≈270、框高約 228～704）：左 / 右 / 下三邊金框（2026-10-11 實測，樣本 tools/gui/fixtures 無，截圖 p9）。
+# 前兩組都不吻合 → bag.popup_open 一直 False → use_one 開彈窗後以為沒開、「找不到龍王的守護」（questrun 龍王的守護連 4 次 rc 95 的根因之一）
+POPUP_SIG3 = [(492, 400, 189, 130, 65, 25), (968, 400, 184, 127, 64, 25), (700, 704, 196, 133, 65, 25)]
 
 
 def _popup_open() -> bool:
-    return uikit.sig_match(bag.POPUP_SIG) or uikit.sig_match(POPUP_SIG2)
+    return uikit.sig_match(bag.POPUP_SIG) or uikit.sig_match(POPUP_SIG2) or uikit.sig_match(POPUP_SIG3)
 
 
 bag.POPUP = uikit.Panel('BAGPOPUP', None, bag.POPUP_SIG, None, forbidden=bag.POPUP.forbidden, is_open_fn=_popup_open)
@@ -39,7 +42,8 @@ _orig_popup_name = bag.popup_name
 
 
 def _popup_name() -> str:
-    return _orig_popup_name() or bag._ocr_join(POPUP_NAME_ALT, bag.NAME_OPTS)
+    """兩個標題框都讀、串起來（短彈窗時預設框 y133 在彈窗外，讀到的是上方 HUD / 聊天雜訊，不是空字串，舊的「讀不到才用備援」不會觸發）"""
+    return (_orig_popup_name() + ' ' + bag._ocr_join(POPUP_NAME_ALT, bag.NAME_OPTS)).strip()
 
 
 bag.popup_name = _popup_name
@@ -92,7 +96,7 @@ def use_one(role: str, want: str) -> int:
         rc = bag.select_role(role)
         if rc:
             return rc
-        i = bag.find_item(want, popup_fallback=False)
+        i = bag.find_item(want, popup_fallback=True)             # 格名稱 OCR 讀歪（「守 4-0」）時改逐格開彈窗核對名稱（重疊字多的先開）
         if i is None:
             return bag._fail(bag.EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
         if not bag.open_slot_popup(i):

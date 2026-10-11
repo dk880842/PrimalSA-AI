@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 import actlog  # noqa: E402
 actlog.add.__defaults__ = (Path(__import__('tempfile').mkdtemp()) / 'actions.log', actlog.KEEP)   # 測試的 log 寫暫存，不污染 tools/.cache/actions.log（psa-hud 顯示）
 import ass  # noqa: E402

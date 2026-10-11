@@ -46,7 +46,8 @@ SRC = 'follow'
 EXIT_NO_LEVEL = 59
 CACHE = uikit.CACHE
 PID_FILE, STOP_FILE, STATE_FILE = CACHE / 'follow.pid', CACHE / 'follow.stop', CACHE / 'follow.json'
-EVENT_LOG = uikit.ROOT / 'notes' / 'quest-events.log'
+import logpaths  # noqa: E402
+EVENT_LOG = logpaths.p(uikit.ROOT / 'notes' / 'quest-events.log')
 BLOCK_RE = re.compile(r'未\s*達\s*到?\s*(\d+)\s*轉\s*(\d+)\s*級')
 MAP_NAME_BOX = (1085, 30, 225, 80)    # 右上地圖名（兩行時 HUD 的 pos / map 欄會讀不到，例：五兄弟的山寨地下６樓）
 CHAT_BOX = (65, 650, 460, 180)        # 左下聊天區（截圖座標；只在傳送失敗時 OCR）

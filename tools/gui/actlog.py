@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AI 操作遊戲畫面的共用 log（只用標準函式庫）：tools/.cache/actions.log，只留最新 100 行，psa-hud pane 會顯示。
+"""AI 操作遊戲畫面的共用 log（只用標準函式庫）：tools/.cache/actions.log，只留最新 2000 行（2026-10-11 由 100 提高，才追得回完整任務過程），psa-hud pane 會顯示。
 
   import actlog
   actlog.add('walk', '10204 → 188,13')      # 寫一行：「23:14:25 walk 10204 → 188,13」
@@ -11,8 +11,10 @@ import sys
 import time
 from pathlib import Path
 
-LOG = Path(__file__).resolve().parents[1] / '.cache' / 'actions.log'
-KEEP = 100
+import logpaths
+
+LOG = logpaths.p(Path(__file__).resolve().parents[1] / '.cache' / 'actions.log')
+KEEP = 2000
 
 
 def add(kind: str, msg: str = '', path: Path = LOG, keep: int = KEEP) -> None:

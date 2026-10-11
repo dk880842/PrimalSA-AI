@@ -363,10 +363,10 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> in
         t = read_slot_name(i, depot)
         if t and name_match(t, want):
             return i
-        unread.append(i)
+        unread.append((-sum(1 for c in set(norm_name(want)) if c in norm_name(t)), i))
     if not popup_fallback:
         return None
-    for i in unread:
+    for _, i in sorted(unread):                       # 名稱 OCR 有重疊字的格先開（2026-10-11：龍王的守護格被讀成「守 4-0」，背包滿 / 順序在後時逐格開彈窗太慢）
         if not open_slot_popup(i, depot):
             continue                                  # 空格不會開彈窗
         nm = popup_name()

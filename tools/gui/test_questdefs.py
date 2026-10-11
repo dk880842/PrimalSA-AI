@@ -9,6 +9,7 @@ from pathlib import Path
 os.environ.setdefault('PSA_LAYOUT', '2880x1659')
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 import questdefs  # noqa: E402
 
 TABLES = questdefs.ROOT / 'knowledge' / 'data' / 'tables'

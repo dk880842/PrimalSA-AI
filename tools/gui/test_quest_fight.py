@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 import quest  # noqa: E402
 _REAL_PS_JSON = quest.ps_json   # 後面測試會把 ps_json 換成假的，這裡留真的給 ps_json 自己的測試
 import battleguard  # noqa: E402
@@ -404,14 +405,56 @@ def team_px(kinds):
     return lambda args: ' '.join(' '.join(['%d,%d,%d' % col[kinds[r]]] * n_s) for r in quest.TEAM_CARDS)
 
 
-print('(m2) check_team（真函式 + 假面板）：5 人 OK / 4 人不符 / 面板沒開；每次都關面板、沒開就不讀')
-for nm, kinds, opens, want in [('5 人', ALL5, True, True), ('4 人', four, True, False), ('面板打不開', ALL5, False, None)]:
+print('(m2) check_team（真函式 + 假面板，開 / 關走 uikit.open_panel / close_panel）：5 人 OK / 4 人不符 / 面板沒開；每次都關面板、沒開就不讀')
+import uikit  # noqa: E402
+
+
+class PanelUi:
+    """假 uikit：open_panel 前 fail 次失敗；close_panel 點 ✕ 1064,208；記錄開關次數"""
+
+    def __init__(self, pg, fail=0):
+        self.pg, self.fail, self.opens, self.closes = pg, fail, 0, 0
+
+    def open_panel(self, p, timeout=4.0):
+        self.opens += 1
+        if self.fail > 0:
+            self.fail -= 1
+            return False
+        self.pg.panel = self.pg.opens
+        return self.pg.panel
+
+    def close_panel(self, p, known_open=False):
+        self.closes += 1
+        self.pg.clicks.append('click 1064 208')
+        self.pg.panel = False
+        return True
+
+
+_real_ui = (uikit.open_panel, uikit.close_panel)
+quest.CHECK_TEAM_GAP = 0.0
+for nm, kinds, opens, want, nopen in [('5 人', ALL5, True, True, 1), ('4 人', four, True, False, 1), ('面板打不開', ALL5, False, None, quest.CHECK_TEAM_TRIES)]:
     pg = PanelGame(kinds, opens)
+    ui = PanelUi(pg)
+    uikit.open_panel, uikit.close_panel = ui.open_panel, ui.close_panel
     quest.gui, quest.read_screen = pg.gui, pg.screen
     res = REAL_CHECK_TEAM(5, '測試：')
-    ok &= check(f'{nm} → {want}', res[0] is want and not pg.panel, str(res))
+    ok &= check(f'{nm} → {want}（開面板 {nopen} 次）', res[0] is want and not pg.panel and ui.opens == nopen, str(res))
     if opens:
-        ok &= check(f'{nm}：用 ✕ 1064,208 關面板', any(c.startswith('click 1064 208') for c in pg.clicks), str(pg.clicks))
+        ok &= check(f'{nm}：用 uikit.close_panel（✕ 1064,208）關面板', ui.closes == 1 and any(c.startswith('click 1064 208') for c in pg.clicks), str(pg.clicks))
+pg = PanelGame(ALL5, True)
+ui = PanelUi(pg, fail=2)
+uikit.open_panel, uikit.close_panel = ui.open_panel, ui.close_panel
+quest.gui, quest.read_screen = pg.gui, pg.screen
+res = REAL_CHECK_TEAM(5, '測試：')
+ok &= check('打不開 2 次、第 3 次開起來 → 原地重試成功（True、開 3 次）', res[0] is True and ui.opens == 3, str(res))
+state = {'s': 'dialog'}
+pg = PanelGame(ALL5, True)
+ui = PanelUi(pg)
+uikit.open_panel, uikit.close_panel = ui.open_panel, ui.close_panel
+quest.gui, quest.read_screen = pg.gui, lambda: dict(IDLE, state=state['s'])
+res = REAL_CHECK_TEAM(5, '測試：')
+ok &= check('畫面是對話 / 戰鬥 → 不開面板（0 次點擊）、回 None', res[0] is None and ui.opens == 0 and not pg.clicks, str(res))
+uikit.open_panel, uikit.close_panel = _real_ui
 
 print('(n) --fight 4 人隊 → 不點 NPC，退出碼 30；5 人 → 照常點')
 TEAM['ret'], TEAM['calls'] = (False, "隊長 ['DKBO']、隊員 ['DKBO2', 'DKBO3', 'DKBO5']、不在隊 / 單人 / 離線 ['DKBO4']"), []
@@ -474,7 +517,7 @@ s = Script([IDLE, DIALOG, DIALOG, REWARD, IDLE])
 rc = run2(['--no-track', '--stop-after-rewards', '1', '--max-seconds', '180'], s, team=True)
 ok &= check('exit 0、只驗 1 次（開始前）、有按對話左鈕', rc == 0 and TEAM['calls'] == [(5, '開始前：')] and len(has(s, 'click 948 461')) == 2, f'rc={rc} {TEAM["calls"]} {s.clicks}')
 TEAM['ret'] = (True, 'ok')
-print('(n3) 預設模式：兩次檢查間隔 >= TEAM_CHECK_GAP（通過後不每秒都開面板）')
+print('(n3) 預設模式：只在必要時驗隊伍（開始前 1 次；平常點追蹤不再驗；任務戰打完後下一次點之前才驗）')
 TEAM['ret'], TEAM['calls'] = (True, 'ok'), []
 tracked_n = []
 s = Script([IDLE] * 3)
@@ -490,7 +533,18 @@ quest.layout.current = lambda: '2880x1659'
 quest.netwatch.guard = lambda *_: {'status': 'ok'}
 sys.argv = ['quest.py', '--task', 'x', '--max-seconds', '8']
 rc = quest.main()
-ok &= check('8 秒內只檢查 1 次、追蹤點了多次', len(TEAM['calls']) == 1 and len(tracked_n) >= 3, f'checks={len(TEAM["calls"])} tracks={len(tracked_n)}')
+ok &= check('8 秒內只檢查 1 次（開始前）、追蹤點了多次', len(TEAM['calls']) == 1 and len(tracked_n) >= 3, f'checks={len(TEAM["calls"])} tracks={len(tracked_n)}')
+TEAM['ret'], TEAM['calls'] = (True, 'ok'), []
+BATTLE_Q = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': False, 'auto_off': False}
+s = Script([IDLE, DIALOG, BATTLE_Q, BATTLE_Q, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE])
+tracked_n.clear()
+quest.time.time, quest.time.sleep = s.time, s.sleep
+quest.read_screen, quest.gui = s.screen, s.gui
+quest.walk.gui = s.gui
+sys.argv = ['quest.py', '--task', 'x', '--max-seconds', '14', '--no-stop-after-boss']
+rc = quest.main()
+tags = [t for _, t in TEAM['calls']]
+ok &= check('任務戰打完後：下一次點追蹤前驗 1 次，之後不再驗', tags.count('點追蹤 / 黃問號前：') == 1 and tags[0] == '開始前：' and len(tags) == 2 and len(tracked_n) >= 2, f'{tags} tracks={len(tracked_n)}')
 
 print('(o) 戰鬥鎖檔：戰鬥中存在（含 pid）、戰鬥結束 / 程式結束後刪除')
 seen = []
@@ -722,6 +776,13 @@ for nm, g, want_close, want_switch in [('有列 → 點關閉後才按切換', R
     cl = [i for i, c in enumerate(g.clicks) if c.startswith('click 510 ')]
     sw = [i for i, c in enumerate(g.clicks) if c.startswith('click 850 765')]
     ok &= check(nm, len(cl) == want_close and bool(sw) == want_switch and r == want_switch and (not sw or not cl or cl[-1] < sw[0]), f'{g.clicks}')
+_rs = quest.read_screen
+for stt in ('idle', 'dialog', 'reward'):
+    g = RowGame(True)
+    quest.gui, quest.read_screen = g.gui, (lambda stt=stt: dict(IDLE, state=stt))
+    r = quest.refresh_characters(True)
+    ok &= check(f'關閉列還在但戰鬥已結束（畫面 {stt}）→ 不點關閉、不點切換 850,765、回 False', r is False and not g.clicks, str(g.clicks))
+quest.read_screen = _rs
 g = RowGame(False)
 quest.gui = g.gui
 quest.refresh_characters(False)
