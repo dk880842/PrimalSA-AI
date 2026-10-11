@@ -43,6 +43,9 @@ Q182 = [
     dict(id=2020, detail='強盜的洞穴(1.82)', track='強盜的洞穴', accept_npc='老人薩頓 1112:16,15', steps_total=4,
          steps={}, bag_slots=1, boss=True, est_min=13, live=False,
          note='3 場任務戰（怪力的小陣 10701 / 鐵壁的小守 10703 / 疾風的咪雅 10705，各得一件傳家寶）；盜賊對話框是「戰鬥 / 再見」，左鈕 948,461 = 戰鬥；10-09 quest.py 判成 idle 沒按（quest.py 已加按鈕 OCR 後備，未用樣本驗證，需實機確認）；末步回薩頓交付（薩頓家的秘藥、聲望 2）'),
+    dict(id=2023, detail='解救老爺爺(1.82)', track='解救老爺爺', accept_npc='村莊小姑娘 3110:16,15', steps_total=2,
+         steps={}, bag_slots=0, boss=False, est_min=5, live=False,
+         note='純巡路（哈羅山的醫生 20105:16,20 拿藥 → 村莊小姑娘交藥）；攻略名「塔姆塔姆村的草藥」'),
 ]
 
 BY_ID = {d['id']: d for d in Q182}
