@@ -23,6 +23,7 @@ AI 只透過「截圖 → 看圖 → 點擊 / 按鍵 → 再截圖確認」操�
 ```bash
 bash tools/gui/gui.sh info                 # 視窗大小
 bash tools/gui/gui.sh max                  # 最大化 → 客戶區 2880×1659（ui/ 座標的基準）
+bash tools/gui/gui.sh fit [寬] [dry]       # 外接螢幕：視窗化成「2880×1659 同比例」最大客戶區（1920×1080 螢幕 → 1728×995）；dry 只印目標不動視窗。沒有腳本在跑、非戰鬥時才做
 bash tools/gui/gui.sh shot [out.png]       # 預設存 tools/.cache/shot.png，再用 Read 看圖（不能存到 /tmp，WSL 路徑會 GDI+ Save 例外；用預設路徑或 Windows 可寫路徑）
 bash tools/gui/gui.sh click X Y [right]
 bash tools/gui/gui.sh dclick X Y          # 雙擊（倉庫存入）
@@ -75,6 +76,7 @@ uv run --no-project python tools/gui/errlog.py list
 - **座標 = 截圖座標**：截圖固定縮成客戶區的 1/2（`-Scale 2`，不隨視窗大小變），click 內部 ×2。實測客戶區 2880×1659 → 截圖 1440×830。
 - `ui/` 的座標只在這個大小有效。**每次開始操作先跑 `info`**，不是 2880×1659 就跑 `max`；`max` 後仍不同（換螢幕 / 解析度）時不要等比例換算（UI 縮放與錨點會變，例：1436×1644 時背包在 558,790），以新截圖重新目測。
 - **1920×1080 螢幕**（`max` 後 `client=1920x1017`、截圖 960×508）：用 [ui/layout-1920x1017.md](ui/layout-1920x1017.md) 的座標；`stat.ps1`、`walk.py`、`heal.py` 會自動切換（`tools/gui/layout.py`）。
+- **外接螢幕同比例視窗（P1，2026-10-11）**：`gui.sh fit` 把視窗設成與 2880×1659 同長寬比的客戶區（1920×1080 螢幕 → **1728×995**，原最大化狀態存 `tools/.cache/window-placement.txt`；回復用 `gui.sh max` + `end`）。`gui.ps1` 有座標換算層（`tools/gui/psageom.ps1`）：`shot` 一律縮成 1440×830、`click / dclick / drag / pixel / waitpix` 的 1440×830 座標自動乘 Sx = W/1440、Sy = H/829.5（1728×995 = 1.2；P0 實測純等比例、位置誤差 < 0.4 px），所以 ui/*.md 與各腳本的座標常數**不用改**。2880×1659 時 Sx = Sy = 2 恆等，輸出與舊版逐位元組相同。`gui.sh info` 追加 `layout=`（座標常數用的邏輯版面）、`phys=`、`sx / sy`、`proportional=`；`PSA_GEOM=off`（WSL 由 gui.sh / winenv 自動帶進 WSLENV）或明確給 `-Scale` = 完全舊行為；`pixel ... -Sample norm` = 先縮成 1440×830 再取點（預設取實體最近點，細線 / 圖示框邊的點兩者會差很多）。**P1 只做 gui.ps1 這一層**：`layout.current()` 仍回實體 `1728x995`，`ass / quest / uikit / petwatch / netwatch / watch` 的版面守衛照舊擋下（stat / digitmatch / ocr / titlematch / findmark、樣板、sig 點都還沒適配，P2～P4 再放行），所以外接上目前只適合手動 `gui.sh` 點擊 / 截圖；`layout.logical()` / `resolve()` = 座標常數用哪套（1728×995 → `2880x1659`）、`layout.template_layout()` = 樣板該存哪一份（實體尺寸不在 SUPPORTED → None = 未就緒）。`fit` 後跑中的腳本 / watch 的版面快取不會更新，只在沒有腳本在跑時做。
 - 只有 `fg` / `max` 會讓遊戲佔著前景（使用者打字可能打進遊戲），之後要跑 `end`。習慣上任務結束仍跑 `end`，沒狀態時它什麼都不做。
 - 背景模式 `dclick`（倉庫存入）、`key` 打字（含中文）都實測可用（2026-10-09）。`key` 語法：一般字元 = 打進輸入框；`{ESC}` `{BS}` 等 = 按鍵；`{a}` = 只按 a 鍵（快捷鍵用）。
 - `gui.ps1` 必須保持 **UTF-8 with BOM**（PowerShell 5.1 讀無 BOM 檔會把中文當 Big5，整支解析失敗）。

@@ -79,10 +79,22 @@ def ps_argv(script: str, *args: str) -> list[str]:
     return [*PS_PREFIX, '-File', to_windows(p), *map(str, args)]
 
 
+def child_env() -> dict:
+    """傳給 powershell.exe 的環境變數。WSL 預設不會把 Linux 的環境變數帶進 Windows 程序，要列在 WSLENV：
+    PSA_GEOM（=off 讓 gui.ps1 座標換算層退回舊行為，見 psageom.ps1）。其他平台原樣。"""
+    env = dict(os.environ)
+    if env.get('PSA_GEOM') is not None and platform_kind() == 'wsl':
+        parts = [x for x in env.get('WSLENV', '').split(':') if x]
+        if 'PSA_GEOM' not in [x.split('/')[0] for x in parts]:
+            parts.append('PSA_GEOM')
+        env['WSLENV'] = ':'.join(parts)
+    return env
+
+
 def _oneshot(script: str, *args: str, timeout: float | None = None) -> subprocess.CompletedProcess:
     """一次性：每次啟動一個 powershell.exe -File（原本的做法）"""
     r = subprocess.run(ps_argv(script, *args), capture_output=True, text=True, encoding='utf-8',
-                       errors='replace', timeout=timeout)
+                       errors='replace', timeout=timeout, env=child_env())
     r.stdout = (r.stdout or '').replace('\r', '')
     r.stderr = (r.stderr or '').replace('\r', '')
     return r
@@ -115,14 +127,14 @@ SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch', 'digitmatch'}
 # 各腳本 param 區塊裡「具名」參數（五支腳本都沒有 [switch]，所以「-名稱 值」成對拆進 named，其餘當位置參數）。
 # 腳本改 param 時要同步這裡（test_winenv_server.py 的「白名單與 ps1 param 區塊同步」會檢查；_selftest 只測路徑換算）。
 SERVER_NAMED = {
-    'gui': ('Scale', 'Note', 'NoRestore'),
+    'gui': ('Scale', 'Note', 'NoRestore', 'Sample'),
     'ocr': ('X', 'Y', 'Wd', 'Ht', 'Zoom', 'Dark', 'Zooms', 'Light'),
     'stat': ('Shot', 'ShotWidth'),
     'findmark': ('Crop', 'Out', 'Zoom'),
     'titlematch': ('Mode', 'Dir', 'Image', 'Out', 'Y', 'Thr'),
     'digitmatch': ('Image', 'Boxes'),
 }
-INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
+INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'fit', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
 START_TIMEOUT = 20.0
 IDLE_MARGIN = 15.0          # client 閒置超過 (SERVER_IDLE_MIN*60 − 此秒數) 就先重開 server
 SERVER_IDLE_MIN = 3         # serve.ps1 閒置看門狗（分鐘）：長程序每秒都有請求，不會誤殺；殘留的 server 最多活這麼久
@@ -194,7 +206,7 @@ def _log_err(kind: str, msg: str) -> None:
 
 def estimate_timeout(script: str, pos: list[str], named: dict[str, str]) -> tuple[float, bool]:
     """(逾時秒數, 是否輸入類)。唯讀預設 20 s；waitpix / waitstill = 指令逾時 + 5 s；ocr -Zooms 每倍數 +2 s；
-    輸入類（click / dclick / drag / key / max / end / fg，含 seq 裡有這些）= seq 內等待毫秒總和 ×2 + 30 s"""
+    輸入類（click / dclick / drag / key / max / fit / end / fg，含 seq 裡有這些）= seq 內等待毫秒總和 ×2 + 30 s"""
     if script != 'gui':
         n = len([z for z in named.get('Zooms', '').split(',') if z.strip()])
         return 20.0 + 2.0 * n, False
@@ -287,7 +299,7 @@ class GuiServer:
                 ep.write_bytes(b'')
             err = open(ep, 'ab')
             kw = {'creationflags': 0x08000000} if platform_kind() == 'windows' else {}   # CREATE_NO_WINDOW
-            self.proc = subprocess.Popen(self._argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, **kw)
+            self.proc = subprocess.Popen(self._argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, env=child_env(), **kw)
         except (OSError, ValueError, RuntimeError) as e:
             self.proc = None
             return self._start_failed(f'無法啟動 serve.ps1：{e}')

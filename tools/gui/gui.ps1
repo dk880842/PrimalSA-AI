@@ -8,6 +8,8 @@
 #   gui.ps1 info                      印出視窗大小 / 位置
 #   gui.ps1 pixel <x> <y> | "x,y x,y ..."  背景截圖後印出各點顏色 r,g,b（縮圖座標），給腳本判斷畫面狀態
 #   gui.ps1 max                       最大化遊戲視窗（ui/ 座標以最大化的 2880×1659 為準）
+#   gui.ps1 fit [寬] [dry]            把視窗設成螢幕放得下的最大「2880×1659 同比例」客戶區（外接 1920×1080 → 1728×995）；給寬就照給；dry 只印不動
+#                                     原最大化狀態存 tools/.cache/window-placement.txt；只做視窗操作，不搶前景、不碰遊戲記憶體
 #   gui.ps1 end                       任務結束：把前景視窗與游標還給使用者（只有 fg 模式需要）
 #   gui.ps1 wait <毫秒>               等待（給 seq 用）
 #   gui.ps1 waitpix <逾時毫秒> "x,y,r,g,b[!] ..." [容差]  輪詢背景截圖，等到各點顏色符合（! = 不符合）才回來；印 ok/timeout 毫秒
@@ -19,7 +21,9 @@
 #   -Note "用途"                       任何指令後面可加，附註寫進操作 log（gui.sh 用環境變數 PSA_NOTE）
 #   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 2000 行，psa-hud pane 顯示）；shot / pixel / wait* 不記
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
-# 座標系：縮圖座標 × Scale = 客戶區像素座標。Scale 預設 2。
+# 座標系：縮圖座標（1440×830）→ 客戶區像素，換算見 psageom.ps1：客戶區與 2880×1659 同長寬比時 Sx = W/1440、Sy = H/829.5
+#   （2880×1659 = 恆等 2，與舊版輸出逐位元組相同；1728×995 = 1.2）。其他比例 / 環境變數 PSA_GEOM=off / 明確給 -Scale = 舊行為（× Scale，預設 2）。
+#   pixel 預設取實體最近點；-Sample norm = 先縮成 1440×830 再取點（與 shot 圖一致）。
 # 背景模式（預設，2026-10-09 實測可用）：不把遊戲拉到前景，使用者可以繼續用其他視窗。
 #   - 滑鼠：先 PostMessage WM_ACTIVATEAPP / WM_ACTIVATE / WM_SETFOCUS 讓 Unity 以為有焦點
 #     （不然 UGUI 的 StandaloneInputModule 會忽略 UI 點擊，點擊穿透到地面變成走路），
@@ -30,7 +34,7 @@
 #   - 鍵盤：PostMessage WM_KEYDOWN / WM_CHAR / WM_KEYUP，游標完全不動。
 # fg 模式：任務期間第一次 click / drag / key 時記下使用者原本的前景視窗與游標（存 tools/.cache/gui-session.txt），
 #          把遊戲拉到前景並一直留著；任務做完呼叫 end 才還原。
-param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2, [string]$Note = '', [string]$NoRestore = '0')
+param([string]$Cmd, [string]$A1, [string]$A2, [string]$A3, [string]$A4, [string]$A5, [double]$Scale = 2, [string]$Note = '', [string]$NoRestore = '0', [string]$Sample = 'near')
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8  # 讓 WSL 收到的中文不變亂碼
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @"
@@ -40,6 +44,13 @@ public class W {
   [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr h, out RECT r);
   [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr h, ref POINT p);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);
+  [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] public static extern bool AdjustWindowRectEx(ref RECT r, int style, bool menu, int ex);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
+  [DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr h, ref WP p);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int sz);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
   [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint f);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -58,6 +69,7 @@ public class W {
   [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
   public struct RECT { public int L,T,R,B; }
   public struct POINT { public int X,Y; }
+  [StructLayout(LayoutKind.Sequential)] public struct WP { public int len, flags, show; public POINT minP, maxP; public RECT normal; }
 }
 // 背景點擊期間（約 0.15 秒）吞掉使用者實體滑鼠的移動 / 按下 / 滾輪，讓游標停在目標上，點擊不會被使用者帶歪。
 // 用低階滑鼠鉤子（WH_MOUSE_LL，只過濾本機輸入，不碰遊戲）；放開事件照樣放行，免得使用者那邊的按鍵卡住。
@@ -145,6 +157,10 @@ if ([W]::IsIconic($h)) {
 }
 $r = New-Object W+RECT; [W]::GetClientRect($h, [ref]$r) | Out-Null
 $p = New-Object W+POINT; [W]::ClientToScreen($h, [ref]$p) | Out-Null
+# 座標換算層（psageom.ps1）：有明確給 -Scale 或 PSA_GEOM=off → 舊行為（× Scale）
+. (Join-Path $PSScriptRoot 'psageom.ps1')
+$GeomOff = ($env:PSA_GEOM -eq 'off') -or $PSBoundParameters.ContainsKey('Scale')
+$Gm = Get-PsaGeom $r.R $r.B $Scale $GeomOff
 $Fg = $false
 $WaitOk = $true
 
@@ -168,7 +184,7 @@ function Focus {
   }
   SetFg $h; Start-Sleep -Milliseconds 120
 }
-function MoveTo($x, $y) { [W]::SetCursorPos($p.X + [int]([double]$x * $Scale), $p.Y + [int]([double]$y * $Scale)) | Out-Null }
+function MoveTo($x, $y) { $q = Convert-PsaPoint $Gm $x $y; [W]::SetCursorPos($p.X + $q[0], $p.Y + $q[1]) | Out-Null }
 
 # ---- 背景模式 ----
 function Wake {
@@ -178,7 +194,7 @@ function Wake {
   [W]::PostMessage($h, 0x0007, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null   # WM_SETFOCUS
   Start-Sleep -Milliseconds 80
 }
-function ToLParam($x, $y) { $cx = [int]([double]$x * $Scale); $cy = [int]([double]$y * $Scale); [IntPtr](($cy -shl 16) -bor ($cx -band 0xffff)) }
+function ToLParam($x, $y) { $q = Convert-PsaPoint $Gm $x $y; [IntPtr](($q[1] -shl 16) -bor ($q[0] -band 0xffff)) }
 # 背景滑鼠：游標移到 (x,y)（縮圖座標）並送一則滑鼠訊息；wParam = 按著的鍵（MK_LBUTTON 1 / MK_RBUTTON 2）
 function BgMsg($msg, $wp, $x, $y) { MoveTo $x $y; [W]::PostMessage($h, $msg, [IntPtr]$wp, (ToLParam $x $y)) | Out-Null }
 # 背景滑鼠動作開始 / 結束：鎖住使用者實體滑鼠、記下並還原使用者游標（動作期間使用者移動的量被吞掉，游標回到原位）
@@ -245,7 +261,12 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     Invoke-Gui $A1 $A2 $A3 $A4 $A5
     $script:Fg = $old
   }
-  'info' { "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) scale=$Scale shot=$([int]($r.R/$Scale))x$([int]($r.B/$Scale)) foreground=$([W]::GetForegroundWindow() -eq $h)" }
+  'info' {
+    # 舊欄位（client / origin / scale / shot / foreground）格式不變；後面追加換算層欄位：layout = 套哪套座標常數的邏輯版面、
+    # phys = 實體客戶區、sx / sy = 截圖座標 → 實體像素倍率、proportional = 與 2880×1659 同比例（換算可用）。PSA_GEOM=off 時不追加（完全舊輸出）
+    $extra = if ($GeomOff) { '' } else { " layout=$($Gm.Layout) phys=$($r.R)x$($r.B) sx=$([Math]::Round($Gm.Sx, 4)) sy=$([Math]::Round($Gm.Sy, 4)) proportional=$($Gm.Proportional)" }
+    "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) scale=$($Gm.Sx) shot=$($Gm.ShotW)x$($Gm.ShotH) foreground=$([W]::GetForegroundWindow() -eq $h)$extra"
+  }
   'shot' {
     if (-not $A1) { $A1 = 'shot.png' }
     # 相對路徑一律解析到 tools/.cache/ 底下（單獨 shot 與 seq 內的 shot 一致；絕對路徑照用）
@@ -256,10 +277,8 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     # 3 = PW_CLIENTONLY | PW_RENDERFULLCONTENT（DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面）
     $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
     if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
-    $w = [int]($r.R / $Scale); $hh = [int]($r.B / $Scale)
-    $small = New-Object System.Drawing.Bitmap $w, $hh
-    $g = [System.Drawing.Graphics]::FromImage($small)
-    $g.InterpolationMode = 'HighQualityBicubic'; $g.DrawImage($full, 0, 0, $w, $hh); $g.Dispose()
+    $w = $Gm.ShotW; $hh = $Gm.ShotH
+    $small = Get-PsaShot $full $Gm
     $small.Save($A1, [System.Drawing.Imaging.ImageFormat]::Png)
     $small.Dispose(); $full.Dispose()   # 兩張都是大 Bitmap（~19 MB / ~5 MB），常駐 server 下不能留給 GC
     "saved ${w}x${hh}"
@@ -332,6 +351,52 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     ActLog 'max'; Focus; [W]::ShowWindow($h, 3) | Out-Null; Start-Sleep -Milliseconds 800
     [W]::GetClientRect($h, [ref]$r) | Out-Null; "client=$($r.R)x$($r.B)"
   }
+  'fit' {
+    # fit [寬] [dry]：視窗化成「與 2880×1659 同比例」的最大客戶區（預設取螢幕工作區放得下的最大值再量化到 144 的倍數）。
+    # 只做 ShowWindow / SetWindowPos（一般視窗操作）：不搶前景、不送遊戲輸入、不碰遊戲記憶體；跑中的腳本 / watch 的版面快取不會自動更新，
+    # 所以只在沒有腳本在跑、非戰鬥時做。回復：gui.sh max（再 gui.sh end）或用 window-placement.txt 的原狀態。
+    $reqW = 0; $dry = $false
+    foreach ($a in @($A1, $A2)) { if ($a -eq 'dry') { $dry = $true } elseif ($a -match '^\d+$') { $reqW = [int]$a } elseif ($a) { Write-Error "fit 參數看不懂：$a（用法 fit [寬] [dry]）"; exit 2 } }
+    $zoomed = [W]::IsZoomed($h)
+    if ($zoomed -and -not $dry) { [W]::ShowWindow($h, 4) | Out-Null; Start-Sleep -Milliseconds 800 }   # SW_SHOWNOACTIVATE：取消最大化、不搶前景
+    # 視窗外框 → 「可見框架」的額外寬 / 高（扣掉 DWM 隱形邊框；最大化時外框含 −8 的隱形部分，所以量測要在還原後；dry 時只估）
+    $wr = New-Object W+RECT; [W]::GetWindowRect($h, [ref]$wr) | Out-Null
+    $ext = New-Object W+RECT; $dw = [W]::DwmGetWindowAttribute($h, 9, [ref]$ext, 16)   # DWMWA_EXTENDED_FRAME_BOUNDS
+    if ($dw -ne 0 -or $zoomed) { $ext = $wr }
+    $insL = $ext.L - $wr.L; $insT = $ext.T - $wr.T; $insR = $wr.R - $ext.R; $insB = $wr.B - $ext.B
+    $style = [W]::GetWindowLong($h, -16) -band (-bnot 0x01000000); $exs = [W]::GetWindowLong($h, -20)   # 去掉 WS_MAXIMIZE
+    $z = New-Object W+RECT; [W]::AdjustWindowRectEx([ref]$z, $style, $false, $exs) | Out-Null
+    $exW = ($z.R - $z.L) - $insL - $insR; $exH = ($z.B - $z.T) - $insT - $insB
+    $wa = [System.Windows.Forms.Screen]::FromHandle($h).WorkingArea
+    $tg = Get-PsaFitSize $wa.Width $wa.Height $exW $exH $reqW
+    $tw = $tg[0]; $th = $tg[1]
+    if ($dry) { "fit dry: 目標 client=${tw}x${th} 工作區=$($wa.X),$($wa.Y),$($wa.Width)x$($wa.Height) 可見框架額外 ${exW}x${exH} 目前 client=$($r.R)x$($r.B) zoomed=$zoomed"; break }
+    # 存原狀態（只在目前最大化、或還沒存過時存，避免把 fit 後的狀態當成原狀態）
+    $wp = New-Object W+WP; $wp.len = [Runtime.InteropServices.Marshal]::SizeOf($wp)
+    $plFile = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache\window-placement.txt'))
+    if ($zoomed -or -not (Test-Path $plFile)) {
+      [W]::GetWindowPlacement($h, [ref]$wp) | Out-Null
+      New-Item -ItemType Directory -Force (Split-Path $plFile) | Out-Null
+      "zoomed=$zoomed normal=$($wp.normal.L),$($wp.normal.T),$($wp.normal.R),$($wp.normal.B) client=$($r.R)x$($r.B)" | Set-Content -Encoding UTF8 $plFile
+    }
+    $cw = $tw; $ch = $th; $res = ''
+    for ($i = 0; $i -lt 3; $i++) {
+      $z = New-Object W+RECT; $z.R = $cw; $z.B = $ch
+      [W]::AdjustWindowRectEx([ref]$z, $style, $false, $exs) | Out-Null
+      $ow = $z.R - $z.L; $oh = $z.B - $z.T
+      $vx = $wa.X + [int](($wa.Width - ($ow - $insL - $insR)) / 2) - $insL
+      $vy = $wa.Y - $insT   # 可見標題列貼工作區頂
+      [W]::SetWindowPos($h, [IntPtr]::Zero, $vx, $vy, $ow, $oh, 0x0014) | Out-Null   # SWP_NOZORDER | SWP_NOACTIVATE
+      Start-Sleep -Milliseconds 500
+      [W]::GetClientRect($h, [ref]$r) | Out-Null
+      if ($r.R -eq $tw -and $r.B -eq $th) { break }
+      $cw += ($tw - $r.R); $ch += ($th - $r.B)   # 差幾 px 就補在外框上重試
+    }
+    [W]::ClientToScreen($h, [ref]$p) | Out-Null
+    $script:Gm = Get-PsaGeom $r.R $r.B $Scale $GeomOff   # seq 裡 fit 後面的動作用新幾何
+    ActLog "fit ${tw}x${th}"
+    "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) target=${tw}x${th}" + $(if ($r.R -ne $tw -or $r.B -ne $th) { ' 未達目標' } else { '' })
+  }
   'key' {
     ActLog "key $A1"
     if ($script:Fg) { Focus; [System.Windows.Forms.SendKeys]::SendWait($A1) } else { BgKeys $A1 }
@@ -354,10 +419,16 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
     # 點可以是「pixel X Y」或一個字串「pixel "X,Y X,Y ..."」（參數個數有限，多點用後者）
     $pts = if ($A2) { @("$A1,$A2") } else { $A1 -split '[\s/]+' | Where-Object { $_ } }
+    # -Sample norm：先縮成截圖座標系（與 shot 圖一致）再直接取點；預設 near = 實體最近點（見 plan §3.4）
+    $src = $full; $norm = ($Sample -eq 'norm')
+    if ($norm) { $src = Get-PsaShot $full $Gm }
     $out = foreach ($pt in $pts) {
       $v = $pt -split ','
-      $c = $full.GetPixel([int]([double]$v[0] * $Scale), [int]([double]$v[1] * $Scale)); "$($c.R),$($c.G),$($c.B)"
+      if ($norm) { $q = @([Math]::Max(0, [Math]::Min($Gm.ShotW - 1, [int][double]$v[0])), [Math]::Max(0, [Math]::Min($Gm.ShotH - 1, [int][double]$v[1]))) }
+      else { $q = Convert-PsaPoint $Gm $v[0] $v[1] }
+      $c = $src.GetPixel($q[0], $q[1]); "$($c.R),$($c.G),$($c.B)"
     }
+    if ($norm) { $src.Dispose() }
     $full.Dispose(); $out -join ' '
   }
   'waitpix' {
@@ -367,7 +438,8 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     $conds = New-Object System.Collections.ArrayList
     foreach ($t in ($A2 -split '[\s/]+' | Where-Object { $_ })) {
       $neg = $t.EndsWith('!'); $v = $t.TrimEnd('!') -split ','
-      [void]$conds.Add(@([int]([double]$v[0] * $Scale), [int]([double]$v[1] * $Scale), [int]$v[2], [int]$v[3], [int]$v[4], $neg))
+      $q = Convert-PsaPoint $Gm $v[0] $v[1]
+      [void]$conds.Add(@($q[0], $q[1], [int]$v[2], [int]$v[3], [int]$v[4], $neg))
     }
     $sw = [Diagnostics.Stopwatch]::StartNew(); $hit = $false; $pwfail = $false
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
@@ -433,7 +505,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       if ($t[0]) { Invoke-Gui $t[0] $t[1] $t[2] $t[3] $t[4] $t[5] }
     }
   }
-  default { "未知指令：$Cmd（shot|click|dclick|drag|key|info|max|end|wait|seq|fg）" }
+  default { "未知指令：$Cmd（shot|click|dclick|drag|key|info|max|fit|end|wait|seq|fg）" }
 }
 }
 Invoke-Gui $Cmd $A1 $A2 $A3 $A4 $A5
