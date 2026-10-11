@@ -384,7 +384,8 @@ def n_slots(depot: bool = False) -> int:
 
 
 ICON_FILE = HERE / 'fixtures' / 'item_icons.json'         # {名稱: {'bag': [[dx,dy,r,g,b],…], 'depot': […]}}：格子中心周圍 9×9 點的圖示顏色（背包格與倉庫格圖示大小不同，各一份）
-ICON_TOL, ICON_RATIO = 40, 0.85
+POPUP_SETTLE_S = 1.0
+ICON_TOL, ICON_RATIO, ICON_RATIO_LOOSE = 40, 0.85, 0.45
 
 
 def load_icons() -> dict:
@@ -413,7 +414,13 @@ def icon_match_slots(want: str, depot: bool = False) -> list | None:
     for k, (i, c) in enumerate(zip(owner, cols)):
         d = tpl[k % len(tpl)]
         hit[i] = hit.get(i, 0) + (all(abs(a - b) <= ICON_TOL for a, b in zip(c, d[2:])))
-    return [i for i in range(n_slots(depot)) if hit.get(i, 0) >= ICON_RATIO * len(tpl)]
+    strict = [i for i in range(n_slots(depot)) if hit.get(i, 0) >= ICON_RATIO * len(tpl)]
+    if strict:
+        return strict
+    # 嚴格比對一格都不中（堆疊數 / 格位背景不同會掉到約 0.55，其他道具實測 ≤ 0.32）→ 放寬一次；
+    # 後面一定有彈窗標題 + 按鈕列核對，放寬只多開幾個候選格，不會誤用
+    return sorted((i for i in range(n_slots(depot)) if hit.get(i, 0) >= ICON_RATIO_LOOSE * len(tpl)),
+                  key=lambda i: -hit.get(i, 0))
 
 
 def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> int | None:
@@ -483,6 +490,7 @@ def click_popup_button(label: str, allow=()) -> tuple:
     x, y = b[label]
     if label == '使用' and b.get('kind') == 'single' and is_pair_layout():
         x = 619                                       # OCR 漏讀「更多」→ 誤判單鈕，732 點在兩鈕中間沒反應（2026-10-11 龍王的守護根因）
+    uikit.sleep(POPUP_SETTLE_S)                       # 彈窗動畫期間點按鈕會落空
     if not _click(x, y, POPUP, f'bag 彈窗 {label}', allow=allow, wait_ms=500):
         return _fail(EXIT_PANEL, '彈窗特徵消失，沒點按鈕', 'bag-popup-gone'), b.get('kind')
     return 0, b['kind']
@@ -673,6 +681,7 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
         if '取出' not in re.sub(r'\s+', '', txt):
             close_popup()
             return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn')
+        uikit.sleep(POPUP_SETTLE_S)                      # 彈窗出現動畫期間點「取出」會落空（2026-10-11 實測：彈窗關了但道具沒動）
         x, y = (722, 662) if kind == 'equip' else (732, 648)
         if not _click(x, y, POPUP, f'bag 倉庫取出「{want}」', allow=(), wait_ms=700):
             return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone')
@@ -681,7 +690,8 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
         rc = goto_page('bag')
         if rc:
             return rc
-        if find_item(want) is None:                      # 格名稱 OCR 會讀歪（「守 4-0」），要逐格開彈窗核對
+        # 切回背包頁後格子要約 1～3 秒才更新（2026-10-11 實測：立刻找會找不到而誤判失敗並回滾存回），輪詢最多 4 秒
+        if not _wait(lambda: find_item(want) is not None, 4.0):
             return _fail(EXIT_VERIFY, f'取出後背包讀不到「{want}」', 'bag-depot-verify')
     return 0
 
@@ -715,6 +725,7 @@ def depot_store(role: str, want: str, depot: str = 'public') -> int:
         if '存入' not in re.sub(r'\s+', '', txt):
             close_popup()
             return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「存入」（不點）', 'bag-store-btn')
+        uikit.sleep(POPUP_SETTLE_S)                      # 同取出：彈窗動畫期間點會落空
         if not _click(732, 648, POPUP, f'bag 存入「{want}」', wait_ms=700):
             return _fail(EXIT_PANEL, '彈窗特徵消失，沒點存入', 'bag-store-gone')
         if not _wait(lambda: not popup_open(), 2.5):
@@ -722,7 +733,7 @@ def depot_store(role: str, want: str, depot: str = 'public') -> int:
         rc = goto_page('bag')
         if rc:
             return rc
-        if find_item(want) is not None:
+        if not _wait(lambda: find_item(want) is None, 4.0):      # 同上：背包頁更新有延遲，輪詢到消失
             return _fail(EXIT_VERIFY, f'存入後背包仍找到「{want}」', 'bag-store-verify')
     return 0
 
