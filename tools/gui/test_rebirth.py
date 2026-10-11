@@ -527,7 +527,7 @@ check('guard_target：第 1 格 / 騎乘 / 出戰 / 騎寵名 / 名字不符 / �
 class FakePets:
     """替換 pet.list_role / scan_frames / select_slot / read_slot / CONFIRM，驗 drop_role 流程與防護"""
 
-    def __init__(self, slots, confirm_text='確定丟棄 烏力斯坦'):
+    def __init__(self, slots, confirm_text='確定要丟棄【烏力斯坦】嗎? 回收站保存48小時!'):
         self.slots, self.sel, self.confirm_open = slots, None, False
         self.confirm_text, self.clicks = confirm_text, []
         import pet
@@ -560,7 +560,7 @@ PETS = [{'slot': 1, 'name': '瑪斯貝卡', 'state': '騎乘'}, {'slot': 2, 'nam
 fp = FakePets([dict(s) for s in PETS])
 rc = quiet(petdrop.drop_role, 'DKBO', '烏力斯坦', {})
 check('petdrop：只丟第 3 格烏力斯坦（垃圾桶 1 次、確定 1 次）', rc == 0 and fp.slots[2].get('empty') and fp.slots[0]['name'] == '瑪斯貝卡' and fp.clicks == [petdrop.TRASH_XY, petdrop.CONFIRM_OK], str(fp.clicks))
-fp = FakePets([dict(s) for s in PETS], confirm_text='確定丟棄 瑪斯貝卡')
+fp = FakePets([dict(s) for s in PETS], confirm_text='確定要丟棄【瑪斯貝卡】嗎? 回收站保存48小時!')
 rc = quiet(petdrop.drop_role, 'DKBO', '烏力斯坦', {})
 check('petdrop：提示窗名稱是騎寵 → 76、按取消不按確定', rc == 76 and petdrop.CONFIRM_OK not in fp.clicks and petdrop.CONFIRM_CANCEL in fp.clicks and not fp.slots[2].get('empty'))
 fp = FakePets([dict(s) for s in PETS], confirm_text='')

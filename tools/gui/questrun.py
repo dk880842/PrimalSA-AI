@@ -421,10 +421,14 @@ class Run:
             got, self.pending = self.pending, None
             return got
         step = self.T.read_step(d['track'])
-        if step is None or step == self.T.gone():
-            return None, 'default', None
-        sd = d['steps'].get(step)
-        return step, (sd['kind'] if sd else 'default'), sd
+        if step is not None and step != self.T.gone():
+            sd = d['steps'].get(step)
+            return step, (sd['kind'] if sd else 'default'), sd
+        if step is None and len(d['steps']) >= d.get('steps_total', 0) and all(v.get('kind') == 'manual' for v in d['steps'].values()):
+            # 步號讀不到、但這個任務每一步都是 manual（例：恐龍博士，追蹤文字「圖鑒抓狗，練至18級+」沒有步驟樣板）→ 當 manual 停下交人，
+            # 不要落到 quest.py 去對話（2026-10-12 實機：quest.py 對吉魯「恐龍博士」按鈕空轉 → 117）
+            return 0, 'manual', {'kind': 'manual'}
+        return None, 'default', None
 
     def do_walk(self, d, step, sd) -> int:
         event(f'步 {step} kind=walk → 走到 {sd["map"]}:{sd["xy"]}')

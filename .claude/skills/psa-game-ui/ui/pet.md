@@ -88,3 +88,7 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 250 200; wait 400
 - **批次存取**：`pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 名,名] [--skip-missing] [--pick first|last]`、`take-many --role ... --pets ...`、`take --pet 名`（不給格號，現場逐張找）。一個 Session（面板只開關一次）、角色間直接點左欄頭像（`select_role`：黃框剛好只有該角色 + 頭像名字樣板），子分頁（個人 / 公共）每次存取前都現場驗。每隻都走 store / take 同一套驗證，失敗立即停（不重點、後面的角色不做）。騎寵只放行 `--allow-mount-store` 名單內的名字。每隻之間會切回寵物分頁（狀態鈕 / 狀態標在倉庫分頁讀不到），所以「省」的是 preflight / 開關面板 / 重新 session，不是每隻的 list（約 3～5 s）。同物種多隻（新抓的 4 隻）要 `--pick last`（保留第 1 格）。
 - 退出碼補充：72 也代表「倉庫裡逐張看不到」（take --pet / take-many 沒給 `--skip-missing`）。
 
+
+## 交寵物任務的「選擇」視窗（2026-10-12，pet_turnin.py）
+NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清單（寵物名 + 綠字「0轉N級」）、卡 y 約 341 / 446 / 544（第 3 張被截半，清單可往下 drag 700,520→700,400）、確定 706,614、右上 ✕ 970,213。順序每人不同，**依名字點卡**，卡片變黃底（探點 900,y）才按確定。腳本：`pet_turnin.py dino <角色…>`，說明見 psa-pet-quest。
+丟寵提示窗「確定要丟棄【名字】嗎?」+「回收站保存48小時!」：確定 615,557 / 取消 813,557；名字行是黃字，OCR 要 `-Dark 120`（petdrop.confirm_names_ok）。

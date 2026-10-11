@@ -56,6 +56,21 @@ def guard_target(sl: dict, want: str) -> str | None:
     return None
 
 
+def confirm_names_ok(ct: str, want: str) -> bool:
+    """提示窗 OCR 文字「確定要丟棄【名字】嗎?」→ 括號內的名字必須（模糊）等於 want。
+    （bag.name_match 的 norm_name 會把【…】內容整段刪掉，名字就在括號裡，不能用；2026-10-12 實機 rc 76 的根因。）
+    括號內要 OCR 讀得到：括號前後的 OCR 殘字（如 [布克布 嗎?）也算：取「丟棄」之後到「嗎」之前的文字。純函式"""
+    import re
+    import difflib
+    t = re.sub(r'\s+', '', ct or '')
+    m = re.search(r'丟棄[【\[（(]?(.*?)[】\]）)]?嗎', t) or re.search(r'[【\[（(]([^】\]）)]*)[】\]）)]', t)
+    if not m:
+        return False
+    got = re.sub(r'[\W_]+', '', m[1])
+    w = re.sub(r'[\W_]+', '', want)
+    return bool(got) and (got == w or difflib.SequenceMatcher(None, got, w).ratio() >= 0.85)
+
+
 def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_run: bool = False) -> int:
     """面板已開。選角色 → 找名字 = want 的格 → 選取 → 垃圾桶 → 提示窗驗名 → 確定 → 驗空格"""
     rc, slots = pet.list_role(role, ctx)
@@ -93,9 +108,10 @@ def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_r
         if uikit.clock() >= end:
             return _fail(EXIT_VERIFY, '按了垃圾桶但提示窗沒出現（不重點）', 'petdrop-noconfirm')
         uikit.sleep(0.15)
-    ct = ' '.join(uikit.ocr(pet.CONFIRM_BOX, '-Dark', 0, '-Zooms', '2,3,4')) or ' '.join(uikit.ocr(pet.CONFIRM_BOX, '-Dark', 120, '-Zooms', '2,3'))
-    mounts = [m for m in uikit.MOUNTS if bag.name_match(ct, m, 0.8)]
-    if not ct or not bag.name_match(ct, want) or mounts:
+    # 2026-10-12 實機：名字那行是黃字（【布克布克】）— -Dark 0 只讀得到「回收站保存48小時!」，-Dark 120 才讀得到「確定要丟棄【布克布克】嗎?」→ 兩組串起來
+    ct = ' '.join(uikit.ocr(pet.CONFIRM_BOX, '-Dark', 120, '-Zooms', '2,3') + uikit.ocr(pet.CONFIRM_BOX, '-Dark', 0, '-Zooms', '2,3,4'))
+    mounts = [m for m in uikit.MOUNTS if bag.name_match(ct, m, 0.8) or m in ct]
+    if not ct or not confirm_names_ok(ct, want) or mounts:
         uikit.safe_click(CONFIRM_CANCEL[0], CONFIRM_CANCEL[1], pet.CONFIRM, note='petdrop 提示窗名稱不符 → 取消')
         return _fail(EXIT_VERIFY, f'提示窗 OCR 是 {ct!r}（要含「{want}」、不含騎寵 {mounts}）→ 已取消', 'petdrop-confirm-name')
     if not uikit.safe_click(CONFIRM_OK[0], CONFIRM_OK[1], pet.CONFIRM, note=f'petdrop 確定丟棄 {want}', wait_ms=700):
