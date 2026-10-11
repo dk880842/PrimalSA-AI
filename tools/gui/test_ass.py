@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import actlog  # noqa: E402
+actlog.add.__defaults__ = (Path(__import__('tempfile').mkdtemp()) / 'actions.log', actlog.KEEP)   # 測試的 log 寫暫存，不污染 tools/.cache/actions.log（psa-hud 顯示）
 import ass  # noqa: E402
 import battleguard  # noqa: E402
 import json  # noqa: E402
@@ -580,6 +582,109 @@ g = MGame(role='DKBO2', fix='fail_1219', m_from=0.0, m_until=10 ** 9)
 setup(g)
 g.panel = True
 check('跑馬燈在、DKBO2 選中 → set_many 前的 DKBO3 不會被當成已選中', ass.selected_role() == 'DKBO2')
+
+print('(24) set_pet_many：5 人戰寵 一般動作 → 防禦（只改不同的、讀回確認、隊長最後）')
+
+
+class PGame(Game):
+    """每個角色各自的戰寵一般動作 + 各自學的技能（下拉清單依序：攻擊 / 防禦 / 技能…）"""
+    pet_set = None
+
+    def __init__(self, normals=None, skills=None, **k):
+        self.pets = {r: {'first_on': False, 'first': '攻擊', 'normal': (normals or {}).get(r, '攻擊')} for r in ass.ROLES}
+        self.skills = {r: (skills or {}).get(r, ['忠犬']) for r in ass.ROLES}
+        self.ocr_fail = set()           # 這些角色的下拉 OCR 讀不到
+        super().__init__(**k)
+
+    @property
+    def pet(self):
+        return self.pets[self.role]
+
+    @pet.setter
+    def pet(self, v):
+        pass
+
+    def opts(self):
+        return ['攻擊', '防禦'] + self.skills[self.role]
+
+    def click(self, x, y):
+        if self.panel and self.dd and x == ass.PET_OPT_X:
+            self.clicks.append((x, y))
+            idx = round((y - ass.PET_DD[self.dd][1]) / ass.PET_OPT_DY) - 1
+            if 0 <= idx < len(self.opts()) and not self.dd_stuck:
+                self.pet[self.dd] = self.opts()[idx]
+            self.dd = None
+            return
+        super().click(x, y)
+
+    def ocr_lines(self, box, *opts):
+        if not self.dd or self.role in self.ocr_fail:
+            return []
+        y0 = ass.PET_DD[self.dd][1]
+        return [(t, 944, y0 + ass.PET_OPT_DY * (i + 1)) for i, t in enumerate(self.opts())]
+
+
+def psetup(g):
+    setup(g)
+    ass._ocr_lines = g.ocr_lines
+
+
+g = PGame()
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({r: {'normal': '防禦'} for r in ass.ordered_roles(ass.ROLES)})
+check('5 人全改成 防禦、rc 0、面板關', rc == 0 and all(g.pets[r]['normal'] == '防禦' for r in ass.ROLES) and not g.panel, f'{rc} {msg}')
+check('  隊長 DKBO 最後、回傳 5 人 normal=防禦、changed 5 人', list(sts)[-1] == 'DKBO' and all(v == {'normal': '防禦'} for v in sts.values()) and len(info['changed']) == 5, str(info))
+check('  首次動作 / 勾選沒被動', all(g.pets[r]['first'] == '攻擊' and not g.pets[r]['first_on'] for r in ass.ROLES) and ass.PET_FIRST_CHK not in g.clicks)
+check('  選項點在 OCR 找到的位置（防禦 = 欄位 +84）', g.clicks.count((ass.PET_OPT_X, ass.PET_DD['normal'][1] + 84)) == 5, str(g.clicks[:12]))
+n = len(g.clicks)
+rc, sts, msg, info = ass.set_pet_many({r: {'normal': '防禦'} for r in ass.ROLES})
+check('已全是防禦 → 不開任何下拉、不點戰寵座標、changed 空', rc == 0 and not info['changed'] and not [c for c in g.clicks[n:] if c in ass.PET_DD.values() or c[0] == ass.PET_OPT_X])
+g = PGame(normals={'DKBO2': '防禦', 'DKBO4': '防禦'})
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({r: {'normal': '防禦'} for r in ass.ordered_roles(ass.ROLES)})
+check('2 人本來就是防禦 → 只改另外 3 人', rc == 0 and sorted(info['changed']) == ['DKBO', 'DKBO3', 'DKBO5'], str(info['changed']))
+g = PGame()
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({r: {'normal': '防禦'} for r in ass.ordered_roles(ass.ROLES)}, dry_run=True)
+check('dry_run：只讀、不點下拉、沒改', rc == 0 and all(g.pets[r]['normal'] == '攻擊' for r in ass.ROLES) and not [c for c in g.clicks if c in ass.PET_DD.values()] and not g.panel)
+g = PGame(skills={'DKBO3': ['忠犬', '猛擊']})
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO3': {'normal': '猛擊'}, 'DKBO': {'normal': '猛擊'}})
+check('技能名依文字找（DKBO3 學了猛擊 → 第 4 項）；DKBO 沒這技能 → rc 12、DKBO3 已改、DKBO 不亂點',
+      rc == ass.EXIT_NO_OPTION and g.pets['DKBO3']['normal'] == '猛擊' and g.pets['DKBO']['normal'] == '攻擊' and info['role'] == 'DKBO'
+      and not [c for c in g.clicks if c[0] == ass.PET_OPT_X and g.role == 'DKBO' and c[1] > 700] and not g.panel, f'{rc} {msg}')
+g = PGame()
+g.ocr_fail = {'DKBO2'}
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '防禦'}, 'DKBO': {'normal': '防禦'}})
+check('下拉 OCR 讀不到 → rc 12、不點選項、後面的人不動', rc == ass.EXIT_NO_OPTION and g.pets['DKBO2']['normal'] == '攻擊' and g.pets['DKBO']['normal'] == '攻擊'
+      and not [c for c in g.clicks if c[0] == ass.PET_OPT_X])
+g = PGame()
+g.dd_stuck = True
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '防禦'}})
+check('選了沒生效 → rc 4、不補點（只點 1 次選項）', rc == ass.EXIT_CONFIRM and len([c for c in g.clicks if c[0] == ass.PET_OPT_X]) == 1)
+g = PGame()
+g.scrolled = True
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '防禦'}})
+check('右半面板被捲走 → rc 7、不點下拉', rc == ass.EXIT_NOT_TOP and not [c for c in g.clicks if c in ass.PET_DD.values()])
+print('(25) set_pet_many 戰鬥中：不開面板；等到戰鬥結束才做')
+g = BGame(battle_until=30.0)
+setup(g)
+g.pets = {r: {'first_on': False, 'first': '攻擊', 'normal': '攻擊'} for r in ass.ROLES}
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '防禦'}}, no_wait=True)
+check('戰鬥中 --no-wait → rc 8、沒開面板', rc == ass.EXIT_IN_BATTLE and not g.panel and not g.clicks, f'{rc}')
+check('ordered_roles：隊長最後、其他照序', ass.ordered_roles(ass.ROLES) == ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO'])
+class PBGame(PGame, BGame):
+    pass
+
+
+g = PBGame(battle_until=6.0)
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '防禦'}})
+check('戰鬥中等到結束才開面板並改 → rc 0', rc == 0 and g.pets['DKBO2']['normal'] == '防禦' and g.t > 6.0, f'{rc} {msg} t={g.t}')
+check('CLI 參數錯（多人只支援 normal）→ 1', ass.main(['pet', 'all', 'first', '防禦']) == 1 and ass.main(['pet', 'DKBO,DKBO', 'normal', '防禦']) == 1)
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

@@ -8,6 +8,9 @@
   uv run --no-project python tools/gui/ass.py pet DKBO get                # 戰寵 首次動作（勾選 + 值）/ 一般動作（值）
   uv run --no-project python tools/gui/ass.py pet DKBO first 防禦          # 首次動作 = 防禦 並勾選
   uv run --no-project python tools/gui/ass.py pet DKBO first off normal 攻擊   # 首次動作取消勾選（值不動）、一般動作 = 攻擊
+  uv run --no-project python tools/gui/ass.py pet all normal 防禦        # 多人：5 人戰寵 一般動作 = 防禦（也可 DKBO,DKBO3 指定幾人；選項依文字找，可填已學的寵物技能名）
+    多人流程：關原地遇敵 + 等戰鬥結束 → 一次開面板逐人（讀現值 → 不同才改 → 讀回確認；隊長最後）→ grind.py ensure 恢復掛機。
+    旗標：--dry-run 只讀不改（仍會暫停 / 恢復掛機）、--no-resume 改完不恢復掛機、--no-pause 不關遇敵（確定不在戰鬥才用）。只動「一般動作」，首次動作 / 對象都不碰。
 角色：DKBO / DKBO2 / DKBO3 / DKBO4 / DKBO5（真名字母 O；DKB0… 同義；不分大小寫）。
 項目：原地遇敵(encounter) / 快速戰鬥(fast) / 自動戰鬥(auto) / 夥伴助戰(partner)。
 （2026-10-10 起不再支援外掛「自動逃跑」：使用者要求外掛自動逃跑一律不用、不看那個勾選框；逃跑改由 quest.py 手動按戰鬥畫面逃跑鈕。）
@@ -15,7 +18,7 @@
 安全：每次點面板內座標前都先 pixel 驗證面板還開著（面板沒開時點這些座標會穿透到地面讓角色走掉）；
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
 退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色 / 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
-        8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
+        12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
 戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
   是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
@@ -64,6 +67,7 @@ CONFIRM_WAIT = 0.5               # 點勾選後第一次讀回的等待
 CONFIRM_WAIT2 = 0.9              # 還沒變就多等一次（不補點，避免切回去）
 
 EXIT_OK, EXIT_USAGE, EXIT_NO_PANEL, EXIT_NO_ROLE, EXIT_CONFIRM, EXIT_LAYOUT, EXIT_PANEL_LOST, EXIT_NOT_TOP = 0, 1, 2, 3, 4, 5, 6, 7
+EXIT_NO_OPTION = 12              # 多人戰寵動作：下拉找不到指定選項（不亂點）
 EXIT_IN_BATTLE = 8               # 戰鬥中：等不到結束（或 --no-wait）→ 不開面板、不改設定
 BATTLE_WAIT = 90.0               # 戰鬥中最多等幾秒（一般一場 < 60 秒；BOSS 戰約 20~40 秒）
 BATTLE_POLL = 1.5                # 等待時的輪詢秒數
@@ -484,12 +488,32 @@ def set_states(role: str, changes: dict, no_wait: bool = False):
     return _session(role, changes, None, no_wait)
 
 
+def _visit_checks(changes):
+    """set_many 的逐人動作：讀四項勾選、只點不對的。回 (退出碼, 狀態 dict, 訊息, 改了哪些項目)"""
+    def visit(role):
+        st = read_checks()
+        if st is None:
+            return EXIT_PANEL_LOST, None, f'{role} 讀不到勾選框像素', []
+        todo = [i for i, w in (changes or {}).items() if st.get(i) != w]
+        if not todo:
+            return EXIT_OK, st, '', []
+        rc, st, msg = _apply_changes(role, st, changes)
+        return rc, st, msg, todo
+    return visit
+
+
 def set_many(plan: dict, no_wait: bool = False) -> tuple:
     """一次開外掛面板，依 plan 的順序逐人選角色、讀勾選、（有 changes 就只點不對的並確認）、最後關面板。
     plan = {角色: {項目: bool} 或 None（只讀）}；選角色走 select_role（內建等遮擋 + 重試）。
     回 (退出碼, {角色: 狀態 dict}, 訊息, info)；info = {'secs': {角色: 秒}, 'changed': {角色: [項目]}, 'role': 出錯的角色或 None}。
     出錯時已讀到的照回、不再往下；面板一律關。最後選到的角色 = plan 最後一個（呼叫端把隊長放最後）。
     輪到被跑馬燈蓋住的角色（DKBO3）時若吉祥物正在，先挪到最後一位前面再做（只挪一次；成功時回傳的 dict 仍照 plan 順序）。"""
+    return _many(plan, lambda role: _visit_checks(plan[role])(role), no_wait)
+
+
+def _many(plan: dict, visit, no_wait: bool = False) -> tuple:
+    """set_many / set_pet_many 共用：開面板 → 逐人 select_role → visit(role) → 關面板。
+    visit(role) → (退出碼, 狀態 dict 或 None, 訊息, 改了哪些項目)；plan 只提供角色順序與 key。"""
     info = {'secs': {}, 'changed': {}, 'role': None}
     ok_, why = wait_not_battle(no_wait)
     if not ok_:
@@ -502,7 +526,6 @@ def set_many(plan: dict, no_wait: bool = False) -> tuple:
         i = 0
         while i < len(order):
             role = order[i]
-            changes = plan[role]
             # 跑馬燈正蓋著 DKBO3：先做後面的人（每人約 1.3 s），把它挪到最後一位（隊長）前面，等跑馬燈的時間被別人用掉
             if (role in MARQUEE_ROLES and role not in deferred and i < len(order) - 2
                     and marquee_on() and selected_role() != role):
@@ -519,25 +542,129 @@ def set_many(plan: dict, no_wait: bool = False) -> tuple:
                 why = (f'頭像被頂部跑馬燈（綠髮吉祥物公告）蓋住，等了 {MARQUEE_WAIT:.0f} 秒仍沒消失' if st_ == 'marquee'
                        else f'頭像 {st_}；被遮住 / 重試 {SELECT_TRIES} 次仍沒選中，或面板消失')
                 return EXIT_NO_ROLE, out, f'選不到角色 {role}（{why}）', info
-            st = read_checks()
-            if st is None:
-                info['role'] = role
-                return EXIT_PANEL_LOST, out, f'{role} 讀不到勾選框像素', info
-            todo = [i for i, w in (changes or {}).items() if st.get(i) != w]
+            rc, st, msg, todo = visit(role)
             if todo:
-                rc, st, msg = _apply_changes(role, st, changes)
                 info['changed'][role] = todo
-                if rc:
-                    info['role'] = role
-                    if st:
-                        out[role] = st
-                    return rc, out, msg, info
+            if rc:
+                info['role'] = role
+                if st:
+                    out[role] = st
+                return rc, out, msg, info
             out[role] = st
             info['secs'][role] = round(clock() - t, 2)
         return EXIT_OK, {r: out[r] for r in plan}, '', info
     finally:
         if not close_panel():
             print('警告：外掛面板沒關成功（請 shot 看畫面，手動點 X 1318,90）', flush=True)
+
+
+# ---- 多人戰寵 一般動作（選項依 OCR 文字找，不寫死列序：各寵物學的技能不同）----
+PET_LIST_DY, PET_LIST_H = 22, 330        # 下拉清單 OCR 區：欄位 y +22 起、高 330（最多約 7 列）
+PET_LIST_X, PET_LIST_W = 805, 280
+
+
+def _ocr_lines(box, *opts) -> list:
+    """ocr.ps1 → [(文字, x, y)]（x / y = 文字中心，截圖座標）；逾時 / 失敗回 []（可替換給測試）"""
+    import json
+    import subprocess
+    import winenv
+    try:
+        r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+        d = json.loads((r.stdout.strip().splitlines() or [''])[-1])
+    except (subprocess.TimeoutExpired, ValueError):
+        return []
+    return [(ln['text'], ln.get('x', 0), ln.get('y', 0)) for ln in d.get('lines', [])] if d.get('ok') else []
+
+
+def find_option(key: str, want: str) -> tuple | None:
+    """下拉已展開：OCR 清單，回選項文字中心 (x, y)；完全相等優先，其次唯一包含；找不到 / 有歧義回 None"""
+    y0 = PET_DD[key][1] + PET_LIST_DY
+    lines = _ocr_lines((PET_LIST_X, y0, PET_LIST_W, PET_LIST_H), '-Zooms', '2,3,4')
+    exact = [(x, y) for t, x, y in lines if t.replace(' ', '') == want]
+    hits = exact or [(x, y) for t, x, y in lines if want in t.replace(' ', '')]
+    return hits[0] if len(hits) == 1 or (exact and len(set(exact)) == 1) else None
+
+
+def read_pet_text(which: str) -> str:
+    return _ocr(PET_FIELD[which], '-Zooms', '2,3,4').replace(' ', '')
+
+
+def _field_is(which: str, want: str) -> bool:
+    return want in read_pet_text(which)
+
+
+def _visit_pet_normal(want: str, dry_run: bool):
+    """多人戰寵 一般動作的逐人動作。回 (退出碼, {'normal': 值}, 訊息, 改了哪些)"""
+    def visit(role):
+        if not pet_on_top():
+            return EXIT_NOT_TOP, None, f'{role}：右半面板不在頂端（讀不到「戰寵動作」標題）；不點', []
+        txt = read_pet_text('normal')
+        cur = want if want in txt else next((o for o in PET_OPTS if o in txt), txt or '?')
+        if cur == want or dry_run:
+            return EXIT_OK, {'normal': cur}, '', []
+        if not panel_open() or selected_role() != role or not pet_on_top():
+            return EXIT_PANEL_LOST, {'normal': cur}, f'{role}：開下拉前面板已不在 / 角色不對 / 被捲動 → 不點', []
+        x, y = PET_DD['normal']
+        gui('seq', f'click {x} {y}; wait 500', note=f'ass.py {role} 戰寵normal 開下拉')
+        pos = find_option('normal', want)
+        if pos is None:
+            return EXIT_NO_OPTION, {'normal': cur}, f'{role}：下拉裡找不到唯一的「{want}」選項（該寵物沒學這技能？OCR 讀不到？）；不亂點，下拉隨面板關閉', []
+        if not panel_open():
+            return EXIT_PANEL_LOST, {'normal': cur}, f'{role}：開下拉後面板消失', []
+        gui('seq', f'click {PET_OPT_X} {pos[1]}; wait 500', note=f'ass.py {role} 戰寵normal → {want}')
+        for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
+            sleep(w)
+            if not panel_open():
+                return EXIT_PANEL_LOST, {'normal': cur}, f'{role}：選 {want} 後面板消失', ['normal']
+            if _field_is('normal', want):
+                log(f'ass：{role} 戰寵normal {cur} → {want}（已確認）')
+                return EXIT_OK, {'normal': want}, '', ['normal']
+        return EXIT_CONFIRM, {'normal': cur}, f'{role}：戰寵 normal 選了 {want} 但讀回仍是 {cur}（不補點；請 shot 確認）', ['normal']
+    return visit
+
+
+def set_pet_many(plan: dict, no_wait: bool = False, dry_run: bool = False) -> tuple:
+    """一次開面板逐人改「戰寵 一般動作」：plan = {角色: {'normal': 值}}；現值不同才改、改完讀回確認。
+    只動這一項（首次動作 / 勾選 / 對象都不碰）。dry_run 只讀。回值同 set_many：(rc, {角色: {'normal': 值}}, 訊息, info)。
+    EXIT_NO_OPTION：該角色的下拉找不到這個選項 → 停在該角色（不亂點、不繼續往下）。"""
+    return _many(plan, lambda role: _visit_pet_normal(plan[role]['normal'], dry_run)(role), no_wait)
+
+
+def ordered_roles(roles) -> list:
+    """隊長 DKBO 放最後（面板結束選在隊長），其他照 ROLES 順序"""
+    rs = [r for r in ROLES if r in set(roles)]
+    return [r for r in rs if r != 'DKBO'] + [r for r in rs if r == 'DKBO']
+
+
+def run_pet_many(roles, value: str, dry_run: bool = False, pause: bool = True, resume: bool = True,
+                 no_wait: bool = False) -> tuple:
+    """CLI 用完整流程：[pause：preflight → 關原地遇敵 + 等戰鬥結束（不開切換面板）] → set_pet_many → [resume：grind ensure 恢復掛機]。
+    回 (退出碼, {角色: 狀態}, 訊息, info)。恢復掛機一律會做（pause 且 resume 時），即使中間失敗，免得遇敵一直關著；ensure 失敗且編輯成功時退出碼 = ensure 的退出碼。"""
+    import uikit
+    plan = {r: {'normal': value} for r in ordered_roles(roles)}
+    rc, sts, msg, info = EXIT_OK, {}, '', {}
+    if pause:
+        import heal
+        rc = uikit.preflight('ass')
+        if rc:
+            return rc, {}, f'preflight 失敗（{rc}）；沒動任何東西', {}
+        # 掛機中戰鬥一場接一場，戰鬥畫面讀不到切換面板（char rc 60）→ 先關遇敵、等 VS 牌消失才開外掛面板
+        nobat = f'waitpix 20000 {heal.SIG_NO_BATTLE} 40'
+        heal.set_encounter(False)
+        heal.gui('seq', nobat)
+        # 當前角色一律維持 DKBO（使用者規定），這裡不開切換面板確認（每次確認都開關一次切換面板）；
+        # 恢復掛機的 grind ensure 開頭會 char.ensure(DKBO) 驗一次，並重新確認隊伍 / 外掛 / 遇敵。
+    if rc:
+        sts, msg, info = {}, f'preflight 失敗（{rc}）', {}
+    else:
+        rc, sts, msg, info = set_pet_many(plan, no_wait, dry_run)
+    if pause and resume and rc != 9:          # 9 = 疑似驗證視窗：不碰遊戲，交給使用者
+        import grind
+        grc = grind.run('ensure')
+        info['grind_rc'] = grc
+        if grc and not rc:
+            rc, msg = grc, f'戰寵動作已處理，但恢復掛機（grind ensure）退出碼 {grc}'
+    return rc, sts, msg, info
 
 
 def fmt(states: dict, items=None) -> str:
@@ -576,13 +703,40 @@ def _main_pet(role: str, rest: list, no_wait: bool = False) -> int:
     return rc
 
 
+def _main_pet_many(a) -> int:
+    roles = list(ROLES) if a.role.lower() == 'all' else [norm_role(r) for r in a.role.split(',')]
+    if not all(roles) or len(set(roles)) != len(roles):
+        print(f'角色要是 all 或逗號分隔的 {" / ".join(ROLES)}（不可重複）')
+        return EXIT_USAGE
+    rest = [OPT_ALIASES.get(x.lower(), x) for x in a.rest]
+    if len(rest) != 2 or rest[0] != 'normal' or not rest[1]:
+        print('多人 pet 用法：ass.py pet all|DKBO,DKBO2… normal <攻擊|防禦|已學寵物技能名> [--dry-run] [--no-pause] [--no-resume]')
+        return EXIT_USAGE
+    if layout.current() != '2880x1659':
+        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+        return EXIT_LAYOUT
+    import winenv
+    winenv.enable_server()          # char / grind 的 main 都會開常駐 server；沒開時切換面板讀像素常逾時（rc 60）
+    rc, sts, msg, info = run_pet_many(roles, rest[1], a.dry_run, not a.no_pause, not a.no_resume, a.no_wait)
+    for r, st in sts.items():
+        print(f'{r} 戰寵 一般動作={st["normal"]}{"（改了）" if r in info.get("changed", {}) else ""}')
+    if rc:
+        print(f'失敗（退出碼 {rc}）：{msg}')
+    return rc
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='外掛 ASS 左欄戰鬥設定讀 / 設')
     ap.add_argument('cmd', choices=['get', 'set', 'pet'])
     ap.add_argument('role', help='DKBO / DKBO2~5（DKB0… 同義）')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
+    ap.add_argument('--dry-run', action='store_true', help='多人 pet：只讀不改')
+    ap.add_argument('--no-pause', action='store_true', help='多人 pet：不先關原地遇敵 / 不等戰鬥結束（戰鬥中面板打不開，只在確定不在戰鬥時用）')
+    ap.add_argument('--no-resume', action='store_true', help='多人 pet：改完不跑 grind ensure 恢復掛機（遇敵會維持關閉）')
     ap.add_argument('--no-wait', action='store_true', help='戰鬥中不等戰鬥結束，直接退出碼 %d（預設等最多 %d 秒）' % (EXIT_IN_BATTLE, BATTLE_WAIT))
     a = ap.parse_args(argv)
+    if a.cmd == 'pet' and (a.role.lower() == 'all' or ',' in a.role):
+        return _main_pet_many(a)
     role = norm_role(a.role)
     if not role:
         print(f'角色要是 {" / ".join(ROLES)}')
