@@ -124,11 +124,11 @@ def install(g, stat_missing=False):
         g.map = want_map
     H.teleport = tele
 
-    def trip(spot, no_return=False):
+    def trip(spot, no_return=False, reopen=True):
         g.log.append(f'heal_trip:{spot}')
         if g.heal_fail:
             raise RuntimeError('x')
-        g.enc = True
+        g.enc = reopen
     H.heal_trip = trip
     grind.walk.wait_pos = lambda tries=4, want_map=None, gap=0.5: (g.map, 24, 24)
     A.gui = lambda *a, **k: ''          # 不讓 set_many 的像素 / 失敗截圖碰到真遊戲
@@ -380,6 +380,7 @@ g.screens = good_screens()
 rc, j, _ = run('start', spot='地雷區2', do_heal=True)
 check('--heal：heal_trip → 再關遇敵 → 外掛 → 開遇敵（不另傳送）', rc == 0 and 'heal_trip:地雷區2' in g.log and not any(e.startswith('teleport') for e in g.log)
       and g.log.index('heal_trip:地雷區2') < g.log.index('open'), str(g.log))
+check('--heal：heal_trip 不重開遇敵（reopen=False），也不多餘 enc:True 再 enc:False', 'enc:True' not in g.log[:g.log.index('open')], str(g.log))
 g = install(Game(cur_map=60050))
 g.heal_fail = True
 rc, j, _ = run('start', spot='地雷區2', do_heal=True)

@@ -44,6 +44,7 @@ class World:
         self.hp = 100
         self.reads = []               # 若有，read_status 依序吐出（雜訊測試）
         self.heals = []
+        self.reopens = []
         self.enc_on = True
         self.ens_rc = None
         self.panel = None             # 非 None = watch 認得面板開著（state=panel）
@@ -61,7 +62,7 @@ def install(w):
     follow.read_block_msg = lambda: w.block
     follow.errlog.add = lambda msg, **k: w.errs.append(msg)
     follow.heal.read_vitals = lambda last=None, **k: ({'ok': True, 'hpPct': w.hp, 'mpPct': 100}, 1.0)
-    follow.heal.heal_trip = lambda spot, no_return=False: w.heals.append(spot)
+    follow.heal.heal_trip = lambda spot, no_return=False, reopen=True: (w.heals.append(spot), w.reopens.append(reopen))
     follow.grind.take_lock = lambda: True
     def _screen(*a, **k):
         if w.enc_on == 'none':
@@ -257,6 +258,7 @@ w.hp = 20
 f = mk(w)
 f.step()
 check('血低（連 2 次）→ heal_trip 目前點 + ensure', w.heals == ['柯奧龜洞'] and ('ensure', None) in w.runs)
+check('follow 補血 heal_trip 傳 reopen=False（ensure 會先關遇敵）', w.reopens == [False])
 w = install(World(lv=(1, 5), map_=11001))
 w.reads = [(None, None)] * (follow.BAD_MAX + 5)
 f = mk(w)
@@ -372,5 +374,15 @@ f.step()
 w.t += 40
 f.step()
 check('遇敵中途打開會重新計時', ('ensure', None) not in w.runs)
+
+# heal_trip 的 reopen 預設 True（CLI / petwatch 維持補完開遇敵）；1920×1017 座標表唯一來源在 spots.py
+import ast  # noqa: E402
+_tree = ast.parse((HERE / 'heal.py').read_text(encoding='utf-8'))
+_fn = next(n for n in _tree.body if isinstance(n, ast.FunctionDef) and n.name == 'heal_trip')
+check('heal_trip(reopen) 預設 True', [a.arg for a in _fn.args.args] == ['spot', 'no_return', 'reopen'] and _fn.args.defaults[-1].value is True)
+check('heal.py 不再自帶 1920 座標表（只讀 spots）', "'波拉島2': (759" not in (HERE / 'heal.py').read_text(encoding='utf-8'))
+check('spots.HEAL_SPOTS_1920 值照舊', spots.HEAL_SPOTS_1920 == {'柯奧4F龜洞': (567, 216, 11004), '波拉島': (718, 138, 500), '波拉島2': (759, 198, 502),
+      '地雷區': (759, 245, 60049), '地雷區2': (759, 288, 60050), '海主人隧道': (571, 405, 31401)})
+check('spots.HEAL_SPOTS（2880 版）不受影響', spots.HEAL_SPOTS['波拉島'] == (1100, 231, 500))
 print(f'\n失敗 {fails} 項' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

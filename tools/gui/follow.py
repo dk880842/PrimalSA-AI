@@ -421,7 +421,7 @@ class Follow:
             return None
         note(f'血 / 魔太低（HP {s2.get("hpPct")}% MP {s2.get("mpPct")}%），回村補血後回 {self.cur}')
         try:
-            heal.heal_trip(self.cur)
+            heal.heal_trip(self.cur, reopen=False)   # 接著 ensure 本來就會先關遇敵
         except RuntimeError as e:
             errlog.add(f'follow 補血失敗：{e}', source=SRC)
             return grind.EXIT_HEAL

@@ -395,11 +395,10 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
         if do_heal or (isinstance(s.get('hpPct'), int) and s['hpPct'] < 40):
             if target in heal.SPOTS:
                 try:
-                    heal.heal_trip(target)
+                    heal.heal_trip(target, reopen=False)      # 不開遇敵：外掛設定前遇敵本來就要關
                 except RuntimeError as e:
                     return uikit.fail(SRC, EXIT_HEAL, f'補血失敗：{e}')
                 info['healed'] = True
-                heal.set_encounter(False)                       # heal_trip 結束會開遇敵；外掛設定前再關
                 heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')
                 lap('補血')
             elif do_heal:

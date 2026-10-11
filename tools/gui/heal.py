@@ -24,7 +24,7 @@ import winenv
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
 # 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；唯一來源 spots.py（= ui/transfer.md 表，9 點含柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟）
-from spots import HEAL_SPOTS as SPOTS  # noqa: E402
+from spots import HEAL_SPOTS as SPOTS, HEAL_SPOTS_1920  # noqa: E402
 SPOT_XY = {500: (212, 344), 31401: (91, 29)}   # 練級傳送抵達點（31401 於 2026-10-09 實測兩次）
 TELEPORT_BTN = (1340, 65)            # 主畫面右上圓形傳送鈕
 TAB_TOWN, TAB_LEVEL = (259, 196), (259, 314)
@@ -67,14 +67,7 @@ ENC_PROBES = [(1365, 645), (1380, 630), (1360, 632), (1388, 640)]
 # ======== 1920×1017 版面（截圖 960×508）：2026-10-09 在 31401 → 薩姆吉爾 → 醫院 → 31401 實際走一趟量的 ========
 # 上面 2880×1659 的常數不動；layout.py 判斷是 1920×1017 時改用這組。
 if LAYOUT == '1920x1017':
-    SPOTS = {
-        '柯奧4F龜洞': (567, 216, 11004),
-        '波拉島': (718, 138, 500),
-        '波拉島2': (759, 198, 502),
-        '地雷區': (759, 245, 60049),
-        '地雷區2': (759, 288, 60050),
-        '海主人隧道': (571, 405, 31401),      # 實測
-    }
+    SPOTS = dict(HEAL_SPOTS_1920)     # 座標表在 spots.py（唯一來源）
     TELEPORT_BTN = (905, 38)
     TAB_TOWN, TAB_LEVEL = (192, 118), (192, 190)
     SAMUGIL = (500, 312)
@@ -204,8 +197,8 @@ def bars_full(out: str) -> bool:
     return full
 
 
-def heal_trip(spot: str, no_return: bool = False) -> None:
-    """回村補血。no_return = 補完停在醫院（不傳回練功點、不開原地遇敵；解任務單人逃跑風格用，之後由 quest.py 巡路回任務）"""
+def heal_trip(spot: str, no_return: bool = False, reopen: bool = True) -> None:
+    """回村補血。reopen=False 時補完不開原地遇敵（呼叫端接著 grind ensure / 外掛設定，本來就會再關；CLI / petwatch 維持開）。no_return = 補完停在醫院（不傳回練功點、不開原地遇敵；解任務單人逃跑風格用，之後由 quest.py 巡路回任務）"""
     sx, sy, spot_map = SPOTS[spot]
     t0 = last = time.time()
     seg = []
@@ -242,8 +235,9 @@ def heal_trip(spot: str, no_return: bool = False) -> None:
     out = LAST_OUT
     log('血 / 魔已補滿' if bars_full(out) else f'警告：血 / 魔條看起來沒補滿（{out!r}），請檢查畫面')
     lap('確認 + 傳送回去')
-    set_encounter(True)
-    lap('開遇敵')
+    if reopen:
+        set_encounter(True)
+        lap('開遇敵')
     log(f'完成，耗時 {time.time() - t0:.1f} 秒（{"、".join(seg)}）')
 
 
