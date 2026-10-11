@@ -2,9 +2,11 @@
 # 用法：stat.ps1   → 印出一行 JSON：{"ok":true,"level":"0轉25級","hp":115,"mp":100,"hpPct":23,"mpPct":100,"petLevel":...,"petHp":...,"map":"...","pos":"1000:92,99"}
 #       stat.ps1 -Shot <out.png> [-ShotWidth 960]   → 另外存一張縮小的整窗截圖
 # 要看即時遊戲畫面用鏡像視窗 mirror.ps1（mirror.sh）。
-# 區域座標 = 客戶區像素（截圖座標 ×2）。支援兩種視窗大小（版面 $L）：2880×1659（原本的基準）、1920×1017（1920×1080 螢幕最大化）；
-# 其他大小回 ok=false。
-param([string]$Shot, [int]$ShotWidth = 960)
+# 區域座標 = 邏輯客戶區像素（2880×1659 座標系，截圖座標 ×2）。支援的視窗（版面 $L）：2880×1659（基準）、與它同長寬比的視窗（例 1728×995；
+# psageom.ps1 換算層：框換成實體像素、OCR 直接裁實體像素再依「邏輯框寬 × 放大倍數」放大，不先縮成 1440）、1920×1017（1920×1080 螢幕最大化，舊版面）；
+# 其他大小回 ok=false。環境變數 PSA_GEOM=off 關掉換算層（1728×995 回「不支援」）。
+# -Image 檔.png：離線讀圖（測試用，唯讀；圖的大小就是客戶區大小）。
+param([string]$Shot, [int]$ShotWidth = 960, [string]$Image)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
 Add-Type @"
@@ -49,12 +51,19 @@ public class WS {
 "@ -ReferencedAssemblies System.Drawing
 function Out-Json($o) { $o | ConvertTo-Json -Compress; exit 0 }
 [WS]::SetProcessDPIAware() | Out-Null
+. (Join-Path $PSScriptRoot 'psageom.ps1')
+if ($Image) {
+  $full = Open-PsaImage $Image
+  if (-not $full) { Out-Json @{ ok = $false; error = "讀不到圖：$Image" } }
+  $r = [pscustomobject]@{ R = $full.Width; B = $full.Height }
+} else {
 $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
 if (-not $proc) { Out-Json @{ ok = $false; error = '遊戲沒有在執行' } }
 $h = $proc.MainWindowHandle
 # 最小化時 Unity 不繪製，這裡不去還原（不打擾使用者），直接回報
 if ([WS]::IsIconic($h)) { Out-Json @{ ok = $false; error = '遊戲視窗最小化' } }
 $r = New-Object WS+RECT; [WS]::GetClientRect($h, [ref]$r) | Out-Null
+}
 # 各版面的 OCR 區域（x, y, 寬, 高, 放大倍數）與血條 / 魔條掃描線
 # 1920×1017：UI 約為 2880×1659 的 0.613 倍（依高度縮放、貼邊對齊），2026-10-09 從截圖量測；字小所以 OCR 放大倍數調高
 $Layouts = @{
@@ -67,13 +76,22 @@ $Layouts = @{
                    pos = 1530, 98, 190, 30, 4; pos2 = 1545, 113, 185, 22, 4   # pos2（地圖名折兩行）是換算值，未實測
                    barX0 = 214; barX1 = 332; hpY = 72; mpY = 113; retryZoom = 2, 3, 4, 5 }   # MP 兩位數 Windows OCR 常讀不到 → 看 mpPct
 }
-$L = $Layouts["$($r.R)x$($r.B)"]
-if (-not $L) { Out-Json @{ ok = $false; error = "視窗大小 $($r.R)x$($r.B)，只支援 2880x1659 或 1920x1017（請最大化遊戲視窗）" } }
+$Gm = Get-PsaGeomAuto $r.R $r.B      # 同比例（1728×995…）→ Layout = '2880x1659'，框用邏輯座標、Convert-PsaBox 換成實體像素
+$L = $Layouts[$Gm.Layout]
+if (-not $L) { Out-Json @{ ok = $false; error = "視窗大小 $($r.R)x$($r.B)，只支援 2880x1659、同長寬比的視窗（gui.sh fit）或 1920x1017（請最大化遊戲視窗）" } }
+if ($Gm.Proportional -and -not $Gm.Identity) {
+  # 實體像素比邏輯少（1728×995 = 0.6 倍）：放大倍數 ×(2/Sx) 補回（2 → 3、3 → 5；P0 實測：等級「1轉125級」用 2 倍會漏「1」、用 3 倍才對），
+  # 另加 retryZoom：縮小後 MP 兩位數 / 等級偶爾整個讀空 → 讀不到數字就換倍數再試（同 1920×1017；MP 仍可能 null，看 mpPct）
+  $L = $L.Clone(); $L.retryZoom = 2, 3, 4, 5
+  foreach ($zk in 'lv', 'hp', 'mp', 'plv', 'php', 'pos', 'pos2') { $za = $L[$zk]; $L[$zk] = @($za[0], $za[1], $za[2], $za[3], [int][Math]::Round($za[4] * 2.0 / $Gm.Sx)) }
+}
 
+if (-not $Image) {
 $full = New-Object System.Drawing.Bitmap $r.R, $r.B
 $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
 $ok = [WS]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
 if (-not $ok) { Out-Json @{ ok = $false; error = 'PrintWindow 失敗' } }
+}
 if ($Shot) {
   $sh = [int]($r.B * $ShotWidth / $r.R)
   $small = New-Object System.Drawing.Bitmap $ShotWidth, $sh
@@ -96,10 +114,12 @@ $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windo
 if (-not $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }
 
 # 裁一塊 → 放大 → OCR，回傳去掉空白的文字
+# x, y, w, hh = 邏輯客戶區像素框；實體客戶區與邏輯不同（1728×995）時直接裁實體像素放大成「邏輯寬 × zoom」（輸出尺寸與筆電相同）
 function Ocr([int]$x, [int]$y, [int]$w, [int]$hh, [int]$zoom = 2, [bool]$light = $true) {
+  $pb = Convert-PsaBox $Gm $x $y $w $hh
   $crop = New-Object System.Drawing.Bitmap ($w * $zoom), ($hh * $zoom)
   $g = [System.Drawing.Graphics]::FromImage($crop); $g.InterpolationMode = 'HighQualityBicubic'
-  $g.DrawImage($full, (New-Object System.Drawing.Rectangle 0, 0, ($w * $zoom), ($hh * $zoom)), $x, $y, $w, $hh, 'Pixel'); $g.Dispose()
+  $g.DrawImage($full, (New-Object System.Drawing.Rectangle 0, 0, ($w * $zoom), ($hh * $zoom)), $pb[0], $pb[1], $pb[2], $pb[3], 'Pixel'); $g.Dispose()
   [WS]::Binarize($crop, $light)
   # 四周補白邊：字太短又貼邊時 OCR 會整個漏掉（實測 MP「75」）
   $pad = New-Object System.Drawing.Bitmap ($crop.Width + 80), ($crop.Height + 80)
@@ -154,7 +174,8 @@ if ($pos -match '^(\d+):') {
 function Bar([int]$y, [bool]$red) {
   $x0 = $L.barX0; $x1 = $L.barX1; $end = $null; $good = 0; $n = 0
   for ($x = $x0; $x -le $x1; $x += 2) {
-    $c = $full.GetPixel($x, $y); $n++
+    $pp = Convert-PsaClientPoint $Gm $x $y      # 掃描線在邏輯座標，取樣換成實體像素（恆等時同一點）
+    $c = $full.GetPixel($pp[0], $pp[1]); $n++
     $empty = [Math]::Abs($c.R - 123) -lt 22 -and [Math]::Abs($c.G - 97) -lt 20 -and [Math]::Abs($c.B - 65) -lt 20
     $fill = if ($red) { $c.R -gt 130 -and $c.R - $c.G -gt 60 -and $c.R - $c.B -gt 60 } else { $c.B -gt 130 -and $c.B - $c.R -gt 60 }
     $text = ([Math]::Min($c.R, [Math]::Min($c.G, $c.B)) -gt 150) -or ([Math]::Max($c.R, [Math]::Max($c.G, $c.B)) -lt 90)

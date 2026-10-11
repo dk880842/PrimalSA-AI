@@ -62,3 +62,40 @@ function Get-PsaFitSize([int]$WaW, [int]$WaH, [int]$ExW, [int]$ExH, [int]$ReqW =
   $ch = [int][Math]::Round($cw * $script:PsaLogH / $script:PsaLogW, [MidpointRounding]::AwayFromZero)
   , @($cw, $ch)
 }
+
+# ---- P2：截圖端（stat / digitmatch / ocr / titlematch / findmark）共用 ----
+# 這些腳本自己 PrintWindow 取「實體客戶區」全解析度圖，區域框一律以「邏輯客戶區像素」（2880×1659 座標系；截圖座標 ×2）給，
+# 同比例的實體視窗（例 1728×995）由下面兩個函式換成實體像素框 / 點；OCR 直接裁實體像素（不先縮成 1440 再放大），
+# 輸出尺寸仍是「邏輯框寬高 × 放大倍數」（與筆電相同大小，文字等效放大倍數自動依實體 / 邏輯比例調整）。
+# 2880×1659（恆等）與不同比例 / PSA_GEOM=off（舊行為）：原樣回傳，與舊版逐位元組相同。
+
+# 依環境變數 PSA_GEOM=off 決定要不要走換算層（gui.ps1 另有 -Scale 覆蓋；截圖端沒有 -Scale）
+function Get-PsaGeomAuto([int]$CW, [int]$CH) { Get-PsaGeom $CW $CH 2 ($env:PSA_GEOM -eq 'off') }
+
+# 四捨五入（0.5 進位，不用銀行家捨入；框邊界要單調）
+function Round-PsaHalfUp([double]$Val) { [int][Math]::Floor($Val + 0.5) }
+
+# 邏輯客戶區像素框 (x, y, w, h) → 實體客戶區像素框（int[4]）。兩端各自取整再相減，相鄰框不會產生縫；夾在客戶區內且至少 1 px
+function Convert-PsaBox($G, $bx, $by, $bw, $bh) {
+  if (-not $G.Proportional -or $G.Identity) { return , @([int]$bx, [int]$by, [int]$bw, [int]$bh) }
+  $fx = $G.Sx / 2.0; $fy = $G.Sy / 2.0
+  $x0 = [Math]::Max(0, [Math]::Min($G.CW - 1, (Round-PsaHalfUp ($bx * $fx)))); $y0 = [Math]::Max(0, [Math]::Min($G.CH - 1, (Round-PsaHalfUp ($by * $fy))))
+  $x1 = [Math]::Max($x0 + 1, [Math]::Min($G.CW, (Round-PsaHalfUp (($bx + $bw) * $fx)))); $y1 = [Math]::Max($y0 + 1, [Math]::Min($G.CH, (Round-PsaHalfUp (($by + $bh) * $fy))))
+  , @($x0, $y0, ($x1 - $x0), ($y1 - $y0))
+}
+
+# 邏輯客戶區像素點 → 實體客戶區像素點（int[2]；血條掃描線用）
+function Convert-PsaClientPoint($G, $px, $py) {
+  if (-not $G.Proportional -or $G.Identity) { return , @([int]$px, [int]$py) }
+  $fx = $G.Sx / 2.0; $fy = $G.Sy / 2.0
+  , @([Math]::Max(0, [Math]::Min($G.CW - 1, (Round-PsaHalfUp ($px * $fx)))), [Math]::Max(0, [Math]::Min($G.CH - 1, (Round-PsaHalfUp ($py * $fy)))))
+}
+
+# 讀圖檔成 32bpp / 96dpi 的 Bitmap（離線測試用 -Image；DrawImage 不會被檔案內的 dpi 影響）。讀不到回 $null
+function Open-PsaImage([string]$Path) {
+  try { $src = New-Object System.Drawing.Bitmap $Path } catch { return $null }
+  $bm = New-Object System.Drawing.Bitmap $src.Width, $src.Height, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+  $bm.SetResolution(96, 96)
+  $gr = [System.Drawing.Graphics]::FromImage($bm); $gr.DrawImage($src, 0, 0, $src.Width, $src.Height); $gr.Dispose(); $src.Dispose()
+  $bm
+}

@@ -118,5 +118,36 @@ foreach ($wa in @(@(1920, 1032), @(1920, 1080), @(2560, 1392), @(2560, 1440), @(
 }
 Check 'fit 各種工作區：結果同比例（換算層認得）且放得進工作區' $allProp
 
+# --- P2：截圖端的框 / 點換算（邏輯客戶區像素 → 實體像素） ---
+$ga = Get-PsaGeomAuto 1728 995
+Check 'Get-PsaGeomAuto：未設 PSA_GEOM=off 時 = Get-PsaGeom（1728x995 同比例）' ($ga.Proportional -and $ga.Layout -eq '2880x1659' -and $ga.Sx -eq $g1.Sx)
+$bx = Convert-PsaBox $g0 150 186 180 46
+Check 'Convert-PsaBox 恆等：框原樣（含不夾範圍）' ($bx[0] -eq 150 -and $bx[1] -eq 186 -and $bx[2] -eq 180 -and $bx[3] -eq 46)
+$bx = Convert-PsaBox $g0 3000 1700 50 60
+Check 'Convert-PsaBox 恆等：超出客戶區也原樣（舊版不夾）' ($bx[0] -eq 3000 -and $bx[2] -eq 50 -and $bx[3] -eq 60)
+$bx = Convert-PsaBox $g2 1530 98 190 30
+Check 'Convert-PsaBox 1920x1017 舊版面：框原樣（版面表本來就是客戶區像素）' ($bx[0] -eq 1530 -and $bx[1] -eq 98 -and $bx[2] -eq 190 -and $bx[3] -eq 30)
+$bx = Convert-PsaBox $g4 150 186 180 46
+Check 'Convert-PsaBox PSA_GEOM=off：1728x995 也原樣（舊行為）' ($bx[0] -eq 150 -and $bx[2] -eq 180)
+$bx = Convert-PsaBox $g1 150 186 180 46      # HUD 等級框
+Check "Convert-PsaBox 1728x995：等級框 → 90,112,108,27（實得 $($bx -join ','))" ($bx[0] -eq 90 -and $bx[1] -eq 112 -and $bx[2] -eq 108 -and $bx[3] -eq 27)
+# 相鄰框無縫（右邊界 = 下一框左邊界）、整張範圍夾在客戶區內、至少 1 px
+$a = Convert-PsaBox $g1 100 50 37 20; $b = Convert-PsaBox $g1 137 50 41 20
+Check '相鄰邏輯框換成實體後仍相接（無縫、不重疊）' (($a[0] + $a[2]) -eq $b[0])
+$bx = Convert-PsaBox $g1 0 0 2880 1659
+Check '整個客戶區 → 0,0,1728,995' ($bx[0] -eq 0 -and $bx[1] -eq 0 -and $bx[2] -eq 1728 -and $bx[3] -eq 995)
+$bx = Convert-PsaBox $g1 2870 1650 100 100
+Check '超出客戶區的框夾進範圍、至少 1 px' (($bx[0] + $bx[2]) -le 1728 -and ($bx[1] + $bx[3]) -le 995 -and $bx[2] -ge 1 -and $bx[3] -ge 1)
+$cp = Convert-PsaClientPoint $g0 344 112
+Check 'Convert-PsaClientPoint 恆等：點原樣' ($cp[0] -eq 344 -and $cp[1] -eq 112)
+$cp = Convert-PsaClientPoint $g1 344 112
+Check "Convert-PsaClientPoint 1728x995：HP 血條起點 344,112 → 206,67（實得 $($cp -join ','))" ($cp[0] -eq 206 -and $cp[1] -eq 67)
+# 全部 HUD 框（stat / digitmatch 的 2880x1659 版面）換成實體後都在客戶區內、尺寸約為 0.6 倍
+$hud = @(@(150,186,180,46), @(340,92,200,44), @(340,166,200,38), @(560,158,160,46), @(750,92,200,44), @(2220,150,360,46), @(2250,178,300,34))
+$okHud = $true
+foreach ($hb in $hud) { $q = Convert-PsaBox $g1 $hb[0] $hb[1] $hb[2] $hb[3]
+  if ($q[0] -lt 0 -or $q[1] -lt 0 -or ($q[0] + $q[2]) -gt 1728 -or ($q[1] + $q[3]) -gt 995 -or [Math]::Abs($q[2] - $hb[2] * 0.6) -gt 1.01 -or [Math]::Abs($q[3] - $hb[3] * 0.6) -gt 1.01) { $okHud = $false; "  box $($hb -join ',') -> $($q -join ',')" } }
+Check 'HUD 7 個框換成 1728x995：在客戶區內、寬高為 0.6 倍 ±1' $okHud
+
 "SUMMARY $($script:total - $script:fail)/$($script:total)"
 if ($script:fail) { exit 1 }

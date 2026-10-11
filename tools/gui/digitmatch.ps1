@@ -1,7 +1,10 @@
 ﻿# HUD 數字樣板比對的截圖端：背景 PrintWindow → 依版面裁出各欄位 → 原解析度二值化 → 輸出 0/1 字串列（不做 OCR；比對在 digitmatch.py）
 # 用法：digitmatch.ps1 [-Image 檔.png]  → 一行 JSON：{"ok":true,"layout":"2880x1659","ms":N,"fields":{"lv":"0010..,0110..,...",...}}（每欄一個字串，列以逗號分隔）
-#   -Boxes "x,y,w,h,mode;…"：改裁自訂框（客戶區像素；mode 1 = 亮字、0 = 深字、2 = 咖啡色字），只輸出 fields.b0,b1,…（namematch.py 切換面板卡片名字用，不輸出 HUD 欄位 / 血條）。
+#   -Boxes "x,y,w,h,mode;…"：改裁自訂框（邏輯客戶區像素 = 2880×1659 座標系；mode 1 = 亮字、0 = 深字、2 = 咖啡色字），只輸出 fields.b0,b1,…（namematch.py 切換面板卡片名字用，不輸出 HUD 欄位 / 血條）。
 #   -Image：用截圖檔測試（尺寸須是支援的版面）。唯讀：只截圖，不點擊、不送鍵。
+# 客戶區與 2880×1659 同長寬比（例 1728×995）時：框由 psageom.ps1 換成實體像素直接裁（原解析度二值化，不縮放），輸出的點陣是「實體」大小，
+#   layout 仍是實體尺寸字串（"1728x995"；digitmatch.py 用它找樣板，沒有該尺寸的樣板 = 無樣板，不會拿筆電樣板硬比），另附 logical = 2880x1659（只有縮放時才有）。
+#   PSA_GEOM=off：同比例視窗回「不支援」（舊行為）。
 # 另外輸出 hpPct / mpPct（血條 / 魔條比例，-1 = 掃不出來）。版面座標與 stat.ps1 的 $Layouts 一致（x, y, 寬, 高；客戶區像素）。字色：HUD 數字 = 亮白字（light）；座標行 = 深色字（dark）。
 param([string]$Image, [string]$Boxes)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -36,11 +39,14 @@ public class DM {
     return rows;
   }
   // 血條 / 魔條填滿比例 0～100（同 stat.ps1 的 Bar：沿中線每 2 px 掃，第一個空槽棕色像素是終點；掃到的像素多半不像條 / 字 → -1）
-  public static int Bar(byte[] buf, int stride, int bw, int bh, int y, int x0, int x1, bool red) {
+  // x0 / x1 / y 是邏輯座標；fx / fy = 邏輯 → 實體倍率（恆等 = 1，取樣點不變），取樣點四捨五入後夾在圖內
+  public static int Bar(byte[] buf, int stride, int bw, int bh, int y, int x0, int x1, bool red, double fx, double fy) {
     int end = -1, good = 0, n = 0;
-    if (y < 0 || y >= bh || x1 >= bw) return -1;
+    int py = (int)Math.Floor(y * fy + 0.5);
+    if (py < 0 || py >= bh || (int)Math.Floor(x1 * fx + 0.5) >= bw) return -1;
     for (int x = x0; x <= x1; x += 2) {
-      int i = y * stride + x * 4; int b = buf[i], g = buf[i + 1], r = buf[i + 2]; n++;
+      int px = Math.Min(bw - 1, (int)Math.Floor(x * fx + 0.5));
+      int i = py * stride + px * 4; int b = buf[i], g = buf[i + 1], r = buf[i + 2]; n++;
       bool empty = Math.Abs(r - 123) < 22 && Math.Abs(g - 97) < 20 && Math.Abs(b - 65) < 20;
       bool fill = red ? (r > 130 && r - g > 60 && r - b > 60) : (b > 130 && b - r > 60);
       int mn = Math.Min(r, Math.Min(g, b)), mx = Math.Max(r, Math.Max(g, b));
@@ -83,18 +89,27 @@ $Layouts = @{
   '2880x1659' = [ordered]@{ lv = 150,186,180,46,1; hp = 340,92,200,44,1; mp = 340,166,200,38,1; plv = 560,158,160,46,1; php = 750,92,200,44,1; pos = 2220,150,360,46,0; pos2 = 2250,178,300,34,0 }
   '1920x1017' = [ordered]@{ lv = 110,122,84,29,1; hp = 211,60,124,26,1; mp = 230,104,86,21,1; plv = 354,101,98,30,1; php = 466,60,124,26,1; pos = 1530,98,190,30,0; pos2 = 1545,113,185,22,0 }
 }
-if ($Boxes) {   # 自訂框模式：不管版面，座標由呼叫端給
+. (Join-Path $PSScriptRoot 'psageom.ps1')
+$Gm = Get-PsaGeomAuto $W $Hh
+$scaled = $Gm.Proportional -and -not $Gm.Identity
+if ($Boxes) {   # 自訂框模式：不管版面，座標由呼叫端給（邏輯客戶區像素；同比例視窗換成實體像素框）
   $stride = 0; $buf = [DM]::Bytes($full, [ref]$stride); $full.Dispose()
   $f = [ordered]@{}; $i = 0
   foreach ($b in ($Boxes -split ';')) { $a = $b.Split(','); if ($a.Count -lt 5) { continue }
-    $f["b$i"] = ([DM]::CropMode($buf, $stride, $W, $Hh, [int]$a[0], [int]$a[1], [int]$a[2], [int]$a[3], [int]$a[4]) -join ","); $i++ }
-  Out-Json ([ordered]@{ ok = $true; layout = "${W}x${Hh}"; ms = [int]$sw.ElapsedMilliseconds; fields = $f })
+    $pb = Convert-PsaBox $Gm ([int]$a[0]) ([int]$a[1]) ([int]$a[2]) ([int]$a[3])
+    $f["b$i"] = ([DM]::CropMode($buf, $stride, $W, $Hh, $pb[0], $pb[1], $pb[2], $pb[3], [int]$a[4]) -join ","); $i++ }
+  $o = [ordered]@{ ok = $true; layout = "${W}x${Hh}"; ms = [int]$sw.ElapsedMilliseconds; fields = $f }
+  if ($scaled) { $o['logical'] = $Gm.Layout }
+  Out-Json $o
 }
-$key = "${W}x${Hh}"; $L = $Layouts[$key]
-if (-not $L) { Out-Json @{ ok = $false; error = "視窗大小 $key，只支援 2880x1659 或 1920x1017" } }
+$key = "${W}x${Hh}"; $lk = $Gm.Layout; $L = $Layouts[$lk]    # lk = 座標用的邏輯版面（同比例視窗 → 2880x1659）；key = 實體尺寸（樣板用）
+if (-not $L) { Out-Json @{ ok = $false; error = "視窗大小 $key，只支援 2880x1659、同長寬比的視窗（gui.sh fit）或 1920x1017" } }
 $stride = 0; $buf = [DM]::Bytes($full, [ref]$stride); $full.Dispose()
 $f = [ordered]@{}
-foreach ($k in $L.Keys) { $a = $L[$k]; $f[$k] = ([DM]::Crop($buf, $stride, $W, $Hh, $a[0], $a[1], $a[2], $a[3], ($a[4] -eq 1)) -join ",") }
-$bb = $Bars[$key]
-$hpPct = [DM]::Bar($buf, $stride, $W, $Hh, $bb[2], $bb[0], $bb[1], $true); $mpPct = [DM]::Bar($buf, $stride, $W, $Hh, $bb[3], $bb[0], $bb[1], $false)
-Out-Json ([ordered]@{ ok = $true; layout = $key; ms = [int]$sw.ElapsedMilliseconds; hpPct = $hpPct; mpPct = $mpPct; fields = $f })
+foreach ($k in $L.Keys) { $a = $L[$k]; $pb = Convert-PsaBox $Gm $a[0] $a[1] $a[2] $a[3]; $f[$k] = ([DM]::Crop($buf, $stride, $W, $Hh, $pb[0], $pb[1], $pb[2], $pb[3], ($a[4] -eq 1)) -join ",") }
+$bb = $Bars[$lk]
+$fxb = if ($scaled) { $Gm.Sx / 2.0 } else { 1.0 }; $fyb = if ($scaled) { $Gm.Sy / 2.0 } else { 1.0 }
+$hpPct = [DM]::Bar($buf, $stride, $W, $Hh, $bb[2], $bb[0], $bb[1], $true, $fxb, $fyb); $mpPct = [DM]::Bar($buf, $stride, $W, $Hh, $bb[3], $bb[0], $bb[1], $false, $fxb, $fyb)
+$o = [ordered]@{ ok = $true; layout = $key; ms = [int]$sw.ElapsedMilliseconds; hpPct = $hpPct; mpPct = $mpPct; fields = $f }
+if ($scaled) { $o['logical'] = $lk }
+Out-Json $o
