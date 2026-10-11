@@ -183,7 +183,8 @@ for smp in PX['samples']:
         if c['panel'] is not None or c['state'] == 'panel':
             bad.append((smp['f'], 'FP', c['state'], c['panel']))
 check(f'panel fixture：{pos_n} 張正例 100% 認對面板名、{neg_n} 張負例 0 誤判、凍結結果一致', not bad, str(bad[:4]))
-check('panel fixture 涵蓋 pet / bag / ass / quest / switch / transfer / setting / team / qteam', set(per) == set(S.PANEL_X), str(per))
+check('panel fixture 涵蓋 pet / bag / ass / quest / switch / transfer / setting / team / qteam / role', set(per) == set(S.PANEL_X), str(per))
+check('panel fixture 有人物資訊 4 張正例（watch-panels/role-0～3）', {f'watch-panels/role-{i}.png' for i in range(4)} <= {x['f'] for x in PX['samples'] if x['expect_panel'] == 'role'})
 check('panel fixture 有今天使用者開的寵物視窗（watch-panels/pet-0、pet-1）', {'watch-panels/pet-0.png', 'watch-panels/pet-1.png'} <= {x['f'] for x in PX['samples']})
 check('panel fixture 負例涵蓋 unknown / idle / dialog / battle / loading / login', {x['state'] for x in PX['samples'] if not x['expect_panel']} >= {'unknown', 'idle', 'dialog', 'battle'}
       and any(x['annot'] == ['loading'] for x in PX['samples']) and any(x['annot'] == ['login'] for x in PX['samples']))

@@ -175,10 +175,44 @@ w.verify, w.screen = True, 'idle'
 f = mk(w)
 rc = f.step()
 check('誤報（主畫面 idle）不停、照常換點', rc is None and ('start', '阿布龜洞') in w.runs)
+# 7a) 不認得的畫面：暫停（不退出 9），超過 UNKNOWN_STOP_MIN 分鐘才退出
 w = install(World(lv=(1, 10), map_=11001))
 w.verify, w.screen = True, 'unknown'
-rc = mk(w).step()
-check('真的不認得畫面 → 退出 9 + errlog、不動作', rc == 9 and w.errs and w.runs == [])
+f = mk(w)
+rc = f.step()
+check('不認得畫面 → 暫停這輪（不退出、不動作、不點擊）+ errlog 一次', rc is None and w.runs == [] and w.heals == [] and len(w.errs) == 1 and '暫停' in w.errs[0], str(w.errs))
+for _ in range(5):
+    w.t += 15
+    f.step()
+check('持續 unknown：errlog 只寫一次、仍不動作、不算 BAD_MAX', len(w.errs) == 1 and w.runs == [] and f.bad == 0)
+w.verify = False                                       # watch 旗標清掉也要現場讀畫面（暫停中不信旗標）
+w.screen = 'unknown'
+check('暫停中旗標消失但畫面仍 unknown → 繼續暫停', f.step() is None and w.runs == [] and f.unk_since is not None)
+w.screen = 'idle'
+rc = f.step()
+check('畫面恢復主畫面 → 自動恢復（清暫停、照常換點）', rc is None and f.unk_since is None and ('start', '阿布龜洞') in w.runs)
+w.screen, w.verify = 'unknown', True
+f.step()
+check('恢復後再 unknown → 重新計時並再寫一次 errlog', len(w.errs) == 2)
+w.screen = 'panel'
+check('unknown 後變已知面板 → 仍暫停但解除 unknown 計時', f.step() is None and f.unk_since is None)
+w = install(World(lv=(1, 10), map_=11001))
+w.verify, w.screen = True, 'unknown'
+f = mk(w)
+f.step()
+w.t += follow.UNKNOWN_STOP_MIN * 60 - 1
+check('未滿 UNKNOWN_STOP_MIN 仍暫停', f.step() is None and w.runs == [])
+w.t += 2
+rc = f.step()
+check('超過 UNKNOWN_STOP_MIN 分鐘 → 退出 9 + errlog、不動作', rc == 9 and len(w.errs) == 2 and '超過' in w.errs[-1] and w.runs == [], str(w.errs))
+w = install(World(lv=(1, 10), map_=11001))
+w.verify, w.screen = True, 'unknown'
+w.reads = [(None, 11001)] * 200
+f = mk(w)
+for _ in range(follow.BAD_MAX + 10):
+    w.t += 5                                           # 總共 < UNKNOWN_STOP_MIN，只測 BAD_MAX
+    rc = f.step()
+check('unknown 暫停期間不累計 BAD_MAX（即使 HUD 讀不到）、不退出 59', rc is None and f.bad == 0 and len(w.reads) == 200)
 w = install(World(lv=(1, 10), map_=11001))
 w.verify, w.screen = True, 'battle'
 check('戰鬥中旗標也視為主畫面', mk(w).step() is None)

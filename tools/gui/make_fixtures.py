@@ -99,6 +99,10 @@ PANEL_POS = {
     'w5.png': 'ass',
     'watch-panels/pet-0.png': 'pet',
     'watch-panels/pet-1.png': 'pet',
+    'watch-panels/role-0.png': 'role',       # 人物資訊（2026-10-11 使用者開的 + 唯讀補截；role-3 原是 watch 的 unknown 警報截圖）
+    'watch-panels/role-1.png': 'role',
+    'watch-panels/role-2.png': 'role',
+    'watch-panels/role-3.png': 'role',
 }
 # 負例：各種不是這些面板的畫面（主畫面 / 行走 / 對話 / 獲得物品 / 戰鬥 / 選擇對象 / 提示視窗 / 登入 / 載入 / 面板上疊彈窗…）等距各取 6 張
 PANEL_NEG = [

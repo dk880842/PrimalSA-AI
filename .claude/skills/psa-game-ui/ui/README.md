@@ -62,7 +62,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 |---|---|---|
 | `idle` | 主畫面（未偵測到已知視窗） | 外掛紅字 / 底部圖示列 / 右下按鈕任一組命中；**不代表沒有驗證視窗** |
 | `walking` `dialog` `reward` `select` `battle` | 自動跑路中 / 對話框 / 獲得物品視窗 / 選擇對象面板 / 戰鬥中 | 舊有 |
-| `panel` + `pet` / `bag` / `ass` / `team` / `qteam` / `switch` / `setting` / `transfer` / `quest` | 面板：寵物 / 背包 / 外掛 / 組隊 / 快速組隊 / 切換角色 / 設置 / 傳送 / 任務 | ✕ + 8 點框特徵；認得的面板不計入 unknown 計時、不產生 verify_suspect |
+| `panel` + `pet` / `bag` / `ass` / `team` / `qteam` / `switch` / `setting` / `transfer` / `quest` / `role` | 面板：寵物 / 背包 / 外掛 / 組隊 / 快速組隊 / 切換角色 / 設置 / 傳送 / 任務 / 人物資訊（主畫面點頭像開出，✕ 1335,112） | ✕ + 8 點框特徵；認得的面板不計入 unknown 計時、不產生 verify_suspect |
 | `unknown` + annot `login` / `charsel` / `loading` / `black` | 登入畫面 / 選角畫面 / 載入畫面 / 黑畫面（轉場） | 已知畫面，不計 unknown |
 | `unknown`（其餘） | 不認得的畫面 | 連續 10 s → `alerts.unknown_long`（自動存截圖 `tools/.cache/watch-alerts/`）+ `verify_suspect` |
 

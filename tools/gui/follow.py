@@ -16,7 +16,8 @@
 補血：隊長血 / 魔低（連 2 次）→ heal.heal_trip(目前點) → grind.run('ensure')。健康檢查：每 --check-every 分鐘（或等級 --stall-min 分鐘沒動）
 grind.run('check')，快速 / 自動戰鬥關了或遇敵鈕關了 → grind.run('ensure')（自動修）。
 暫停：battle.lock（quest / pet 在動）、petwatch / 別的 grind / heal --watch 在跑時不動作。watch 標 verify_suspect 時先讀一次畫面，
-主畫面（idle / walking / battle）= 誤報忽略；不是主畫面 = 停手（9）+ errlog（鐵則 5）。netwatch halt → 10。
+主畫面（idle / walking / battle）= 誤報忽略；已知面板 = 暫停；不認得 = 進入「unknown 暫停」（不點擊、不補血、不 ensure，只讀 state；
+第一次寫 errlog 附 watch 警報截圖；畫面恢復自動繼續；不累計 BAD_MAX），連續超過 UNKNOWN_STOP_MIN（10）分鐘才停手（9）+ errlog（鐵則 5）。netwatch halt → 10。
 狀態：tools/.cache/follow.json（等級、所在點、下一點、上次換點時間）；每次換點 / 升級寫 notes/quest-events.log 一行（「follow：…」）。
 鎖：tools/.cache/follow.pid（單一實例）、換點之間持 grind.lock；--stop 寫 tools/.cache/follow.stop 通知結束。
 
@@ -58,6 +59,7 @@ RETRY_GAP = 30.0                      # 掛機未恢復（ensure / start 失敗�
 ENC_OFF_SECS = 60.0                   # 練功點上遇敵鈕關超過這麼久（watch 零輸入讀到）就補 ensure
 ENC_MAX_AGE = 5.0                     # state.screen 資料年齡上限
 PANEL_PAUSE_MAX = 1800.0              # 使用者開著面板（watch 認得的：寵物 / 背包…）最多暫停這麼久；超過就照常跑（面板殘留不能讓 follow 永遠卡住）
+UNKNOWN_STOP_MIN = 10                 # 畫面不認得（疑似驗證視窗）暫停最久幾分鐘；超過才退出 9。暫停期間不點擊、不補血、不 ensure，只讀 state（鐵則 5 要的是停止自動操作並通知）
 sleep = time.sleep
 clock = time.time
 
@@ -190,6 +192,8 @@ class Follow:
         self.enc_off_since = None   # watch 讀到遇敵鈕關的起點（clock）
         self.panel_since = None     # watch 讀到面板開著的起點（clock）；None = 沒有面板
         self.panel_noted = None
+        self.unk_since = None       # 畫面不認得的起點（clock）；None = 沒在 unknown 暫停
+        self.unk_logged = False
 
     # ---- 等級 ----
     def feed(self, lv) -> bool:
@@ -252,21 +256,44 @@ class Follow:
         return True
 
     # ---- 驗證 ----
+    def alert_shot(self) -> str | None:
+        """watch 警報附的截圖路徑（state.alerts[].shot）；沒有 / 讀不到 → None"""
+        st = watchstate.fresh(10.0) or {}
+        for a in st.get('alerts') or []:
+            if isinstance(a, dict) and a.get('shot'):
+                return str(a['shot'])
+        return None
+
     def verify_check(self):
-        """None = 沒事；整數 = 要結束的退出碼。watch 標旗 → 先讀畫面，主畫面 = 誤報"""
-        if watchstate.verify_suspect() is not True:
+        """None = 沒事；-1 = 暫停這輪（面板 / 畫面不認得，不點任何東西）；其他整數 = 要結束的退出碼。
+        watch 標旗 → 先現場讀畫面：主畫面 = 誤報；已知面板 = 暫停；不認得 = 進入 unknown 暫停，連續超過 UNKNOWN_STOP_MIN 分鐘才退出 9。
+        暫停中（unk_since 有值）不管旗標，每輪都現場讀畫面，恢復成主畫面 / 已知面板就自動恢復。"""
+        if self.unk_since is None and watchstate.verify_suspect() is not True:
             return None
         st = verify_screen_state()
-        if st in MAIN_STATES:
-            if clock() - self.verify_note > 300:
+        if st in MAIN_STATES or st == 'panel':
+            if self.unk_since is not None:
+                log(f'畫面恢復（{st}），follow 繼續（unknown 暫停了 {int(clock() - self.unk_since)} 秒）')
+                self.unk_since, self.unk_logged = None, False
+                self.verify_note = clock()
+            elif st in MAIN_STATES and clock() - self.verify_note > 300:
                 log(f'watch 標 verify_suspect 但畫面是 {st}（主畫面），視為誤報，繼續')
                 self.verify_note = clock()
-            return None
-        if st == 'panel':
-            return -1                                 # 有面板開著：暫停這輪
-        errlog.add(f'疑似答題 / 驗證視窗（畫面 {st}），停止 follow，請人工檢查畫面（鐵則 5）', source=SRC)
-        log(f'疑似驗證視窗（畫面 {st}）→ 停手通知使用者')
-        return uikit.EXIT_UNKNOWN_SCREEN
+            return -1 if st == 'panel' else None      # 有面板開著：暫停這輪
+        now = clock()
+        if self.unk_since is None:
+            self.unk_since = now
+        if now - self.unk_since > UNKNOWN_STOP_MIN * 60:
+            errlog.add(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘，follow 停止，請人工檢查畫面（鐵則 5）', source=SRC)
+            log(f'畫面不認得超過 {UNKNOWN_STOP_MIN} 分鐘 → 停手通知使用者')
+            return uikit.EXIT_UNKNOWN_SCREEN
+        if not self.unk_logged:
+            shot = self.alert_shot()
+            errlog.add('畫面不認得，follow 暫停中，請人工確認' + (f'（watch 警報截圖：{shot}）' if shot else ''), source=SRC)
+            log(f'畫面不認得（{st}），暫停（不點擊、不補血、不 ensure），最多 {UNKNOWN_STOP_MIN} 分鐘')
+            self.unk_logged = True
+        self.write_state('paused')
+        return -1
 
     # ---- 狀態檔 ----
     def write_state(self, state='running'):
