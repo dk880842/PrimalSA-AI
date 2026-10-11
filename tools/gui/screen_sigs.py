@@ -33,6 +33,58 @@ SIG_DIALOG = _t([(1360, 300, 107, 70, 44), (1100, 350, 107, 70, 44), (948, 445, 
 SIG_REWARD = _t([(720, 572, 62, 106, 158), (680, 560, 82, 125, 178), (560, 620, 233, 203, 161), (720, 640, 104, 72, 46)], TOL)
 SIG_PANEL = _t([(1064, 208, 197, 69, 41), (880, 590, 55, 67, 13)], TOL)    # 切換角色面板：右上紅 ✕ + 刷新鈕深綠
 SIG_HUD = _t([(1300, 745, 254, 0, 0)], TOL)                                  # 外掛鈕 ASS 紅字（對話框開著時整個 UI 隱藏）
+# 已量好的面板右上 ✕ 紅圓（uikit.PET / TEAMPANEL / QTEAM 沿用這幾個，不重量）
+X_PET = (1310, 108, 197, 71, 49, TOL)
+X_TEAM = (1250, 77, 197, 72, 48, TOL)
+X_QTEAM = (1052, 167, 195, 73, 49, TOL)
+
+# ---- 常見面板（2026-10-11 以 tools/.cache 767 張 1440×830 樣本學出；watch 用，classify 認得就回 state=panel + panel 名）----
+# 判定 = ✕ 必須命中（PANEL_X，tol 40）+ 該面板的 8 個「框 / 標題板 / 邊緣」點至少 PANEL_NEED 個在 PANEL_TOL 內（容許個別點被遊戲內容 / 特效蓋住）。
+# 8 點是用該面板全部正例（pet 219 / bag 78 / ass 64 / quest 13 / switch 9 / transfer 6 / setting 5 / team 3 / qteam 4）挑「各正例都穩定、其餘 700 多張都不符」的點；
+# 離線驗證：全部樣本 0 誤判（見 test_screen_sigs.py）。切換角色面板仍用既有 SIG_PANEL（2 點）優先判，這裡的 switch 只是補它被蓋 / 暗化時。
+# 沒有可靠樣本所以**不上線**：人物 / 角色資訊、圖鑑、商城、家族、排行榜、信箱等（見 ui/README.md「watch 認得的畫面」）。
+PANEL_TOL = 16
+PANEL_NEED = 6
+PANEL_X = {
+    'pet': X_PET,
+    'bag': (1280, 113, 197, 70, 43, TOL),
+    'quest': (1360, 80, 197, 72, 48, TOL),
+    'transfer': (1288, 96, 197, 73, 50, TOL),
+    'setting': (1340, 85, 197, 73, 49, TOL),
+    'team': X_TEAM,
+    'qteam': X_QTEAM,
+    'switch': SIG_PANEL[0],
+    'ass': (1318, 90, 195, 127, 8, TOL),
+}
+PANEL_PTS = {
+    'pet': [(536, 70, 194, 155, 112), (1322, 778, 62, 38, 25), (182, 772, 129, 91, 55), (1298, 82, 144, 99, 63), (752, 778, 143, 100, 67), (170, 322, 148, 99, 58), (920, 106, 90, 55, 23), (1310, 430, 107, 68, 41)],
+    'bag': [(540, 76, 195, 140, 95), (1296, 760, 59, 33, 17), (150, 784, 104, 67, 45), (1272, 82, 56, 36, 22), (678, 772, 188, 154, 117), (156, 268, 219, 179, 135), (894, 106, 83, 43, 26), (1290, 424, 46, 24, 10)],
+    'quest': [(502, 60, 186, 127, 87), (1372, 768, 49, 22, 12), (106, 768, 105, 70, 47), (1216, 72, 60, 29, 18), (736, 732, 184, 153, 122), (100, 288, 89, 55, 36), (1366, 402, 121, 80, 55), (1054, 738, 177, 142, 103)],
+    'transfer': [(158, 66, 85, 49, 25), (1310, 714, 116, 107, 44), (530, 756, 116, 77, 48), (920, 66, 178, 112, 73), (128, 528, 85, 51, 24), (1310, 276, 82, 45, 24), (920, 756, 114, 76, 48), (536, 102, 139, 86, 54)],
+    'setting': [(172, 60, 123, 93, 25), (1354, 738, 126, 90, 63), (556, 756, 171, 64, 33), (952, 66, 198, 142, 108), (88, 564, 78, 39, 19), (1348, 288, 135, 84, 48), (952, 714, 205, 147, 79), (550, 102, 154, 90, 60)],
+    'team': [(488, 50, 175, 117, 77), (1256, 746, 112, 76, 52), (188, 758, 70, 43, 35), (1238, 50, 141, 96, 61), (722, 734, 231, 203, 163), (200, 344, 237, 205, 162), (884, 92, 159, 96, 59), (1226, 398, 245, 229, 204)],
+    'qteam': [(438, 140, 67, 56, 41), (1062, 716, 86, 53, 33), (378, 716, 85, 57, 33), (1032, 140, 17, 12, 5), (720, 674, 24, 47, 76), (732, 164, 181, 153, 114), (1068, 410, 42, 28, 17), (300, 368, 20, 15, 8)],
+    'switch': [(426, 160, 136, 106, 73), (1062, 664, 66, 38, 20), (1002, 160, 201, 163, 119), (1068, 406, 138, 92, 56), (1050, 532, 146, 115, 82), (1068, 280, 123, 84, 53), (300, 328, 122, 110, 90), (738, 730, 118, 114, 98)],
+    'ass': [(334, 60, 168, 144, 99), (1354, 774, 225, 210, 177), (1096, 60, 229, 210, 163), (592, 774, 221, 221, 219), (100, 558, 223, 204, 164), (1354, 372, 232, 218, 188), (718, 102, 115, 100, 74), (970, 738, 255, 255, 255)],
+}
+PANEL_NAMES = {'pet': '寵物', 'bag': '背包', 'quest': '任務', 'transfer': '傳送', 'setting': '設置', 'team': '組隊', 'qteam': '快速組隊',
+               'switch': '切換角色', 'ass': '外掛'}
+
+# ---- 主畫面多組特徵（任一組命中 = 主畫面 idle）----
+# G1 = 外掛鈕紅字（舊 SIG_HUD，單點、暗地圖 / 特效時會失敗）；G2 = 底部圖示列（切換～外掛 7 顆石頭圓鈕的框）；G3 = 右下（遇敵鈕 / 收合箭頭周圍）。
+# G2 / G3 都是不透明的 UI 圖示，不受地圖顏色影響；每組 6 點允許 1 點不符（HUD_TOL 16）。
+# 刻意不放「左上血條框 / 右上地圖名框」當單獨判據：寵物、背包等大面板開著時它們仍然露在外面，會把沒認得的面板（含驗證視窗）誤當主畫面。
+# 底部圖示列與右下按鈕會被所有大面板蓋住，所以兩組都不成立 → 還是 unknown。
+HUD_TOL = 16
+HUD_MISS = 1
+HUD_GROUPS = {
+    'bottom': [(760, 720, 81, 78, 73), (1068, 756, 187, 171, 140), (908, 784, 190, 169, 97), (852, 720, 95, 86, 74), (992, 784, 74, 93, 49), (732, 796, 126, 97, 65)],
+    'right': [(1336, 648, 170, 154, 119), (1300, 796, 171, 153, 126), (1372, 700, 28, 28, 28), (1304, 724, 155, 138, 111), (1336, 764, 176, 160, 122), (1300, 760, 147, 147, 146)],
+}
+# 全黑轉場：HUD 各處 + 畫面中央共 10 點全暗（max < BLACK_MAX）。洞窟地圖大片黑但 HUD 圖示不黑，所以不會誤判（沒有實測樣本，只有合成測試）
+BLACK_PTS = [(216, 58), (1200, 70), (1130, 765), (1300, 745), (1380, 660), (90, 70), (100, 790), (720, 400), (1250, 450), (300, 300)]
+BLACK_MAX = 24
+
 # 切換角色後的全螢幕「加載中」畫面（P-I3 實測，約 0.25～0.5 s；此時 SIG_HUD 不成立、classify = unknown；只給 char.py 等切換用，不進 classify）
 SIG_LOADING = _t([(1000, 40, 96, 183, 243), (30, 780, 231, 189, 76), (668, 727, 255, 255, 255)], TOL)
 # 「選擇對象」面板（點 NPC 後右側跳出的米色面板）
@@ -78,10 +130,47 @@ def points() -> list:
     return [(x, y) for x, y, *_ in SIG_DIALOG + SIG_REWARD + SIG_PANEL + SIG_SELECT + SIG_HUD + SIG_BATTLE + SIG_CMD + SIG_AUTO_OFF] + [VS_PROBE] + AW_POINTS
 
 
+def panel_points() -> list:
+    """面板 / 主畫面多組 / 載入 / 黑畫面要的取樣點（不在 points() 裡，讓 screen_px.json 與 quest / uikit 的 classify 不變；watch 另外讀）"""
+    seen, out = set(points()), []
+    cand = [(x, y) for x, y, *_ in PANEL_X.values()] + [(x, y) for pts in PANEL_PTS.values() for x, y, *_ in pts] + \
+           [(x, y) for pts in HUD_GROUPS.values() for x, y, *_ in pts] + BLACK_PTS
+    for pt in cand:
+        if pt not in seen:
+            seen.add(pt)
+            out.append(pt)
+    return out
+
+
+def _count_ok(px: dict, pts, tol: int) -> int:
+    return sum(1 for x, y, r, g, b in pts if (x, y) in px and close(px[(x, y)], (r, g, b), tol))
+
+
+def panel_of(px: dict):
+    """認得的面板名（PANEL_X 的 key）或 None。缺點（呼叫端沒讀 panel_points）一律當不符合"""
+    for name, (x, y, r, g, b, tol) in PANEL_X.items():
+        if (x, y) in px and close(px[(x, y)], (r, g, b), tol) and _count_ok(px, PANEL_PTS[name], PANEL_TOL) >= PANEL_NEED:
+            return name
+    return None
+
+
+def hud_main(px: dict) -> bool:
+    """主畫面多組判斷：G1 外掛紅字、G2 底部圖示列、G3 右下按鈕，任一組命中"""
+    if _match_safe(px, SIG_HUD):
+        return True
+    return any(_count_ok(px, pts, HUD_TOL) >= len(pts) - HUD_MISS for pts in HUD_GROUPS.values())
+
+
+def is_black(px: dict) -> bool:
+    return all(pt in px and max(px[pt]) < BLACK_MAX for pt in BLACK_PTS)
+
+
 def classify(px: dict) -> dict:
     """px 含 points() 的所有點 → {'state', 'gold', 'full', 'cmd', 'auto_off'}。
-    state：dialog / reward / battle / panel / select / walking / idle / unknown（優先序不可動：HUD 紅字在戰鬥 / 選擇面板時還在，所以 idle 排最後）"""
+    state：dialog / reward / battle / panel / select / walking / idle / unknown（優先序不可動：HUD 紅字在戰鬥 / 選擇面板時還在，所以 idle 排最後）
+    panel：state=panel 時是面板名（switch / pet / bag …，見 PANEL_NAMES），其他 None。px 沒帶 panel_points() 的點時只認 switch（舊行為）、主畫面只看 G1。"""
     full = False
+    pn = None
     gold = sum(1 for x, y in AW_POINTS if px[(x, y)][0] > 225 and 150 < px[(x, y)][1] < 205 and px[(x, y)][2] < 50)
     if match(px, SIG_DIALOG):
         st = 'dialog'
@@ -90,6 +179,8 @@ def classify(px: dict) -> dict:
     elif match(px, SIG_BATTLE):
         st, full = 'battle', True
     elif match(px, SIG_PANEL):
+        st, pn = 'panel', 'switch'
+    elif (pn := panel_of(px)):
         st = 'panel'
     elif match(px, SIG_SELECT):
         st = 'select'
@@ -97,30 +188,34 @@ def classify(px: dict) -> dict:
         st = 'battle'
     elif gold >= AW_MIN:
         st = 'walking'
-    elif match(px, SIG_HUD):
+    elif hud_main(px):
         st = 'idle'
     else:
         st = 'unknown'
     cmd = full and match(px, SIG_CMD)                 # 完整戰鬥且在下指令階段
     auto_off = full and match(px, SIG_AUTO_OFF)       # 自動戰鬥鈕是關的
-    return {'state': st, 'gold': gold, 'full': full, 'cmd': cmd, 'auto_off': auto_off}
+    return {'state': st, 'gold': gold, 'full': full, 'cmd': cmd, 'auto_off': auto_off, 'panel': pn}
 
 
 # ---- annotate 特徵（watch 專用附註；只上「有正例樣本」的特徵，2026-10-10 以 tools/.cache 等 677 張 1440×830 樣本驗證：
 # 4 種各有正例（提示視窗 1、登入 2、選角 1、遇敵鈕 30）、其餘樣本 0 誤判，見 fixtures/annot_px.json）----
 # 沒有可靠特徵 / 沒有正例所以**不上線**：通用彈窗（popup）、背包 / 寵物 / 外掛面板（沙地與米色面板太像，沒有樣本證明 0 誤判）、驗證 / 答題視窗（沒有任何樣本）
 ANNOT_SIGS = {'notice_dialog': NET_DIALOG, 'login': NET_LOGIN, 'charsel': NET_CHARSEL}
-ANNOT_KNOWN = ('login', 'charsel')    # 這些視窗本來就是「已知畫面」：不算 unknown（netwatch 那一層處理）
+ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場）
 
 
 def annot_points() -> list:
     """annotate 需要的取樣點（不在 points() 裡；watch 的 pixel 呼叫把兩組一起讀，classify 的 points() 不變）"""
     seen, out = set(points()), []
-    for sig in list(ANNOT_SIGS.values()) + [ENC_ON]:
+    for sig in list(ANNOT_SIGS.values()) + [ENC_ON, SIG_LOADING]:
         for x, y, *_ in sig:
             if (x, y) not in seen:
                 seen.add((x, y))
                 out.append((x, y))
+    for pt in panel_points():
+        if pt not in seen:
+            seen.add(pt)
+            out.append(pt)
     return out
 
 
@@ -135,6 +230,11 @@ def annotate(px: dict, base: dict) -> list:
     for name, sig in ANNOT_SIGS.items():
         if _match_safe(px, sig):
             return [name]
+    if base.get('state') == 'unknown':          # 載入 / 全黑只在 classify 不認得時才附註（有 HUD 的畫面不可能是轉場）
+        if _match_safe(px, SIG_LOADING):
+            return ['loading']
+        if is_black(px):
+            return ['black']
     return []
 
 
@@ -151,7 +251,7 @@ _LABELS = {'idle': '主畫面（未偵測到已知視窗）', 'walking': '自動
            'select': '選擇對象面板', 'panel': '切換角色面板', 'unknown': '不認得的畫面',
            'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
 
-_ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面'}
+_ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面', 'loading': '載入畫面', 'black': '黑畫面（轉場）'}
 
 
 def label(d: dict, annot=None) -> str:
@@ -163,7 +263,9 @@ def label(d: dict, annot=None) -> str:
         for k in ANNOT_KNOWN:
             if k in annot:
                 return _ANNOT_TEXT[k]
-    if st == 'battle':
+    if st == 'panel' and d.get('panel'):
+        base = '面板：' + PANEL_NAMES.get(d['panel'], d['panel'])
+    elif st == 'battle':
         base = '戰鬥中（完整・下指令）' if d.get('cmd') else '戰鬥中（完整・演出中）' if d.get('full') else '戰鬥中（快速）'
     else:
         base = _LABELS.get(st, f'未知狀態 {st}')

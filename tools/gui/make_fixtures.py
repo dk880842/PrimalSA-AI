@@ -52,6 +52,119 @@ def write(name: str, data: dict) -> None:
     print('寫入', name)
 
 
+# ---- 面板辨識樣本（watch / screen_sigs.panel_of）：人工指定檔案 → 期望面板名（None = 不是這些面板的負例）----
+# 正例標籤來自獨立證據（右上 ✕ 紅圓的位置叢集 / 外掛面板的橘 ✕ + 5 個角色圓鈕），不是 PANEL_PTS 本身；挑選 = 每種面板等距取 5 張 + 今天（2026-10-11）使用者開的寵物視窗 2 張。
+PANEL_POS = {
+    'at_210_322.png': 'pet',
+    'catch-m0/p_02.png': 'pet',
+    'm1.png': 'pet',
+    'pp599.png': 'pet',
+    'v695.png': 'pet',
+    'b1.png': 'bag',
+    'd0.png': 'bag',
+    'dep_195.png': 'bag',
+    'k4.png': 'bag',
+    'w2.png': 'bag',
+    'g.png': 'quest',
+    'scroll_1.png': 'quest',
+    'scroll_4.png': 'quest',
+    'ui/detail.png': 'quest',
+    'up_3.png': 'quest',
+    'catch-m0/switch0.png': 'switch',
+    'm-a0.png': 'switch',
+    'p3_b_pre.png': 'switch',
+    't.png': 'switch',
+    'ui/switch.png': 'switch',
+    'm-a1.png': 'qteam',
+    'm-a2.png': 'qteam',
+    'm-a3.png': 'qteam',
+    'm-a4.png': 'qteam',
+    't1.png': 'transfer',
+    'ui/i_tp.png': 'transfer',
+    'ui/i_tphero.png': 'transfer',
+    'ui/i_tplevel.png': 'transfer',
+    'ui/transfer.png': 'transfer',
+    'ui/j_chat.png': 'setting',
+    'ui/j_other.png': 'setting',
+    'ui/j_set.png': 'setting',
+    'ui/j_sound.png': 'setting',
+    'ui/setting.png': 'setting',
+    'team4.png': 'team',
+    'team_solo.png': 'team',
+    'ui/team.png': 'team',
+    'a1.png': 'ass',
+    'g4.png': 'ass',
+    's7.png': 'ass',
+    't_pre5.png': 'ass',
+    'w5.png': 'ass',
+    'watch-panels/pet-0.png': 'pet',
+    'watch-panels/pet-1.png': 'pet',
+}
+# 負例：各種不是這些面板的畫面（主畫面 / 行走 / 對話 / 獲得物品 / 戰鬥 / 選擇對象 / 提示視窗 / 登入 / 載入 / 面板上疊彈窗…）等距各取 6 張
+PANEL_NEG = [
+    'a.png',
+    'quest-log/094534-dialog.png',
+    'quest-log/143725-dialog.png',
+    'quest-log/171153-dialog.png',
+    'quest-log/221622-dialog.png',
+    'quest-log/221920-dialog.png',
+    'al_620_385.png',
+    'exp-r1/r03.png',
+    'exp-r1/r35.png',
+    'quest-log/151602-disbanded.png',
+    'ui/e_mail_esc.png',
+    'watch-m0/p9.png',
+    'b3.png',
+    'd2.png',
+    'i1.png',
+    'ui-log/025725-pet-store-nochange.png',
+    'ui/e_mail.png',
+    'w3.png',
+    'b_a1.png',
+    'battle-samples/seq_4.png',
+    'battle-samples/vs_13.png',
+    'battle-samples/vs_9.png',
+    'watch-m0/p10.png',
+    'watch-m0/s1.png',
+    'battle-samples/neg_reward.png',
+    'battle-samples/neg_reward_b2_3.png',
+    'battle-samples/neg_reward_b2_6.png',
+    'quest-log/143259-reward.png',
+    'quest-log/171854-reward.png',
+    'quest-log/184457-reward.png',
+    'kr322.png',
+    'kr450.png',
+    'kr580.png',
+    'kr700.png',
+    'net1.png',
+    'm.png',
+    'o.png',
+    'ui/sponsor.png',
+    'net5.png',
+    'net6.png',
+    'p3_a_1.png',
+    'quest-log/172356-no-npc.png',
+]
+
+
+def make_panel_fixture() -> list:
+    """panel_px.json：points = screen_sigs.points() + annot_points()（watch 實際讀的點）；每張樣本存各點 hex 與當時 classify / annotate 的凍結結果。回缺的檔案"""
+    pts = screen_sigs.points() + screen_sigs.annot_points()
+    samples, miss = [], []
+    for rel, want in list(PANEL_POS.items()) + [(r, None) for r in PANEL_NEG]:
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = {tuple(map(int, k.split(','))): tuple(v) for k, v in grab(p, pts).items()}
+        c = screen_sigs.classify(px)
+        samples.append({'f': rel, 'expect_panel': want, 'state': c['state'], 'panel': c['panel'], 'annot': screen_sigs.annotate(px, c),
+                        'px': ''.join('%02x%02x%02x' % px[pt] for pt in pts)})
+    write('panel_px.json', {'note': 'watch 面板辨識樣本（2026-10-11）：expect_panel = 獨立證據的標籤；state / panel / annot = 當時 classify / annotate 的凍結結果（px 格式同 annot_px.json）',
+                            'points': [list(p) for p in pts], 'samples': samples})
+    return miss
+
+
 def main() -> int:
     done, skipped = [], []
 
@@ -101,6 +214,8 @@ def main() -> int:
                               'positive': [t for t in EXP_POSITIVE if t in imgs], 'images': imgs})
         done.append('exp_px.json' + (f'（缺 {miss_exp}）' if miss_exp else ''))
 
+    miss_panel = make_panel_fixture()
+    done.append('panel_px.json' + (f'（缺 {miss_panel}）' if miss_panel else ''))
     print('完成：', done)
     for n, m in skipped:
         print('跳過', n, '缺', m)

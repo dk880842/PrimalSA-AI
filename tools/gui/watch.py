@@ -18,8 +18,8 @@
 退出碼：0 正常（含父程序死）/ 2 參數錯 / 3 同平台已有實例（或鎖被換走）/ 5 收到 --stop / 6 鎖屬於另一平台 / 其他 = 異常。
 
 **零輸入**：只送 gui.ps1 的 pixel / info（一律帶 -NoRestore 1：遊戲最小化時不還原視窗）與 stat.ps1 / ocr.ps1 / digitmatch.ps1（每 3 s 一次讀 HUD 數值：digitmatch 樣板比對第一順位，讀不出的欄位才用 stat.ps1 補；每分鐘最多一次用 stat 補學樣板）。
-不送任何點擊、按鍵、走路、fg / max / seq / shot / waitpix；test_watch.py 用白名單與 AST 檢查把關。
-watch 不上傳截圖，不做驗證視窗判斷（那是 quest 那一層）；state 不能當點擊依據。
+不送任何點擊、按鍵、走路、fg / max / seq / waitpix（shot 只在 unknown_long 觸發存證用一次）；test_watch.py 用白名單與 AST 檢查把關。
+watch 不上傳截圖（只有 unknown_long 觸發時唯讀存一張到 tools/.cache/watch-alerts/），不做驗證視窗判斷（那是 quest 那一層）；state 不能當點擊依據。
 """
 import argparse
 import json
@@ -68,7 +68,10 @@ LAYOUT_OK = '2880x1659'
 TRANSITIONS_KEEP = 20
 STABLE_CAP = 5                    # stable_n 上限（不封頂會每輪都「內容有變」）
 
-GUI_ALLOWED = ('pixel', 'info')               # 零輸入白名單：gui.ps1 只准這兩個指令
+GUI_ALLOWED = ('pixel', 'info')               # 零輸入白名單：gui.ps1 只准這兩個指令（另：unknown_long 警報存證才用 _snap_alert 的 shot，唯讀）
+ALERT_SHOT_DIR = 'watch-alerts'              # tools/.cache/ 底下；unknown_long 觸發時自動存一張截圖（唯讀），只留最新 ALERT_SHOT_KEEP 張
+ALERT_SHOT_KEEP = 10
+SHOT_TIMEOUT = 8.0
 PS_ALLOWED = ('stat.ps1', 'ocr.ps1', 'digitmatch.ps1')   # 其他腳本只准這三支（都是唯讀截圖 / 讀像素 / OCR）
 NOGAME_STATES = ('no_game', 'minimized')
 
@@ -90,10 +93,10 @@ def _check_stop() -> None:
         raise SystemExit(128 + _stop_flag['sig'])
 
 
-def _gui(cmd: str, *args: str, timeout: float = GUI_TIMEOUT) -> subprocess.CompletedProcess:
-    """gui.ps1 只准 pixel / info；自動加 -NoRestore 1（最小化時不還原視窗、回 rc=3）；一定帶 timeout"""
+def _gui(cmd: str, *args: str, timeout: float = GUI_TIMEOUT, allow_shot: bool = False) -> subprocess.CompletedProcess:
+    """gui.ps1 只准 pixel / info（警報存證的 shot 要明確帶 allow_shot=True，唯讀截圖、只存檔）；自動加 -NoRestore 1（最小化時不還原視窗、回 rc=3）；一定帶 timeout"""
     _check_stop()
-    if cmd not in GUI_ALLOWED:
+    if cmd not in GUI_ALLOWED and not (cmd == 'shot' and allow_shot):
         raise ValueError(f'watch 零輸入白名單：gui 只准 {GUI_ALLOWED}，不准 {cmd!r}')
     return winenv.run_ps('gui.ps1', cmd, *args, '-NoRestore', '1', timeout=timeout)
 
@@ -204,7 +207,7 @@ class Watcher:
         self.stable_n = 0
         self.transitions: list = []      # [舊, 新, 畫面時間, 寫入時間]
         self.screen_ts = self.started
-        self.cls = {'full': False, 'cmd': False, 'auto_off': False, 'gold': 0}
+        self.cls = {'full': False, 'cmd': False, 'auto_off': False, 'gold': 0, 'panel': None}
         self.annot: list = []
         self.layout = None
         self.minimized = False
@@ -426,7 +429,7 @@ class Watcher:
         if kind == 'ok':
             c = screen_sigs.classify(px)
             new = c['state']
-            self.cls = {k: c[k] for k in ('full', 'cmd', 'auto_off', 'gold')}
+            self.cls = {k: c[k] for k in ('full', 'cmd', 'auto_off', 'gold', 'panel')}
             self.annot = screen_sigs.annotate(px, c)
             self.enc_on = screen_sigs.enc_on(px, c)
             self.last_px = px
@@ -435,7 +438,7 @@ class Watcher:
             if kind != 'error':
                 self.enc_on = None
             if kind in ('no_game', 'minimized', 'unsupported'):
-                self.cls = {'full': False, 'cmd': False, 'auto_off': False, 'gold': 0}
+                self.cls = {'full': False, 'cmd': False, 'auto_off': False, 'gold': 0, 'panel': None}
                 self.annot = []
         if kind == 'error':
             self.errors += 1
@@ -481,7 +484,7 @@ class Watcher:
         else:
             self.interval = INTERVAL
 
-    # ---- 警示（§5）：只標出、不點任何東西；不存截圖 ----
+    # ---- 警示（§5）：只標出、不點任何東西；unknown_long 觸發時唯讀存一張截圖 ----
     def _alerts(self) -> list:
         out = []
         if self.unk_alert:
@@ -502,8 +505,9 @@ class Watcher:
                 self.unknown_since = now
                 self.unknown_wall = self.clock()
             if self.unk_alert is None and now - self.unknown_since >= UNKNOWN_LONG_S:
-                eid = errlog.add(f'疑似驗證視窗：畫面連續 {int(UNKNOWN_LONG_S)} 秒以上不認得（watch 偵測；不碰、請人工確認）', source='watch')
-                self.unk_alert = {'kind': 'unknown_long', 'since': self.unknown_wall, 'shot': None, 'err_id': eid,
+                shot = self._snap_alert()
+                eid = errlog.add(f'疑似驗證視窗：畫面連續 {int(UNKNOWN_LONG_S)} 秒以上不認得（watch 偵測；不碰、請人工確認）' + (f'；截圖 {shot}' if shot else ''), source='watch')
+                self.unk_alert = {'kind': 'unknown_long', 'since': self.unknown_wall, 'shot': shot, 'err_id': eid,
                                   'msg': f'不認得的畫面超過 {int(UNKNOWN_LONG_S)} 秒（可能是驗證視窗，請人工確認）'}
         elif st in NOGAME_STATES:
             self.unknown_since = self.known_since = None
@@ -520,6 +524,20 @@ class Watcher:
                     self._clear_unknown(st)
             else:
                 self.known_since = None
+
+    def _snap_alert(self):
+        """unknown_long 觸發時存一張截圖（gui shot，唯讀）→ 回路徑；失敗 / 遊戲最小化 → None。只留最新 ALERT_SHOT_KEEP 張"""
+        d = Path(watchstate.CACHE) / ALERT_SHOT_DIR
+        path = d / f'unknown-{int(self.clock())}.png'
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            r = _gui('shot', winenv.to_windows(path), timeout=SHOT_TIMEOUT, allow_shot=True)
+            ok = r.returncode == 0 and path.exists()
+            for f in sorted(d.glob('unknown-*.png'))[:-ALERT_SHOT_KEEP]:
+                f.unlink()
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return str(path) if ok else None
 
     def _clear_unknown(self, st) -> None:
         a, self.unk_alert = self.unk_alert, None
@@ -800,7 +818,7 @@ class Watcher:
                        'prev': self.prev, 'annot': self.annot,
                        'label': screen_sigs.label({'state': self.cur, **self.cls}, self.annot) if self.cur else '啟動中',
                        'since': self.since, 'transitions': [list(t[:3]) + [t[3] if t[3] is not None else now] for t in self.transitions],
-                       'full': self.cls['full'], 'cmd': self.cls['cmd'], 'auto_off': self.cls['auto_off'], 'gold': self.cls['gold'],
+                       'full': self.cls['full'], 'cmd': self.cls['cmd'], 'auto_off': self.cls['auto_off'], 'gold': self.cls['gold'], 'panel': self.cls['panel'],
                        'enc_on': self.enc_on, 'stable_n': self.stable_n, 'src': 'pixel'},
             'hud': self._hud_section(now),
             'flags': dict(self._flags(mono), verify_suspect=bool(self._alerts())),

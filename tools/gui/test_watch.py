@@ -631,8 +631,8 @@ watch.OCR_ON = False
 ALLPTS = screen_sigs.points() + screen_sigs.annot_points()
 
 
-def px_with(*sigs, base='0,0,0'):
-    """全黑底，指定特徵的點塗成特徵色 → gui pixel 輸出字串（順序 = watch.pts）"""
+def px_with(*sigs, base='70,70,70'):
+    """灰底（70,70,70；全黑會被認成「全黑轉場」annot），指定特徵的點塗成特徵色 → gui pixel 輸出字串（順序 = watch.pts）"""
     d = {}
     for sg in sigs:
         for x, y, r, g, b, _ in sg:
@@ -711,6 +711,101 @@ check('主畫面沒紅龍頭 → enc_on = False', watchstate.read()['screen']['e
 fk.pixel = (0, px_with(), '')
 w.cycle()
 check('不認得的畫面 → enc_on = null', watchstate.read()['screen']['enc_on'] is None)
+
+
+# ---- 面板辨識 / 主畫面多組 / 載入 / 黑畫面 / 警報截圖（2026-10-11：使用者開寵物視窗被誤報疑似驗證）----
+def px_panel(name):
+    d = {}
+    for x, y, r, g, b in screen_sigs.PANEL_PTS[name]:
+        d[(x, y)] = f'{r},{g},{b}'
+    x, y, r, g, b, _ = screen_sigs.PANEL_X[name]
+    d[(x, y)] = f'{r},{g},{b}'
+    return ' '.join(d.get(pt, '70,70,70') for pt in ALLPTS)
+
+
+w, clk, fk = make('panel1')
+fk.pixel = (0, px_panel('pet'), '')
+for _ in range(40):                  # 36 s：遠超過 UNKNOWN_LONG_S
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('寵物視窗：state=panel、panel=pet、label=面板：寵物', st['screen']['state'] == 'panel' and st['screen']['panel'] == 'pet' and st['screen']['label'] == '面板：寵物', str(st['screen']))
+check('寵物視窗開 36 s：沒有 unknown_long 警報、verify_suspect=False、errlog 沒新增', st['alerts'] == [] and st['flags']['verify_suspect'] is False and not errlog._read(errlog.LOG))
+for nm, lab in (('bag', '面板：背包'), ('ass', '面板：外掛'), ('team', '面板：組隊'), ('qteam', '面板：快速組隊'), ('switch', '面板：切換角色'), ('setting', '面板：設置'),
+                ('transfer', '面板：傳送'), ('quest', '面板：任務')):
+    fk.pixel = (0, px_panel(nm), '')
+    w.cycle()
+    check(f'{nm} → label {lab}', watchstate.read()['screen']['label'] == lab and watchstate.read()['screen']['panel'] == nm)
+fk.pixel = (0, px_with(screen_sigs.SIG_HUD), '')
+w.cycle()
+check('回主畫面 → panel = null', watchstate.read()['screen']['state'] == 'idle' and watchstate.read()['screen']['panel'] is None)
+# 面板 → 不認得（彈窗蓋住）→ 只有 unknown 才計時，且從頭算
+w, clk, fk = make('panel2')
+for i in range(38):
+    fk.pixel = (0, px_panel('pet') if i < 30 else px_with(), '')
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('認得的面板期間不累積 unknown 計時（30 輪面板後轉 unknown，還沒滿 10 s 不報）', st['screen']['state'] == 'unknown' and st['alerts'] == [], str(st['alerts']))
+# 載入畫面 / 全黑轉場 = 已知，不計 unknown
+w, clk, fk = make('known1')
+fk.pixel = (0, px_with(screen_sigs.SIG_LOADING), '')
+for _ in range(20):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('載入畫面：annot loading、label=載入畫面、20 輪不報警', st['screen']['annot'] == ['loading'] and st['screen']['label'] == '載入畫面' and st['alerts'] == [], str(st['screen']))
+fk.pixel = (0, px_with(base='0,0,0'), '')
+for _ in range(20):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('全黑轉場：annot black、label 黑畫面（轉場）、不報警', st['screen']['annot'] == ['black'] and st['screen']['label'] == '黑畫面（轉場）' and st['alerts'] == [], str(st['screen']))
+# 主畫面多組：外掛紅字被蓋住時，底部圖示列 / 右下按鈕仍判 idle
+w, clk, fk = make('hudgrp')
+d = {(x, y): f'{r},{g},{b}' for x, y, r, g, b in screen_sigs.HUD_GROUPS['bottom']}
+fk.pixel = (0, ' '.join(d.get(pt, '70,70,70') for pt in ALLPTS), '')
+w.cycle()
+check('外掛紅字不見、只有底部圖示列 → idle', watchstate.read()['screen']['state'] == 'idle')
+# unknown_long：自動存截圖（唯讀 shot），alerts.shot 填路徑
+shots = []
+real_to_win = winenv.to_windows
+
+
+def shot_hook(script, args):
+    if script == 'gui.ps1' and args and args[0] == 'shot':
+        shots.append(args)
+        Path(args[1]).write_bytes(b'png')
+
+
+winenv.to_windows = lambda p, *a, **k: str(p)
+w, clk, fk = make('shot')
+fk.on_call = shot_hook
+fk.pixel = UNK
+for _ in range(16):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+sp = st['alerts'][0]['shot'] if st['alerts'] else None
+check('unknown_long 觸發 → 自動 shot 一次、alerts[0].shot 是存在的 png 路徑', len(shots) == 1 and sp and Path(sp).exists() and Path(sp).parent.name == watch.ALERT_SHOT_DIR, str((shots, sp)))
+check('shot 指令帶 -NoRestore 1 + allow（只在警報觸發時送）', shots and shots[0][-2:] == ('-NoRestore', '1'))
+for _ in range(10):
+    w.cycle(); clk.t += 0.9
+check('警報持續期間不重複 shot', len(shots) == 1)
+rows = errlog._read(errlog.LOG)
+check('errlog 訊息含截圖路徑', rows and sp in rows[0]['error'], str(rows[:1]))
+d_ = Path(sp).parent
+for i in range(15):                    # 目錄只留最新 ALERT_SHOT_KEEP 張
+    (d_ / f'unknown-{1000 + i}.png').write_bytes(b'x')
+w._snap_alert()
+check('截圖只留最新 ALERT_SHOT_KEEP 張', len(list(d_.glob('unknown-*.png'))) <= watch.ALERT_SHOT_KEEP, str(len(list(d_.glob('unknown-*.png')))))
+fk.on_call = None
+w, clk, fk = make('shot2')
+fk.pixel = UNK
+for _ in range(16):
+    w.cycle(); clk.t += 0.9
+check('shot 失敗（沒檔案）→ shot=None 但警報照常', watchstate.read()['alerts'][0]['kind'] == 'unknown_long' and watchstate.read()['alerts'][0]['shot'] is None)
+try:
+    watch._gui('shot', 'x.png')
+    check('_gui(shot) 無 allow_shot 被拒', False)
+except ValueError:
+    check('_gui(shot) 無 allow_shot 被拒', True)
+winenv.to_windows = real_to_win
 
 # ---- quest-events.log 轉述 ----
 w, clk, fk = make('qlog')

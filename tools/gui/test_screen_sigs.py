@@ -33,8 +33,10 @@ for smp in fx['samples']:
     px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(pts)}
     got = S.classify(px)
     want = {k: smp[k] for k in ('state', 'gold', 'full', 'cmd', 'auto_off')}
-    if got != want:
+    if {k: got[k] for k in want} != want or got['panel'] not in (None, 'switch'):     # 舊 fixture 沒帶 panel_points：只會認出切換面板
         diff.append((smp['name'], want, got))
+    if smp['state'] == 'panel' and got['panel'] != 'switch':
+        diff.append((smp['name'], 'panel 名應為 switch', got['panel']))
 check(f'fixture {len(fx["samples"])} 筆新舊判斷 0 差異', not diff, str(diff[:3]))
 states = {}
 for smp in fx['samples']:
@@ -158,5 +160,93 @@ check('enc_on：主畫面看不到紅龍 = False；戰鬥等其他畫面 = None'
 check('label：登入 / 選角（classify=unknown）顯示認得的畫面名', S.label({'state': 'unknown'}, ['login']) == '登入畫面' and S.label({'state': 'unknown'}, ['charsel']) == '選角畫面')
 check('label：idle + 提示視窗', S.label({'state': 'idle'}, ['notice_dialog']) == '主畫面（未偵測到已知視窗）（提示視窗）')
 check('label：任何 annotate 組合都不出現「安全」「無驗證」', all(not any(w in S.label({'state': st}, an) for w in ('安全', '無驗證')) for st in ('idle', 'unknown', 'dialog') for an in ([], ['login'], ['notice_dialog'])))
+
+# ---- 5. 面板辨識（2026-10-11）：樣本 fixture + 邊界 + 主畫面多組 + 載入 / 黑畫面 ----
+PX = json.loads((HERE / 'fixtures' / 'panel_px.json').read_text(encoding='utf-8'))
+ppts = [tuple(p) for p in PX['points']]
+check('panel fixture 取樣點 == points() + annot_points()', ppts == S.points() + S.annot_points())
+bad, pos_n, neg_n, per = [], 0, 0, {}
+for smp in PX['samples']:
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(ppts)}
+    c = S.classify(px)
+    a = S.annotate(px, c)
+    if c['state'] != smp['state'] or c['panel'] != smp['panel'] or a != smp['annot']:
+        bad.append((smp['f'], 'frozen'))
+    if smp['expect_panel']:
+        pos_n += 1
+        per[smp['expect_panel']] = per.get(smp['expect_panel'], 0) + 1
+        if c['state'] != 'panel' or c['panel'] != smp['expect_panel']:
+            bad.append((smp['f'], 'recall', c['state'], c['panel']))
+    else:
+        neg_n += 1
+        if c['panel'] is not None or c['state'] == 'panel':
+            bad.append((smp['f'], 'FP', c['state'], c['panel']))
+check(f'panel fixture：{pos_n} 張正例 100% 認對面板名、{neg_n} 張負例 0 誤判、凍結結果一致', not bad, str(bad[:4]))
+check('panel fixture 涵蓋 pet / bag / ass / quest / switch / transfer / setting / team / qteam', set(per) == set(S.PANEL_X), str(per))
+check('panel fixture 有今天使用者開的寵物視窗（watch-panels/pet-0、pet-1）', {'watch-panels/pet-0.png', 'watch-panels/pet-1.png'} <= {x['f'] for x in PX['samples']})
+check('panel fixture 負例涵蓋 unknown / idle / dialog / battle / loading / login', {x['state'] for x in PX['samples'] if not x['expect_panel']} >= {'unknown', 'idle', 'dialog', 'battle'}
+      and any(x['annot'] == ['loading'] for x in PX['samples']) and any(x['annot'] == ['login'] for x in PX['samples']))
+check('PANEL_X / PANEL_PTS / PANEL_NAMES 的面板一致、每面板 8 點', set(S.PANEL_X) == set(S.PANEL_PTS) == set(S.PANEL_NAMES) and all(len(v) == 8 for v in S.PANEL_PTS.values()))
+check('panel_points 與 classify 的 points 不重複', not (set(S.panel_points()) & set(S.points())))
+import uikit  # noqa: E402
+check('uikit 沿用 screen_sigs 的 ✕ 特徵（PET / TEAMPANEL / QTEAM / SWITCH）', uikit.PET.sig == [S.X_PET] and uikit.TEAMPANEL.sig[0] == S.X_TEAM
+      and uikit.QTEAM.sig[0] == S.X_QTEAM and S.PANEL_X['switch'] == uikit.SWITCH.sig[0])
+
+
+def panel_px(name, miss=0, delta=0, x_delta=0):
+    """合成：全灰底 + 某面板的 ✕ 與 8 點；前 miss 個點偏 delta、✕ 偏 x_delta"""
+    px = {pt: (70, 70, 70) for pt in S.points() + S.panel_points()}
+    for i, (x, y, r, g, b) in enumerate(S.PANEL_PTS[name]):
+        px[(x, y)] = shifted((r, g, b), delta) if i < miss else (r, g, b)
+    x, y, r, g, b, t = S.PANEL_X[name]
+    px[(x, y)] = shifted((r, g, b), x_delta)
+    return px
+
+
+for nm in S.PANEL_X:
+    ok = S.classify(panel_px(nm))
+    check(f'{nm}：8 點全中 → panel={nm}', ok['state'] == 'panel' and ok['panel'] == nm)
+    check(f'{nm}：2 點不符（偏 PANEL_TOL+1）仍認得（容許被內容蓋住）', S.classify(panel_px(nm, 2, S.PANEL_TOL + 1))['panel'] == nm)
+    check(f'{nm}：3 點不符 → 不認得（unknown）', S.classify(panel_px(nm, 3, S.PANEL_TOL + 1))['state'] == 'unknown')
+    check(f'{nm}：點偏 PANEL_TOL 剛好仍中', S.classify(panel_px(nm, 8, S.PANEL_TOL))['panel'] == nm)
+    check(f'{nm}：✕ 偏 tol+1 → 不認得', S.classify(panel_px(nm, 0, 0, S.PANEL_X[nm][5] + 1))['state'] == 'unknown')
+check('沒讀 panel_points（舊 fixture / quest.read_screen）→ 不認得新面板、不丟例外', S.classify({pt: (70, 70, 70) for pt in S.points()})['panel'] is None)
+check('label：面板：寵物 / 外掛 / 快速組隊；舊切換面板', S.label({'state': 'panel', 'panel': 'pet'}) == '面板：寵物' and S.label({'state': 'panel', 'panel': 'ass'}) == '面板：外掛'
+      and S.label({'state': 'panel', 'panel': 'qteam'}) == '面板：快速組隊' and S.label({'state': 'panel'}) == '切換角色面板')
+
+
+# 主畫面多組：任一組命中 = idle；一組允許 1 點不符
+def hud_px(*groups, miss=0, delta=60):
+    px = {pt: (70, 70, 70) for pt in S.points() + S.panel_points()}
+    for g in groups:
+        for i, (x, y, r, gg, b) in enumerate(S.HUD_GROUPS[g]):
+            px[(x, y)] = shifted((r, gg, b), delta) if i < miss else (r, gg, b)
+    return px
+
+
+check('主畫面：沒有任何一組 = unknown', S.classify(hud_px())['state'] == 'unknown')
+check('主畫面：只有底部圖示列（G2，外掛紅字被特效蓋住）= idle', S.classify(hud_px('bottom'))['state'] == 'idle')
+check('主畫面：只有右下按鈕（G3）= idle', S.classify(hud_px('right'))['state'] == 'idle')
+check('主畫面：G2 有 1 點不符仍 idle、2 點不符 = unknown', S.classify(hud_px('bottom', miss=1))['state'] == 'idle' and S.classify(hud_px('bottom', miss=2))['state'] == 'unknown')
+p = {pt: (70, 70, 70) for pt in S.points() + S.panel_points()}
+p.update(px_of(S.SIG_HUD))
+check('主畫面：只有外掛紅字（舊判斷）仍 idle', S.classify(p)['state'] == 'idle')
+check('主畫面圖示列在面板開著時被蓋住不成立（面板優先，且不靠 HUD 組）', S.classify({**hud_px('bottom'), **panel_px('pet')})['panel'] == 'pet')
+# 戰鬥 / 對話框優先於 idle
+check('戰鬥 + 主畫面圖示列 = battle', S.classify({**hud_px('bottom'), **{pt: c for pt, c in px_of(S.SIG_BATTLE).items()}})['state'] == 'battle')
+# 載入 / 黑畫面：annotate 才認（classify 仍是 unknown，腳本的 preflight 不會把它當正常畫面）
+ld = {pt: (70, 70, 70) for pt in S.points() + S.annot_points()}
+ld.update(px_of(S.SIG_LOADING))
+c = S.classify(ld)
+check('載入畫面：classify=unknown、annotate=[loading]、label=載入畫面', c['state'] == 'unknown' and S.annotate(ld, c) == ['loading'] and S.label(c, ['loading']) == '載入畫面')
+bk = {pt: (0, 0, 0) for pt in S.points() + S.annot_points()}
+c = S.classify(bk)
+check('全黑轉場：annotate=[black]、label=黑畫面（轉場）', c['state'] == 'unknown' and S.annotate(bk, c) == ['black'] and S.label(c, ['black']) == '黑畫面（轉場）')
+bk[S.BLACK_PTS[3]] = (S.BLACK_MAX, 0, 0)
+check('黑畫面：任一點亮度 ≥ BLACK_MAX → 不是黑畫面', S.annotate(bk, S.classify(bk)) == [])
+check('黑 / 載入只在 classify=unknown 時附註（idle 畫面剛好暗不算）', S.annotate({**bk, **{pt: (0, 0, 0) for pt in S.BLACK_PTS}}, {'state': 'idle'}) == [])
+check('ANNOT_KNOWN 含 login / charsel / loading / black', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black'})
+
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

@@ -91,9 +91,11 @@ def sig_match(sig) -> bool:
     return bool(cols) and all(screen_sigs.close(c, (r, g, b), tol) for c, (_, _, r, g, b, tol) in zip(cols, sig))
 
 
-def screen() -> dict:
-    """一次讀 screen_sigs.points() → classify（同 quest.read_screen；不 import quest）。讀不到 → {'state': 'error'}"""
-    pts = screen_sigs.points()
+def screen(full: bool = False) -> dict:
+    """一次讀 screen_sigs.points() → classify（同 quest.read_screen；不 import quest）。讀不到 → {'state': 'error'}。
+    full=True 多讀 panel_points()（寵物 / 背包 / 外掛等面板與主畫面多組特徵，watch 用的同一套）：認得的面板回 state=panel + panel 名。
+    預設 False（腳本沿用舊判斷：只認切換角色面板）；follow 判斷「使用者開的面板」才用 full=True"""
+    pts = screen_sigs.points() + (screen_sigs.panel_points() if full else [])
     cols = px(pts)
     if cols is None:
         return {'state': 'error'}
@@ -134,6 +136,8 @@ def watch_preflight_ok() -> bool:
         return False
     if not st or not sc or sc.get('state') not in WATCH_OK_STATES or sc.get('annot'):
         return False
+    if sc.get('state') == 'panel' and sc.get('panel') not in (None, 'switch'):
+        return False                              # watch 認得的其他面板（寵物 / 背包…）：腳本維持舊行為，走完整檢查（它只認切換面板）
     fl = st.get('flags') or {}
     if fl.get('verify_suspect') or fl.get('netwatch_halt') or st.get('alerts'):
         return False
@@ -197,7 +201,7 @@ class Panel:
 
 SWITCH = Panel('SWITCH', (763, 760), screen_sigs.SIG_PANEL, (1064, 208),
                forbidden={'login_all': rect(716, 578, 40)})                  # 全部登錄會讓角色上線（要問；--login-all 才 allow）
-PET = Panel('PET', (318, 80), [(1310, 108, 197, 71, 49, screen_sigs.TOL)], (1310, 108),
+PET = Panel('PET', (318, 80), [screen_sigs.X_PET], (1310, 108),     # ✕ 特徵與 watch 的面板辨識共用（screen_sigs.X_PET）
             forbidden={'trash': rect(708, 565), 'recycle': rect(372, 610), 'loyal_minus': rect(1140, 234), 'loyal_plus': rect(1265, 234),
                        'lock': rect(708, 630), 'depot_expand': rect(1195, 705),
                        'depot_prev': rect(805, 703, 35), 'depot_next': rect(1055, 703, 35),     # 倉庫頁箭頭（P-I6 量到 私人倉庫1/1 兩側；用途未知，先禁）
@@ -206,14 +210,14 @@ PET = Panel('PET', (318, 80), [(1310, 108, 197, 71, 49, screen_sigs.TOL)], (1310
 # 特徵 = ✕ 紅圓 + 標題條兩點 + 米底 + 「解散隊伍」鈕紅橘（有隊伍才有；無隊伍時是藍色「創建隊伍」，所以單人時特徵會不符 → 沒做過單人量測，只在有隊伍時可靠）。
 # 解散鈕 720,670 列入禁區：解散一律走 quest.disband_team（左側分頁，逐步像素驗證），不從這個面板點。
 TEAMPANEL = Panel('TEAMPANEL', (850, 760),
-                  [(1250, 77, 197, 72, 48, screen_sigs.TOL), (720, 75, 147, 89, 57, screen_sigs.TOL), (600, 60, 149, 92, 60, screen_sigs.TOL),
+                  [screen_sigs.X_TEAM, (720, 75, 147, 89, 57, screen_sigs.TOL), (600, 60, 149, 92, 60, screen_sigs.TOL),
                    (1300, 400, 255, 229, 191, screen_sigs.TOL), (720, 670, 187, 73, 43, screen_sigs.TOL)],
                   (1250, 77), forbidden={'disband': rect(720, 670, 60)})
 # 快速組隊「提示」視窗（P-I2 實測 2026-10-11）：疊在切換面板上方（切換面板的 SIG_PANEL 此時被暗化而不成立）。
 # 特徵 = ✕ 紅圓 (1052,167) + 下方藍色「組隊」鈕兩點 + 左側「隊長」標籤米色；ESC 只關提示（切換面板仍在，再 ESC 才關它）。
 # 沒有自己的開啟鈕（在切換面板內點 520,578 開）；close_panel 會點 ✕ 1052,167 並等它消失。
 QTEAM = Panel('QTEAM', None,
-              [(1052, 167, 195, 73, 49, screen_sigs.TOL), (720, 665, 66, 113, 171, screen_sigs.TOL), (448, 325, 251, 223, 187, screen_sigs.TOL)],
+              [screen_sigs.X_QTEAM, (720, 665, 66, 113, 171, screen_sigs.TOL), (448, 325, 251, 223, 187, screen_sigs.TOL)],
               (1052, 167))
 ASS = Panel('ASS', None, None, None)                                          # 見 _ass_panel()
 

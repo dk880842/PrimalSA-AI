@@ -46,6 +46,7 @@ class World:
         self.heals = []
         self.enc_on = True
         self.ens_rc = None
+        self.panel = None             # 非 None = watch 認得面板開著（state=panel）
 
 
 def install(w):
@@ -62,7 +63,14 @@ def install(w):
     follow.heal.read_vitals = lambda last=None, **k: ({'ok': True, 'hpPct': w.hp, 'mpPct': 100}, 1.0)
     follow.heal.heal_trip = lambda spot, no_return=False: w.heals.append(spot)
     follow.grind.take_lock = lambda: True
-    follow.watchstate.screen = lambda *a, **k: ({'enc_on': w.enc_on} if w.enc_on != 'none' else None)
+    def _screen(*a, **k):
+        if w.enc_on == 'none':
+            return None
+        d = {'enc_on': w.enc_on}
+        if w.panel:
+            d.update(state='panel', panel=w.panel, enc_on=None)
+        return d
+    follow.watchstate.screen = _screen
     follow.grind.release_lock = lambda: None
 
     def grun(mode, spot=None, **k):
@@ -174,6 +182,29 @@ check('真的不認得畫面 → 退出 9 + errlog、不動作', rc == 9 and w.e
 w = install(World(lv=(1, 10), map_=11001))
 w.verify, w.screen = True, 'battle'
 check('戰鬥中旗標也視為主畫面', mk(w).step() is None)
+
+# 7b) 使用者開面板（watch 認得 panel）：暫停這一輪，不是退出 9
+w = install(World(lv=(1, 10), map_=11001))
+w.panel = 'pet'
+f = mk(w)
+rc = f.step()
+check('面板開著（寵物）→ 暫停這輪：不退出、不動作、不算讀不到等級', rc is None and w.runs == [] and not w.errs and f.bad == 0)
+w.t += 600
+check('面板開著 10 分鐘仍暫停（不累積 BAD_MAX 停手）', f.step() is None and w.runs == [] and f.bad == 0)
+w.panel = None
+rc = f.step()
+check('面板關了 → 恢復照常（換點 / 檢查）', rc is None and ('start', '阿布龜洞') in w.runs)
+w = install(World(lv=(1, 10), map_=11001))
+w.panel = 'bag'
+f = mk(w)
+f.step()
+w.t += follow.PANEL_PAUSE_MAX + 5
+f.step()
+check('面板開超過 PANEL_PAUSE_MAX → 不再暫停（照常跑）', ('start', '阿布龜洞') in w.runs)
+w = install(World(lv=(1, 10), map_=11001))
+w.verify, w.screen = True, 'panel'
+rc = mk(w).step()
+check('verify_suspect 但現場畫面是面板 → 暫停這輪（不退出 9、不 errlog）', rc is None and not w.errs and w.runs == [])
 
 # 8) until-level
 w = install(World(lv=(1, 30), map_=11001))

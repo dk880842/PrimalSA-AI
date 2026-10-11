@@ -57,6 +57,17 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 「網路異常，是否重連?」/ 回到登入畫面 | [network.md](network.md) → 點確定；登入畫面 netwatch 自動按登錄（授權範圍見該檔）|
 | 出現要選答案的視窗 | [todo.md](todo.md#答題驗證) → 停手通知使用者 |
 
+### watch 認得的畫面（`state.json` 的 `screen`；`screen_sigs.py` 的特徵，2026-10-11）
+| `screen.state` / `panel` / `annot` | label | 備註 |
+|---|---|---|
+| `idle` | 主畫面（未偵測到已知視窗） | 外掛紅字 / 底部圖示列 / 右下按鈕任一組命中；**不代表沒有驗證視窗** |
+| `walking` `dialog` `reward` `select` `battle` | 自動跑路中 / 對話框 / 獲得物品視窗 / 選擇對象面板 / 戰鬥中 | 舊有 |
+| `panel` + `pet` / `bag` / `ass` / `team` / `qteam` / `switch` / `setting` / `transfer` / `quest` | 面板：寵物 / 背包 / 外掛 / 組隊 / 快速組隊 / 切換角色 / 設置 / 傳送 / 任務 | ✕ + 8 點框特徵；認得的面板不計入 unknown 計時、不產生 verify_suspect |
+| `unknown` + annot `login` / `charsel` / `loading` / `black` | 登入畫面 / 選角畫面 / 載入畫面 / 黑畫面（轉場） | 已知畫面，不計 unknown |
+| `unknown`（其餘） | 不認得的畫面 | 連續 10 s → `alerts.unknown_long`（自動存截圖 `tools/.cache/watch-alerts/`）+ `verify_suspect` |
+
+**還沒樣本、所以 watch 不認得（出現會算 unknown，10 s 後報警）**：人物 / 角色資訊（頭像 119,68）、寵物管理以外的圖鑑、商城 / 贊助 / 交易所 / LuckyCard、家族、排行榜、信箱 / 鈴鐺、聲音設置小窗、面板上疊的彈窗（提示 / 數量輸入 / 道具詳情 / 數字鍵盤）。要補：開該面板時 `gui.sh shot watch-panels/<名>-0.png`（存 tools/.cache/watch-panels/），再把檔案加進 `make_fixtures.py` 的 `PANEL_POS` 並重學特徵。
+
 ## 新增 / 更新規則
 - 驗證過、會重複執行的流程拆成獨立 skill（`.claude/skills/psa-<流程>/SKILL.md`），功能檔與兩邊索引改成引用它。目前有：`psa-quick-team`、`psa-disband-team`、`psa-grind-start`、`psa-quest-solo`。
 - 一個功能（或一組相關面板）一個檔；新檔要加進上面兩張表。

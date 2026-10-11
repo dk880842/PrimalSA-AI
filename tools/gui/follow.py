@@ -57,6 +57,7 @@ BLOCK_COOLDOWN = 600.0
 RETRY_GAP = 30.0                      # 掛機未恢復（ensure / start 失敗）後，每隔多久再試一次 ensure
 ENC_OFF_SECS = 60.0                   # 練功點上遇敵鈕關超過這麼久（watch 零輸入讀到）就補 ensure
 ENC_MAX_AGE = 5.0                     # state.screen 資料年齡上限
+PANEL_PAUSE_MAX = 1800.0              # 使用者開著面板（watch 認得的：寵物 / 背包…）最多暫停這麼久；超過就照常跑（面板殘留不能讓 follow 永遠卡住）
 sleep = time.sleep
 clock = time.time
 
@@ -134,7 +135,8 @@ def hud_map_id() -> int | None:
 
 
 def verify_screen_state() -> str:
-    return uikit.screen().get('state', 'error')
+    """現場讀一次畫面（full=True：連寵物 / 背包 / 外掛等 watch 認得的面板也認，回 'panel'；不認得才是 unknown）"""
+    return uikit.screen(full=True).get('state', 'error')
 
 
 def read_block_msg() -> tuple | None:
@@ -186,6 +188,8 @@ class Follow:
         self.unrecovered = False    # 掛機未恢復：ensure / start 失敗後為 True，每 RETRY_GAP 秒重試 ensure 直到成功
         self.retry_at = 0.0
         self.enc_off_since = None   # watch 讀到遇敵鈕關的起點（clock）
+        self.panel_since = None     # watch 讀到面板開著的起點（clock）；None = 沒有面板
+        self.panel_noted = None
 
     # ---- 等級 ----
     def feed(self, lv) -> bool:
@@ -221,6 +225,31 @@ class Follow:
             if i < 2:
                 nap(READ_GAP)
         return self.good if self.bad == 0 else None
+
+    # ---- 面板（使用者自己開的）----
+    def panel_pause(self) -> bool:
+        """watch 認得面板開著（state=panel，例：使用者在看寵物視窗）→ True = 暫停這一輪（不讀 HUD 等級、不點任何東西、不算 bad 輪）。
+        最多暫停 PANEL_PAUSE_MAX 秒，超過照常跑（log 一次）；面板關了 / watch 讀不到就恢復。不是驗證警報、不退出"""
+        sc = watchstate.screen(ENC_MAX_AGE)
+        pn = (sc.get('panel') or '?') if isinstance(sc, dict) and sc.get('state') == 'panel' else None
+        if pn is None:
+            if self.panel_since is not None:
+                log('面板已關，恢復')
+            self.panel_since = self.panel_noted = None
+            return False
+        now = clock()
+        if self.panel_since is None:
+            self.panel_since = now
+        if now - self.panel_since > PANEL_PAUSE_MAX:
+            if self.panel_noted != 'max':
+                log(f'面板（{pn}）開著超過 {int(PANEL_PAUSE_MAX / 60)} 分鐘，不再暫停，照常跑')
+                self.panel_noted = 'max'
+            return False
+        if self.panel_noted != pn:
+            log(f'面板（{pn}）開著（使用者操作中？），暫停這一輪')
+            self.panel_noted = pn
+        self.write_state('paused')
+        return True
 
     # ---- 驗證 ----
     def verify_check(self):
@@ -405,6 +434,8 @@ class Follow:
             self.write_state('paused')
             return None
         self.paused_note = None
+        if self.panel_pause():
+            return None
         v = self.verify_check()
         if v == -1:
             return None
