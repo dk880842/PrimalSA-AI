@@ -291,5 +291,118 @@ check('黑畫面：任一點亮度 ≥ BLACK_MAX → 不是黑畫面', S.annotat
 check('黑 / 載入只在 classify=unknown 時附註（idle 畫面剛好暗不算）', S.annotate({**bk, **{pt: (0, 0, 0) for pt in S.BLACK_PTS}}, {'state': 'idle'}) == [])
 check('ANNOT_KNOWN 含 login / charsel / loading / black', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black'})
 
+
+# ---- 4. 外接螢幕覆寫表 PHYS_OVERRIDES（P4 離線準備；沒有任何程式呼叫 set_layout）----
+import importlib.util  # noqa: E402
+
+spec = importlib.util.spec_from_file_location('screen_sigs_pristine', HERE / 'screen_sigs.py')
+PRISTINE = importlib.util.module_from_spec(spec)          # 另載一份從沒呼叫過 set_layout 的模組：筆電原值的基準
+spec.loader.exec_module(PRISTINE)
+
+
+def snap(mod):
+    return repr([getattr(mod, n) for n in S._OVERRIDABLE] + [mod.points(), mod.panel_points(), mod.annot_points()])
+
+check('覆寫表只有 1728x995，key 都是 WxH', set(S.PHYS_OVERRIDES) == {'1728x995'})
+check('預設（沒呼叫 set_layout）= 筆電原值，與另載的原始模組逐位元組相同', snap(S) == snap(PRISTINE) and S.active_layout() is None)
+check('layout_key：1728×995 有表、2880×1659 / 1920×1017 沒有（精確比對不猜）', S.layout_key(1728, 995) == '1728x995' and S.layout_key(2880, 1659) is None and S.layout_key(1920, 1017) is None)
+check('set_layout(None) / 筆電 key / 沒表的 key 回 False，原值不變', not S.set_layout(None) and not S.set_layout('2880x1659') and not S.set_layout('1920x1017') and snap(S) == snap(PRISTINE))
+check('set_layout(1728x995) 回 True、HUD_GROUPS / ENC_ON 變了、classify 的 points() 不變',
+      S.set_layout('1728x995') and S.active_layout() == '1728x995' and S.HUD_GROUPS != PRISTINE.HUD_GROUPS and S.ENC_ON != PRISTINE.ENC_ON and S.points() == PRISTINE.points())
+check('套用後其餘特徵（SIG_*、PANEL_*、AW…）仍與筆電原值相同（只覆寫表內列的）',
+      all(repr(getattr(S, n)) == repr(getattr(PRISTINE, n)) for n in S._OVERRIDABLE if n not in ('HUD_GROUPS', 'ENC_ON')))
+check('覆寫的點座標都在 1440×830 內、每組點數 ≥ HUD_MISS+3', all(0 <= x < 1440 and 0 <= y < 830 for pts in S.HUD_GROUPS.values() for x, y, *_ in pts + S.ENC_ON) and all(len(v) >= S.HUD_MISS + 3 for v in S.HUD_GROUPS.values()))
+_hg, _enc, _bot = S.HUD_GROUPS, S.ENC_ON, S.HUD_GROUPS['bottom']
+S.set_layout(None)
+S.set_layout('1728x995')
+check('from-import 的清單引用在切換後仍有效（原地改寫，物件 id 不變）', S.HUD_GROUPS is _hg and S.ENC_ON is _enc and S.HUD_GROUPS['bottom'] is _bot)
+S.set_layout('1728x995')
+S.set_layout('1728x995')
+check('重複套用冪等', repr(S.HUD_GROUPS) == repr({k: PRISTINE.HUD_GROUPS[k] if k not in S.PHYS_OVERRIDES['1728x995']['HUD_GROUPS'] else S.PHYS_OVERRIDES['1728x995']['HUD_GROUPS'][k] for k in S.HUD_GROUPS}))
+S.set_layout(None)
+check('1728x995 → None 還原後與筆電原值逐位元組相同', snap(S) == snap(PRISTINE) and S.active_layout() is None)
+try:
+    S.PHYS_OVERRIDES['x'] = {'NO_SUCH': []}
+    S.set_layout('x')
+    check('不認得的特徵名會丟 KeyError', False)
+except KeyError:
+    check('不認得的特徵名會丟 KeyError', True)
+finally:
+    del S.PHYS_OVERRIDES['x']
+    S.set_layout(None)
+check('KeyError 測試後仍還原為筆電原值', snap(S) == snap(PRISTINE))
+
+# 外接樣本（fixtures/phys_1728x995_px.json：P0 的 1728×995 全解析度、實體像素 ⌊x·sx⌋ 取樣，只有主畫面；make_phys_fixture.py 重產）
+fxp = json.loads((HERE / 'fixtures' / 'phys_1728x995_px.json').read_text(encoding='utf-8'))
+ppts = [tuple(p) for p in fxp['points']]
+
+
+def phys_px(name):
+    h = fxp['samples'][name]
+    return {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(ppts)}
+
+
+def main_pts_ok(mod, px, enc):
+    """主畫面 15 點（SIG_HUD 1 + HUD_GROUPS 12→目前表的點 + ENC_ON 2）在各自容差內的 (命中, 總數)；ENC_ON 只在遇敵開的圖算"""
+    sigs = [(x, y, r, g, b, tol) for x, y, r, g, b, tol in mod.SIG_HUD] + [(x, y, r, g, b, mod.HUD_TOL) for pts in mod.HUD_GROUPS.values() for x, y, r, g, b in pts]
+    if enc:
+        sigs += list(mod.ENC_ON)
+    return sum(1 for x, y, r, g, b, tol in sigs if S.close(px[(x, y)], (r, g, b), tol)), len(sigs)
+
+
+# 原值（沒套覆寫）的基準：計畫 §2.4 的 P0 實測值
+tot0 = ok0 = tot1 = ok1 = 0
+for name, enc in (('off', False), ('enc', True)):
+    px = phys_px(name)
+    S.set_layout(None)
+    a = main_pts_ok(S, px, enc)
+    c0, hm0, e0 = S.classify(px), S.hud_main(px), S.enc_on(px, S.classify(px))
+    S.set_layout('1728x995')
+    b = main_pts_ok(S, px, enc)
+    c1, hm1, e1 = S.classify(px), S.hud_main(px), S.enc_on(px, S.classify(px))
+    S.set_layout(None)
+    ok0, tot0, ok1, tot1 = ok0 + a[0], tot0 + a[1], ok1 + b[0], tot1 + b[1]
+    check(f'外接 {name}：原值 classify=idle / hud_main 成立（原本就判對）', c0['state'] == 'idle' and hm0)
+    check(f'外接 {name}：套覆寫後 classify 結果不變（idle、panel None、其餘欄位相同）', c1 == c0, str(c1))
+    check(f'外接 {name}：hud_main 兩組都滿分（0 點不符）', hm1 and all(sum(1 for x, y, r, g, b in pts if S.close(px[(x, y)], (r, g, b), S.HUD_TOL)) == len(pts) for pts in S.PHYS_OVERRIDES['1728x995']['HUD_GROUPS'].values()))
+    check(f'外接 {name}：enc_on 判斷 = {enc}（原值 {e0}、覆寫 {e1}）', e1 is enc)
+rate0, rate1 = ok0 / tot0, ok1 / tot1
+print(f'  [外接 1728×995 實體取樣] 主畫面特徵點在容差內：原值 {ok0}/{tot0} = {rate0:.1%}，覆寫後 {ok1}/{tot1} = {rate1:.1%}')
+check('覆寫後主畫面特徵在容差內比例 ≥ 95%（原值較低）', rate1 >= 0.95 and rate1 > rate0)
+
+# 筆電樣本庫：覆寫後對 tools/.cache 全部 1440×830 樣本的 classify 與原值 0 差異、主畫面 recall 不降（樣本庫是 gitignore 的，不在就略過）
+try:
+    import shotcache
+    idx_ok = shotcache.INDEX.exists()
+except Exception:                        # noqa: BLE001
+    idx_ok = False
+if idx_ok:
+    allp = {}
+    for k in (None, '1728x995'):
+        S.set_layout(k)
+        allp[k] = sorted(set(S.points() + S.panel_points() + S.annot_points()))
+    S.set_layout(None)
+    union = sorted(set(allp[None]) | set(allp['1728x995']))
+    n = diff = tp0 = tp1 = pos = 0
+    for rel, label, shot in shotcache.iter_shots():
+        px = shot.pixels(union)
+        S.set_layout(None)
+        c0, h0 = S.classify(px), S.hud_main(px)
+        S.set_layout('1728x995')
+        c1, h1 = S.classify(px), S.hud_main(px)
+        S.set_layout(None)
+        n += 1
+        diff += c0 != c1
+        if label in ('idle', 'walking'):
+            pos += 1
+            tp0 += h0
+            tp1 += h1
+    print(f'  [筆電樣本庫 {n} 張] 套外接覆寫後 classify 差異 {diff}；主畫面 hud_main 命中 原值 {tp0}/{pos}、覆寫 {tp1}/{pos}')
+    check('樣本庫：套覆寫後 classify 與原值 0 差異（覆寫點仍是同元件顏色，不會讓別的畫面誤判）', diff == 0)
+    check('樣本庫：覆寫後主畫面 hud_main 命中不低於原值 −1', tp1 >= tp0 - 1)
+else:
+    print('  （略過）沒有 tools/.cache 樣本索引')
+check('測試結束時已還原筆電原值', snap(S) == snap(PRISTINE))
+
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

@@ -5,7 +5,22 @@
 特徵 = 清單，每點 tuple (x, y, r, g, b, tol)：座標是 2880×1659 版面的截圖座標（1440×830 縮圖座標），
 tol 是該特徵原本使用的容差（搬移時逐一保留，不要統一）。
 classify(px) 與搬出前的 quest.read_screen 判定逐點相同（fixtures/screen_px.json 驗證）。
+
+外接螢幕覆寫表（P4，notes/plan-display-scale.md §5，2026-10-11 離線準備）：
+  PHYS_OVERRIDES[版面 key] = {特徵名: 替代值}。版面 key = 遊戲客戶區實體尺寸字串 'WxH'（外接螢幕目前只有 '1728x995'）；
+  筆電 2880×1659 不在表內，set_layout() 對它（或 None）等於還原原值，所有特徵逐位元組與沒有這張表時相同。
+  只覆寫「實體像素取樣 ⌊x·sx⌋（sx = W/1440、sy = H/829.5，計畫 §3.4 方案 a）下在圖示框邊 / 細線上」的點；座標仍是 1440×830 邏輯座標，
+  換成「同一個元件附近、3×3 實體像素平坦、遇敵開 / 關兩張一致」的點，所以不用管 P1 取樣是 floor 還是四捨五入。
+  怎麼接（P1 完成後的 P4 正式接線，**目前沒有任何人呼叫 set_layout，gui / layout / watch 都沒接**）：
+    1. watch.py / quest.py / netwatch.py / heal.py 這類「讀實體像素再 classify」的入口，在讀到 gui info 的實體客戶區（layout.physical()）後呼叫
+       screen_sigs.set_layout(f'{W}x{H}')（換版面才呼叫，同版面重複呼叫無副作用）；之後 points() / panel_points() / annot_points() 自動給覆寫後的座標，
+       呼叫端照舊「依這些點讀像素 → classify / hud_main / enc_on」，不必另外處理。
+    2. 它會原地改寫模組內的清單 / 字典（其他模組 from screen_sigs import 的引用仍然有效），不是 thread-safe：只在行程啟動 / 版面變更時呼叫。
+    3. 沒有表的實體尺寸 set_layout 回 False 並還原原值（=沿用筆電特徵，外接上會有「圖示框邊點不中」的老問題，但 classify 仍多半判對）。
+  表內值的取得方法與量測見檔尾 PHYS_OVERRIDES 註解；沒有外接樣本的特徵（面板 / 戰鬥 / 對話…）一律沒有覆寫，清單見計畫檔 P4 段「待實機收樣本」。
 """
+import copy
+
 import battleguard
 
 # ---- 容差原值 ----
@@ -138,6 +153,69 @@ NET_CHARSEL = _t([(640, 640, 197, 134, 70), (500, 250, 241, 213, 179), (1186, 19
 
 # ---- heal 特徵：主畫面「取消遇敵」紅龍頭（容差 50）----
 ENC_ON = _t([(1380, 630, 129, 6, 0), (1360, 632, 179, 12, 0)], ENC_TOL)
+
+
+# ---- 外接螢幕覆寫表（見檔頭；離線以 P0 的 1728×995 全解析度樣本挑點，2026-10-11）----
+# 評估（tools/.cache/p0_fit_full.png 遇敵關 / p0_fit_full_enc.png 遇敵開，實體像素 ⌊x·sx⌋ 取樣；筆電基準點 15/15）：
+#   SIG_HUD 1 + HUD_GROUPS 12 + ENC_ON 2 = 15 點，原值在 tol 內只有 11/15（bottom (908,784) d35、right (1372,700) d21 / 28 遇敵開、
+#   (1304,724) d23、(1300,760) d18）；另外 (760,720)(852,720)(1300,796)(1336,648) 等雖在容差內，但 3×3 範圍差 77～201（落在圖示邊緣）、取樣偏 1 px 就會掉。
+# 替代點挑法：以原點為中心 ±20 邏輯 px 內，要求 3×3 實體範圍差 ≤ 12（遇敵開 / 關兩張都要）、兩張同色（差 ≤ 3）、
+#   與筆電樣本同座標也相近（差 ≤ 14，確保是 UI 不是世界）；再用 tools/.cache 全部 1440×830 樣本（idle+walking 163 張當正例、其餘 600+ 張當反例）
+#   篩：正例命中 ≥ 0.99、反例命中 ≤ 0.09，點與點相距 ≥ 18。bottom 6 點、right 5 點（right 找不到更多平坦點；容許 1 點不符 → 仍要 ≥ 4 點）。
+#   ENC_ON 同法在遇敵開的圖找紅龍頭上平坦點（3×3 範圍差 ≤ 7），遇敵關的圖該處是地圖（差 ≥ 80）；對 77 張遇敵開樣本與原 ENC_ON 判定 100% 一致。
+# SIG_HUD（外掛紅字 (1300,745)）沒覆寫：兩張都 d=1 在 tol 40 內（紅字筆畫細，3×3 範圍差 92，但紅 (255,0,0) 與周圍差太大、不會被誤取成別色）。
+PHYS_OVERRIDES = {
+    '1728x995': {
+        'HUD_GROUPS': {
+            'bottom': [(1067, 754, 187, 169, 139), (924, 777, 74, 81, 68), (845, 739, 179, 121, 66), (1011, 766, 163, 65, 41), (760, 732, 90, 85, 68), (993, 766, 159, 139, 114)],
+            'right': [(1322, 761, 193, 195, 191), (1300, 755, 189, 189, 195), (1284, 727, 197, 181, 147), (1319, 730, 205, 185, 147), (1297, 781, 76, 81, 68)],
+        },
+        'ENC_ON': [(1378, 637, 183, 11, 0, ENC_TOL), (1353, 637, 185, 13, 0, ENC_TOL)],
+    },
+}
+
+# 可被覆寫的特徵（名稱 → 模組內物件）；set_layout 先還原再套用，所以只動這些
+_OVERRIDABLE = ('SIG_DIALOG', 'SIG_REWARD', 'SIG_PANEL', 'SIG_HUD', 'SIG_SELECT', 'SIG_BATTLE', 'SIG_CMD', 'SIG_AUTO_OFF', 'SIG_CLOSE_ROW', 'SIG_LOADING',
+                'PANEL_X', 'PANEL_PTS', 'PANEL_TITLE', 'HUD_GROUPS', 'BLACK_PTS', 'AW_POINTS', 'ENC_ON', 'NET_DIALOG', 'NET_LOGIN', 'NET_CHARSEL')
+_ORIG = {n: copy.deepcopy(globals()[n]) for n in _OVERRIDABLE}
+_ACTIVE = [None]                      # 目前套用的版面 key（None = 筆電原值）
+
+
+def _assign(target, value):
+    """原地改寫 target（list 用切片、dict 逐 key；dict 的 list 值遞迴原地改），保持其他模組 from-import 的引用有效"""
+    if isinstance(target, list):
+        target[:] = copy.deepcopy(value)
+    else:
+        for k, v in value.items():
+            if isinstance(target.get(k), list):
+                _assign(target[k], v)
+            else:
+                target[k] = copy.deepcopy(v)
+
+
+def layout_key(w: int, h: int):
+    """實體客戶區尺寸 → PHYS_OVERRIDES 的 key（精確比對；沒有表的尺寸回 None，不猜）"""
+    k = f'{int(w)}x{int(h)}'
+    return k if k in PHYS_OVERRIDES else None
+
+
+def set_layout(key=None) -> bool:
+    """套用 / 還原版面覆寫。key = 'WxH'（例 '1728x995'）；None、'2880x1659' 或表內沒有的 key = 還原成筆電原值（回 False）；有表且套用回 True。
+    先全部還原再套用，所以 A → B → None 任意切換都不殘留；筆電原值逐位元組不變（測試驗證）"""
+    ov = PHYS_OVERRIDES.get(key) if key else None
+    for n in _OVERRIDABLE:
+        _assign(globals()[n], _ORIG[n])
+    _ACTIVE[0] = key if ov else None
+    for n, v in (ov or {}).items():
+        if n not in _ORIG:
+            raise KeyError('PHYS_OVERRIDES 不認得的特徵：' + n)
+        _assign(globals()[n], v)
+    return bool(ov)
+
+
+def active_layout():
+    """目前套用的覆寫版面 key；None = 筆電原值"""
+    return _ACTIVE[0]
 
 
 def sig_str(sig, neg: bool = False) -> str:
