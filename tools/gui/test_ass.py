@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """ass.py 模擬測試（不碰遊戲）：假 gui（pixel / seq）模擬外掛面板，驗證讀 / 設 / 確認失敗 / 面板沒開。
-用法：uv run --no-project python tools/gui/test_ass.py"""
+(23) 起用實機截圖抽的像素 fixtures/ass_marquee_px.json（頂部跑馬燈蓋住 DKBO3 頭像，2026-10-11 rc 52 的根因）。
+用法：uv run --no-project python tools/gui/test_ass.py
+      uv run --no-project python tools/gui/test_ass.py --regen   # 從 tools/.cache 截圖重抽 fixture（截圖不存在就跳過該張）"""
 import re
 import sys
 from pathlib import Path
@@ -8,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ass  # noqa: E402
 import battleguard  # noqa: E402
+import json  # noqa: E402
 import os
 import tempfile
 battleguard.LOCK_FILE = Path(tempfile.mkdtemp()) / 'battle.lock'      # 測試用鎖檔位置
@@ -112,6 +115,45 @@ def _ocr_impl(self, box, *opts):
 
 Game.ocr = _ocr_impl
 
+
+# ---- 跑馬燈 fixture：1440×830 實機截圖在這些點的像素 ----
+FIX = Path(__file__).resolve().parent / 'fixtures' / 'ass_marquee_px.json'
+FIX_SRC = {      # 名稱: (tools/.cache 下的截圖, 說明)
+    'fail_1219': ('ass-select-fail-DKBO3.png', '2026-10-11 12:19 rc 52：跑馬燈「恭喜玩家【东风浩荡】」吉祥物蓋住 DKBO3，頭像讀成 cover'),
+    'fail_0232': ('ui-log/023205-grind-select-fail-DKBO3.png', '2026-10-11 02:32 rc 52：跑馬燈「成功」，吉祥物淡藍衣服讓頭像讀成 dim（舊版因此直接點、被吃掉）'),
+    'on_ass1': ('catch-m0/ass1.png', '2026-10-10 20:29 跑馬燈「翻倍成功」、外掛面板 DKBO2 選中'),
+    'on_g3': ('g3.png', '2026-10-11 10:12 跑馬燈捲入中、外掛面板 DKBO2 選中'),
+    'off_ass2': ('catch-m0/ass2.png', '沒有跑馬燈、DKBO2 選中'),
+    'off_a1': ('a1.png', '沒有跑馬燈、DKBO 選中'),
+    'off_ass0': ('ass0.png', '沒有跑馬燈、DKBO 選中'),
+}
+LABEL3 = (ass.ROLES['DKBO3'][0] + ass.LABEL_DX, ass.ROLES['DKBO3'][1])
+
+
+def fix_points():
+    return sorted(set(list(ass.ROLES.values()) + list(ass.ITEMS.values()) + list(ass.MARQUEE_PTS)
+                      + [ass.X_SIG[:2], ass.HUD_PROBE[:2], ass.PET_FIRST_CHK, LABEL3]))
+
+
+def regen():
+    import pngread
+    cache = Path(__file__).resolve().parents[1] / '.cache'
+    out = json.loads(FIX.read_text(encoding='utf-8')) if FIX.exists() else {}
+    for name, (rel, note) in FIX_SRC.items():
+        f = cache / rel
+        if not f.exists():
+            print('跳過（截圖不存在）', rel)
+            continue
+        w, h, bpp, rows = pngread.decode(f.read_bytes())
+        px = pngread.pixels(rows, bpp, fix_points())
+        out[name] = {'src': rel, 'note': note, 'px': {f'{x},{y}': list(c) for (x, y), c in px.items()}}
+        print('抽好', name, rel)
+    FIX.write_text(json.dumps(out, ensure_ascii=False, indent=1) + '\n', encoding='utf-8')
+
+
+if '--regen' in sys.argv:
+    regen()
+    sys.exit(0)
 
 ok = True
 
@@ -433,6 +475,111 @@ g = Game(hud=False)
 setup(g)
 rc, sts, msg, info = ass.set_many({'DKBO': None})
 check('面板打不開 → 2', rc == ass.EXIT_NO_PANEL and g.ground_clicks == 0)
+
+print('(23) 頂部跑馬燈（綠髮吉祥物）蓋住 DKBO3：實機截圖 fixture')
+FIXD = json.loads(FIX.read_text(encoding='utf-8'))
+
+
+class Replay:
+    """純回放一張截圖（只讀像素，不能點）"""
+    def __init__(self, name):
+        self.px = FIXD[name]['px']
+
+    def gui(self, *args, note=''):
+        if args[0] == 'pixel':
+            return ' '.join('%d,%d,%d' % tuple(self.px.get(p, (1, 2, 3))) for p in args[1].split())
+        raise AssertionError('回放不能點擊：' + ' '.join(args))
+
+
+for name in ('fail_1219', 'fail_0232', 'on_ass1', 'on_g3'):
+    ass.gui = Replay(name).gui
+    check(f'{name}：marquee_on、DKBO3 = marquee、選中讀成 DKBO2（不受吉祥物黑邊 / 淡藍衣服影響）、面板算開著',
+          ass.marquee_on() is True and ass.avatar_state('DKBO3') == 'marquee' and ass.selected_role() == 'DKBO2' and ass.panel_open(),
+          f'{ass.avatar_state("DKBO3")} {ass.selected_role()}')
+    check(f'{name}：其他 4 人頭像不受影響（不是 marquee）', all(ass.avatar_state(r) in ('sel', 'off') for r in ass.ROLES if r != 'DKBO3'))
+c0232 = tuple(FIXD['fail_0232']['px']['%d,%d' % ass.ROLES['DKBO3']])
+check('fail_0232 重現舊誤判：DKBO3 那一點的顏色本身落在 dim 範圍（舊版因此直接點進吉祥物）',
+      all(-8 <= r - v <= ass.DIM_MAX for r, v in zip(ass.AVATAR_OFF, c0232)) and c0232[2] > c0232[1] > c0232[0], str(c0232))
+for name, want in (('off_ass2', 'DKBO2'), ('off_a1', 'DKBO'), ('off_ass0', 'DKBO')):
+    ass.gui = Replay(name).gui
+    check(f'{name}：沒有跑馬燈 → marquee_on False、DKBO3 = off、選中 {want}',
+          ass.marquee_on() is False and ass.avatar_state('DKBO3') == 'off' and ass.selected_role() == want)
+
+
+class MGame(Game):
+    """外掛面板 + 頂部跑馬燈：t 在 [m_from, m_until) 時，跑馬燈點與 DKBO3 頭像 / 名字標籤回放 fixture 像素，點 DKBO3 會被吉祥物吃掉"""
+    def __init__(self, *a, fix='fail_1219', m_from=0.0, m_until=10 ** 9, **k):
+        super().__init__(*a, **k)
+        self.fx, self.m_from, self.m_until = FIXD[fix]['px'], m_from, m_until
+        self.eaten = 0                  # 點在吉祥物上被吃掉的次數
+
+    def mq(self):
+        return self.panel and self.m_from <= self.t < self.m_until
+
+    def color(self, x, y):
+        if self.mq() and ((x, y) in ass.MARQUEE_PTS or (x, y) in (ass.ROLES['DKBO3'], LABEL3)):
+            return tuple(self.fx['%d,%d' % (x, y)])
+        return super().color(x, y)
+
+    def click(self, x, y):
+        if self.mq() and y == ass.ROLES['DKBO3'][1] and ass.ROLES['DKBO3'][0] <= x <= LABEL3[0]:
+            self.clicks.append((x, y))
+            self.eaten += 1             # 實機 12:18 / 12:19 兩次 × 頭像 2 下 + 名字標籤 2 下 全部沒反應
+            return
+        super().click(x, y)
+
+
+g = MGame(role='DKBO2', fix='fail_0232', m_until=8.0)
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+check('跑馬燈 8 s（fail_0232，舊版讀成 dim）：不往吉祥物點、等它消失後一點就選中 rc 0',
+      rc == 0 and g.eaten == 0 and g.t >= 8.0 and g.clicks.count(ass.ROLES['DKBO3']) == 1, f'rc={rc} t={g.t} eaten={g.eaten} {msg}')
+g = MGame(role='DKBO2', fix='fail_1219', m_until=6.0)
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+check('跑馬燈 6 s（fail_1219，舊版讀成 cover）：同樣等完一點選中、沒點進吉祥物', rc == 0 and g.eaten == 0, f'rc={rc} t={g.t} eaten={g.eaten}')
+g = MGame(role='DKBO2', fix='fail_1219')
+setup(g)
+rc, sts, msg, info = ass.set_many({r: None for r in ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO']})
+check('跑馬燈一直在 → rc 3、info.role DKBO3、訊息講跑馬燈、0 次點進吉祥物、有上限、面板關',
+      rc == ass.EXIT_NO_ROLE and info['role'] == 'DKBO3' and '跑馬燈' in msg and g.eaten == 0 and g.t <= ass.SELECT_TIMEOUT + 15 and not g.panel,
+      f'rc={rc} t={g.t} eaten={g.eaten} {msg}')
+check('  跑馬燈一直在時其他人照樣做完（DKBO2 / 4 / 5 先讀到）', all(r in sts for r in ('DKBO2', 'DKBO4', 'DKBO5')), str(list(sts)))
+g = MGame(role='DKBO', fix='fail_0232', m_until=3.5)
+setup(g)
+plan = {r: {'快速戰鬥': True} for r in ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO']}
+rc, sts, msg, info = ass.set_many(plan)
+roles_clicked = [r for c in g.clicks for r, xy in ass.ROLES.items() if xy == c]
+check('set_many：輪到 DKBO3 時跑馬燈在 → 挪到隊長前面，順序 DKBO2→4→5→3→DKBO、0 次被吃、全部設好',
+      rc == 0 and roles_clicked == ['DKBO2', 'DKBO4', 'DKBO5', 'DKBO3', 'DKBO'] and g.eaten == 0 and all(s['快速戰鬥'] for s in sts.values()),
+      f'rc={rc} {roles_clicked} eaten={g.eaten} t={g.t}')
+check('  回傳 dict 照 plan 順序、結束選在隊長、面板關', list(sts) == list(plan) and g.role == 'DKBO' and not g.panel, str(list(sts)))
+g = MGame(role='DKBO3', fix='fail_1219')
+setup(g)
+rc, st, msg = ass.set_states('DKBO3', {'快速戰鬥': True})
+check('DKBO3 已選中但被跑馬燈蓋住：用其他 4 人推斷是 DKBO3 → 不點頭像、直接改勾選 rc 0',
+      rc == 0 and st['快速戰鬥'] and g.checks['DKBO3']['快速戰鬥'] and g.eaten == 0, f'rc={rc} {msg}')
+g = MGame(role='DKBO4', fix='fail_1219')
+setup(g)
+g.panel = True
+check('跑馬燈在、選中 DKBO4 → selected_role = DKBO4（不會誤判成 DKBO3）', ass.selected_role() == 'DKBO4')
+
+
+class OddGame(MGame):
+    def color(self, x, y):
+        if (x, y) == ass.ROLES['DKBO5'] and self.panel:
+            return (120, 120, 120)          # 另一個頭像也讀不清
+        return super().color(x, y)
+
+
+g = OddGame(role='DKBO3', fix='fail_1219')
+setup(g)
+g.panel = True
+check('跑馬燈在、其他 4 人有 1 個讀不清 → selected_role None（不猜）', ass.selected_role() is None)
+g = MGame(role='DKBO2', fix='fail_1219', m_from=0.0, m_until=10 ** 9)
+setup(g)
+g.panel = True
+check('跑馬燈在、DKBO2 選中 → set_many 前的 DKBO3 不會被當成已選中', ass.selected_role() == 'DKBO2')
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

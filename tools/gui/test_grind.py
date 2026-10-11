@@ -131,6 +131,8 @@ def install(g, stat_missing=False):
         g.enc = True
     H.heal_trip = trip
     grind.walk.wait_pos = lambda tries=4, want_map=None, gap=0.5: (g.map, 24, 24)
+    A.gui = lambda *a, **k: ''          # 不讓 set_many 的像素 / 失敗截圖碰到真遊戲
+    A.marquee_on = lambda: False
     A.wait_not_battle = lambda no_wait=False, timeout=None: (True, '')
     A.open_panel = lambda timeout=None: g.log.append('open') or setattr(g, 'panel', True) or True
     A.panel_open = lambda: g.panel

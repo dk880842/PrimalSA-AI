@@ -25,6 +25,9 @@
 給其他腳本 import：ass.get_states(role) / ass.set_states(role, {項目: bool}) → (rc, 狀態 dict 或 None, 訊息)；
 ass.set_many({角色: {項目: bool} 或 None}) 一次開面板逐人讀 / 改 → (rc, {角色: 狀態}, 訊息, info)（P8，grind 用）。
 選角色（select_role）頭像被不透明東西（EXP 橫幅文字）蓋住會先等一下、沒選中會重試、第 3 次起改點名字標籤（2026-10-11 DKBO3 選不到的修正；失敗時面板開著存 tools/.cache/ass-select-fail-<角色>.png）。
+頂部跑馬燈（伺服器公告「恭喜玩家…」「翻倍成功」，左端綠髮啦啦隊吉祥物）疊在外掛面板上、剛好蓋住 DKBO3 頭像並吃掉點擊（2026-10-11 rc 52 的根因，
+失敗截圖 4 / 4 都是它）：select_role 偵測到就不往吉祥物上點、等它消失（最多 MARQUEE_WAIT 秒）；set_many 遇到時先把 DKBO3 挪到隊長前面最後做；
+跑馬燈在時 selected_role 用其他 4 人推斷（4 人都沒選中 = 選中的是被蓋住的 DKBO3）。
 """
 import argparse
 import sys
@@ -81,6 +84,33 @@ def _px(pts):
 
 def _close(c, ref, tol=TOL):
     return all(abs(a - b) <= tol for a, b in zip(c, ref))
+
+
+# 頂部跑馬燈（伺服器公告：「恭喜玩家【…】」「翻倍成功」等，文字由右往左捲；一則約 7～10 秒，可能接連多則）。
+# 左端綠髮啦啦隊吉祥物約 x 400～490、y 60～178，疊在所有面板之上、吃掉點擊，剛好蓋住外掛面板 DKBO3 頭像 (461,151)；
+# 吉祥物衣服是淡藍（195,225,251 一帶），單點讀頭像會被誤判成 off / dim。偵測用吉祥物頭髮 6 點：
+# 2026-10-11 掃 tools/.cache 767 張 1440×830 截圖，有跑馬燈 59 張 = 6/6 點綠、沒有的 708 張 = 0/6（含外掛面板開著、綠色草地地圖）。
+MARQUEE_PTS = ((428, 98), (432, 94), (434, 94), (452, 94), (456, 98), (460, 98))
+MARQUEE_MIN = 3                  # 6 點至少幾點是頭髮綠才算跑馬燈在
+MARQUEE_X = (395, 495)           # 吉祥物橫向範圍：頭像 x 落在裡面的角色會被蓋住（= DKBO3）
+MARQUEE_ROLES = tuple(r for r, (x, _) in ROLES.items() if MARQUEE_X[0] <= x <= MARQUEE_X[1])
+MARQUEE_WAIT = 20.0              # 等跑馬燈消失的上限（一則 7～10 s；超過 = 接連多則，回 3 交給呼叫端稍後重試）
+MARQUEE_POLL = 0.5
+
+
+def _hair(c) -> bool:
+    r, g, b = c[:3]
+    return g > 130 and g - r > 50 and g - b > 50
+
+
+def _marquee(cols) -> bool:
+    return sum(1 for c in cols if _hair(c)) >= MARQUEE_MIN
+
+
+def marquee_on() -> bool | None:
+    """頂部跑馬燈（綠髮吉祥物）在不在；讀不到 None"""
+    cols = _px(list(MARQUEE_PTS))
+    return None if not cols else _marquee(cols)
 
 
 def panel_open() -> bool:
@@ -156,15 +186,28 @@ def close_panel() -> bool:
 
 
 def selected_role() -> str | None:
-    cols = _px(list(ROLES.values()))
+    """目前選中的角色；讀不到 / 不確定回 None。
+    跑馬燈蓋住 DKBO3 時那一點讀的是吉祥物（黑邊可能被當成選中、淡藍衣服像沒選中），改看其他 4 人：
+    其中剛好 1 人選中 → 就是他；4 人都清楚是「沒選中」→ 選中的是被蓋住的那位（角色圓鈕是單選，面板上永遠有 1 人選中）；其他 → None"""
+    n = len(ROLES)
+    cols = _px(list(ROLES.values()) + list(MARQUEE_PTS))
     if not cols:
         return None
-    sel = [r for r, c in zip(ROLES, cols) if _close(c, AVATAR_SEL, 8)]
+    av, mq = cols[:n], cols[n:]
+    if _marquee(mq) and MARQUEE_ROLES:
+        vis = [(r, c) for r, c in zip(ROLES, av) if r not in MARQUEE_ROLES]
+        sel = [r for r, c in vis if _close(c, AVATAR_SEL, 8)]
+        if len(sel) == 1:
+            return sel[0]
+        if not sel and len(MARQUEE_ROLES) == 1 and all(_close(c, AVATAR_OFF, 8) for _, c in vis):
+            return MARQUEE_ROLES[0]
+        return None
+    sel = [r for r, c in zip(ROLES, av) if _close(c, AVATAR_SEL, 8)]
     return sel[0] if len(sel) == 1 else None
 
 
 SELECT_TRIES = 4                 # 選角色最多點幾次
-SELECT_TIMEOUT = 25.0            # 選角色總上限（含等遮擋消失）
+SELECT_TIMEOUT = 35.0            # 選角色總上限（含等遮擋 / 跑馬燈消失；跑馬燈最多等 MARQUEE_WAIT）
 COVER_WAIT = 4.0                 # 頭像被不透明東西遮住時，每圈最多等幾秒（等不到也照點：點在面板內，無害）
 LABEL_DX = 50                    # 頭像右邊的名字標籤（備援點擊；點在自己那列的標籤上）
 DIM_MAX = 45                     # 半透明橫幅蓋住時頭像顏色比正常暗多少以內仍算「dim」（實測 off 197,227,255 → 189,219,243）
@@ -173,11 +216,13 @@ wait_cover_hook = None           # 呼叫端可設 fn(timeout)：等 EXP 橫幅�
 
 def avatar_state(role: str) -> str | None:
     """該角色頭像圓鈕：'sel' 選中 / 'off' 沒選中 / 'dim' 被半透明橫幅蓋著但看得出是未選中（實測點得穿，可以直接點）/
-    'cover' 被不透明的東西蓋住（EXP 橫幅文字 / 「NEW」/ 浮字）/ None 讀不到"""
-    cols = _px([ROLES[role]])
+    'cover' 被不透明的東西蓋住（EXP 橫幅文字 / 「NEW」/ 浮字）/ 'marquee' 被頂部跑馬燈吉祥物蓋住（點擊會被吃掉，要等它消失）/ None 讀不到"""
+    cols = _px([ROLES[role]] + list(MARQUEE_PTS))
     if not cols:
         return None
     c = cols[0]
+    if role in MARQUEE_ROLES and _marquee(cols[1:]):
+        return 'marquee'        # 先判：吉祥物淡藍衣服會像 off / dim、黑邊會像 sel
     if _close(c, AVATAR_SEL, 8):
         return 'sel'
     if _close(c, AVATAR_OFF, 8):
@@ -198,6 +243,8 @@ def wait_uncovered(role: str, timeout: float = COVER_WAIT) -> bool:
         st = avatar_state(role)
         if st in ('sel', 'off', 'dim'):
             return True
+        if st == 'marquee':
+            return False        # 跑馬燈由 wait_marquee_gone 處理（select_role 先叫）
         if not panel_open():
             return False
         if clock() >= end:
@@ -209,9 +256,24 @@ def wait_uncovered(role: str, timeout: float = COVER_WAIT) -> bool:
         sleep(0.4)
 
 
+def wait_marquee_gone(timeout: float = MARQUEE_WAIT) -> bool:
+    """等頂部跑馬燈消失（連 2 次讀到沒有才算，間隔 MARQUEE_POLL）。回 True = 消失；面板消失 / 逾時 / 讀不到 False"""
+    end = clock() + timeout
+    clear = 0
+    while True:
+        m = marquee_on()
+        clear = clear + 1 if m is False else 0
+        if clear >= 2:
+            return True
+        if not panel_open() or clock() >= end:
+            return False
+        sleep(MARQUEE_POLL)
+
+
 def select_role(role: str, tries: int = SELECT_TRIES, timeout: float = SELECT_TIMEOUT) -> bool:
-    """選外掛面板角色並驗證。內建：頭像被不透明東西蓋住先等一下（EXP 橫幅 / 浮字，等不到也照點）；
-    點了沒選中就重試（面板還開著才重點）；第 3 次起改點頭像右邊的名字標籤（備援）。回 False = 選不到（面板消失 / 逾時）"""
+    """選外掛面板角色並驗證。內建：頭像被頂部跑馬燈吉祥物蓋住 → 不點、等它消失（最多 MARQUEE_WAIT）；
+    被其他不透明東西蓋住先等一下（EXP 橫幅 / 浮字，等不到也照點）；點了沒選中就重試（面板還開著才重點）；
+    第 3 次起改點頭像右邊的名字標籤（備援）。回 False = 選不到（面板消失 / 逾時 / 跑馬燈一直在）"""
     if selected_role() == role:
         return True
     end = clock() + timeout
@@ -219,6 +281,12 @@ def select_role(role: str, tries: int = SELECT_TRIES, timeout: float = SELECT_TI
     for k in range(tries):
         if not panel_open():
             return False
+        if role in MARQUEE_ROLES and avatar_state(role) == 'marquee':
+            log(f'ass：{role} 頭像被頂部跑馬燈蓋住（點了會被吃掉），等它消失')
+            if not wait_marquee_gone(min(MARQUEE_WAIT, max(0.0, end - clock()))):
+                return False    # 不往吉祥物上點：點了也沒用（2026-10-11 實機 4 / 4 次點頭像、名字標籤都被吃掉）
+            if selected_role() == role:
+                return True
         wait_uncovered(role, min(COVER_WAIT, max(0.0, end - clock())))
         if not panel_open():
             return False
@@ -420,7 +488,8 @@ def set_many(plan: dict, no_wait: bool = False) -> tuple:
     """一次開外掛面板，依 plan 的順序逐人選角色、讀勾選、（有 changes 就只點不對的並確認）、最後關面板。
     plan = {角色: {項目: bool} 或 None（只讀）}；選角色走 select_role（內建等遮擋 + 重試）。
     回 (退出碼, {角色: 狀態 dict}, 訊息, info)；info = {'secs': {角色: 秒}, 'changed': {角色: [項目]}, 'role': 出錯的角色或 None}。
-    出錯時已讀到的照回、不再往下；面板一律關。最後選到的角色 = plan 最後一個（呼叫端把隊長放最後）。"""
+    出錯時已讀到的照回、不再往下；面板一律關。最後選到的角色 = plan 最後一個（呼叫端把隊長放最後）。
+    輪到被跑馬燈蓋住的角色（DKBO3）時若吉祥物正在，先挪到最後一位前面再做（只挪一次；成功時回傳的 dict 仍照 plan 順序）。"""
     info = {'secs': {}, 'changed': {}, 'role': None}
     ok_, why = wait_not_battle(no_wait)
     if not ok_:
@@ -428,13 +497,28 @@ def set_many(plan: dict, no_wait: bool = False) -> tuple:
     if not open_panel():
         return EXIT_NO_PANEL, {}, f'外掛面板 {OPEN_TIMEOUT:.0f} 秒內打不開（戰鬥 / 對話 / 載入中擋住？）；沒點任何面板內座標', info
     out: dict = {}
+    order, deferred = list(plan), set()
     try:
-        for role, changes in plan.items():
+        i = 0
+        while i < len(order):
+            role = order[i]
+            changes = plan[role]
+            # 跑馬燈正蓋著 DKBO3：先做後面的人（每人約 1.3 s），把它挪到最後一位（隊長）前面，等跑馬燈的時間被別人用掉
+            if (role in MARQUEE_ROLES and role not in deferred and i < len(order) - 2
+                    and marquee_on() and selected_role() != role):
+                deferred.add(role)
+                order.insert(len(order) - 2, order.pop(i))
+                log(f'ass：{role} 頭像被頂部跑馬燈蓋住，先做後面的人、{role} 挪到 {order[-1]} 前面')
+                continue
+            i += 1
             t = clock()
             if not select_role(role):
                 info['role'] = role
                 gui('shot', f'ass-select-fail-{role}.png')      # 面板還開著時的畫面（tools/.cache/；之後看是什麼蓋住）
-                return EXIT_NO_ROLE, out, f'選不到角色 {role}（頭像 {avatar_state(role)}；被遮住 / 重試 {SELECT_TRIES} 次仍沒選中，或面板消失）', info
+                st_ = avatar_state(role)
+                why = (f'頭像被頂部跑馬燈（綠髮吉祥物公告）蓋住，等了 {MARQUEE_WAIT:.0f} 秒仍沒消失' if st_ == 'marquee'
+                       else f'頭像 {st_}；被遮住 / 重試 {SELECT_TRIES} 次仍沒選中，或面板消失')
+                return EXIT_NO_ROLE, out, f'選不到角色 {role}（{why}）', info
             st = read_checks()
             if st is None:
                 info['role'] = role
@@ -450,7 +534,7 @@ def set_many(plan: dict, no_wait: bool = False) -> tuple:
                     return rc, out, msg, info
             out[role] = st
             info['secs'][role] = round(clock() - t, 2)
-        return EXIT_OK, out, '', info
+        return EXIT_OK, {r: out[r] for r in plan}, '', info
     finally:
         if not close_panel():
             print('警告：外掛面板沒關成功（請 shot 看畫面，手動點 X 1318,90）', flush=True)
