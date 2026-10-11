@@ -10,11 +10,12 @@
   layout.logical()        # 換算層認定的邏輯版面：與 2880×1659 同長寬比（例 1728×995）→ '2880x1659'
   layout.resolve()        # 套哪套座標常數：邏輯版面在 SUPPORTED 內就用它，否則 DEFAULT
   layout.template_layout()  # 樣板該存哪一份：實體尺寸在 SUPPORTED 內才有，否則 None（樣板未就緒）
+  layout.supported()      # 腳本守衛 → (ok, reason)：2880×1659 ok；同比例視窗要 template_layout() 有值才 ok
   layout.SUPPORTED        # 支援的版面
 
 P1（2026-10-11）：外接螢幕可用 `gui.sh fit` 把視窗設成 2880×1659 同比例（1728×995），gui.ps1 的換算層讓 1440×830 截圖座標仍然成立，
-所以 resolve() / logical() 認它是 '2880x1659'（座標常數）；但 current() 仍回實體 '1728x995'，各腳本的 `current() != '2880x1659'` 守衛照舊擋下
-（樣板 / 像素特徵未驗，P4 才放行）。
+所以 resolve() / logical() 認它是 '2880x1659'（座標常數）；但 current() 仍回實體 '1728x995'，守衛改呼叫 supported()（P4 已接線）：
+樣板未就緒（template_layout() 為 None）時仍擋，P3 補上樣板後自動放行。
 
 環境變數 PSA_LAYOUT=1920x1017 可直接指定（不問遊戲；例：遊戲沒開時用 walk.py --plan 試算）。
 命令列：python tools/gui/layout.py   → 印出目前版面
@@ -46,7 +47,7 @@ def _load() -> dict:
 
 def current() -> str | None:
     """目前遊戲客戶區「實體」大小 'WxH'（gui.ps1 info）；PSA_LAYOUT 優先。遊戲沒開或讀不到回 None。
-    各腳本的版面守衛（`current() != '2880x1659'`）看的是它：同比例但非 2880×1659 的視窗（例 1728×995）目前仍判不支援（樣板 / 特徵未就緒，P4 再放行）"""
+    守衛請用 supported()"""
     env = os.environ.get('PSA_LAYOUT')
     if env:
         return env
@@ -66,11 +67,11 @@ def logical() -> str | None:
     return d['logical'] or d['phys']
 
 
-def prime(value: str) -> None:
+def prime(value: str, logical_: str | None = None) -> None:
     """已有可信來源（例：watch state 的 game.layout 剛讀到、≤2 s）時預先填快取，省掉 gui.ps1 info 那次呼叫（約 0.6 s）。已有快取就不蓋。
-    只填實體大小（logical 之後由 logical() 退回實體大小）"""
+    logical_ 是 watch state 的 game.logical（沒給就由 logical() 退回實體大小）"""
     if not _cache and value:
-        _cache.append({'phys': value, 'logical': None})
+        _cache.append({'phys': value, 'logical': logical_})
 
 
 def resolve() -> str:
@@ -80,19 +81,43 @@ def resolve() -> str:
     return cur if cur in SUPPORTED else DEFAULT
 
 
-def template_layout() -> str | None:
+def template_layout(phys: str | None = None) -> str | None:
     """樣板該存哪一份（第二個判斷）：樣板（digit / name / pet / title…）依「實體」尺寸渲染；實體大小在 SUPPORTED 內才有樣板，
     其他（含同比例的 1728×995）回 None = 樣板未就緒（P3 之後才會有 `<root>/<phys>/`）"""
-    cur = current()
+    cur = phys or current()
     return cur if cur in SUPPORTED else None
+
+
+def evaluate(phys: str | None, logical_: str | None) -> tuple:
+    """純函式版的守衛判斷（watch 已經從 info 讀到 phys / logical，不必再問 gui.ps1）→ (ok, reason)：
+    實體 2880×1659 → ok（筆電照舊）；同長寬比的縮放視窗（例 1728×995，logical == 2880x1659）→ 只有 template_layout(phys) 有值
+    （樣板已就緒，P3 之後）才 ok；其他（1920×1017、不認得的大小、遊戲沒開）→ 不放行（1920×1017 走舊的 resolve() 路徑，不經這個守衛）。
+    reason 是給人看的理由（ok 時為空字串）"""
+    if phys == DEFAULT:
+        return True, ''
+    if not phys:
+        return False, '讀不到遊戲視窗大小（遊戲沒開？）'
+    if logical_ == DEFAULT:
+        if template_layout(phys) is not None:
+            return True, ''
+        return False, f'同比例視窗 {phys}：座標換算可用，但樣板（digit / name / pet / title…）未就緒'
+    return False, f'目前 {phys}，只量過 {DEFAULT}（或同長寬比視窗，見 gui.sh fit）'
+
+
+def supported() -> tuple:
+    """各腳本 / uikit 的版面守衛 → (ok, reason)，判斷見 evaluate()。2880×1659 不多問 gui.ps1 的 logical"""
+    cur = current()
+    return evaluate(cur, DEFAULT if cur == DEFAULT else logical())
 
 
 def status() -> dict:
     """三個判斷合在一起，給 info 顯示 / 上層決定降級用：
-    phys 實體大小；coords 座標常數用哪套；scaled = 換算層在縮放（同比例但非 2880×1659）；templates = 樣板是否就緒"""
+    phys 實體大小；coords 座標常數用哪套；scaled = 換算層在縮放（同比例但非 2880×1659）；templates = 樣板是否就緒；
+    ok / reason = supported() 的結果（腳本守衛放不放行）"""
     cur = current()
+    ok, why = supported()
     return {'phys': cur, 'coords': resolve(), 'scaled': bool(cur and cur != DEFAULT and logical() == DEFAULT),
-            'templates': template_layout() is not None}
+            'templates': template_layout() is not None, 'ok': ok, 'reason': why}
 
 
 if __name__ == '__main__':
@@ -101,4 +126,4 @@ if __name__ == '__main__':
     cur = current()
     st = status()
     print(f'客戶區 {cur}；座標常數 {st["coords"]}；樣板 {"就緒" if st["templates"] else "未就緒"}'
-          + ('（換算層縮放中：同比例視窗，座標可用但腳本守衛仍擋，P4 前不放行）' if st['scaled'] else ('' if cur in SUPPORTED else '（不支援的大小，沿用預設；請最大化遊戲視窗或 gui.sh fit）')))
+          + ('（換算層縮放中：同比例視窗，座標可用；守衛：' + ('放行' if st['ok'] else '擋下，' + st['reason']) + '）' if st['scaled'] else ('' if cur in SUPPORTED else '（不支援的大小，沿用預設；請最大化遊戲視窗或 gui.sh fit）')))

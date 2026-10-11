@@ -701,8 +701,9 @@ def _main_pet(role: str, rest: list, no_wait: bool = False) -> int:
                 print(f'參數錯：{k} {v}')
                 return EXIT_USAGE
             i += 2
-    if layout.current() != '2880x1659':
-        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+    _ok, _why = layout.supported()
+    if not _ok:
+        print('ass.py 版面不支援：' + _why)
         return EXIT_LAYOUT
     rc, st, msg = _pet_session(role, want or None, no_wait)
     if st:
@@ -721,8 +722,9 @@ def _main_pet_many(a) -> int:
     if len(rest) != 2 or rest[0] != 'normal' or not rest[1]:
         print('多人 pet 用法：ass.py pet all|DKBO,DKBO2… normal <攻擊|防禦|已學寵物技能名> [--dry-run] [--no-pause] [--no-resume]')
         return EXIT_USAGE
-    if layout.current() != '2880x1659':
-        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+    _ok, _why = layout.supported()
+    if not _ok:
+        print('ass.py 版面不支援：' + _why)
         return EXIT_LAYOUT
     import winenv
     winenv.enable_server()          # char / grind 的 main 都會開常駐 server；沒開時切換面板讀像素常逾時（rc 60）
@@ -771,8 +773,9 @@ def main(argv=None) -> int:
                 return EXIT_USAGE
             changes[it] = v.lower() in ('on', '開')
         items = list(changes)
-    if layout.current() != '2880x1659':
-        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+    _ok, _why = layout.supported()
+    if not _ok:
+        print('ass.py 版面不支援：' + _why)
         return EXIT_LAYOUT
     rc, states, msg = _session(role, changes if a.cmd == 'set' else None, None, a.no_wait)
     if states:

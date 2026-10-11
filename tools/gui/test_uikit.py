@@ -221,8 +221,23 @@ class Flaky(Game):
 
 g = install(Flaky())
 check('preflight unknown 2 次後恢復 → 0', uikit.preflight('t') == 0)
+_real_logical0 = layout.logical
 layout.current = lambda: '1920x1017'
+layout.logical = lambda: '1920x1017'
 check('preflight 版面不符 → 2', uikit.preflight('t') == 2)
+# P4：同比例縮放視窗（1728×995）— 樣板未就緒擋下（退出碼 2）、模擬樣板就緒放行
+_real_logical, _real_tl = _real_logical0, layout.template_layout
+layout.current = lambda: '1728x995'
+layout.logical = lambda: '2880x1659'
+layout.template_layout = lambda phys=None: None
+g = install(Game(hud=True))
+check('preflight 同比例視窗樣板未就緒 → 2（0 點擊）', uikit.preflight('t') == 2 and g.clicks == [])
+layout.template_layout = lambda phys=None: '1728x995'
+g = install(Game(hud=True))
+check('preflight 同比例視窗樣板就緒 → 放行 0', uikit.preflight('t') == 0)
+layout.logical = lambda: '1728x995'      # 換算層不認得（非同比例）→ 擋
+check('preflight 非同比例的 1728×995 → 2', uikit.preflight('t') == 2)
+layout.logical, layout.template_layout = _real_logical, _real_tl
 layout.current = lambda: '2880x1659'
 battleguard.LOCK_FILE.write_text(json.dumps({'pid': __import__('os').getpid(), 'start': __import__('time').time(), 'note': 'x'}), encoding='utf-8')
 g = install(Game())
@@ -233,8 +248,11 @@ battleguard.LOCK_FILE.unlink()
 import time as _t  # noqa: E402
 
 
-def wst(state='idle', annot=None, alerts=None, verify=False, layout_='2880x1659', running=True):
-    return ({'flags': {'verify_suspect': verify}, 'alerts': alerts or [], 'game': {'layout': layout_, 'running': running}},
+def wst(state='idle', annot=None, alerts=None, verify=False, layout_='2880x1659', running=True, sup=None):
+    game = {'layout': layout_, 'running': running}
+    if sup is not None:
+        game['screen_supported'] = sup
+    return ({'flags': {'verify_suspect': verify}, 'alerts': alerts or [], 'game': game},
             {'state': state, 'annot': annot or []})
 
 
@@ -255,6 +273,8 @@ fastcase('有 annot（登入 / 提示視窗）→ 不採用', False, annot=['log
 fastcase('verify_suspect → 不採用', False, verify=True)
 fastcase('alerts 非空 → 不採用', False, alerts=[{'kind': 'verify'}])
 fastcase('版面不符 → 不採用', False, layout_='1920x1017')
+fastcase('watch 算好的 screen_supported=False（外接樣板未就緒）→ 不採用', False, layout_='1728x995', sup=False)
+fastcase('watch 算好的 screen_supported=True（外接樣板就緒）→ 採用', True, layout_='1728x995', sup=True)
 fastcase('遊戲沒跑 → 不採用', False, running=False)
 uikit.watch_state = lambda max_age=1.0: None
 g = install(Game(hud=False, unknown=True))

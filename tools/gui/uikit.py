@@ -142,10 +142,11 @@ def watch_preflight_ok() -> bool:
     if fl.get('verify_suspect') or fl.get('netwatch_halt') or st.get('alerts'):
         return False
     g = st.get('game') or {}
-    if g.get('layout') != LAYOUT or not g.get('running'):
+    # watch 算好的守衛結果（layout.evaluate）；舊 state 沒有 screen_supported 就退回「實體版面 == 2880x1659」
+    if not g.get('screen_supported', g.get('layout') == LAYOUT) or not g.get('running'):
         return False
     import layout
-    layout.prime(g['layout'])                     # 後面 import walk（uikit.gui 第一次呼叫）時不必再問一次版面
+    layout.prime(g['layout'], g.get('logical'))                     # 後面 import walk（uikit.gui 第一次呼叫）時不必再問一次版面
     return True
 
 
@@ -157,8 +158,9 @@ def preflight(src: str, fast: bool = True) -> int:
     fast_ok = fast and watch_preflight_ok()
     if not fast_ok:
         import layout
-        if layout.current() != LAYOUT:
-            print(f'{src}：只量過 {LAYOUT}，目前 {layout.current()}', file=sys.stderr)
+        ok, why = layout.supported()
+        if not ok:
+            print(f'{src}：版面不支援：{why}', file=sys.stderr)
             return EXIT_LAYOUT
         import netwatch
         netwatch.guard(src)

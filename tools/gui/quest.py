@@ -1200,8 +1200,9 @@ def _main() -> int:
     a.npc_map = None
     if a.step and not a.npc:
         a.npc = 'auto'
-    if layout.current() != '2880x1659':
-        log('quest.py 只量過 2880×1659 版面，先跑 gui.sh max；見 ui/layout-1920x1017.md')
+    _ok, _why = layout.supported()
+    if not _ok:
+        log('quest.py 版面不支援：%s；先跑 gui.sh max / fit；見 ui/layout-1920x1017.md' % _why)
         return 4
     if a.solo and a.fight:
         log('--solo（逃跑）與 --fight（打）互斥')
