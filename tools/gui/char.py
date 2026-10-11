@@ -50,6 +50,9 @@ POLL_S = 0.05
 LOADING_GRACE_S = 1.0                # 沒看到加載畫面時，點擊後這麼久才接受 HUD（避免面板剛自關、加載還沒出現那一瞬間的 HUD）
 FAST_NAME_MAX_AGE_S = 8.0            # ensure 快路徑：頭頂名牌多新才採用（watch 名牌每 3～9 s 才核對一次；另外要求名牌核對時間在目前畫面狀態開始之後）
 FAST_CHAR_MAX_AGE_S = 1800.0         # ensure 快路徑：current-char.json 多新才採用
+RETRY_RC = (EXIT_NO_CARD, EXIT_CUR_COUNT)  # 暫時性讀不準：飄字 / 戰鬥淡入剛好蓋住卡片（掛機遇敵開著時常見），重讀就好
+READ_TRIES = 3
+READ_RETRY_S = 0.8
 LAST: dict = {}                      # 最近一次 current / switch / ensure 的結果 dict（可 import 的呼叫端讀這個，同最後一行 JSON）
 
 
@@ -73,6 +76,23 @@ def analyse(r: dict, target=None) -> dict:
     if not confirmed(cc):
         return {'rc': EXIT_NO_CARD, 'msg': f'當前框在 slot{cc.slot}，但名字無法確認（樣板 / OCR 都沒證據）', 'current': None, 'target_card': tc}
     return {'rc': 0, 'msg': '', 'current': charstate.display(cc.name), 'target_card': tc}
+
+
+def read_analyse(target=None, keep_open: bool = False) -> tuple:
+    """team.read_state + analyse；rc 61 / 63（名字沒證據 / 當前框數不對）多半是掛機飄字（恢復血量、獲得 EXP 等半透明橫條）
+    或戰鬥淡入剛好蓋住卡片，重讀最多 READ_TRIES 次（每次間隔 READ_RETRY_S，不點任何東西）；矛盾（64）不重試。→ (r, a)"""
+    r = a = None
+    for i in range(READ_TRIES):
+        r = team.read_state(True, keep_open=keep_open)
+        if not r['ok']:
+            return r, None
+        a = analyse(r, target)
+        if a['rc'] not in RETRY_RC:
+            break
+        if i + 1 < READ_TRIES:
+            print(f'char：讀卡片 rc {a["rc"]}（{a["msg"]}），{READ_RETRY_S} s 後重讀（{i + 1}/{READ_TRIES}）')
+            uikit.sleep(READ_RETRY_S)
+    return r, a
 
 
 def wait_switched(loading_s: float = LOADING_SEEN_S, hud_s: float = HUD_TIMEOUT_S) -> tuple:
@@ -122,12 +142,11 @@ def current(as_json: bool = False) -> int:
     rc = uikit.preflight(SRC)
     if rc:
         return _out(rc, {'current': None}, t0)
-    r = team.read_state(True)
+    r, a = read_analyse()
     if not r['ok']:
         uikit.snap('char-current-fail')
         uikit.fail(SRC, EXIT_PANEL, r['err'])
         return _out(EXIT_PANEL, {'current': None}, t0, r['err'])
-    a = analyse(r)
     if a['rc']:
         uikit.snap('char-current-fail')
         uikit.fail(SRC, a['rc'], a['msg'])
@@ -181,12 +200,11 @@ def switch(target_text: str, fast: bool = False) -> int:
         return _out(0, info, t0)
     clicked = False
     try:
-        r = team.read_state(True, keep_open=True)
+        r, a = read_analyse(target, keep_open=True)
         if not r['ok']:
             uikit.snap('char-switch-fail')
             uikit.fail(SRC, EXIT_PANEL, r['err'])
             return _out(EXIT_PANEL, info, t0, r['err'])
-        a = analyse(r, target)
         info['current'] = a['current']
         if a['rc']:                                   # 矛盾 / 當前框數不對 / 當前名字不明：不知道來源狀態，不敢切
             uikit.snap('char-switch-fail')

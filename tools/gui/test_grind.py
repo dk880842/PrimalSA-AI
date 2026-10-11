@@ -56,7 +56,7 @@ check('is_exp_purple 邊界', grind.is_exp_purple((147, 79, 200)) and not grind.
 a = spots.auto_spot
 check('auto 邊界', [a(0, n) for n in (1, 19, 20, 44, 45, 59, 60, 79, 80, 119, 120, 130)] ==
       ['柯奧龜洞', '柯奧龜洞', '海主人隧道', '海主人隧道', '五兄弟洞窟', '五兄弟洞窟', '柯奧4F龜洞', '柯奧4F龜洞', '波拉島', '波拉島', '地雷區', '地雷區'])
-check('auto 1 轉以上拒絕 / 0 級無', a(1, 50) is None and a(2, 130) is None and a(0, 0) is None)
+check('auto 1 轉以上沿用 0 轉表（未實測）/ 0 級無', a(1, 50) == '五兄弟洞窟' and a(2, 130) == '地雷區' and a(0, 0) is None and a(1, 0) is None)
 check('too_low：0 轉預判、1 轉不預判', spots.too_low('地雷區', 0, 119) and not spots.too_low('地雷區', 0, 120) and not spots.too_low('地雷區', 1, 1))
 check('parse_level', spots.parse_level('0轉130級') == (0, 130) and spots.parse_level('一0轉128級') == (0, 128) and spots.parse_level('abc') is None)
 check('spot_of_map / same_tier', spots.spot_of_map(60050) == '地雷區2' and spots.spot_of_map(1) is None and spots.same_tier('地雷區', '地雷區2') and not spots.same_tier('柯奧龜洞', '阿布龜洞'))
@@ -68,7 +68,7 @@ check('choose_spot：明確指定另一點 → 傳送', ns == '地雷區')
 ns, err = grind.choose_spot('地雷區', 0, 100, 500)
 check('choose_spot：等級不夠 → 錯誤、不傳送', ns is None and '會被擋' in err)
 ns, err = grind.choose_spot('auto', 1, 50, 500)
-check('choose_spot：1 轉 auto → 拒絕', ns is None and 'auto' in err)
+check('choose_spot：1 轉 auto 50 級 → 五兄弟洞窟（沿用 0 轉表）', ns == '五兄弟洞窟' and not err)
 ns, err = grind.choose_spot('here', 0, 130, 1)
 check('choose_spot：here 不傳送', ns is None and not err)
 
@@ -360,8 +360,9 @@ g.tele_fail = True
 rc, j, _ = run('start', spot='地雷區')
 check('傳送失敗 → 51', rc == 51)
 g = install(Game(cur_map=500, level='1轉5級'))
+g.screens = good_screens()
 rc, j, _ = run('start', spot='auto')
-check('1 轉 auto → 1（要求明確 --spot）', rc == 1 and not any(e.startswith('teleport') for e in g.log))
+check('1 轉 5 級 auto → 柯奧龜洞（傳送、不再拒絕）', rc == 0 and ('teleport:柯奧龜洞' in g.log), str(g.log))
 g = install(Game(cur_map=500, level='0轉100級'))
 g.screens = good_screens()
 rc, j, _ = run('start', spot='auto')

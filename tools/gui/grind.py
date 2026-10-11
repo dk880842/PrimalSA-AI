@@ -4,6 +4,7 @@
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/grind.py start --spot 地雷區2|auto|here [--heal] [--confirm-secs 30] [--no-fix]
   uv run --no-project python tools/gui/grind.py ensure [--confirm-secs 30] [--no-fix]   # 不傳送：補血回來 / 任務後 / 重登後用
+  uv run --no-project python tools/gui/grind.py follow [--every 15] [--buffer 0] [--until-level N] [--dry-run] | --stop   # 依等級自動換練功點（常駐；見 follow.py）
   uv run --no-project python tools/gui/grind.py check                                   # 唯讀：5 人快速戰鬥 / 自動戰鬥 + 遇敵鈕，不改任何東西
 最後一行是 JSON（rc、耗時、各步秒數、EXP 命中數…）；同內容寫 tools/.cache/grind.json。
 
@@ -18,6 +19,7 @@
   56 看到完整戰鬥畫面（有人沒快速戰鬥）；--fix（預設開）會先自動重設一次再確認，仍看到才回 56
   57 補血失敗（heal RuntimeError）
   58 當前角色切不回隊長（char.ensure 失敗，info.char_rc）
+  59 follow 專用：連續讀不到等級（follow 其他退出碼見 follow.py 檔頭）
 
 流程（與計畫 §3.3 的差異：外掛設定「先讀 5 人、只改不對的」，不是 5 人全點）：
   preflight → char.ensure(隊長) → 關遇敵 + 等戰鬥結束 → team.check / form → [start：選點 / 補血 / 傳送]
@@ -282,7 +284,9 @@ def choose_spot(spot: str, trans: int, level: int, cur_map) -> tuple:
     if spot == 'auto':
         name = spots.auto_spot(trans, level)
         if not name:
-            return None, ('--spot auto 只支援 0 轉（1 轉以上門檻未實測），請明確指定 --spot <點名>' if trans else f'等級 {level} 不到可練功點')
+            return None, f'等級 {level} 不到可練功點'
+        if trans:
+            log(f'警告：{trans} 轉的練功點門檻{spots.UNTESTED}')
     else:
         name = spot
     if spots.too_low(name, trans, level):
@@ -462,11 +466,15 @@ def main() -> int:
     cp.add_argument('--confirm-secs', type=float, default=CONFIRM_SECS)
     cp.add_argument('--no-fix', action='store_true', help='看到完整戰鬥時不自動重設 5 人（預設會重設一次）')
     p = sub.add_parser('start', help='選點 → 傳送 → 設定 → 遇敵 → 確認', parents=[cp])
-    p.add_argument('--spot', required=True, help='練功點名（見 spots.py）| auto（依等級，僅 0 轉）| here（不傳送）')
+    p.add_argument('--spot', required=True, help='練功點名（見 spots.py）| auto（依等級；1 轉以上沿用 0 轉表、未實測）| here（不傳送）')
     p.add_argument('--heal', action='store_true', help='先回村補血（點需在 heal.SPOTS）')
     sub.add_parser('ensure', help='不傳送：重查 5 人設定 + 遇敵 + 確認', parents=[cp])
     sub.add_parser('check', help='唯讀檢查')
+    import follow
+    follow.add_parser(sub)
     a = ap.parse_args()
+    if a.cmd == 'follow':
+        return follow.run(a)
     if a.cmd == 'start' and a.spot not in spots.SPOTS and a.spot not in ('auto', 'here'):
         print(f'不認得的練功點：{a.spot}（{" / ".join(spots.SPOTS)} / auto / here）')
         return uikit.EXIT_USAGE

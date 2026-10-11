@@ -15,9 +15,10 @@ uv run --no-project python tools/gui/grind.py start --spot 地雷區2     # 換�
 uv run --no-project python tools/gui/grind.py ensure                     # 不傳送：補血回來 / 任務後 / 斷線重登後，重查並補好（約 25 s）
 uv run --no-project python tools/gui/grind.py check                      # 唯讀：5 人快速 / 自動戰鬥 + 遇敵鈕（約 9 s）
 ```
-- `--spot`：點名（`tools/gui/spots.py`，資料唯一來源是 `ui/transfer.md`）、`auto`（依隊長等級，**僅 0 轉**；1 轉以上要明確指定）、`here`（不傳送）。已在該點（或 auto 的同檔點，例 地雷區 / 地雷區2）不會傳送；0 轉等級不夠依表預判就擋（退出碼 51）。目前隊伍掛機點 = 庫塔伊洞窟地下二樓：`start --spot 地雷區2`。
+- `--spot`：點名（`tools/gui/spots.py`，資料唯一來源是 `ui/transfer.md`）、`auto`（依隊長等級；1 轉以上沿用 0 轉表並標「未實測」，被擋時由 follow 學習修正）、`here`（不傳送）。已在該點（或 auto 的同檔點，例 地雷區 / 地雷區2）不會傳送；0 轉等級不夠依表預判就擋（退出碼 51）。目前隊伍掛機點 = 庫塔伊洞窟地下二樓：`start --spot 地雷區2`。
 - `--heal`：先回村補血（點需在 heal.SPOTS，柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟暫不支援）；血量 < 40% 也會自動補。`--no-fix`：看到完整戰鬥時不自動重設 5 人。
 - 成功 = 退出碼 0 且 30 秒內看到 ≥2 次 EXP 橫幅。非 0：50 隊伍不全且組不起來 / 51 傳送失敗或等級不夠 / 52 外掛設定失敗 / 53 此地圖禁止快速戰鬥 / 54 遇敵開不起來 / 55 沒看到 EXP / 56 仍看到完整戰鬥 / 57 補血失敗 / 58 切不回隊長；8 別的工具在用畫面 / 9 疑似驗證視窗（**立刻停手通知使用者**）/ 10 netwatch halt。最後一行 JSON 看細節。
+- **依等級自動換點（常駐）**：`grind.py follow [--trans 1] [--every 15] [--buffer 0] [--until-level N] [--dry-run]`、`follow --stop`。換點表（實測真門檻）：1 柯奧龜洞 / 10 阿布龜洞 / 20 海主人隧道 / 45 五兄弟洞窟 / 60 柯奧4F龜洞 / 80 波拉島 / 120 地雷區（1 轉未實測）。讀 state.hud.level 的「N級」（轉數位會讀錯，改用 `--trans`；轉生後重啟並改 `--trans`）、連 2 次一致才採用；到門檻就 `grind.run('start')`；被擋 → errlog + 門檻修正存 `tools/.cache/spot-thresholds.json` + 留原點；血低回村補血；每 20 分鐘 `check` 並自動 ensure；有 battle.lock / 別的 grind 在動就暫停；watch 標 verify_suspect 時先讀畫面，主畫面算誤報、否則停（9）。狀態 `tools/.cache/follow.json`，事件寫 `notes/quest-events.log`。背景跑（WSL）：`nohup setsid uv run --no-project python tools/gui/grind.py follow --trans 1 > tools/.cache/follow.log 2>&1 &`。退出碼 59 = 連續讀不到等級。**follow 在跑時不要另外手動跑 grind start / heal**（會互相搶；要手動就先 `--stop`）。
 - 只動快速戰鬥 / 自動戰鬥 / 主畫面遇敵鈕，先讀再改（已開不點）；不要和 `heal.py --watch`、`petwatch.py`、`quest.py` 同跑。
 
 ## 1. 讀目前等級與位置（手動退路）
