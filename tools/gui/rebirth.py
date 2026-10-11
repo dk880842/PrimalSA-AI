@@ -1,0 +1,750 @@
+#!/usr/bin/env python3
+"""漆黑洞窟轉生任務（任務組 2004 一轉、2005 二轉、2006 三轉、2007 四轉、2008 五轉；結構相同）一行跑完。只用標準函式庫。
+
+**實機驗證狀態（2026-10-11 寫成時）**：流程取自 2004 一轉實跑（notes/quest-log.md 2004 段）。quest / team / char / heal / ass 的呼叫都是既有已驗證工具；
+**bag.py / petdrop.py（讀等級、找道具、使用龍王的守護、穿弓丟舊武器、公共倉庫取出 / 存入、丟烏力斯坦）是新寫的，實機完全沒驗證**，
+離線測試只驗流程與防護（test_rebirth.py）。第一次實跑請在旁邊看。
+
+用法（專案根目錄；WSL / Windows 原生相同）：
+  uv run --no-project python tools/gui/rebirth.py [--trans N] [--from 階段] [--dry-run] [--keep-old-weapon] [--confirm-rebirth] [--pet-action 忠犬|攻擊|防禦|none]
+    --trans N        這次要轉到第 N 轉（預設 = 目前轉數 + 1；從 preflight 以外階段續跑時用上次進度檔的 N，沒有就要明講）
+                     任務組 = 2004 + N - 1；等級門檻 N=1～4 為 131、N=5 為 140（knowledge/quests/tasks.md）
+    --from 階段      從這個階段開始（中斷後接著做）：preflight enter boss10 bow16 swap heal boss20 rebirth cleanup；--to 階段 = 跑到該階段（含）就停
+    --dry-run        只印計畫（階段 / 要跑的指令 / 退出碼），完全不碰遊戲
+    --keep-old-weapon 換弓後不丟舊武器
+    --confirm-rebirth 精靈王轉生頁確認是「角色轉生」後停下（退出碼 89，對話框維持開著）等人；預設不停直接轉（使用者 2026-10-11：不用停）
+    --pet-action 值  換弓後把 5 人戰寵「一般動作」設成這個（預設忠犬；none = 不動）
+    --no-dragon      不用龍王的守護
+  可 import：rebirth.run(trans=None, from_stage='preflight', dry_run=False, ..., tools=None) → 退出碼；結果 dict 在 rebirth.LAST
+
+階段（每階段開始 / 結束都寫 notes/quest-events.log、tools/.cache/rebirth.json；失敗另寫 errlog）：
+  preflight 前置檢查：當前角色 = DKBO、team.form 滿 5 人、5 人轉數 / 等級、5 人 4 件證明（大地的羈絆 / 水的戒指 / 火的羽毛飾品 / 風的鎖）、
+            背包 / 寵物欄空位 ≥ 2、heal 補滿
+  enter     quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
+  boss10    龍王的守護（背包沒有就從公共倉庫取）→ quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認進到 11F（32011）
+  bow16     龍王的守護 → quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）
+  swap      5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器（名稱防護；--keep-old-weapon 跳過）
+  heal      heal.py --no-return → ass.py 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」→ team.form
+  boss20    龍王的守護 → quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
+  rebirth   team.form → quest.py 預設模式（守門人 → 精靈王）→ 39 時 OCR 對話判斷：「角色轉生」才放行（點完成 + quest.py --allow-irreversible 收尾），
+            「寵物轉生」/ 讀不到 / 位置不在精靈王旁 → 88；--confirm-rebirth → 89；放行後確認 5 人轉數 = N
+  cleanup   丟 5 人烏力斯坦（petdrop）→ 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
+
+退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79、90～96；rebirth 自己 80～89）：
+  80 等級 / 轉數不符（info.levels 看誰）或讀不到等級
+  81 缺四件證明（info.missing）
+  82 背包 / 寵物欄空位不足
+  83 隊伍 / 當前角色（不是 DKBO、team.form 失敗、補隊失敗）
+  84 quest.py 階段沒完成（非預期退出碼 / 地圖不對 / 逾時；info.quest_rc、info.pos）
+  85 BOSS 戰輸 / 被打飛者重打失敗 / 隊伍補不滿
+  86 背包 / 寵物操作失敗（換弓、丟舊武器、丟烏力斯坦、龍王倉庫取存；info.bag_rc 是 bag.py / petdrop.py 的碼）
+  87 補血 / 外掛戰寵動作 / 便捷傳送失敗
+  88 精靈王對話不是「角色轉生」（寵物轉生 / 讀不到 / 位置不對），或轉生後驗證轉數沒變
+  89 --confirm-rebirth 停下等人
+驗證視窗（quest 回 2 / uikit 回 9）→ 一律回 9 並停手（鐵則 5）；斷線（netwatch halt）→ 10。
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import charstate  # noqa: E402
+import uikit  # noqa: E402
+
+SRC = 'rebirth'
+ROOT = uikit.ROOT
+EVENT_LOG = ROOT / 'notes' / 'quest-events.log'
+QUEST_LOG = ROOT / 'notes' / 'quest-log.md'
+PROGRESS = uikit.CACHE / 'rebirth.json'
+
+EXIT_LEVEL, EXIT_ITEMS, EXIT_SPACE, EXIT_TEAM, EXIT_QUEST, EXIT_BOSS, EXIT_BAG, EXIT_SETUP, EXIT_REBIRTH, EXIT_CONFIRM = 80, 81, 82, 83, 84, 85, 86, 87, 88, 89
+
+STAGES = ['preflight', 'enter', 'boss10', 'bow16', 'swap', 'heal', 'boss20', 'rebirth', 'cleanup']
+LEADER = 'DKBO'
+ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+CN = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五'}
+CERTS = ['大地的羈絆', '水的戒指', '火的羽毛飾品', '風的鎖']
+BOW = '精靈王之弓'
+DRAGON = '龍王的守護'
+URISTAN = '烏力斯坦'
+DRAGON_REEAT_S = 540.0               # 效果約 10 分鐘（2026-10-11 實測）；超過 9 分鐘再吃
+SLICE_S = 540                        # quest.py 單次最長秒數（到點回 0 = 逾時，吃新的龍王再繼續）
+MAP_1F, MAP_10F, MAP_11F, MAP_16F, MAP_20F, MAP_21F = 32001, 32010, 32011, 32016, 32020, 32021
+WIN_21F = (MAP_21F, 29, 57)          # 20F BOSS 贏了傳到 32021:29,57
+KING_Y = 28                          # 精靈王 32021:31,28
+LAST: dict = {}
+
+
+def level_min(n: int) -> int:
+    return 140 if n >= 5 else 131
+
+
+def task_name(n: int) -> str:
+    return f'漆黑洞窟({CN[n]}轉)'
+
+
+def task_group(n: int) -> int:
+    return 2004 + n - 1
+
+
+def pet_names(n: int) -> list:
+    one = {1: ['大地守護獸'], 2: ['水的守護獸'], 3: ['火的守護獸'], 4: ['風的守護獸']}
+    return one.get(n, ['大地守護獸', '水的守護獸', '火的守護獸', '風的守護獸'])
+
+
+def near(pos, want, tol: int = 6) -> bool:
+    return bool(pos) and pos[0] == want[0] and abs(pos[1] - want[1]) <= tol and abs(pos[2] - want[2]) <= tol
+
+
+# ---- 純函式（測試直接餵）----
+def judge_rebirth_dialog(texts: dict, pos) -> tuple:
+    """精靈王對話框文字（quest.read_dialog_texts 的 {'body','buttons','body_ok'}）+ 位置 → ('role'|'pet'|'unknown', 理由)。
+    寵物轉生 / 瑪雷菲雅 → pet；內文含「轉生」且含「儀式」或「出生」、且（位置讀得到時）在精靈王旁 32021 y≈28 → role；其他 unknown"""
+    flat = ''.join(texts.get('body', []) + texts.get('buttons', [])).replace(' ', '')
+    if '寵物轉生' in flat or '瑪雷菲雅' in flat:
+        return 'pet', '對話含「寵物轉生」'
+    if not texts.get('body_ok'):
+        return 'unknown', '讀不到對話內文'
+    if '轉生' not in flat or not ('儀式' in flat or '出生' in flat):
+        return 'unknown', f'內文沒有角色轉生儀式字樣：{flat[:40]}'
+    if pos and not (pos[0] == MAP_21F and abs(pos[2] - KING_Y) <= 8):
+        return 'unknown', f'位置 {pos} 不在精靈王旁（32021 y≈{KING_Y}）'
+    return 'role', '內文是角色轉生儀式'
+
+
+def missing_members(cards) -> list:
+    """切換面板卡片 → 不在隊上的角色名（label 不是隊長 / 隊員）；名字讀不出的回 None 元素"""
+    return [c.name for c in cards if c.label not in ('leader', 'member')]
+
+
+def parse_plan_stage(a: str) -> str | None:
+    return a if a in STAGES else None
+
+
+# ---- 真實工具（測試換成 FakeTools，介面相同）----
+class Tools:
+    def sleep(self, s):
+        uikit.sleep(s)
+
+    def preflight(self):
+        return uikit.preflight(SRC)
+
+    def current(self):
+        import char
+        rc = char.current(True)
+        return rc, char.LAST.get('current')
+
+    def char_switch(self, name):
+        import char
+        return char.switch(name)
+
+    def char_ensure(self, name):
+        import char
+        return char.ensure(name)
+
+    def team_form(self):
+        import team
+        return team.form()
+
+    def team_check(self):
+        import team
+        return team.check(5)
+
+    def team_cards(self):
+        import team
+        r = team.read_state(True)
+        return (r['cards'] if r.get('ok') else None), r.get('err', '')
+
+    def levels(self, roles):
+        import bag
+        return bag.levels(roles)
+
+    def find_items(self, role, names):
+        import bag
+        return bag.find_items(role, names)
+
+    def pet_empties(self):
+        import pet
+        ctx = pet.load_ctx(True)
+        out = {}
+        with pet.Session(False, True) as s:
+            if s.rc:
+                return s.rc, out
+            for r in pet.role_list('all'):
+                rc, slots = pet.list_role(r, ctx)
+                if rc:
+                    pet.save_ctx(ctx)
+                    return rc, out
+                out[r] = sum(1 for x in slots if x.get('empty'))
+            pet.save_ctx(ctx)
+        return 0, out
+
+    def heal(self):
+        import heal
+        heal.heal_trip('波拉島', True)
+
+    def ass_pet(self, role, action):
+        import ass
+        return ass.set_pet(role, {'normal': action})
+
+    def teleport20(self):
+        import heal
+        tab = (259, 432)                                        # 便捷傳送分頁（ui/transfer.md）
+        heal.SIG_TAB.setdefault(tab, '185,411,243,174,63')       # 分頁選中橘色（同練級 / 尼斯分頁的規律，未實測）
+        return heal.teleport(tab, (790, 248), MAP_21F, '漆黑20樓', want_xy=(31, 29))
+
+    def quest(self, args, timeout=1500):
+        """子程序跑 quest.py（它自己管戰鬥鎖 / server）；回 (退出碼, 最後幾行輸出)"""
+        cmd = [sys.executable, str(HERE / 'quest.py')] + [str(x) for x in args]
+        env = dict(os.environ, PYTHONIOENCODING='utf-8')
+        tail = []
+        p = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, encoding='utf-8', errors='replace')
+        t0 = time.time()
+        try:
+            for ln in p.stdout:
+                ln = ln.rstrip()
+                print(ln, flush=True)
+                tail.append(ln)
+                del tail[:-30]
+                if time.time() - t0 > timeout:
+                    p.kill()
+                    break
+        finally:
+            p.wait()
+        return p.returncode, tail
+
+    def read_pos(self):
+        import quest
+        return quest.read_pos()
+
+    def track(self, task):
+        import quest
+        quest.ensure_task_tab()
+        return quest.track_task(task)
+
+    def dialog_texts(self):
+        import quest
+        return quest.read_dialog_texts()
+
+    def press_dialog(self):
+        import quest
+        uikit.gui('seq', f'click {quest.DIALOG_NEXT[0]} {quest.DIALOG_NEXT[1]}; wait 800', note='rebirth 精靈王對話按左鈕（角色轉生）')
+
+    def bag_use(self, role, name):
+        import bag
+        return bag.use_item(role, name, verify_buff=True), dict(bag.LAST)
+
+    def bag_take(self, role, name):
+        import bag
+        return bag.depot_take(role, name, 'public')
+
+    def bag_store(self, role, name):
+        import bag
+        return bag.depot_store(role, name, 'public')
+
+    def swap_weapon(self, role, keep_old):
+        import bag
+        return bag.swap_weapon(role, BOW, keep_old), dict(bag.LAST)
+
+    def drop_pet(self, name):
+        import petdrop
+        return petdrop.drop('all', name, name)
+
+    def encounter_on(self):
+        import heal
+        return heal.encounter_on()
+
+    def encounter_off(self):
+        import heal
+        heal.set_encounter(False)
+
+    def snap(self, tag):
+        return uikit.snap(tag)
+
+
+# ---- 紀錄 ----
+def event(msg: str) -> None:
+    line = f'{time.strftime("%Y-%m-%d %H:%M:%S")} [rebirth] {msg}'
+    print(line, flush=True)
+    try:
+        EVENT_LOG.parent.mkdir(exist_ok=True)
+        with open(EVENT_LOG, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+    except OSError:
+        pass
+
+
+def load_progress() -> dict:
+    try:
+        return json.loads(PROGRESS.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_progress(d: dict) -> None:
+    try:
+        PROGRESS.parent.mkdir(parents=True, exist_ok=True)
+        PROGRESS.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding='utf-8')
+    except OSError:
+        pass
+
+
+class Run:
+    def __init__(self, n: int, T, opts: dict):
+        self.n, self.T, self.o = n, T, opts
+        self.task = task_name(n)
+        self.st = load_progress()
+        if self.st.get('trans') != n:
+            self.st = {'trans': n, 'stages': {}}
+        self.st.setdefault('stages', {})
+        self.info: dict = {}
+        self.warnings: list = []
+
+    # -- 紀錄 --
+    def save(self):
+        self.st['info'] = self.info
+        self.st['warnings'] = self.warnings
+        save_progress(self.st)
+
+    def begin(self, name):
+        self.st['stages'][name] = {'status': 'running', 't0': time.strftime('%H:%M:%S')}
+        event(f'階段 {name} 開始（{self.task}）')
+        self.save()
+
+    def end(self, name, rc):
+        d = self.st['stages'].setdefault(name, {})
+        d.update(status='ok' if rc == 0 else 'fail', rc=rc, t1=time.strftime('%H:%M:%S'))
+        event(f'階段 {name} 結束 rc={rc}' + (f' info={json.dumps(self.info, ensure_ascii=False)[:300]}' if rc else ''))
+        self.save()
+
+    def fail(self, rc: int, msg: str, **kw) -> int:
+        self.info.update(kw)
+        self.info['msg'] = msg
+        event(f'失敗 rc={rc}：{msg}')
+        try:
+            import errlog
+            errlog.add(f'rebirth：{msg}', source='rebirth')
+        except Exception:
+            pass
+        return rc
+
+    def warn(self, msg: str):
+        self.warnings.append(msg)
+        event(f'警告：{msg}')
+
+    # -- 共用步驟 --
+    def quest(self, args, timeout=1500):
+        event('quest.py ' + ' '.join(str(a) for a in args))
+        rc, tail = self.T.quest(args, timeout)
+        self.info['quest_rc'] = rc
+        event(f'quest.py 退出碼 {rc}')
+        return rc, tail
+
+    def quest_stop(self, rc, where: str):
+        """quest 非預期退出碼 → 本階段退出碼（2 = 疑似驗證視窗 → 9，鐵則 5）"""
+        if rc == 2:
+            return self.fail(uikit.EXIT_UNKNOWN_SCREEN, f'{where}：quest.py 看到不認得的畫面（疑似驗證視窗），停手通知使用者', quest_rc=rc)
+        return self.fail(EXIT_QUEST, f'{where}：quest.py 非預期退出碼 {rc}', quest_rc=rc)
+
+    def ensure_dragon(self, force: bool = False):
+        """隊長吃龍王的守護（背包沒有就從公共倉庫取）。失敗只警告（沒有也能跑，只是遇敵）；10 分鐘內不重吃"""
+        if not self.o.get('dragon', True):
+            return
+        now = time.time()
+        if not force and now - self.st.get('last_eat', 0) < DRAGON_REEAT_S:
+            return
+        rc, d = self.T.bag_use(LEADER, DRAGON)
+        if rc == 92:                                           # 背包沒有 → 公共倉庫
+            event('背包沒有龍王的守護，從公共倉庫取出')
+            r2 = self.T.bag_take(LEADER, DRAGON)
+            if r2:
+                self.info['bag_rc'] = r2
+                self.warn(f'龍王的守護取出失敗（bag rc {r2}），這段不用龍王')
+                return
+            self.st['dragon_taken'] = True
+            rc, d = self.T.bag_use(LEADER, DRAGON)
+        if rc:
+            self.info['bag_rc'] = rc
+            self.warn(f'龍王的守護使用失敗（bag rc {rc}），這段不用龍王')
+            return
+        self.st['last_eat'] = time.time()
+        self.st['dragon_used'] = self.st.get('dragon_used', 0) + 1
+        if d.get('buff') is False:
+            self.warn('吃了龍王的守護但沒看到 buff 圖示（偵測特徵只有單張樣本，不一定是失敗）')
+        event(f'已吃龍王的守護（第 {self.st["dragon_used"]} 顆）')
+        self.save()
+
+    def read_pos(self):
+        return self.T.read_pos()
+
+    # -- BOSS 後處理 --
+    def after_boss(self, name: str, won, boss_map: int) -> int:
+        pos = self.read_pos()
+        self.info['pos'] = pos
+        if not won(pos):
+            return self.fail(EXIT_BOSS, f'{name}：BOSS 戰後位置 {pos} 不是勝利落點（沒贏？），不往下', pos=pos)
+        rc = self.T.team_check()
+        if rc == 0:
+            return 0
+        event(f'{name}：BOSS 戰後 team.check rc={rc}，隊伍不滿 → 找被打飛的人重打')
+        return self.fix_team(name, won, boss_map)
+
+    def fix_team(self, name: str, won, boss_map: int) -> int:
+        cards, err = self.T.team_cards()
+        if cards is None:
+            return self.fail(EXIT_BOSS, f'{name}：讀不到隊伍狀態：{err}')
+        miss = missing_members(cards)
+        if not miss or any(m is None for m in miss):
+            return self.fail(EXIT_BOSS, f'{name}：不滿 5 人但找不出被打飛的人（不在隊名單 {miss}）', missing=miss)
+        self.info['missing'] = miss
+        event(f'{name}：不在隊上 {miss}')
+        for who in miss:
+            rc = self.refight(name, who, won, boss_map)
+            self.T.char_ensure(LEADER)                         # 不論成敗都切回隊長
+            if rc:
+                return rc
+        rc = self.T.team_form()
+        if rc:
+            return self.fail(EXIT_TEAM, f'{name}：重打後 team.form 失敗 rc={rc}')
+        rc = self.T.team_check()
+        if rc:
+            return self.fail(EXIT_BOSS, f'{name}：重打後隊伍仍不滿 5 人（team.check rc={rc}）')
+        return 0
+
+    def refight(self, name: str, who: str, won, boss_map: int) -> int:
+        """被打飛者：char.switch 當單人隊長 → 點任務追蹤自動傳送 → quest.py --fight 重打 → 確認落點"""
+        rc = self.T.char_switch(who)
+        if rc:
+            return self.fail(EXIT_TEAM, f'{name}：切到 {who} 失敗 rc={rc}')
+        pos = self.read_pos()
+        if won(pos):
+            event(f'{name}：{who} 已在勝利落點 {pos}，不用重打')
+            return 0
+        res = self.T.track(self.task)
+        if not res:
+            return self.fail(EXIT_BOSS, f'{name}：{who} 點任務追蹤沒成功（{res}）')
+        arrived, last = 0, None
+        for _ in range(60):
+            self.T.sleep(3)
+            p = self.read_pos()
+            if p and p[0] == boss_map and p == last:
+                arrived += 1
+                if arrived >= 2:
+                    break
+            else:
+                arrived = 0
+            last = p
+        else:
+            return self.fail(EXIT_BOSS, f'{name}：{who} 傳送 / 巡路後沒到 BOSS 地圖 {boss_map}（最後位置 {last}）')
+        rc, _ = self.quest(['--fight', '--task', self.task, '--npc', 'auto', '--team-size', '1', '--max-seconds', '300'], 400)
+        if rc == 2:
+            return self.quest_stop(rc, f'{who} 重打')
+        if rc:
+            return self.fail(EXIT_BOSS, f'{name}：{who} 重打 quest.py --fight 退出碼 {rc}（0 才是贏）', fight_rc=rc)
+        pos = self.read_pos()
+        if not won(pos):
+            return self.fail(EXIT_BOSS, f'{name}：{who} 重打後位置 {pos} 不是勝利落點')
+        event(f'{name}：{who} 重打贏了 {pos}')
+        return 0
+
+    def boss_stage(self, name: str, won, boss_map: int, slices: int = 3) -> int:
+        for k in range(slices):
+            self.ensure_dragon()
+            rc, _ = self.quest(['--task', self.task, '--max-seconds', SLICE_S], SLICE_S + 120)
+            if rc in (37, 38):
+                return self.after_boss(name, won, boss_map)
+            if rc == 0:
+                pos = self.read_pos()
+                if won(pos):                                   # 逾時回 0；10F 已到 11F = BOSS 贏了（偵測不到對話後開打的 BOSS）
+                    event(f'{name}：quest 回 0 且位置 {pos} 已是勝利落點，視為 BOSS 已打贏')
+                    return self.after_boss(name, won, boss_map)
+                event(f'{name}：第 {k + 1} 段 {SLICE_S}s 到了還沒打完 BOSS（位置 {pos}），再吃龍王繼續')
+                self.ensure_dragon(force=True)
+                continue
+            return self.quest_stop(rc, name)
+        return self.fail(EXIT_QUEST, f'{name}：跑了 {slices} 段仍沒打到 BOSS（逾時）', pos=self.read_pos())
+
+    # ---- 階段 ----
+    def s_preflight(self) -> int:
+        T = self.T
+        rc = T.preflight()
+        if rc:
+            return rc
+        rc, cur = T.current()
+        if rc or not cur or not charstate.same(cur, LEADER):
+            return self.fail(EXIT_TEAM, f'當前角色不是 {LEADER}（讀到 {cur}，rc {rc}）；判斷看面板左欄頭像紅字「當前登錄」', current=cur)
+        rc = T.team_form()
+        if rc:
+            return self.fail(EXIT_TEAM, f'team.form 沒成功 rc={rc}（要滿 5 人）')
+        rc, lv = T.levels(ALL_ROLES)
+        if rc:
+            return self.fail(EXIT_LEVEL, f'讀等級失敗 bag rc={rc}', bag_rc=rc)
+        self.info['levels'] = {r: list(v) if v else None for r, v in lv.items()}
+        bad = {r: v for r, v in lv.items() if not v or v[0] != self.n - 1 or v[1] < level_min(self.n)}
+        if bad:
+            return self.fail(EXIT_LEVEL, f'要「{self.n - 1}轉 ≥{level_min(self.n)} 級」才能做 {self.task}；不符 / 讀不到：{bad}', bad=bad)
+        miss = {}
+        space = {}
+        for r in ALL_ROLES:
+            rc, it = T.find_items(r, CERTS)
+            if rc:
+                return self.fail(EXIT_ITEMS, f'{r} 查證明失敗 bag rc={rc}', bag_rc=rc)
+            gone = [c for c in CERTS if it.get(c) is None]
+            if gone:
+                miss[r] = gone
+            space[r] = it.get('_free')
+        self.info['bag_free'] = space
+        if miss:
+            return self.fail(EXIT_ITEMS, f'缺四大洞窟證明：{miss}（轉生 / 封印書後要重做洞窟）', missing=miss)
+        short = {r: v for r, v in space.items() if v is not None and v < 2}
+        rc, pe = T.pet_empties()
+        if rc:
+            return self.fail(EXIT_SPACE, f'讀寵物欄失敗 pet rc={rc}', pet_rc=rc)
+        self.info['pet_empty'] = pe
+        pshort = {r: v for r, v in pe.items() if v < 2}
+        if short or pshort:
+            return self.fail(EXIT_SPACE, f'空位不足（要各 ≥2）：背包 {short}、寵物欄 {pshort}', bag_short=short, pet_short=pshort)
+        try:
+            T.heal()
+        except RuntimeError as e:
+            return self.fail(EXIT_SETUP, f'補血失敗：{e}')
+        return 0
+
+    def s_enter(self) -> int:
+        for k in range(3):
+            pos = self.read_pos()
+            if pos and pos[0] == MAP_1F:
+                event(f'已在漆黑 1F {pos}')
+                return 0
+            rc, _ = self.quest(['--task', self.task, '--stop-after-dialog', '--max-seconds', 240], 360)
+            if rc not in (0, 24):
+                return self.quest_stop(rc, 'enter')
+        pos = self.read_pos()
+        self.info['pos'] = pos
+        if pos and pos[0] == MAP_1F:
+            return 0
+        return self.fail(EXIT_QUEST, f'enter：3 輪後仍不在漆黑 1F（{pos}）', pos=pos)
+
+    def s_boss10(self) -> int:
+        return self.boss_stage('boss10', lambda p: bool(p) and p[0] == MAP_11F, MAP_10F)
+
+    def s_bow16(self) -> int:
+        for k in range(2):
+            self.ensure_dragon()
+            rc, _ = self.quest(['--task', self.task, '--stop-after-rewards', 1, '--max-seconds', SLICE_S], SLICE_S + 120)
+            if rc != 0:
+                return self.quest_stop(rc, 'bow16')
+            pos = self.read_pos()
+            if pos and pos[0] == MAP_16F:
+                return 0
+            event(f'bow16：quest 回 0 但位置 {pos} 不在 16F（逾時？）再跑一段')
+        return self.fail(EXIT_QUEST, 'bow16：沒在 16F 領到精靈王之弓', pos=self.read_pos())
+
+    def s_swap(self) -> int:
+        res = {}
+        for r in ALL_ROLES:
+            rc, d = self.T.swap_weapon(r, self.o.get('keep_old', False))
+            res[r] = {'rc': rc, **{k: v for k, v in d.items() if k in ('old', 'already', 'kept_old', 'dropped')}}
+            self.info['swap'] = res
+            event(f'換弓 {r}：{res[r]}')
+            if rc:
+                return self.fail(EXIT_BAG, f'{r} 換弓 / 丟舊武器失敗 bag rc={rc}', bag_rc=rc, role=r)
+        return 0
+
+    def s_heal(self) -> int:
+        T = self.T
+        try:
+            T.heal()
+        except RuntimeError as e:
+            return self.fail(EXIT_SETUP, f'補血失敗：{e}')
+        act = self.o.get('pet_action', '忠犬')
+        if act and act != 'none':
+            for r in ALL_ROLES:
+                rc, st, msg = T.ass_pet(r, act)
+                if rc == 0:
+                    continue
+                if rc == 4 and (not st or st.get('normal') is None):
+                    self.warn(f'{r} 戰寵一般動作設 {act}：OCR 讀回 None（認不得「{act}」，2026-10-11 實測其實設成功），請事後人眼確認')
+                    continue
+                return self.fail(EXIT_SETUP, f'{r} 戰寵一般動作 {act} 失敗 ass rc={rc}：{msg}', role=r)
+        try:
+            T.teleport20()
+        except RuntimeError as e:
+            return self.fail(EXIT_SETUP, f'便捷傳送漆黑20樓失敗：{e}')
+        rc = T.team_form()
+        if rc:
+            return self.fail(EXIT_TEAM, f'傳到 20F 後 team.form 失敗 rc={rc}')
+        return 0
+
+    def s_boss20(self) -> int:
+        return self.boss_stage('boss20', lambda p: near(p, WIN_21F), MAP_20F)
+
+    def s_rebirth(self) -> int:
+        T = self.T
+        rc = T.team_form()
+        if rc:
+            return self.fail(EXIT_TEAM, f'rebirth：team.form 失敗 rc={rc}')
+        rc, _ = self.quest(['--task', self.task, '--max-seconds', 420], 540)
+        if rc != 39:
+            if rc == 0 and self.rebirth_done():
+                return 0
+            return self.quest_stop(rc, 'rebirth（預期停在 39：精靈王轉生頁）')
+        texts = T.dialog_texts()
+        pos = self.read_pos()
+        verdict, why = judge_rebirth_dialog(texts, pos)
+        self.info['dialog'] = {'verdict': verdict, 'why': why, 'pos': pos, 'body': texts.get('body'), 'buttons': texts.get('buttons')}
+        event(f'精靈王對話判斷：{verdict}（{why}）')
+        if verdict != 'role':
+            T.snap('rebirth-dialog-' + verdict)
+            return self.fail(EXIT_REBIRTH, f'對話不是角色轉生：{why}；沒按任何鈕、對話框維持開著，請人看圖')
+        if self.o.get('confirm_rebirth'):
+            return self.fail(EXIT_CONFIRM, '--confirm-rebirth：確認是角色轉生頁，停下等人（對話框維持開著；要繼續請不加 --confirm-rebirth 重跑 --from rebirth）')
+        T.press_dialog()
+        T.sleep(3)
+        rc, _ = self.quest(['--task', self.task, '--no-track', '--team-size', 0, '--allow-irreversible', '--max-seconds', 40], 120)
+        if rc == 2:
+            return self.quest_stop(rc, 'rebirth 收尾')
+        return 0 if self.rebirth_done() else self.fail(EXIT_REBIRTH, f'按了完成但 5 人轉數沒到 {self.n}（見 info.levels）')
+
+    def rebirth_done(self) -> bool:
+        for k in range(4):
+            rc, lv = self.T.levels(ALL_ROLES)
+            self.info['levels_after'] = {r: list(v) if v else None for r, v in lv.items()}
+            if not rc and all(v and v[0] == self.n for v in lv.values()):
+                event(f'轉生確認：5 人 {self.info["levels_after"]}')
+                return True
+            self.T.sleep(8)
+        return False
+
+    def s_cleanup(self) -> int:
+        T = self.T
+        rc = T.drop_pet(URISTAN)
+        if rc:
+            return self.fail(EXIT_BAG, f'丟{URISTAN}失敗 petdrop rc={rc}（沒碰騎寵 / 戰寵）', bag_rc=rc)
+        rc = T.bag_store(LEADER, DRAGON)
+        if rc not in (0, 92):
+            return self.fail(EXIT_BAG, f'{DRAGON}存回公共倉庫失敗 bag rc={rc}', bag_rc=rc)
+        self.info['dragon_stored'] = rc == 0
+        if T.encounter_on():
+            T.encounter_off()
+            self.warn('原地遇敵是開的，已關（轉生後維持關閉、不練功）')
+        T.char_ensure(LEADER)
+        self.write_log()
+        return 0
+
+    def write_log(self):
+        lines = [f'\n## {task_group(self.n)} {self.task} — rebirth.py 自動跑完（{time.strftime("%Y-%m-%d %H:%M")}）',
+                 f'- 階段：' + '、'.join(f'{k}={v.get("status")}' for k, v in self.st['stages'].items()),
+                 f'- 轉生後：{self.info.get("levels_after")}；龍王的守護吃了 {self.st.get("dragon_used", 0)} 顆、存回公共 {self.info.get("dragon_stored")}',
+                 f'- 換弓：{self.info.get("swap")}']
+        if self.warnings:
+            lines.append('- 警告：' + '；'.join(self.warnings))
+        lines.append('- 待辦：重組隊、瑪斯貝卡改回騎乘、選練功點（1 轉門檻未測，`grind --spot auto` 不能用）、1.82 清單 / 四大洞窟 / 2031 紅暴要重做。')
+        try:
+            with open(QUEST_LOG, 'a', encoding='utf-8') as f:
+                f.write('\n'.join(lines) + '\n')
+        except OSError:
+            pass
+
+
+DRY_PLAN = {
+    'preflight': ['char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人', 'bag.levels：5 人 (N-1)轉 ≥{lv} 級（80）', '每人 4 件證明（81）',
+                  '背包 / 寵物欄空位各 ≥2（82）', 'heal.heal_trip --no-return（87）'],
+    'enter': ['quest.py --task {t} --stop-after-dialog --max-seconds 240（最多 3 輪）→ 地圖 32001'],
+    'boss10': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use）', 'quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認地圖 32011'],
+    'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016'],
+    'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
+    'heal': ['heal.heal_trip --no-return', 'ass.set_pet 5 人 normal={act}（rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
+    'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近'],
+    'rebirth': ['team.form', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
+                '點完成 + quest.py --no-track --allow-irreversible 收尾 → bag.levels 確認 5 人轉數 = N'],
+    'cleanup': ['petdrop 烏力斯坦（5 人；名稱完全相同才丟）', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
+}
+
+
+def print_plan(n: int, from_stage: str, opts: dict) -> None:
+    print(f'rebirth 計畫：轉到第 {n} 轉（任務組 {task_group(n)}「{task_name(n)}」，門檻 {level_min(n)} 級，交守護獸 {pet_names(n)}）')
+    print(f'選項：{opts}')
+    for s in STAGES[STAGES.index(from_stage):]:
+        print(f'[{s}]')
+        for ln in DRY_PLAN[s]:
+            print('  - ' + ln.format(t=task_name(n), lv=level_min(n), act=opts.get('pet_action')))
+    print('退出碼：80 等級 81 證明 82 空位 83 隊伍 84 quest 階段 85 BOSS 86 背包/寵物 87 補血/外掛/傳送 88 轉生對話 89 等人；9 驗證視窗 10 斷線')
+
+
+def run(trans=None, from_stage: str = 'preflight', dry_run: bool = False, keep_old_weapon: bool = False, confirm_rebirth: bool = False,
+        pet_action: str = '忠犬', use_dragon: bool = True, tools=None, to_stage: str = 'cleanup') -> int:
+    LAST.clear()
+    if from_stage not in STAGES or to_stage not in STAGES or STAGES.index(to_stage) < STAGES.index(from_stage):
+        print(f'rebirth：--from / --to 要是 {STAGES} 之一，且 to 不早於 from', file=sys.stderr)
+        return uikit.EXIT_USAGE
+    opts = {'keep_old': keep_old_weapon, 'confirm_rebirth': confirm_rebirth, 'pet_action': pet_action, 'dragon': use_dragon}
+    T = tools or Tools()
+    if dry_run:
+        print_plan(trans or 1, from_stage, opts)
+        return 0
+    if trans is None:
+        prog = load_progress()
+        if from_stage != 'preflight' and prog.get('trans'):
+            trans = prog['trans']
+        elif from_stage == 'preflight':
+            rc, lv = T.levels([LEADER])
+            v = lv.get(LEADER) if not rc else None
+            if not v:
+                print(f'rebirth：讀不到 {LEADER} 的轉數（bag rc {rc}），請用 --trans N 明講', file=sys.stderr)
+                return uikit.EXIT_USAGE if not rc else rc
+            trans = v[0] + 1
+        else:
+            print('rebirth：從中途階段續跑但沒有進度檔，請用 --trans N 明講', file=sys.stderr)
+            return uikit.EXIT_USAGE
+    if trans not in CN:
+        print(f'rebirth：--trans 要 1～5（任務組 2004～2008），收到 {trans}', file=sys.stderr)
+        return uikit.EXIT_USAGE
+    r = Run(trans, T, opts)
+    event(f'開始：轉到第 {trans} 轉（{r.task}），從階段 {from_stage}，選項 {opts}')
+    rc = 0
+    for s in STAGES[STAGES.index(from_stage):STAGES.index(to_stage) + 1]:
+        r.begin(s)
+        r.info = {}
+        try:
+            rc = getattr(r, 's_' + s)()
+        except SystemExit:
+            r.end(s, uikit.EXIT_HALT)
+            raise
+        r.end(s, rc)
+        if rc:
+            break
+    LAST.clear()
+    LAST.update(ok=rc == 0, rc=rc, trans=trans, stages=r.st['stages'], info=r.info, warnings=r.warnings)
+    event(f'結束 rc={rc}' + (f'；續跑：--from {s} --trans {trans}' if rc else ''))
+    return rc
+
+
+def main() -> int:
+    import winenv
+    winenv.enable_server()
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('--trans', type=int, default=None)
+    ap.add_argument('--from', dest='from_stage', default='preflight', choices=STAGES)
+    ap.add_argument('--to', dest='to_stage', default='cleanup', choices=STAGES, help='跑到這個階段（含）就停（預設 cleanup）')
+    ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--keep-old-weapon', action='store_true')
+    ap.add_argument('--confirm-rebirth', action='store_true')
+    ap.add_argument('--pet-action', default='忠犬', choices=['忠犬', '攻擊', '防禦', 'none'])
+    ap.add_argument('--no-dragon', action='store_true')
+    a = ap.parse_args()
+    rc = run(a.trans, a.from_stage, a.dry_run, a.keep_old_weapon, a.confirm_rebirth, a.pet_action, not a.no_dragon, to_stage=a.to_stage)
+    if not a.dry_run:
+        print(json.dumps(LAST, ensure_ascii=False, default=str))
+    return rc
+
+
+if __name__ == '__main__':
+    sys.exit(main())

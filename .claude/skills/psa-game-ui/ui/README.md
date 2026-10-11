@@ -12,7 +12,8 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 人物資訊（屬性、抗性、潛力點） | [role.md](role.md) | 頭像 119,68 | 實測 |
 | 切換角色、**快速組隊**、組隊面板、**解散隊伍** | [team.md](team.md) | 切換 763,760／組隊 850,760 | 實測（組隊、解散都成功） |
 | 任務面板、任務詳情、**自動巡路 / 解任務監測 quest.py（--task、黃色問號、追蹤列表 OCR；--solo / --fight 單人逃跑、完整戰鬥逃跑鈕 1283,168 / 自動戰鬥鈕 1380,600）** | [quest.md](quest.md) | 左側 148,236／詳情 368,328／追蹤 205,325 | 實測（成人儀式） |
-| 背包、倉庫、材料圖鑑 | [bag.md](bag.md) | 背包 1120,760 | 實測 |
+| 背包、倉庫、材料圖鑑 | [bag.md](bag.md) | 背包 1120,760 | 實測（腳本 `bag.py` 未實機驗證） |
+| 漆黑洞窟轉生任務一行腳本 | [rebirth.md](rebirth.md) | — | 離線測試（實機未驗證） |
 | 寵物面板（出戰 / 騎乘 / 休息、技能、成長） | [pet.md](pet.md) | 寵物頭像 318,80 | 實測（設定出戰、騎乘） |
 | 地圖傳送（大陸／練級／便捷／英雄戰場） | [transfer.md](transfer.md) | 圓形傳送鈕 1340,65 | 實測（練級傳送實際等級門檻已全測） |
 | 設置（聲音、畫面、其他、聊天） | [setting.md](setting.md) | 設置 1210,760 | 只看過 |
@@ -31,6 +32,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | `char.py current / switch / ensure` | 當前角色讀取 / 切換並驗證；退出碼 60～65 | [team.md](team.md) |
 | `grind.py start / ensure / check` | 開始 / 恢復練功（選點傳送、外掛 5 人 `ass.set_many`、開遇敵、2 次 EXP 確認）；退出碼 50～58；`--heal` 支援 `spots.py` 全部 9 點 | `../psa-grind-start/SKILL.md`、[transfer.md](transfer.md) |
 | `pet.py list / set-state / rest-all / store / take` | 寵物面板讀 / 狀態 / 存取（硬性擋騎寵）；退出碼 70～78；**store / take 掛機中要加 `--pause-encounter`**（戰鬥中操作會被吃掉） | [pet.md](pet.md) |
+| `rebirth.py [--trans N] [--from 階段] [--dry-run]` | 漆黑洞窟轉生任務（2004～2008）整段：前置檢查 → 進洞 → 兩場 BOSS → 換弓 → 補血 / 忠犬 → 精靈王轉生 → 收尾；退出碼 80～89；**新寫的 bag.py / petdrop.py 實機沒驗證** | [rebirth.md](rebirth.md) |
 | `ass.py get / set / pet`（API：`set_many`） | 外掛面板讀 / 設四項勾選與戰寵動作；`select_role` 內建等遮擋 + 重試 | [ass.md](ass.md) |
 | `netwatch.py`（`guard` 已接進 quest / petwatch / heal --watch） | 斷線重連 / 自動登錄；重登後清 charstate、`team.form`、自動 `grind.ensure` | [network.md](network.md) |
 | 共用模組（不直接跑）：`spots.py`（練級傳送點表，唯一來源，heal 也用）、`uikit.py`（面板規格 / safe_click / preflight / 退出碼）、`charstate.py`（當前角色旁路檔）、`namematch.py`（角色名整名樣板）、`petmatch.py`（寵物名 / 等級樣板）、`digitmatch.py`（HUD 數字樣板） | 判斷畫面、比對名字 / 數字、禁區保護 | 各檔開頭 |

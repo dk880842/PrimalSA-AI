@@ -30,7 +30,7 @@ PrimalSA-AI/
     schemadump/        SchemaDump.cs：從 HotUpdate.dll 抽 Tabtoy 欄位對照與列舉（ReflectionOnly，不執行遊戲程式）
     query/psa.py       知識庫查詢工具（搜尋、交叉查詢、跨地圖路線、通行格）
     gui/gui.sh         遊戲畫面操作（截圖、點擊、拖曳、按鍵）；用法與按鈕地圖見 .claude/skills/psa-game-ui/
-                       固定流程腳本（先跑腳本、非 0 才手動；退出碼見各檔開頭）：team.py（組隊 status/check/form/disband）、char.py（切換當前角色）、grind.py（開始 / 恢復練功）、pet.py（寵物 list/set-state/rest-all/store/take）、ass.py（外掛勾選，含 set_many）；
+                       固定流程腳本（先跑腳本、非 0 才手動；退出碼見各檔開頭）：team.py（組隊 status/check/form/disband）、char.py（切換當前角色）、grind.py（開始 / 恢復練功）、pet.py（寵物 list/set-state/rest-all/store/take）、ass.py（外掛勾選，含 set_many）、rebirth.py（漆黑洞窟轉生任務 2004～2008 整段，退出碼 80～89，含 bag.py 背包 / 倉庫、petdrop.py 丟寵物，實機未驗證）；
                        共用模組：spots.py（練級傳送點表，heal 也用）、uikit.py（面板規格 / 禁區保護 / preflight）、charstate.py（當前角色旁路檔）、namematch.py / petmatch.py / digitmatch.py（名字、寵物、HUD 數字的圖樣板比對）；netwatch.py（斷線重連 / 自動登錄，重登後自動 grind ensure）
                        watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；HUD 數值用 digitmatch.py 樣板比對為主、stat.ps1 OCR 補漏；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、test_*（離線測試）
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
@@ -144,6 +144,10 @@ uv run --no-project --with UnityPy python tools/extract/extract.py
 只想重產 Markdown：`uv run --no-project python tools/extract/docs.py`。
 
 ## 7. 開發慣例
+- **任務與操作一律腳本化**（2026-10-11 使用者規定）：之後每個任務、每種遊戲操作行為，都要寫成 `tools/gui/` 底下可以重跑的腳本，不能只靠 agent 手動點一次就結束。
+  - 做法：第一次可以手動探路，但要邊做邊記座標、畫面特徵、例外狀況，做完就把流程寫成腳本，並補離線測試與 ui / skill 文件。
+  - 腳本規範比照現有腳本（team / char / grind / pet / quest / rebirth）：開頭寫用法與分段退出碼；點擊前 `uikit.preflight` 與 `safe_click` 禁區保護；每步驗證，失敗不亂點；可 `import`；支援 `--dry-run`、中斷後可續跑；驗證視窗或斷線就停；不可逆動作（轉生、丟棄、存騎寵）要有明確旗標並先驗名字。
+  - 腳本跑失敗時，先手動完成當次，再把失敗原因修進腳本，記 errlog。
 - Python：查詢工具只用標準函式庫；匯出器需要 UnityPy（用 `uv run --with UnityPy` 臨時載入，不要裝進系統）。本機沒有 `python` / `py` 指令，一律用 `uv run`。
 - C#：用 Windows 內建 `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`，只支援 C# 5（不能用 `$""`、`?.`、`nameof`、`out var`）。
 - 程式註解與文件用繁體中文。

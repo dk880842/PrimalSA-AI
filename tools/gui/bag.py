@@ -1,0 +1,672 @@
+#!/usr/bin/env python3
+"""背包 / 倉庫腳本化（rebirth.py 用）：讀等級、找道具、使用、穿戴、丟棄、公共倉庫取出 / 存入、換武器。只用標準函式庫。
+
+**實機驗證狀態（2026-10-11 寫成時）：整支沒有在遊戲上跑過**（寫的當下遊戲被別的 agent 佔用）。座標 / 特徵取自
+ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache 的 4 張背包截圖 + 倉庫 / 寵物面板負例比對），
+彈窗 / 提示窗 / 等級讀取 / buff 圖示的特徵只有單張樣本，第一次實跑要看 snap（tools/.cache/ui-log/）修正。
+所有動作都是「驗證 → 點 → 驗證」，驗證不過就停、回退出碼、不重點（絕不盲點，見 ui/bag.md 的「取出 732,648 誤進刪除管理」事故）。
+
+用法（專案根目錄；WSL / Windows 原生相同；角色名 DKBO / DKB0 都收）：
+  uv run --no-project python tools/gui/bag.py level DKBO|all              # 唯讀：「N轉M級」（背包中間名牌下方）
+  uv run --no-project python tools/gui/bag.py find DKBO 精靈王之弓 [名稱…]    # 唯讀：每個名稱在背包哪一格
+  uv run --no-project python tools/gui/bag.py use DKBO 龍王的守護           # 背包 → 彈窗名稱核對 → 使用（隊長吃龍王的守護）
+  uv run --no-project python tools/gui/bag.py swap-weapon DKBO [--keep-old] # 穿精靈王之弓、丟舊武器（名稱防護）
+  uv run --no-project python tools/gui/bag.py take DKBO 龍王的守護 [--depot public|personal]   # 倉庫取出（整疊）
+  uv run --no-project python tools/gui/bag.py store DKBO 龍王的守護 [--depot public|personal]  # 倉庫存入
+  uv run --no-project python tools/gui/bag.py drop DKBO 名稱 --confirm-name 名稱               # 丟棄背包道具（名稱必須完全對上）
+最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / find_items / use_item / swap_weapon / depot_take / depot_store / drop_item。
+
+退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；bag 自己 90～96）：
+  90 背包面板打不開 / 分頁不對 / 中途消失（沒點面板內座標）
+  91 左欄角色沒選到（黃框不對 / 名牌不是該角色）
+  92 找不到指定道具（背包或倉庫沒有）
+  93 防護擋下（要丟的名稱是精靈王之弓 / 不是預期名稱 / 沒給舊武器名稱…），零丟棄點擊
+  94 倉庫 / 背包滿
+  95 動作後驗證失敗（不重點；請人看 snap）
+  96 彈窗 / 提示窗名稱 OCR 對不上或讀不到（不點確定）
+
+防護原則：
+  - 丟棄：彈窗名稱與提示窗名稱都必須模糊吻合「預期名稱」，且不能吻合 PROTECT（精靈王之弓…）；任何一塊讀不到 = 不丟。
+  - 紅區（uikit.Panel.forbidden）：刪除管理、擴容、丟棄鈕；只有 drop_item 內 allow=('discard',) 才點丟棄鈕。
+  - 道具浮窗按鈕座標依按鈕文字（OCR）決定：裝備 穿戴 618,662 / 丟棄 826,662；消耗品 使用 628,648 / 丟棄 838,648；
+    可疊加 使用 618,648 / 更多 825,648；只有一顆 使用 732,648；倉庫取出 消耗品 732,648 / 裝備 722,662（ui/bag.md）。
+"""
+import argparse
+import difflib
+import json
+import re
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import charstate  # noqa: E402
+import petmatch  # noqa: E402
+import uikit  # noqa: E402
+
+SRC = 'bag'
+EXIT_PANEL, EXIT_SELECT, EXIT_ITEM, EXIT_GUARD, EXIT_FULL, EXIT_VERIFY, EXIT_NAME = 90, 91, 92, 93, 94, 95, 96
+
+# ---- 版面（2880×1659 截圖座標）----
+BAG_BTN, CLOSE_XY = (1120, 760), (1280, 113)
+TAB_BAG, TAB_DEPOT = (1318, 265), (1318, 467)
+SUB_XY = {'personal': (307, 200), 'public': (547, 200)}
+SUB_PROBE = {'personal': (230, 200), 'public': (480, 200)}        # 選中 = 亮黃 (251,219,135)；沒選 = (171,127,84)
+SUB_ON = (251, 219, 135)
+SLOT_X, SLOT_Y = [752, 860, 966, 1072, 1180], [245, 352, 460]     # 背包格 5×3 可見（ui/bag.md 寫 5×4；第 4 列 / 捲動未量）
+DEPOT_X, DEPOT_Y = [237, 331, 425, 520, 614], [290, 385, 480, 575]
+WEAPON_SLOT = (233, 372)                                            # 裝備格左欄第 3 個（弓箭圖示）
+SLOT_NAME_R = (52, 44, 104, 52)                                     # 格子名稱 OCR 框 = (x-52, y-44, 104, 52)
+POPUP_NAME_BOX = (590, 133, 240, 40)
+POPUP_BTN_BOX = (560, 625, 380, 60)
+LEVEL_BOX = (330, 203, 200, 28)                                     # 「0轉133級」綠字
+NAME_BOX = (330, 176, 200, 26)                                      # 名牌「DKBO」
+BUFF_BOX = (78, 150, 40, 40)                                        # 龍王的守護 buff 圖示（左上、任務欄上方，約 97,170）
+DISCARD_OK = (612, 551)                                             # 提示窗確定 / 丟棄（ui/bag.md 612,544；pet 提示窗 615,557 → 取中間）
+
+FORBID = {'delete_mgr': (700, 598, 540, 56), 'expand': (190, 646, 170, 74)}
+CHROME = [(1280, 113, 197, 70, 43, 30), (730, 688, 50, 95, 150, 30), (730, 625, 168, 55, 32, 30)]
+TAB_BAG_SIG = [(230, 683, 223, 187, 147, 24), (520, 683, 223, 187, 147, 24)]
+TAB_DEPOT_SIG = [(230, 683, 135, 100, 66, 24), (520, 683, 78, 60, 42, 24)]
+POPUP_SIG = [(958, 250, 200, 138, 69, 22), (958, 400, 197, 136, 67, 22), (720, 718, 169, 117, 58, 22), (700, 480, 46, 36, 30, 25)]
+BAGANY = uikit.Panel('BAGANY', BAG_BTN, CHROME, CLOSE_XY, forbidden=FORBID)
+BAG = uikit.Panel('BAG', None, CHROME + TAB_BAG_SIG, CLOSE_XY, forbidden=FORBID)
+DEPOT = uikit.Panel('BAGDEPOT', None, CHROME + TAB_DEPOT_SIG, CLOSE_XY, forbidden=FORBID)
+POPUP = uikit.Panel('BAGPOPUP', None, POPUP_SIG, None, forbidden={'discard': (770, 625, 130, 60)})
+
+# 絕不能丟 / 存的名稱（模糊吻合就擋）
+PROTECT = ['精靈王之弓']
+WAIT_S = 2.0
+POLL_S = 0.15
+LAST: dict = {}
+
+
+def log(msg: str) -> None:
+    print(f'bag：{msg}', file=sys.stderr, flush=True)
+
+
+# ---- 名稱比對（純函式）----
+def norm_name(t) -> str:
+    """去空白 / 標點 / 方括號內容（[地] [水]…）；OCR 常把空白、全半形弄亂"""
+    s = re.sub(r'[\[【（(][^\]】）)]*[\]】）)]', '', str(t or ''))
+    return re.sub(r'[\s\W_]+', '', s)
+
+
+def name_match(text, want, cutoff: float = 0.72) -> bool:
+    """text（OCR 文字，可含多行）是否吻合 want：完全包含，或整體相似度 >= cutoff（OCR 錯一兩字仍過）"""
+    a, w = norm_name(text), norm_name(want)
+    if not a or not w:
+        return False
+    if w in a:
+        return True
+    if difflib.SequenceMatcher(None, a, w).ratio() >= cutoff:
+        return True
+    # 名字被兩行切開或前後多字：用最佳子字串視窗
+    n = len(w)
+    return any(difflib.SequenceMatcher(None, a[i:i + n], w).ratio() >= cutoff for i in range(max(1, len(a) - n + 1)))
+
+
+def protected(text) -> str | None:
+    for p in PROTECT:
+        if name_match(text, p, 0.8):
+            return p
+    return None
+
+
+def parse_level(text) -> tuple | None:
+    """'0轉133級' → (0, 133)；讀不出 None（容許 OCR 把「轉」讀成別字）"""
+    t = re.sub(r'\s+', '', str(text or ''))
+    m = re.search(r'(\d)轉(\d{1,3})級', t) or re.search(r'(\d)\D{1,2}(\d{1,3})級', t)
+    return (int(m[1]), int(m[2])) if m else None
+
+
+def slot_xy(i: int) -> tuple:
+    return SLOT_X[i % 5], SLOT_Y[i // 5]
+
+
+def depot_xy(i: int) -> tuple:
+    return DEPOT_X[i % 5], DEPOT_Y[i // 5]
+
+
+def popup_buttons(text) -> dict:
+    """彈窗按鈕列文字 → {'kind', 按鈕: (x, y)}（依 ui/bag.md 的座標表；kind = equip / stack / consumable / single / depot）"""
+    t = re.sub(r'\s+', '', str(text or ''))
+    d = {}
+    if '穿戴' in t:
+        d.update(kind='equip', 穿戴=(618, 662), 丟棄=(826, 662))
+    elif '取出' in t:
+        d.update(kind='depot', 取出=(732, 648))
+    elif '存入' in t:
+        d.update(kind='depot', 存入=(732, 648))
+    elif '使用' in t and '更多' in t:
+        d.update(kind='stack', 使用=(618, 648))
+    elif '使用' in t and '丟棄' in t:
+        d.update(kind='consumable', 使用=(628, 648), 丟棄=(838, 648))
+    elif '使用' in t:
+        d.update(kind='single', 使用=(732, 648))
+    return d
+
+
+# ---- 遊戲存取縫（測試替換）----
+def _avatar_sel(role: str) -> bool:
+    """左欄頭像黃框剛好只有該角色（與寵物面板同版面：petmatch.AVATAR_TOP_Y）"""
+    import pet
+    roles = list(petmatch.AVATAR_Y)
+    cols = uikit.px([(83, petmatch.AVATAR_TOP_Y[r]) for r in roles])
+    if not cols:
+        return False
+    sel = [pet.is_avatar_sel(c) for c in cols]
+    return sel == [r == role for r in roles]
+
+
+def _sub_on(sub: str) -> bool:
+    cols = uikit.px([SUB_PROBE[sub]])
+    return bool(cols) and all(abs(a - b) <= 24 for a, b in zip(cols[0], SUB_ON))
+
+
+def _buff_icon() -> bool:
+    """buff 圖示：深藍底 + 青色亮點（樣本 quest-log/093317）。讀不到 = False"""
+    x0, y0, w, h = BUFF_BOX
+    pts = [(x0 + i * 5, y0 + j * 5) for i in range(w // 5) for j in range(h // 5)]
+    cols = uikit.px(pts)
+    if not cols:
+        return False
+    cyan = sum(1 for r, g, b in cols if r < 140 and g > 110 and b > 140)
+    navy = sum(1 for r, g, b in cols if r < 60 and g < 70 and b < 110)
+    return cyan >= 3 and navy >= 6
+
+
+def _click(x: int, y: int, panel, note: str, allow=(), wait_ms: int = 350) -> bool:
+    return uikit.safe_click(x, y, panel, note=note, allow=allow, wait_ms=wait_ms)
+
+
+def _wait(pred, secs: float = WAIT_S) -> bool:
+    end = uikit.clock() + secs
+    while True:
+        if pred():
+            return True
+        if uikit.clock() >= end:
+            return False
+        uikit.sleep(POLL_S)
+
+
+def _fail(rc: int, msg: str, tag: str = '') -> int:
+    if tag:
+        uikit.snap(tag)
+    return uikit.fail(SRC, rc, msg)
+
+
+def _ocr_join(box, optsets) -> str:
+    seen = []
+    for o in optsets:
+        seen += [t for t in uikit.ocr(box, *o) if t.strip()]
+        if seen:
+            break
+    return ' '.join(seen)
+
+
+NAME_OPTS = [('-Light', 170, '-Zooms', '2,3'), ('-Dark', 0, '-Zooms', '2,3,4')]
+SLOT_OPTS = [('-Light', 170, '-Zooms', '2,3'), ('-Dark', 120, '-Zooms', '2,3')]
+LEVEL_OPTS = [('-Dark', 0, '-Zooms', '2,3,4'), ('-Light', 120, '-Zooms', '2,3')]
+BTN_OPTS = [('-Dark', 140, '-Zooms', '2,3'), ('-Light', 170, '-Zooms', '2,3')]
+
+
+# ---- 面板 ----
+class Session:
+    """開背包（本來沒開才開 / 才關）並確保在背包分頁；with 後看 self.rc"""
+
+    def __init__(self):
+        self.rc, self.was_open = 0, False
+
+    def __enter__(self):
+        self.rc = uikit.preflight(SRC)
+        if self.rc:
+            return self
+        self.was_open = uikit.is_open(BAGANY)
+        if not self.was_open:
+            ok, _ = uikit.open_panel_ex(BAGANY)
+            if not ok:
+                self.rc = _fail(EXIT_PANEL, '背包面板打不開（沒看到主畫面 HUD 或背包外框特徵）；沒點任何面板內座標', 'bag-open-fail')
+                return self
+        if not uikit.is_open(BAG):
+            self.rc = goto_page('bag')
+        return self
+
+    def __exit__(self, *exc):
+        if not self.was_open and uikit.is_open(BAGANY):
+            uikit.close_panel(BAGANY, known_open=True)
+        return False
+
+
+def goto_page(page: str) -> int:
+    """切背包 / 倉庫分頁並驗證（0 / 90）"""
+    panel, xy = (BAG, TAB_BAG) if page == 'bag' else (DEPOT, TAB_DEPOT)
+    if uikit.is_open(panel):
+        return 0
+    if not _click(xy[0], xy[1], BAGANY, f'bag 切到{page}分頁'):
+        return _fail(EXIT_PANEL, '背包外框特徵不在，沒點分頁', 'bag-tab')
+    if not _wait(lambda: uikit.is_open(panel)):
+        return _fail(EXIT_PANEL, f'點了{page}分頁但特徵沒出現', 'bag-tab')
+    return 0
+
+
+def select_role(role: str, ctx: dict | None = None) -> int:
+    """左欄點頭像 → 黃框剛好只有該角色 + 名牌 OCR 是該角色（0 / 91）"""
+    if role not in petmatch.AVATAR_Y:
+        return _fail(uikit.EXIT_USAGE, f'角色 {role!r} 不在五人白名單')
+    for _ in range(2):
+        if not _click(83, petmatch.AVATAR_Y[role], BAGANY, f'bag 選角色 {role}', wait_ms=500):
+            return _fail(EXIT_PANEL, '背包外框特徵不在，沒點頭像', 'bag-avatar')
+        if _wait(lambda: _avatar_sel(role), 1.5):
+            break
+    else:
+        return _fail(EXIT_SELECT, f'點了 {role} 頭像但黃框不對', f'bag-select-{role}')
+    txt = _ocr_join(NAME_BOX, NAME_OPTS)
+    hit = charstate.norm_char(txt) if txt else None
+    if hit and not charstate.same(hit, role):
+        return _fail(EXIT_SELECT, f'名牌 OCR 是 {hit}，點的是 {role}', f'bag-name-{role}')
+    return 0
+
+
+# ---- 讀 ----
+def read_level(role: str) -> tuple | None:
+    """目前選中角色的 (轉數, 等級)；讀不出 None"""
+    for _ in range(2):
+        v = parse_level(_ocr_join(LEVEL_BOX, LEVEL_OPTS))
+        if v:
+            return v
+        uikit.sleep(0.5)
+    return None
+
+
+def levels(roles) -> tuple:
+    """→ (rc, {role: (trans, level) | None})"""
+    out = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            rc = select_role(r)
+            if rc:
+                return rc, out
+            out[r] = read_level(r)
+    return 0, out
+
+
+def read_slot_name(i: int, depot: bool = False) -> str:
+    x, y = depot_xy(i) if depot else slot_xy(i)
+    dx, dy, w, h = SLOT_NAME_R
+    return _ocr_join((x - dx, y - dy, w, h), SLOT_OPTS)
+
+
+def popup_name() -> str:
+    return _ocr_join(POPUP_NAME_BOX, NAME_OPTS)
+
+
+def popup_open() -> bool:
+    return uikit.is_open(POPUP)
+
+
+def close_popup() -> bool:
+    if not popup_open():
+        return True
+    uikit.gui('seq', 'key {ESC}; wait 300', note='bag ESC 關道具浮窗')
+    return _wait(lambda: not popup_open(), 1.5)
+
+
+def open_slot_popup(i: int, depot: bool = False) -> bool:
+    x, y = depot_xy(i) if depot else slot_xy(i)
+    panel = DEPOT if depot else BAG
+    if not _click(x, y, panel, f'bag 點{"倉庫" if depot else "背包"}第 {i + 1} 格'):
+        return False
+    return _wait(popup_open, 1.2)
+
+
+def n_slots(depot: bool = False) -> int:
+    return 20 if depot else 15
+
+
+def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> int | None:
+    """want 在目前頁（背包 / 倉庫左半）的格號（0 起算）。先逐格 OCR 名稱；找不到再逐格開彈窗讀名稱（慢、保險）"""
+    unread = []
+    for i in range(n_slots(depot)):
+        t = read_slot_name(i, depot)
+        if t and name_match(t, want):
+            return i
+        unread.append(i)
+    if not popup_fallback:
+        return None
+    for i in unread:
+        if not open_slot_popup(i, depot):
+            continue                                  # 空格不會開彈窗
+        nm = popup_name()
+        close_popup()
+        if nm and name_match(nm, want):
+            return i
+    return None
+
+
+def find_items(role: str, names) -> tuple:
+    """唯讀：→ (rc, {名稱: 格號 | None, '_free': 名稱讀不到的格數})。只做格名稱 OCR（不開彈窗），給前置檢查用"""
+    out = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        rc = select_role(role)
+        if rc:
+            return rc, out
+        todo = list(names)
+        free = 0
+        for i in range(n_slots()):                     # 掃全部 15 格（順便數空格：名稱 OCR 空白 = 空格，可能高估，rebirth 只當下限參考）
+            t = read_slot_name(i)
+            if not t.strip():
+                free += 1
+            for nm in list(todo):
+                if t and name_match(t, nm):
+                    out[nm] = i
+                    todo.remove(nm)
+        for nm in todo:
+            out[nm] = None
+        out['_free'] = free
+    return 0, out
+
+
+# ---- 彈窗動作 ----
+def click_popup_button(label: str, allow=()) -> tuple:
+    """彈窗開著：OCR 按鈕列 → 依文字決定座標 → 點 label。回 (rc, kind)"""
+    txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
+    b = popup_buttons(txt)
+    if label not in b:
+        return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，找不到「{label}」鈕（不點）', 'bag-popup-btn'), b.get('kind')
+    x, y = b[label]
+    if not _click(x, y, POPUP, f'bag 彈窗 {label}', allow=allow, wait_ms=500):
+        return _fail(EXIT_PANEL, '彈窗特徵消失，沒點按鈕', 'bag-popup-gone'), b.get('kind')
+    return 0, b['kind']
+
+
+def use_item(role: str, want: str, verify_buff: bool = False) -> int:
+    """背包找 want → 彈窗名稱核對 → 使用。verify_buff = 用 buff 圖示確認（找不到只警告，不重點）。結果 LAST['buff']"""
+    LAST.clear()
+    with Session() as s:
+        if s.rc:
+            return s.rc
+        rc = select_role(role)
+        if rc:
+            return rc
+        i = find_item(want)
+        if i is None:
+            return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
+        if not open_slot_popup(i):
+            return _fail(EXIT_PANEL, f'點第 {i + 1} 格沒開彈窗', 'bag-nopopup')
+        nm = popup_name()
+        if not name_match(nm, want):
+            close_popup()
+            return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不使用）', 'bag-popup-name')
+        rc, _ = click_popup_button('使用')
+        if rc:
+            close_popup()
+            return rc
+        if not _wait(lambda: not popup_open(), 2.0):
+            return _fail(EXIT_VERIFY, '按了使用但彈窗沒關（不重點）', 'bag-use-verify')
+        if verify_buff:
+            LAST['buff'] = _wait(_buff_icon, 3.0)
+            if not LAST['buff']:
+                log('警告：使用後沒看到 buff 圖示（特徵只有單張樣本，可能讀不到；不重點）')
+                uikit.snap('bag-buff-unseen')
+    return 0
+
+
+def equipped_name() -> str | None:
+    """武器格彈窗名稱（空格 = 沒彈窗 → None）；讀完 ESC 關"""
+    if not _click(WEAPON_SLOT[0], WEAPON_SLOT[1], BAG, 'bag 點武器格'):
+        return None
+    if not _wait(popup_open, 1.2):
+        return None
+    nm = popup_name()
+    close_popup()
+    return nm or None
+
+
+def discard_item(role: str, slot: int, expect: str, forbid=None) -> int:
+    """丟棄背包第 slot 格（假設已選好角色、在背包分頁）。彈窗名稱與提示窗名稱都必須吻合 expect 且不吻合 PROTECT / forbid。
+    丟棄鈕只有這裡用 allow=('discard',) 點。成功 = 提示窗關了且該格名稱不再吻合"""
+    bad = list(PROTECT) + list(forbid or [])
+    if protected(expect) or any(name_match(expect, b, 0.8) for b in bad):
+        return _fail(EXIT_GUARD, f'要丟的名稱「{expect}」在保護名單（{bad}）內，拒絕')
+    if not open_slot_popup(slot):
+        return _fail(EXIT_PANEL, f'第 {slot + 1} 格沒開彈窗（空格？），不丟', 'bag-drop-nopopup')
+    nm = popup_name()
+    if not nm or not name_match(nm, expect) or any(name_match(nm, b, 0.8) for b in bad):
+        close_popup()
+        return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是預期的「{expect}」（或在保護名單）→ 不丟', 'bag-drop-name')
+    rc, kind = click_popup_button('丟棄', allow=('discard',))
+    if rc:
+        close_popup()
+        return rc
+    import pet
+    if not _wait(lambda: uikit.is_open(pet.CONFIRM), 2.0):
+        return _fail(EXIT_VERIFY, '按了丟棄但提示窗沒出現（不重點）', 'bag-drop-noconfirm')
+    ct = _ocr_join(pet.CONFIRM_BOX, [('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 120, '-Zooms', '2,3')])
+    if not ct or not name_match(ct, expect) or any(name_match(ct, b, 0.8) for b in bad):
+        uikit.safe_click(813, 557, pet.CONFIRM, note='bag 丟棄提示窗名稱不符 → 取消')
+        return _fail(EXIT_NAME, f'提示窗名稱 OCR 是 {ct!r}，不是預期的「{expect}」→ 已取消', 'bag-drop-confirm-name')
+    if not uikit.safe_click(DISCARD_OK[0], DISCARD_OK[1], pet.CONFIRM, note=f'bag 丟棄「{expect}」確定', wait_ms=600):
+        return _fail(EXIT_VERIFY, '提示窗特徵消失，沒點確定', 'bag-drop-confirm-gone')
+    if not _wait(lambda: not uikit.is_open(pet.CONFIRM), 2.5):
+        return _fail(EXIT_VERIFY, '按了確定但提示窗沒關（不重點）', 'bag-drop-verify')
+    left = read_slot_name(slot)
+    if left and name_match(left, expect):
+        return _fail(EXIT_VERIFY, f'丟完第 {slot + 1} 格仍讀到「{expect}」', 'bag-drop-still')
+    LAST['dropped'] = expect
+    return 0
+
+
+def drop_item(role: str, want: str, confirm_name: str) -> int:
+    """CLI / 外部呼叫：want 與 confirm_name 必須相同才動手（防手誤）"""
+    if norm_name(want) != norm_name(confirm_name):
+        return _fail(EXIT_GUARD, f'--confirm-name {confirm_name!r} 與名稱 {want!r} 不同，不丟')
+    LAST.clear()
+    with Session() as s:
+        if s.rc:
+            return s.rc
+        rc = select_role(role)
+        if rc:
+            return rc
+        i = find_item(want)
+        if i is None:
+            return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
+        return discard_item(role, i, want)
+
+
+def swap_weapon(role: str, bow: str = '精靈王之弓', keep_old: bool = False) -> int:
+    """穿 bow、確認武器格是 bow、（預設）丟舊武器。舊武器名稱 = 穿之前武器格彈窗名稱；讀不到就不丟。結果 LAST"""
+    LAST.clear()
+    with Session() as s:
+        if s.rc:
+            return s.rc
+        rc = select_role(role)
+        if rc:
+            return rc
+        cur = equipped_name()
+        LAST['old'] = cur
+        if cur and name_match(cur, bow):
+            LAST['already'] = True
+            return 0                                    # 已經是弓（續跑）；舊武器早丟過
+        i = find_item(bow)
+        if i is None:
+            return _fail(EXIT_ITEM, f'{role} 背包找不到「{bow}」', 'bag-nobow')
+        if not open_slot_popup(i):
+            return _fail(EXIT_PANEL, f'點第 {i + 1} 格沒開彈窗', 'bag-nopopup')
+        nm = popup_name()
+        if not name_match(nm, bow):
+            close_popup()
+            return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{bow}」（不穿）', 'bag-popup-name')
+        rc, _ = click_popup_button('穿戴')
+        if rc:
+            close_popup()
+            return rc
+        if not _wait(lambda: not popup_open(), 2.0):
+            return _fail(EXIT_VERIFY, '按了穿戴但彈窗沒關', 'bag-equip-verify')
+        now = equipped_name()
+        if not now or not name_match(now, bow):
+            return _fail(EXIT_VERIFY, f'穿戴後武器格彈窗名稱是 {now!r}，不是「{bow}」（不丟舊武器）', 'bag-equip-verify')
+        LAST['equipped'] = True
+        if keep_old:
+            LAST['kept_old'] = True
+            return 0
+        if not cur:
+            return 0                                    # 原本沒武器，沒東西可丟
+        if name_match(cur, bow, 0.8):
+            return _fail(EXIT_GUARD, '舊武器名稱吻合弓，不丟')
+        j = find_item(cur)
+        if j is None:
+            return _fail(EXIT_ITEM, f'穿弓後背包找不到舊武器「{cur}」（不丟別的東西）', 'bag-noold')
+        rc = discard_item(role, j, cur, forbid=[bow])
+        if rc:
+            return rc
+    return 0
+
+
+# ---- 倉庫 ----
+def open_depot(sub: str) -> int:
+    rc = goto_page('depot')
+    if rc:
+        return rc
+    if _sub_on(sub):
+        return 0
+    if not _click(SUB_XY[sub][0], SUB_XY[sub][1], DEPOT, f'bag 倉庫切到{sub}'):
+        return _fail(EXIT_PANEL, '倉庫特徵不在，沒點子分頁', 'bag-depot-sub')
+    if not _wait(lambda: _sub_on(sub), 2.0):
+        return _fail(EXIT_PANEL, f'點了 {sub} 子分頁但底色沒變', 'bag-depot-sub')
+    return 0
+
+
+def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consumable') -> int:
+    """倉庫取出 want（整疊）。kind=equip 時取出鈕在 722,662。成功 = 倉庫左半該格不再吻合，且切回背包能找到"""
+    LAST.clear()
+    with Session() as s:
+        if s.rc:
+            return s.rc
+        rc = select_role(role)
+        if rc:
+            return rc
+        rc = open_depot(depot)
+        if rc:
+            return rc
+        i = find_item(want, depot=True)
+        if i is None:
+            return _fail(EXIT_ITEM, f'{depot} 倉庫找不到「{want}」', 'bag-depot-noitem')
+        if not open_slot_popup(i, depot=True):
+            return _fail(EXIT_PANEL, f'點倉庫第 {i + 1} 格沒開彈窗（空格不要點取出，會進刪除管理）', 'bag-depot-nopopup')
+        nm = popup_name()
+        if not name_match(nm, want):
+            close_popup()
+            return _fail(EXIT_NAME, f'倉庫彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不取）', 'bag-depot-name')
+        txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
+        if '取出' not in re.sub(r'\s+', '', txt):
+            close_popup()
+            return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn')
+        x, y = (722, 662) if kind == 'equip' else (732, 648)
+        if not _click(x, y, POPUP, f'bag 倉庫取出「{want}」', allow=(), wait_ms=700):
+            return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone')
+        if not _wait(lambda: not popup_open(), 2.5):
+            return _fail(EXIT_VERIFY, '按了取出但彈窗沒關（不重點）', 'bag-depot-verify')
+        rc = goto_page('bag')
+        if rc:
+            return rc
+        if find_item(want, popup_fallback=False) is None:
+            return _fail(EXIT_VERIFY, f'取出後背包讀不到「{want}」', 'bag-depot-verify')
+    return 0
+
+
+def depot_store(role: str, want: str, depot: str = 'public') -> int:
+    """背包 want 存入倉庫（彈窗「存入」鈕；整疊）。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存"""
+    LAST.clear()
+    if protected(want):
+        return _fail(EXIT_GUARD, f'「{want}」在保護名單，不存倉')
+    with Session() as s:
+        if s.rc:
+            return s.rc
+        rc = select_role(role)
+        if rc:
+            return rc
+        i = find_item(want)
+        if i is None:
+            return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
+        rc = open_depot(depot)
+        if rc:
+            return rc
+        # 倉庫頁右半是背包，座標同背包頁
+        if not open_slot_popup(i):
+            return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
+        nm = popup_name()
+        if not name_match(nm, want):
+            close_popup()
+            return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
+        rc, _ = click_popup_button('存入')
+        if rc:
+            close_popup()
+            return rc
+        if not _wait(lambda: not popup_open(), 2.5):
+            return _fail(EXIT_VERIFY, '按了存入但彈窗沒關（不重點）', 'bag-store-verify')
+        t = read_slot_name(i)
+        if t and name_match(t, want):
+            return _fail(EXIT_VERIFY, f'存入後第 {i + 1} 格仍讀到「{want}」', 'bag-store-verify')
+    return 0
+
+
+# ---- CLI ----
+def _roles(arg: str):
+    if str(arg).lower() == 'all':
+        return [charstate.display(c) for c in charstate.chars()]
+    hit = charstate.norm_char(arg)
+    return [charstate.display(hit)] if hit else None
+
+
+def _out(rc: int, info: dict) -> int:
+    info.update(ok=rc == 0, rc=rc, **{k: v for k, v in LAST.items() if k not in info})
+    print(json.dumps(info, ensure_ascii=False))
+    return rc
+
+
+def main() -> int:
+    import winenv
+    winenv.enable_server()
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    sub = ap.add_subparsers(dest='cmd', required=True)
+    p = sub.add_parser('level'); p.add_argument('role')
+    p = sub.add_parser('find'); p.add_argument('role'); p.add_argument('names', nargs='+')
+    p = sub.add_parser('use'); p.add_argument('role'); p.add_argument('name')
+    p = sub.add_parser('swap-weapon'); p.add_argument('role'); p.add_argument('--keep-old', action='store_true'); p.add_argument('--bow', default='精靈王之弓')
+    for n in ('take', 'store'):
+        p = sub.add_parser(n); p.add_argument('role'); p.add_argument('name'); p.add_argument('--depot', default='public', choices=['public', 'personal'])
+        p.add_argument('--kind', default='consumable', choices=['consumable', 'equip'])
+    p = sub.add_parser('drop'); p.add_argument('role'); p.add_argument('name'); p.add_argument('--confirm-name', required=True)
+    a = ap.parse_args()
+    roles = _roles(a.role)
+    if not roles:
+        print(f'bag：角色 {a.role!r} 不認得', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, {})
+    r = roles[0]
+    if a.cmd == 'level':
+        rc, d = levels(roles)
+        return _out(rc, {'levels': {k: v for k, v in d.items()}})
+    if a.cmd == 'find':
+        rc, d = find_items(r, a.names)
+        return _out(rc, {'slots': d})
+    if a.cmd == 'use':
+        return _out(use_item(r, a.name, verify_buff=True), {})
+    if a.cmd == 'swap-weapon':
+        return _out(swap_weapon(r, a.bow, a.keep_old), {})
+    if a.cmd == 'take':
+        return _out(depot_take(r, a.name, a.depot, a.kind), {})
+    if a.cmd == 'store':
+        return _out(depot_store(r, a.name, a.depot), {})
+    return _out(drop_item(r, a.name, a.confirm_name), {})
+
+
+if __name__ == '__main__':
+    sys.exit(main())
