@@ -8,13 +8,14 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
 
 用法（專案根目錄；WSL / Windows 原生相同；角色名 DKBO / DKB0 都收）：
   uv run --no-project python tools/gui/bag.py level DKBO|all              # 唯讀：「N轉M級」（背包中間名牌下方）
-  uv run --no-project python tools/gui/bag.py find DKBO 精靈王之弓 [名稱…]    # 唯讀：每個名稱在背包哪一格
+  uv run --no-project python tools/gui/bag.py hp DKBO|all                 # 唯讀：每人 HP（背包頁 HP 條上的「目前/最大」；回 [目前, 最大, %]）
+  uv run --no-project python tools/gui/bag.py find DKBO 精靈王之弓 [名稱…]    # 唯讀：每個名稱在背包哪一格（空格用像素判；「顯示道具名」被關會點開一次）
   uv run --no-project python tools/gui/bag.py use DKBO 龍王的守護           # 背包 → 彈窗名稱核對 → 使用（隊長吃龍王的守護）
   uv run --no-project python tools/gui/bag.py swap-weapon DKBO [--keep-old] # 穿精靈王之弓、丟舊武器（名稱防護）
   uv run --no-project python tools/gui/bag.py take DKBO 龍王的守護 [--depot public|personal]   # 倉庫取出（整疊）
   uv run --no-project python tools/gui/bag.py store DKBO 龍王的守護 [--depot public|personal]  # 倉庫存入
   uv run --no-project python tools/gui/bag.py drop DKBO 名稱 --confirm-name 名稱               # 丟棄背包道具（名稱必須完全對上）
-最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / find_items / use_item / swap_weapon / depot_take / depot_store / drop_item。
+最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / find_items / use_item / swap_weapon / depot_take / depot_store / drop_item。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；bag 自己 90～96）：
   90 背包面板打不開 / 分頁不對 / 中途消失（沒點面板內座標）
@@ -61,6 +62,7 @@ SLOT_NAME_R = (52, 44, 104, 52)                                     # 格子名�
 POPUP_NAME_BOX = (590, 133, 240, 40)
 POPUP_BTN_BOX = (560, 625, 380, 60)
 LEVEL_BOX = (330, 203, 200, 28)                                     # 「0轉133級」綠字
+HP_BOX = (260, 540, 150, 24)                                        # 背包頁左下 HP 條上的「440/571」白字（選中角色的；2026-10-12 實測 OCR 3 種門檻都讀得到）
 NAME_BOX = (330, 176, 200, 26)                                      # 名牌「DKBO」
 BUFF_BOX = (78, 150, 40, 40)                                        # 龍王的守護 buff 圖示（左上、任務欄上方，約 97,170）
 DISCARD_OK = (612, 551)                                             # 提示窗確定 / 丟棄（ui/bag.md 612,544；pet 提示窗 615,557 → 取中間）
@@ -132,6 +134,18 @@ def parse_level(text) -> tuple | None:
     t = re.sub(r'\s+', '', str(text or ''))
     m = re.search(r'(\d)轉(\d{1,3})級', t) or re.search(r'(\d)\D{1,2}(\d{1,3})級', t)
     return (int(m[1]), int(m[2])) if m else None
+
+
+def parse_hp(lines) -> tuple | None:
+    """OCR 各行 → (目前 HP, 最大 HP)：每行抓「數字/數字」、目前 ≤ 最大 > 0，取出現最多次的那組（OCR 偶爾把 440 讀成「4姍」）；讀不出 None"""
+    votes = {}
+    for t in lines or []:
+        m = re.search(r'(\d{1,5})\s*/\s*(\d{1,5})', str(t))
+        if m:
+            v = (int(m[1]), int(m[2]))
+            if 0 < v[1] and v[0] <= v[1]:
+                votes[v] = votes.get(v, 0) + 1
+    return max(votes, key=lambda v: (votes[v], v[1])) if votes else None
 
 
 def slot_xy(i: int) -> tuple:
@@ -251,6 +265,7 @@ def _ocr_join(box, optsets) -> str:
 NAME_OPTS = [('-Light', 170, '-Zooms', '2,3'), ('-Dark', 0, '-Zooms', '2,3,4')]
 SLOT_OPTS = [('-Light', 170, '-Zooms', '2,3'), ('-Dark', 120, '-Zooms', '2,3')]
 LEVEL_OPTS = [('-Dark', 0, '-Zooms', '2,3,4'), ('-Light', 120, '-Zooms', '2,3')]
+HP_OPTS = [('-Light', 200, '-Zooms', '2,3,4'), ('-Dark', 0, '-Zooms', '2,3')]
 BTN_OPTS = [('-Dark', 140, '-Zooms', '2,3'), ('-Light', 170, '-Zooms', '2,3')]
 
 
@@ -336,6 +351,30 @@ def levels(roles) -> tuple:
     return 0, out
 
 
+def read_hp() -> tuple | None:
+    """目前選中角色的 (目前 HP, 最大 HP)（背包頁 HP 條上的字）；讀不出 None"""
+    for o in HP_OPTS:
+        v = parse_hp(uikit.ocr(HP_BOX, *o))
+        if v:
+            return v
+    return None
+
+
+def hps(roles) -> tuple:
+    """唯讀：開背包逐人點左欄頭像讀 HP → (rc, {role: (目前, 最大) | None})。
+    給 questrun 任務之間 / BOSS 後檢查全隊血量（HUD 只有當前角色的 HP；切換面板 / 組隊面板沒有 HP）"""
+    out = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            rc = select_role(r)
+            if rc:
+                return rc, out
+            out[r] = read_hp()
+    return 0, out
+
+
 def read_slot_name(i: int, depot: bool = False) -> str:
     x, y = depot_xy(i) if depot else slot_xy(i)
     dx, dy, w, h = SLOT_NAME_R
@@ -381,6 +420,55 @@ def open_slot_popup(i: int, depot: bool = False) -> bool:
 
 def n_slots(depot: bool = False) -> int:
     return 20 if depot else 15
+
+
+# ---- 背包格有沒有東西（像素）/「顯示道具名」開關（2026-10-12 S3：find 回全 null、_free 15 的根因）----
+# 「顯示道具名」是背包頁右下的開關鈕（968,561），關掉時格子只剩圖示、沒有名稱 → 格名稱 OCR 全空，
+# 舊 find_items 把「OCR 空白」當空格 → 5 人都回 _free 15、全 null（store 走圖示樣板 + 彈窗核對，所以正常）。
+# 改成：空格用像素判（空格內部是均勻棕 (104,74,49)，實測兩張樣本 15 格全中、有道具的格 ≥2 點偏離（最窄的小瓶子圖示實測 4 點、空格 0 點）），
+# 有道具但名稱 OCR 全空 = 開關被關 → 點一次開關、驗證名稱出現。
+NAMES_BTN = (968, 561)
+SLOT_EMPTY = (104, 74, 49)
+SLOT_EMPTY_TOL = 14
+SLOT_PROBE = [(dx, dy) for dx in (-24, -12, 0, 12, 24) for dy in (-20, -10, 0, 10, 20)]   # 格中心周圍 25 點（避開右下數量字）
+SLOT_OCC_MIN = 2
+
+
+def slot_occupied(cols) -> bool:
+    """純函式：某格 SLOT_PROBE 各點顏色 → 有沒有道具（≥ SLOT_OCC_MIN 點偏離空格棕）"""
+    return sum(1 for c in cols if any(abs(a - b) > SLOT_EMPTY_TOL for a, b in zip(c, SLOT_EMPTY))) >= SLOT_OCC_MIN
+
+
+def slot_occupancy() -> list | None:
+    """背包頁 15 格各有沒有道具（一次 uikit.px）；讀不到 None"""
+    pts = [(x + dx, y + dy) for i in range(n_slots()) for x, y in [slot_xy(i)] for dx, dy in SLOT_PROBE]
+    cols = uikit.px(pts)
+    if not cols or len(cols) != len(pts):
+        return None
+    k = len(SLOT_PROBE)
+    return [slot_occupied(cols[i * k:(i + 1) * k]) for i in range(n_slots())]
+
+
+def names_hidden(occ, texts) -> bool:
+    """純函式：有道具的格至少 1 格、而且全部名稱 OCR 都是空白 → 「顯示道具名」被關了"""
+    full = [i for i, o in enumerate(occ or []) if o]
+    return bool(full) and all(not str(texts.get(i) or '').strip() for i in full)
+
+
+def ensure_names_shown(occ: list | None = None) -> bool | None:
+    """背包頁：名稱沒顯示就點「顯示道具名」一次並驗證（第一個有道具的格名稱 OCR 讀得到）。
+    → True（本來就顯示 / 點了後出現）、False（點了仍讀不到，不再點）、None（沒有道具，無從判斷）"""
+    occ = occ if occ is not None else slot_occupancy()
+    first = next((i for i, o in enumerate(occ or []) if o), None)
+    if first is None:
+        return None
+    if read_slot_name(first).strip():
+        return True
+    if not _click(NAMES_BTN[0], NAMES_BTN[1], BAG, 'bag 背包名稱沒顯示 → 點「顯示道具名」', wait_ms=600):
+        return False
+    ok = _wait(lambda: bool(read_slot_name(first).strip()), 2.0)
+    log('已打開「顯示道具名」' if ok else '點了「顯示道具名」名稱仍讀不到')
+    return ok
 
 
 ICON_FILE = HERE / 'fixtures' / 'item_icons.json'         # {名稱: {'bag': [[dx,dy,r,g,b],…], 'depot': […]}}：格子中心周圍 9×9 點的圖示顏色（背包格與倉庫格圖示大小不同，各一份）
@@ -437,6 +525,8 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> in
             if nm and name_match(nm, want):
                 return i
         return None
+    if not depot:
+        ensure_names_shown()                          # 名稱被關掉時格名稱 OCR 全空，只能逐格開彈窗（慢）
     unread = []
     for i in range(n_slots(depot)):
         t = read_slot_name(i, depot)
@@ -456,7 +546,9 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> in
 
 
 def find_items(role: str, names) -> tuple:
-    """唯讀：→ (rc, {名稱: 格號 | None, '_free': 名稱讀不到的格數})。只做格名稱 OCR（不開彈窗），給前置檢查用"""
+    """唯讀（唯一可能的點擊是「顯示道具名」開關）：→ (rc, {名稱: 格號 | None, '_free': 空格數, '_unread': 有道具但名稱讀不到的格號})。
+    空格用像素判（slot_occupancy），只對有道具的格做名稱 OCR；名稱全空 = 「顯示道具名」被關 → 點開再讀（2026-10-12 S3 根因）。
+    像素讀不到時退回舊法（OCR 空白 = 空格，可能高估）"""
     out = {}
     with Session() as s:
         if s.rc:
@@ -464,19 +556,26 @@ def find_items(role: str, names) -> tuple:
         rc = select_role(role)
         if rc:
             return rc, out
+        occ = slot_occupancy()
+        idx = [i for i in range(n_slots()) if occ is None or occ[i]]
+        texts = {i: read_slot_name(i) for i in idx}
+        if occ is not None and names_hidden(occ, texts):
+            if ensure_names_shown(occ):
+                texts = {i: read_slot_name(i) for i in idx}
         todo = list(names)
-        free = 0
-        for i in range(n_slots()):                     # 掃全部 15 格（順便數空格：名稱 OCR 空白 = 空格，可能高估，rebirth 只當下限參考）
-            t = read_slot_name(i)
-            if not t.strip():
-                free += 1
+        for i in idx:
+            t = texts[i]
             for nm in list(todo):
                 if t and name_match(t, nm):
                     out[nm] = i
                     todo.remove(nm)
         for nm in todo:
             out[nm] = None
-        out['_free'] = free
+        if occ is None:
+            out['_free'] = sum(1 for i in idx if not texts[i].strip())
+        else:
+            out['_free'] = occ.count(False)
+            out['_unread'] = [i for i in idx if not texts[i].strip()]
     return 0, out
 
 
@@ -760,6 +859,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('level'); p.add_argument('role')
+    p = sub.add_parser('hp'); p.add_argument('role')
     p = sub.add_parser('find'); p.add_argument('role'); p.add_argument('names', nargs='+')
     p = sub.add_parser('use'); p.add_argument('role'); p.add_argument('name')
     p = sub.add_parser('swap-weapon'); p.add_argument('role'); p.add_argument('--keep-old', action='store_true'); p.add_argument('--bow', default='精靈王之弓')
@@ -776,6 +876,9 @@ def main() -> int:
     if a.cmd == 'level':
         rc, d = levels(roles)
         return _out(rc, {'levels': {k: v for k, v in d.items()}})
+    if a.cmd == 'hp':
+        rc, d = hps(roles)
+        return _out(rc, {'hp': {k: (list(v) + [round(100 * v[0] / v[1])] if v else None) for k, v in d.items()}})
     if a.cmd == 'find':
         rc, d = find_items(r, a.names)
         return _out(rc, {'slots': d})

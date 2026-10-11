@@ -6,6 +6,9 @@
   uv run --no-project python tools/gui/quest.py --once          # 只看一次、做一個動作就結束（除錯用）
   uv run --no-project python tools/gui/quest.py --max-seconds 600 --stop-after-rewards 2
   --max-seconds 的計時（2026-10-11）：自動走路（Auto Walking = 任務進行中）不計入；只有連續非 walking 的閒置 / 其他狀態才耗時限（WalkClock；巡路中途短暫 unknown 1～2 次又回 walking 仍算巡路；單次連續巡路超過 WALK_CAP_S=900 秒不再延長，防卡死）。結束時印「走路不計時 N 秒」，questrun 據此扣總時限。
+  巡路卡住解卡（2026-10-12）：walking 期間每 WALK_POS_EVERY=5 秒讀一次座標（walk.pos，digitmatch），座標連續 WALK_STUCK_S=40 秒不變（座標讀不到時改看世界畫面 WORLD_PTS 取樣 ≥90% 不變 = 鏡頭沒動）→ 存 snap walk-stuck、
+           點附近安全地面一下（walk.unstick_click：通行格、離 NPC / 出口 ≥ 2 格、不在 UI 上；沒有通行格資料 / 只有畫面判斷沒座標就直接重點追蹤卡片）→ 停下後照「對話後先點追蹤」重點追蹤；
+           事件 log + errlog 各記一筆；同一次執行解卡超過 WALK_UNSTICK_MAX=3 次 → 退出碼 19（27～29 是舊外掛逃跑碼，不重用）。
   對話結束後一律先按追蹤（2026-10-11）：對話框 / 領獎關閉回主畫面後，第一個動作是點追蹤欄該任務卡片（標題相符才點，post_track_try）；卡片不在、或點了約 5 秒（TRACK_RETRY_SECS ×2）沒反應才改找黃色問號（沒反應不再直接退出碼 3；黃問號也沒用，之後照舊 2 次追蹤失敗才退出碼 3）。沒對話過的啟動 / 一般閒置仍是先找黃問號、再追蹤。
   選項：--task 任務名（要點追蹤時，先用 OCR 認出追蹤列表每一格的標題，名稱相符才點；不符就捲動列表再找，找不到退出碼 5，絕不點其他任務。
           沒給 --task 又沒給 --no-track 會直接拒絕執行）、--no-marker（不找 NPC 頭上的黃色問號）、
@@ -53,7 +56,7 @@
            `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
-退出碼：37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -483,8 +486,18 @@ TAB_TEAM = (260, 236)                # 左側面板「組隊」分頁鈕
 # 只取分頁鈕「文字上方 y=222、文字下方 y=250」兩排（y=226~246 會踩到「任務 / 組隊」字，讀數亂跳）。
 # 任務分頁 x=130、組隊分頁 x=270；四點全部一致才算（組隊選中：(130,*)≈(87,68,41) 且 (270,*)≈(215,183,135)；任務選中相反）
 TAB_PROBE = ((130, 222), (130, 250), (270, 222), (270, 250))
-# 隊長列左上角的紅色「隊」字標（組隊分頁、自己是隊長才有；四點量到 ≈(217,33,33)；任務分頁同位置是米色 ≈(245,223,187)）
-LEADER_BADGE = ((100, 306), (128, 306), (100, 312), (130, 312))
+# 隊長列頭像左上角的隊長標（組隊分頁、自己是隊長才有）。2026-10-10 是寬約 45 px 的紅「隊」字標（舊四點 (100..130, 306..312) ≈(217,33,33)）；
+# 2026-10-12 S3 起變成約 16×16 的小紅框黃「L」標（x 96～111、y 298～313），舊四點全落空 → disband 誤判「已是單人」（errlog #242）。
+# 改成在頭像左上區域 x 90～136、y 296～318 每 2 px 取樣數「純紅」點（R>170、G<50、B<50）：
+# 新 L 標 16 點、舊隊字標 130 點；沒有標的頭像（橘髮最紅處 G≥0x80）與已解散畫面 0 點（fixtures/leader_badge_px.json）
+LEADER_BADGE_PTS = [(x, y) for y in range(296, 319, 2) for x in range(90, 137, 2)]
+LEADER_BADGE_MIN = 8
+LEADER_BADGE = LEADER_BADGE_PTS                          # 舊名稱（相容）
+
+
+def leader_badge_red(cols) -> int:
+    """純函式：LEADER_BADGE_PTS 各點顏色 → 純紅點數"""
+    return sum(1 for r, g, b in cols if r > 170 and g < 50 and b < 50)
 
 
 def tab_state() -> str | None:
@@ -502,13 +515,13 @@ def tab_state() -> str | None:
 
 
 def has_leader_badge() -> bool | None:
-    """組隊分頁隊長列有沒有紅色「隊」字標（四點都是紅：R>190、G<70、B<70）；讀不到回 None"""
+    """組隊分頁隊長列頭像左上有沒有隊長標（舊紅「隊」字 / 新小「L」都算：純紅點 ≥ LEADER_BADGE_MIN）；讀不到回 None"""
     try:
-        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in LEADER_BADGE)).split()
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in LEADER_BADGE_PTS)).split()
         cols = [tuple(int(v) for v in c.split(',')) for c in out]
-        if len(cols) != len(LEADER_BADGE):
+        if len(cols) != len(LEADER_BADGE_PTS):
             return None
-        return all(r > 190 and g < 70 and b < 70 for r, g, b in cols)
+        return leader_badge_red(cols) >= LEADER_BADGE_MIN
     except Exception:
         return None
 
@@ -532,7 +545,7 @@ def disband_team() -> int:
     """對話步完成後立刻解散（/psa-disband-team 的自動版）。每一步都驗證，驗不過就停、不再點（寧可退出碼 26 也不亂點，
     避免點到 y≈325 的任務追蹤條目觸發自動巡路）：
     1. 切組隊分頁 260,236 → tab_state()=='team'（四點像素；沒切過去再點一次；換圖後第一下點擊常被吃掉）
-    2. 隊長列有紅色「隊」字標（has_leader_badge）才繼續；沒有 = 已是單人（只剩「創建隊伍」）或不是隊長 → 不點任何東西，退出碼 0
+    2. 隊長列有隊長標（舊紅「隊」字 / 新小「L」，has_leader_badge）才繼續；沒有 = 已是單人（只剩「創建隊伍」）或不是隊長 → 不點任何東西，退出碼 0
     3. 點隊長列 210,320 → 左側面板像素必須變了（選單彈出）才點解散；分頁又變回任務 = 點到別的東西 → 停
     4. 點解散 200,372 → 分頁仍是組隊、面板像素變了、隊長紅標消失才算成功"""
     for attempt in range(2):
@@ -695,6 +708,95 @@ class WalkClock:
 
     def expired(self, now: float) -> bool:
         return now >= self.end
+
+
+WALK_STUCK_S = 40.0                  # Auto Walking 但座標連續這麼久沒變 = 巡路卡住（2026-10-12 吉魯島 121,170 站了 40 分鐘；正常巡路每 1～2 秒就換格，換圖讀取 ≤ 3 秒）
+WALK_POS_EVERY = 5.0                 # 巡路中每隔這麼久讀一次座標（digitmatch 約 0.1 秒）
+WALK_UNSTICK_MAX = 3                 # 同一次 quest.py 最多自動解卡這麼多次，再卡 → 退出碼 19（交人；27～29 舊碼不重用）
+EXIT_WALK_STUCK = 19
+
+
+def _errlog(msg: str, fixed: str | None = None) -> None:
+    """寫 errlog 一筆（psa-hud pane 顯示）；失敗不影響主流程"""
+    try:
+        import errlog
+        errlog.add(msg, fix=fixed, source='quest')
+    except Exception as e:
+        log(f'errlog 寫入失敗：{e}')
+
+
+class WalkStuck:
+    """自動巡路卡住偵測（純邏輯，時間 / 座標由呼叫端傳入）：狀態一直是 walking、座標 (地圖, x, y) 連續 stuck_s 秒不變 → feed 回 True。
+    中途短暫 unknown / error 不重設（讀圖失敗）；其他狀態（閒置、對話、戰鬥…）= 不是在巡路 → 重設。讀不到座標的那次不算"""
+
+    def __init__(self, stuck_s: float = WALK_STUCK_S, every: float = WALK_POS_EVERY):
+        self.stuck_s, self.every = stuck_s, every
+        self.pos, self.t0, self.read_t, self.tries = None, 0.0, -1e9, 0
+        self.sig = None                                  # 座標讀不到時的備援：世界畫面取樣（WORLD_PTS）
+
+    def reset(self) -> None:
+        self.pos, self.t0, self.read_t, self.sig = None, 0.0, -1e9, None
+
+    def due(self, st: str, now: float) -> bool:
+        """這一輪要不要讀座標（walking 且距上次讀 >= every）；非巡路狀態順便重設"""
+        if st != 'walking':
+            if st not in ('unknown', 'error'):
+                self.reset()
+            return False
+        return now - self.read_t >= self.every
+
+    def feed(self, pos, now: float) -> bool:
+        self.read_t = now
+        if not pos:
+            return False
+        if pos != self.pos:
+            self.pos, self.t0 = pos, now
+            return False
+        return now - self.t0 >= self.stuck_s
+
+    def feed_sig(self, sig, now: float) -> bool:
+        """座標讀不到（地圖名兩行等，HUD 座標 OCR 失敗）時改看畫面：世界畫面取樣點 ≥ WORLD_SAME_RATIO 跟起點一樣 = 鏡頭沒動
+        （巡路中鏡頭跟著角色捲動，幾乎每點都會變）；連續 stuck_s 秒 → True。self.pos 記 'screen' 表示是畫面判斷"""
+        self.read_t = now
+        if not sig:
+            return False
+        if self.sig is None or not world_same(self.sig, sig):
+            self.sig, self.pos, self.t0 = sig, 'screen', now
+            return False
+        return now - self.t0 >= self.stuck_s
+
+    def stuck_for(self, now: float) -> float:
+        return now - self.t0 if self.pos else 0.0
+
+
+# 世界畫面取樣點（避開左側面板 x<400、右上地圖 / 傳送、底部按鈕列、聊天框，以及角色本身 ME 715,410 附近 ±90 的原地走路動畫）
+WORLD_PTS = [(x, y) for x in range(460, 1261, 100) for y in range(160, 601, 55)
+             if not (625 <= x <= 805 and 320 <= y <= 500)]
+WORLD_TOL, WORLD_SAME_RATIO = 12, 0.9
+
+
+WORLD_DARK, WORLD_MIN_INFO = 40, 15
+
+
+def world_same(a, b) -> bool:
+    """純函式：兩次世界畫面取樣是否「鏡頭沒動」：只看「不是兩次都全黑」的點（洞窟的黑色虛空捲動前後都黑，不能當證據），
+    這種點要 ≥ WORLD_MIN_INFO 個，且 ≥ WORLD_SAME_RATIO 每色差 ≤ WORLD_TOL（水 / 火把等小動畫容許）；不夠就回 False（不判卡住）"""
+    if not a or not b or len(a) != len(b):
+        return False
+    info = [(p, q) for p, q in zip(a, b) if max(p) > WORLD_DARK or max(q) > WORLD_DARK]
+    if len(info) < WORLD_MIN_INFO:
+        return False
+    same = sum(1 for p, q in info if all(abs(u - v) <= WORLD_TOL for u, v in zip(p, q)))
+    return same >= WORLD_SAME_RATIO * len(info)
+
+
+def read_world_sig() -> list | None:
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in WORLD_PTS)).split()
+        cols = [tuple(int(v) for v in c.split(',')) for c in out]
+        return cols if len(cols) == len(WORLD_PTS) else None
+    except Exception:
+        return None
 
 
 def find_irreversible(texts: list[str], keywords=None) -> list[str]:
@@ -1355,6 +1457,7 @@ def _main() -> int:
         event(f'清理 {n_old} 張 {SHOT_KEEP_DAYS} 天前截圖')
     wclock = WalkClock(a.max_seconds, time.time())       # 自動走路中不計時（只有連續非 walking 才耗 --max-seconds）
     WALK['clock'] = wclock
+    wstuck = WalkStuck()                                 # Auto Walking 但座標不動 → 點地面解卡（WALK_STUCK_S）
     marker_fail = 0              # 連續點黃色問號沒反應的次數
     task_miss = 0
     event(f'開始監測（每 {a.every}s，最長 {a.max_seconds}s）')
@@ -1547,6 +1650,29 @@ def _main() -> int:
                 print('對話無進展，已停手', flush=True)
                 return EXIT_NO_PROGRESS
         stall_prev = st
+        stuck_now = False
+        if wstuck.due(st, time.time()):
+            wp = walk.pos()                                    # 座標讀不到（地圖名兩行時 HUD 座標 OCR 失敗）→ 改比世界畫面取樣
+            stuck_now = wstuck.feed(wp, time.time()) if wp else wstuck.feed_sig(read_world_sig(), time.time())
+        if stuck_now:
+            # 自動巡路卡住（2026-10-12 吉魯島 121,170：傳送落點緊鄰出口 122,170，Auto Walking 站著不動 40 分鐘，點一下地面才解開）
+            wstuck.tries += 1
+            secs = wstuck.stuck_for(time.time())
+            shot = snap('walk-stuck')
+            if wstuck.tries > WALK_UNSTICK_MAX:
+                event(f'自動巡路又卡住（座標 {wstuck.pos} {secs:.0f} 秒沒變，已自動解卡 {WALK_UNSTICK_MAX} 次）→ 停手，退出碼 {EXIT_WALK_STUCK}', shot)
+                _errlog(f'quest 自動巡路卡住 {wstuck.pos} 解卡 {WALK_UNSTICK_MAX} 次仍卡，退出碼 {EXIT_WALK_STUCK}')
+                return EXIT_WALK_STUCK
+            xy = walk.unstick_click(*wstuck.pos) if isinstance(wstuck.pos, tuple) else None   # 畫面判斷的（沒有座標）→ 不點地面，直接重點追蹤
+            if xy is None and a.task and not a.no_track:
+                track_task(a.task)                         # 沒有通行格資料 / 附近沒有安全格：不點地面，直接重點追蹤卡片
+            event(f'自動巡路卡住：Auto Walking 但座標 {wstuck.pos} {secs:.0f} 秒沒變 → '
+                  + (f'點地面 {xy}（第 {wstuck.tries} 次），停下後重點追蹤' if xy else f'找不到安全地面，直接重點追蹤（第 {wstuck.tries} 次）'), shot)
+            _errlog(f'quest 自動巡路卡住 {wstuck.pos} {secs:.0f} 秒 → ' + (f'點地面 {xy}' if xy else '重點追蹤'), fixed='quest.WalkStuck 自動解卡')
+            wstuck.reset()
+            post_track, tracked = True, False
+            time.sleep(a.every)
+            continue
         if st in ('walking', 'dialog', 'reward', 'battle'):
             if tracked:
                 tracked, track_fail = False, 0

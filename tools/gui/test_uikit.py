@@ -169,16 +169,20 @@ class EatFirst(Game):
     def gui(self, *args, note=''):
         if args[0] == 'seq' and 'click' in args[1]:
             self.times.append(self.t)
+            self.t += 0.2                                 # 實機每次 seq（PowerShell 往返）約 0.1～0.3 s
             if self.eat > 0:
                 self.eat -= 1
                 self.clicks.append(uikit.SWITCH.open_xy)
+                if 'waitpix' in args[1]:                  # 實機：面板沒開時 waitpix 會等滿 WAIT_OPEN_MS 才回來（舊假畫面不耗時，漏掉 S3 rc 40 的根因）
+                    self.t += uikit.WAIT_OPEN_MS / 1000
                 return ''
         return super().gui(*args, note=note)
 
 
 g = install(EatFirst(panel=False, hud=True))
 ok_ = uikit.open_panel(uikit.SWITCH, timeout=4.0)
-check('開面板第 1 下被吃掉：隔 >= RECLICK_S 才點第 2 下（不連點）並開成功', ok_ is True and len(g.times) == 2 and g.times[1] - g.times[0] >= uikit.RECLICK_S, f'times={g.times}')
+check('開面板第 1 下被吃掉：隔 >= RECLICK_S 才點第 2 下（不連點）並在 4 s timeout 內開成功（S3 rc 40 根因：舊版第 2 下要等 waitpix 1.5 s + 2.5 s，超過 timeout）',
+      ok_ is True and len(g.times) == 2 and uikit.RECLICK_S <= g.times[1] - g.times[0] < 4.0, f'times={g.times}')
 g = install(EatFirst(panel=False, hud=True))
 g.eat = 99
 ok_ = uikit.open_panel(uikit.SWITCH, timeout=4.0)

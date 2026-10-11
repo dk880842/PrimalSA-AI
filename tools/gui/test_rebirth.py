@@ -316,6 +316,7 @@ class FakeBag:
         self.page, self.role, self.popup, self.confirm = 'bag', 'DKBO', None, None
         self.clicks, self.discarded, self.used = [], [], 0
         self.open = True
+        self.names_shown = True                           # 「顯示道具名」開關（False = 格子只有圖示，名稱 OCR 全空）
 
     def install(self):
         bag.load_icons = lambda: {}                       # 假背包沒有真實圖示像素：走名稱 OCR / 彈窗核對的舊路徑
@@ -326,7 +327,7 @@ class FakeBag:
         uikit.is_open = self.is_open
         uikit.gui = self.gui
         uikit.ocr = self.ocr
-        uikit.px = lambda pts: [(0, 0, 0)] * len(list(pts))
+        uikit.px = self.px
         uikit.open_panel_ex = lambda p, **k: (True, True)
         uikit.close_panel = lambda p, known_open=False: True
         bag._avatar_sel = lambda role: self.role == role
@@ -351,6 +352,14 @@ class FakeBag:
             if abs(x - sx) < 50 and abs(y - sy) < 50:
                 return i
         return None
+
+    def px(self, pts):
+        """背包格內的點：空格回空格棕、有道具回紅；其他點回黑"""
+        out = []
+        for x, y in pts:
+            i = self.slot_at(x, y) if self.page == 'bag' and self.popup is None else None
+            out.append((0, 0, 0) if i is None else (bag.SLOT_EMPTY if self.slots[i] is None else (200, 40, 40)))
+        return out
 
     def gui(self, *args, note=''):
         cmd = args[1] if args and args[0] == 'seq' else ''
@@ -383,6 +392,9 @@ class FakeBag:
                 self.used += 1
                 self.popup = None
             return
+        if (x, y) == bag.NAMES_BTN:
+            self.names_shown = not self.names_shown
+            return
         if (x, y) == bag.WEAPON_SLOT:
             if self.weapon:
                 self.popup = (self.weapon, 'equip')
@@ -411,7 +423,7 @@ class FakeBag:
             sx, sy = bag.slot_xy(i)
             dx, dy, w, h = bag.SLOT_NAME_R
             if box == (sx - dx, sy - dy, w, h):
-                return [self.slots[i]] if self.slots[i] else []
+                return [self.slots[i]] if self.slots[i] and self.names_shown else []
         return []
 
 
@@ -475,6 +487,30 @@ check('use_item：彈窗名稱不符 → 96，不使用', quiet(bag.use_item, 'D
 fb = FakeBag(['大地的羈絆', None, '龍王的守護']).install()
 rc, d = quiet(bag.find_items, 'DKBO', ['大地的羈絆', '水的戒指'])
 check('find_items：找到 / 沒找到 / 空格數', rc == 0 and d['大地的羈絆'] == 0 and d['水的戒指'] is None and d['_free'] == 13, str(d))
+check('find_items：名稱開著不點開關', bag.NAMES_BTN not in fb.clicks)
+# 2026-10-12 S3：「顯示道具名」被關 → 舊版回全 null、_free 15；現在像素判空格 + 點開關一次再讀
+fb = FakeBag(['大地的羈絆', None, '龍王的守護']).install()
+fb.names_shown = False
+rc, d = quiet(bag.find_items, 'DKBO', ['大地的羈絆', '龍王的守護', '水的戒指'])
+check('find_items：名稱被關 → 點開關 1 次、找到、空格數用像素', rc == 0 and d['大地的羈絆'] == 0 and d['龍王的守護'] == 2 and d['水的戒指'] is None
+      and d['_free'] == 13 and fb.clicks.count(bag.NAMES_BTN) == 1 and fb.names_shown and d['_unread'] == [], str(d))
+fb = FakeBag([]).install()
+rc, d = quiet(bag.find_items, 'DKBO', ['大地的羈絆'])
+check('find_items：全空 → _free 15、不點開關', rc == 0 and d['_free'] == 15 and d['大地的羈絆'] is None and bag.NAMES_BTN not in fb.clicks, str(d))
+fb = FakeBag(['大地的羈絆']).install()
+fb.names_shown = False
+fb.click = (lambda orig: (lambda x, y: None if (x, y) == bag.NAMES_BTN else orig(x, y)))(fb.click)   # 開關點了沒反應
+rc, d = quiet(bag.find_items, 'DKBO', ['大地的羈絆'])
+check('find_items：開關點了沒反應 → 不重點、回 _unread', rc == 0 and d['大地的羈絆'] is None and d['_unread'] == [0] and d['_free'] == 14, str(d))
+check('names_hidden 純函式', bag.names_hidden([True, False], {0: ''}) and not bag.names_hidden([True, False], {0: '儀之兜'}) and not bag.names_hidden([False], {}))
+# 實機像素樣本（fixtures/bag_slots_px.json）：名稱關 / 開兩種背包，空格判定要與人工標記一致
+import json as _json
+_fx = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'bag_slots_px.json').read_text(encoding='utf-8'))
+for _name, _img in _fx['images'].items():
+    _k = len(bag.SLOT_PROBE)
+    _cols = [tuple(int(h[j:j + 2], 16) for j in (0, 2, 4)) for h in _img['px']]
+    _occ = ''.join('X' if bag.slot_occupied(_cols[i * _k:(i + 1) * _k]) else '.' for i in range(15))
+    check(f'slot_occupied 實機樣本 {_name}', _occ == _img['expect'], _occ)
 rc, lv = quiet(bag.levels, ['DKBO', 'DKBO2'])
 check('levels：兩人 (0,133)', rc == 0 and lv == {'DKBO': (0, 133), 'DKBO2': (0, 133)}, str(lv))
 

@@ -305,16 +305,19 @@ def open_panel_ex(p: Panel, timeout: float = 4.0, hud_wait: float = 0.0) -> tupl
                 end = max(end, clock() + timeout)
         if hud and clicked < 3 and (clicked == 0 or clock() - last_click_t >= RECLICK_S):
             if tol is not None:
+                # last_click_t 記「點下去的時間」，不是 seq 回來的時間：沒開時 waitpix 會耗掉 WAIT_OPEN_MS（1.5 s），
+                # 舊版在 seq 回來後才記 → 第 2 下最早在 1.5 + 2.5 = 4 s 後，剛好超過 4 s timeout，永遠不補點
+                # （2026-10-12 S3：任務接取後 team.form 第一下被吃掉 → rc 40，每個任務幾乎都 1 次；hud_wait 修正管不到，因為 HUD 一直在）
+                last_click_t = clock()
                 out = gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; waitpix {WAIT_OPEN_MS} {screen_sigs.sig_str(p.sig)} {tol}', note=f'uikit 開 {p.name} 面板')
                 clicked += 1
-                last_click_t = clock()
                 LAST_OPEN['clicked'] = clicked
                 if _seq_ok(out) or is_open(p):
                     return True, was_open
             else:
+                last_click_t = clock()
                 gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; wait {p.settle_ms}', note=f'uikit 開 {p.name} 面板')
                 clicked += 1
-                last_click_t = clock()
                 LAST_OPEN['clicked'] = clicked
                 if is_open(p):
                     return True, was_open

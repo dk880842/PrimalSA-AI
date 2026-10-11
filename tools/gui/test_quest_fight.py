@@ -86,6 +86,7 @@ def run(argv, sim, real_verify=False):
     quest.time.time, quest.time.sleep = sim.time, sim.sleep
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: POS_FN()
     quest.walk.gui = sim.gui
+    quest.walk.pos = getattr(sim, 'pos', lambda: None)     # 巡路卡住偵測讀座標：測試一律假的（絕不讀真遊戲）
     quest.check_team = fake_team
     quest.read_dialog_texts = fake_dialog_texts
     quest.snap = lambda tag: 'sim.png'
@@ -258,6 +259,16 @@ print('(h) --disband-after（分頁 / 隊長紅標像素用 2026-10-10 實機量
 TAB_TEAM_PX = {'130,222': '87,68,41', '130,250': '85,65,41', '270,222': '215,185,139', '270,250': '205,173,131'}   # 組隊分頁選中
 TAB_TASK_PX = {'130,222': '213,179,128', '130,250': '211,179,128', '270,222': '90,69,41', '270,250': '87,70,41'}   # 任務分頁選中
 BADGE_RED, BADGE_NONE = '217,33,33', '245,223,187'
+# 實機樣本（fixtures/leader_badge_px.json）：新小「L」標 / 舊紅「隊」字標 / 已解散
+import json as _json
+_LB = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'leader_badge_px.json').read_text(encoding='utf-8'))['images']
+
+
+def _lb_cols(h):
+    return [tuple(int(h[i + j:i + j + 2], 16) for j in (0, 2, 4)) for i in range(0, len(h), 6)]
+
+
+BADGE_L_PX = ['%d,%d,%d' % c for c in _lb_cols(_LB['quest-log/020133-disband-already-solo.png']['px'])]
 
 
 def px_fake(tab=TAB_TEAM_PX, badges=(True, False)):
@@ -268,9 +279,9 @@ def px_fake(tab=TAB_TEAM_PX, badges=(True, False)):
         pts = args[1].split()
         if pts[0] == '130,222':
             return ' '.join(tab[p] for p in pts)
-        if pts[0] == '100,306':
+        if pts[0] == '%d,%d' % quest.LEADER_BADGE_PTS[0]:
             b = next(it, False)
-            return 'err' if b == 'err' else ' '.join([BADGE_RED if b else BADGE_NONE] * 4)
+            return 'err' if b == 'err' else ' '.join(BADGE_L_PX if b else [BADGE_NONE] * len(pts))
         return ''
     return pixel
 
@@ -285,6 +296,9 @@ ok &= check('has_leader_badge 紅標 True', quest.has_leader_badge() is True)
 ok &= check('has_leader_badge 米色 False', quest.has_leader_badge() is False)
 quest.gui = Script([IDLE], px_fake(badges=('err',))).gui
 ok &= check('has_leader_badge 讀不到 None', quest.has_leader_badge() is None)
+for _k, _v in _LB.items():
+    _n = quest.leader_badge_red(_lb_cols(_v['px']))
+    ok &= check(f'隊長標實機樣本 {_k} → {_v["expect"]}', (_n >= quest.LEADER_BADGE_MIN) == _v['expect'], f'紅點 {_n}')
 
 
 def disband_case(name, tab, badges, sigs, want_rc, want_btn, want_leader):
@@ -1200,6 +1214,82 @@ ok &= check('內文含「轉生」即使左鈕是戰鬥 → 不按、退出碼 3
 DLG.update(body=['你要進入裏面嗎？那趕緊通過吧！'], buttons=['完成', '再見'])
 quest.ps_json, quest.gui = _keep_ps2, _keep_gui2
 quest.read_screen = REAL_READ_SCREEN
+
+# ---- 自動巡路卡住解卡（2026-10-12 吉魯島 300:121,170 Auto Walking 站 40 分鐘）----
+print('(w) WalkStuck 巡路卡住偵測 / pick_unstick 選地面')
+ws = quest.WalkStuck(stuck_s=40, every=5)
+seq = [('walking', (300, 121, 170), t) for t in range(0, 45, 5)]
+hits = [ws.feed(p_, t) for st_, p_, t in seq if ws.due(st_, t)]
+ok &= check('同座標 walking 40 秒 → stuck', hits[-1] is True and not any(hits[:-1]), str(hits))
+ws = quest.WalkStuck(stuck_s=40, every=5)
+hits = [ws.feed((300, 121 + t // 10, 170), t) for t in range(0, 60, 5) if ws.due('walking', t)]
+ok &= check('座標有在變 → 不算卡住', not any(hits))
+ws = quest.WalkStuck(stuck_s=40, every=5)
+for t in range(0, 35, 5):
+    if ws.due('walking', t):
+        ws.feed((300, 121, 170), t)
+ws.due('unknown', 36)                                  # 讀圖失敗一次不重設
+ok &= check('中途 unknown 不重設、40 秒到 → stuck', ws.due('walking', 40) and ws.feed((300, 121, 170), 40))
+ws.due('idle', 41)
+ok &= check('閒置 → 重設', ws.pos is None)
+ws = quest.WalkStuck(stuck_s=40, every=5)
+ok &= check('讀不到座標不算', not any(ws.feed(None, t) for t in range(0, 100, 5)))
+cs = quest.walk._cells(300)
+d = quest.walk.pick_unstick(cs, quest.walk.exits_of(300), 121, 170)
+ok &= check('吉魯島 121,170：選通行格、離出口 122,170 / 守門人 118,171 ≥ 2 格', d is not None and cs[2][(170 + d[1]) * cs[0] + 121 + d[0]] == 1
+            and max(abs(121 + d[0] - 122), abs(170 + d[1] - 170)) >= 2 and max(abs(121 + d[0] - 118), abs(170 + d[1] - 171)) >= 2, str(d))
+ok &= check('沒有通行格資料 → None（不亂點）', quest.walk.pick_unstick(None, set(), 1, 1) is None)
+w_, h_ = 7, 7
+ok &= check('四周全是障礙 → None', quest.walk.pick_unstick((w_, h_, bytes([2]) * (w_ * h_), set()), set(), 3, 3) is None)
+
+
+class WalkSim(Sim):
+    """Auto Walking 一直站著不動，直到點了地面（非引子、非 UI 的 click）才停下變閒置"""
+
+    def __init__(self):
+        super().__init__()
+        self.unstuck = False
+
+    def gui(self, *args, note=''):
+        out = super().gui(*args, note=note)
+        if 'click 747 479' in (args[1] if args[0] == 'seq' else ''):
+            self.unstuck = True
+        return out
+
+    def screen(self):
+        return dict(IDLE) if self.unstuck else {'state': 'walking', 'gold': 26, 'full': False, 'cmd': False, 'auto_off': False}
+
+
+ERRS = []
+_keep_err = quest._errlog
+quest._errlog = lambda m, fixed=None: ERRS.append((m, fixed))
+s = WalkSim()
+s.pos = lambda: (300, 121, 170)
+rc = run(['--no-track', '--max-seconds', '30'], s)
+clk = [c for c in s.clicks if 'click 747 479' in c[1]]
+ok &= check('主迴圈：walking 座標 40 秒不變 → 點地面 747,479 一次、記 errlog', len(clk) == 1 and 40 <= clk[0][0] <= 50 and len(ERRS) == 1, f'rc={rc} {clk} {ERRS}')
+# 座標讀不到（地圖名兩行，HUD 座標 OCR 失敗）→ 改比世界畫面取樣；實機樣本 fixtures/world_px.json
+import json as _json2
+_W = _json2.loads((Path(__file__).resolve().parent / 'fixtures' / 'world_px.json').read_text(encoding='utf-8'))['images']
+_h = lambda L: [tuple(int(x[i:i + 2], 16) for i in (0, 2, 4)) for x in L]
+for _k, _v in _W.items():
+    ok &= check(f'world_same 實機 {_k}：同一張 True、鏡頭捲 1 格 False', quest.world_same(_h(_v['base']), _h(_v['base'])) and not quest.world_same(_h(_v['base']), _h(_v['moved'])))
+_black = [(5, 5, 5)] * len(quest.WORLD_PTS)
+ok &= check('world_same：全黑（洞窟虛空）不當證據 → False', not quest.world_same(_black, _black))
+ws = quest.WalkStuck(stuck_s=40, every=5)
+_base = _h(next(iter(_W.values()))['base'])
+ok &= check('feed_sig：畫面 40 秒不變 → stuck、pos = screen', [ws.feed_sig(_base, t) for t in range(0, 45, 5)][-1] and ws.pos == 'screen')
+ERRS.clear()
+quest._errlog = lambda m, fixed=None: ERRS.append((m, fixed))
+_keep_ws, _keep_tt = quest.read_world_sig, quest.track_task
+TT = []
+quest.read_world_sig = lambda: _base
+quest.track_task = lambda want, *a_, **k_: TT.append(want) or True
+s = WalkSim()
+rc = run(['--task', '某任務', '--team-fresh', '--max-seconds', '30'], s)
+ok &= check('主迴圈：座標讀不到、畫面 40 秒不變 → 不點地面、直接重點追蹤 1 次', not [c for c in s.clicks if 'waitstill 2000' in c[1]] and TT[:1] == ['某任務'] and len(ERRS) >= 1, f'rc={rc} TT={TT} {ERRS[:1]}')
+quest.read_world_sig, quest.track_task = _keep_ws, _keep_tt
+quest._errlog = _keep_err
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

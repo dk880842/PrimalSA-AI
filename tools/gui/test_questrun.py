@@ -53,6 +53,8 @@ class Fake:
         self.team_rcs = list(kw.get('team_rcs', []))
         self.accept_rc = kw.get('accept_rc', 0)
         self.hp = kw.get('hp', 100)
+        self.team_hp_seq = list(kw.get('team_hp', []))     # 每次 team_hp 取一個 (rc, {角色: %})；空 = 全員 100
+        self.team_hp_n = 0
         self.bag = kw.get('bag', {r: 5 for r in questrun.ALL_ROLES})
         self.dragon_rc = kw.get('dragon_rc', 0)
         self.follow = kw.get('follow', False)
@@ -135,6 +137,12 @@ class Fake:
 
     def hp_pct(self):
         return self.hp
+
+    def team_hp(self):
+        self.team_hp_n += 1
+        if self.team_hp_seq:
+            return self.team_hp_seq.pop(0)
+        return 0, {r: 100 for r in questrun.ALL_ROLES}
 
     def heal(self):
         self.rec('heal')
@@ -325,6 +333,30 @@ check('背包空位不足 → 110', go(f, [2999]) == questrun.EXIT_PREFLIGHT and
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], hp=30)
 go(f, [2017])
 check('HP 30% < 50% → 補血後重組隊', 'heal' in f.names() and f.names().index('heal') < f.names().index('quest'))
+# 13b) 全隊 HP（2026-10-12 四寶玉之謎：只看隊長 → 隊員約 50% 連打 BOSS 被打死踢隊 4 次 38）
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(0, {'DKBO': 90, 'DKBO2': 95, 'DKBO3': 45, 'DKBO4': 100, 'DKBO5': None})])
+go(f, [2017])
+n = f.names()
+check('任務前隊員 DKBO3 45% < 60% → 補血（整隊）→ team.form → 才跑 quest', 'heal' in n and n.index('heal') < n.index('quest') and 'team_form' in n[n.index('heal'):n.index('quest')], str(n))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(0, {'DKBO': 90, 'DKBO2': 95, 'DKBO3': 80, 'DKBO4': 100, 'DKBO5': None})])
+go(f, [2017])
+check('全隊 ≥ 60%（有人讀不出）→ 不補血', 'heal' not in f.names() and f.team_hp_n == 1)
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(37, []), (0, ['任務完成：x'])],
+         team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {'DKBO': 70, 'DKBO2': 70, 'DKBO3': 70, 'DKBO4': 70, 'DKBO5': 30})])
+rc = go(f, [2017])
+n = f.names()
+qs = [i for i, c in enumerate(n) if c == 'quest']
+check('BOSS 戰後（37）DKBO5 30% → 下一片前補血 + 組隊', rc == 0 and f.team_hp_n == 2 and len(qs) == 2 and 'heal' in n and qs[0] < n.index('heal') < qs[1]
+      and 'team_form' in n[n.index('heal'):qs[1]], str(n))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(90, {})])
+check('全隊讀不到（bag 90）→ 不補血、照跑（只看隊長）', go(f, [2017]) == 0 and 'heal' not in f.names() and 'quest' in f.names())
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(9, {})])
+check('全隊讀 HP 時 bag 回 9（驗證視窗）→ 透傳 9、不跑 quest', go(f, [2017]) == 9 and 'quest' not in f.names())
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2017], team_hp_min=0)
+check('--team-hp-min 0 → 不讀全隊', f.team_hp_n == 0)
+f = Fake(status={D17: [questrun.DOING]}, quest=[(19, [])])
+check('quest.py 19（巡路卡住解卡失敗）→ 112', go(f, [2017]) == questrun.EXIT_STEP)
 f = Fake(status={D17: [questrun.DONE]}, cur='DKBO3')
 go(f, [2017])
 check('當前角色不是 DKBO：交接不另開面板讀（交給 team.form._finish 的 char.ensure）', 'current' not in f.names() and f.names().count('team_form') == 1, str(f.names()))

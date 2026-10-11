@@ -4,7 +4,7 @@
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/questrun.py plan [任務ID …]            # 不碰遊戲：印交接 / 每任務步驟 / 指令 / 預估 / 退出碼（沒給 ID = questdefs 全部）
   uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--no-dragon] [--spot 地雷區]
-        [--max-slices 12] [--slice-s 300] [--max-min 30] [--hp-min 50]
+        [--max-slices 12] [--slice-s 300] [--max-min 30] [--hp-min 50] [--team-hp-min 60]
   uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態
   可 import：questrun.run(ids, dry_run=False, after='grind', tools=None, ...) → 退出碼；結果 dict 在 questrun.LAST
 
@@ -14,7 +14,8 @@
   交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 關原地遇敵 + 等戰鬥結束 → team.form 滿 5 人（同一次切換面板讀「當前」，不是 DKBO 才 char.ensure；
                         2026-10-12 起不另跑 char.current，省 1～2 次開關面板）
   每個任務
-    1 preflight    背包空位（defs.bag_slots）、隊長 HP < --hp-min% → heal 後重組隊
+    1 preflight    背包空位（defs.bag_slots）、補血檢查 hp_gate：隊長 HUD HP < --hp-min% 或全隊任一人 < --team-hp-min%（預設 60；bag.hps 開背包逐人讀 HP，約 8 秒）
+                   → heal（小護士補整隊）後重組隊；quest.py 37（BOSS 戰贏、滿 5 人）後下一片之前也做一次
     2 接取         team.form（距上次組隊 / 驗隊伍 ≤ TEAM_FRESH_S 秒就略過，例：交接剛組完）→ questdetail.accept(skip_ok, verify=False)：**整個任務只開一次詳情**，同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 傳送 → NPC 對話 → 接受，不重開詳情驗證，看對話框收起）；失敗 119
     3 跑步驟       迴圈（每片 ≤ --slice-s 秒，總計 ≤ --max-min 分，片數 ≤ --max-slices）：
                    龍王的守護（人形圖示不在才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵）
@@ -29,7 +30,7 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀�
   （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
   quest.py 回 0 且 tail 有「時間到」（單純 slice 到期、任務還在追蹤欄）→ 不開詳情，直接下一片（完成由下一片 quest.py「任務完成」或回 5 時才讀詳情確認）；回 0 但沒有「任務完成」也不是「時間到」（模糊）才讀一次詳情
   3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
-  33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 114；其他 → 112
+  19 自動巡路卡住解卡 3 次仍卡 → 112；33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 114；其他 → 112
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 20～107、120～129；questrun 自己 110～119）：
   110 preflight 失敗（任務不認得 / 讀不到狀態 / 背包空位不足 / 當前角色不是 DKBO）
@@ -71,6 +72,7 @@ ALL_ROLES = rebirth.ALL_ROLES
 DRAGON = rebirth.DRAGON
 DRAGON_REEAT_S = rebirth.DRAGON_REEAT_S
 SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 300, 12, 30, 50
+TEAM_HP_MIN = 60                # 全隊任一人 HP < 這個 % → 補血（2026-10-12 四寶玉之謎：只看隊長 HP，隊員約 50% 連打 BOSS 被打死踢隊 4 次 38）；0 = 不讀全隊
 WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
 DEFAULT_SPOT = '地雷區'
 FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出）
@@ -125,6 +127,12 @@ class Tools(rebirth.Tools):
     def hp_pct(self):
         import quest
         return quest.stat().get('hpPct')
+
+    def team_hp(self):
+        """5 人 HP%（開背包逐人點頭像讀 HP 條字，約 8 秒）→ (rc, {角色: % | None})；HUD / 切換面板 / 組隊面板都只有當前角色或沒有 HP"""
+        import bag
+        rc, d = bag.hps(ALL_ROLES)
+        return rc, {r: (round(100 * v[0] / v[1]) if v else None) for r, v in d.items()}
 
     def heal(self):
         import heal
@@ -231,7 +239,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'  - team.form（{TEAM_FRESH_S:.0f} 秒內剛確認過就略過）→ questdetail.accept（只開一次詳情）：已完成 → 跳過；待接取 → 接受（不重開詳情）；進行中 → 續跑')
         if d.get('bag_slots'):
             print(f'  - 背包空位：5 人各 ≥ {d["bag_slots"]} 格（bag.find_items）')
-        print(f'  - 隊長 HP < {opts["hp_min"]}% → heal.heal_trip --no-return + team.form')
+        print(f'  - 補血檢查（任務開始前、每次 BOSS 戰後）：隊長 HUD HP < {opts["hp_min"]}% 或全隊（bag.hps）任一人 < {opts.get("team_hp_min", TEAM_HP_MIN)}% → heal.heal_trip --no-return（小護士補整隊）+ team.form')
         for st, sd in sorted((d.get('steps') or {}).items()):
             if sd['kind'] == 'walk':
                 print(f'  - 步 {st}：kind=walk（備援）：先讓遊戲自動巡路，quest.py 回 3 才走到 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]}'
@@ -371,17 +379,38 @@ class Run:
             short = {r: v for r, v in free.items() if v is not None and v < d['bag_slots']}
             if short:
                 return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 要每人背包空 ≥{d["bag_slots"]} 格，不足：{short}', bag_short=short)
+        return self.hp_gate('任務開始前')
+
+    def hp_gate(self, where: str) -> int:
+        """補血檢查（任務開始前、BOSS 戰後下一片之前）：隊長 HUD HP < --hp-min，或全隊（bag.hps）任一人 < --team-hp-min → heal 全隊（小護士補整隊）+ team.form。
+        全隊讀不到（背包打不開 / 選不到角色）→ 只看隊長並記事件；某人 HP 讀不出 = 不知道，不單獨觸發補血"""
         hp = self.T.hp_pct()
         self.info['hp_pct'] = hp
+        low = {}
         if hp is not None and hp < self.o['hp_min']:
-            event(f'隊長 HP {hp}% < {self.o["hp_min"]}% → 補血')
-            try:
-                self.T.heal()
-            except RuntimeError as e:
-                return self.fail(EXIT_HANDOVER, f'補血失敗：{e}')
-            rc = self.form('補血後')
-            if rc:
-                return self.fail(EXIT_HANDOVER, f'補血後 team.form 失敗 rc={rc}')
+            low[LEADER] = hp
+        if self.o.get('team_hp_min', TEAM_HP_MIN) > 0:
+            rc, pct = self.T.team_hp()
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            self.info['team_hp'] = pct
+            if rc or not pct:
+                event(f'{where}：讀不到全隊 HP（bag rc={rc}）→ 只看隊長 HP {hp}%')
+            else:
+                unread = [r for r, v in pct.items() if v is None]
+                low.update({r: v for r, v in pct.items() if v is not None and v < self.o['team_hp_min']})
+                event(f'{where}：全隊 HP {pct}' + (f'（讀不出 {unread}）' if unread else ''))
+        if not low:
+            return 0
+        event(f'{where}：HP 偏低 {low}（隊長門檻 {self.o["hp_min"]}%、全隊門檻 {self.o.get("team_hp_min", TEAM_HP_MIN)}%）→ 補血（小護士補整隊）')
+        try:
+            self.T.heal()
+        except RuntimeError as e:
+            return self.fail(EXIT_HANDOVER, f'補血失敗：{e}')
+        self.info['heals'] = self.info.get('heals', 0) + 1
+        rc = self.form('補血後')
+        if rc:
+            return self.fail(EXIT_HANDOVER, f'補血後 team.form 失敗 rc={rc}')
         return 0
 
     def special_step(self, d):
@@ -496,6 +525,9 @@ class Run:
             if act == 'boss':
                 event(f'任務 {tid}：BOSS 戰贏且滿 5 人，下一片')
                 team_retry = 0
+                rc = self.hp_gate(f'任務 {tid} BOSS 戰後')            # 連戰不補血 → 隊員被打死踢隊（2026-10-12 四寶玉之謎 4 次 38）
+                if rc:
+                    return rc
                 continue
             if act == 'team':
                 if team_retry >= 3:                                    # 對話剛收起時切換面板偶爾打不開（2026-10-11 小豬愛情故事最後一段），多給幾次
@@ -533,6 +565,8 @@ class Run:
                 if s2 == PENDING:
                     return self.fail(EXIT_STEP, f'任務 {tid}：詳情狀態是待接取（沒接成？）', status=s2)
                 continue                                               # 進行中：下一片
+            if rc == 19:
+                return self.fail(EXIT_STEP, f'任務 {tid}：自動巡路卡住，quest.py 自動點地面解卡 3 次仍卡（quest.py 19），請人看 snap walk-stuck', quest_rc=rc)
             return self.fail(EXIT_STEP, f'任務 {tid}：quest.py 非預期退出碼 {rc}', quest_rc=rc)
         return self.fail(EXIT_SLICES, f'任務 {tid}：{self.o["max_slices"]} 片後仍未完成')
 
@@ -554,7 +588,8 @@ class Run:
 
 
 def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_dragon: bool = True, spot: str = DEFAULT_SPOT,
-        max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True) -> int:
+        max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True,
+        team_hp_min: int = TEAM_HP_MIN) -> int:
     LAST.clear()
     defs, bad = questdefs.resolve(ids)
     if bad:
@@ -563,7 +598,8 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     if after not in ('grind', 'none'):
         print('questrun：--after 要 grind 或 none', file=sys.stderr)
         return uikit.EXIT_USAGE
-    opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress)
+    opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress,
+                team_hp_min=team_hp_min)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -634,13 +670,15 @@ def main() -> int:
     p.add_argument('--slice-s', type=int, default=SLICE_S)
     p.add_argument('--max-min', type=int, default=MAX_MIN)
     p.add_argument('--hp-min', type=int, default=HP_MIN)
+    p.add_argument('--team-hp-min', type=int, default=TEAM_HP_MIN, help='全隊任一人 HP 低於這個 %% 就補血（任務開始前 / BOSS 戰後；0 = 不讀全隊，只看隊長）')
     p.add_argument('--no-trust-progress', action='store_true', help='不信進度檔的「已完成」（預設 2 小時內的完成記錄直接跳過）')
     a = ap.parse_args()
     if a.cmd == 'status':
         return cmd_status(a.ids)
     dry = a.cmd == 'plan' or a.dry_run
     kw = dict(max_slices=getattr(a, 'max_slices', MAX_SLICES), slice_s=getattr(a, 'slice_s', SLICE_S),
-              max_min=getattr(a, 'max_min', MAX_MIN), hp_min=getattr(a, 'hp_min', HP_MIN))
+              max_min=getattr(a, 'max_min', MAX_MIN), hp_min=getattr(a, 'hp_min', HP_MIN),
+              team_hp_min=getattr(a, 'team_hp_min', TEAM_HP_MIN))
     rc = run(a.ids, dry, a.after, use_dragon=not a.no_dragon, spot=a.spot, trust_progress=not getattr(a, 'no_trust_progress', False), **kw)
     if not dry:
         print(json.dumps(LAST, ensure_ascii=False, default=str))

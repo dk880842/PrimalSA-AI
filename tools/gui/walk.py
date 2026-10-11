@@ -393,6 +393,46 @@ def walk_to(map_id: int, x: int, y: int, start: tuple[int, int] | None = None, e
     return walk_path(map_id, pts, start=cur, exit_map=exit_map, end_sig=end_sig, arrive=arrive)
 
 
+# ---------------- 自動巡路卡住時點一下地面（quest.py WalkStuck 用；2026-10-12 吉魯島 121,170 站 40 分鐘）----------------
+def exits_of(map_id: int) -> set:
+    """地圖出口格（MapWarp fMap == map_id、未停用）"""
+    return {(e['fX'], e['fY']) for e in psa.T('MapWarp') if e.get('fMap') == map_id and not e.get('isNotUse')}
+
+
+def pick_unstick(cs, exits: set, x: int, y: int, radii=(2, 3)) -> tuple[int, int] | None:
+    """純函式：站在 (x, y) 時要點哪一格地面讓自動巡路解開 → 相對位移 (dx, dy)；找不到 None。
+    條件：通行格 = 1、離 NPC 與出口都 ≥ 2 格（點到出口會整隊傳走）、點擊位置不在 UI 上；
+    先找距離 2 的、再找 3 的（近一點、走一下就停），同距離依固定順序（可重現）"""
+    if not cs:
+        return None
+    w, h, c, npcs = cs
+    for r in radii:
+        for dy in range(-r, r + 1):
+            for dx in range(-r, r + 1):
+                if max(abs(dx), abs(dy)) != r:
+                    continue
+                nx, ny = x + dx, y + dy
+                if not (0 <= nx < w and 0 <= ny < h) or c[ny * w + nx] != 1:
+                    continue
+                if any(max(abs(nx - ax), abs(ny - ay)) <= 1 for ax, ay in npcs):   # NPC 身體畫在格子上方，貼著它點容易點到 NPC 開對話
+                    continue
+                if any(max(abs(nx - ex), abs(ny - ey)) <= 1 for ex, ey in exits):
+                    continue
+                if safe(*screen(dx, dy)):
+                    return dx, dy
+    return None
+
+
+def unstick_click(map_id: int, x: int, y: int) -> tuple[int, int] | None:
+    """自動巡路卡住：點一下附近安全的地面（pick_unstick）。沒有通行格資料 / 找不到安全格 → 不點、回 None；點了回點擊的截圖座標"""
+    d = pick_unstick(_cells(map_id), exits_of(map_id), x, y)
+    if d is None:
+        return None
+    sx, sy = screen(*d)
+    gui('seq', f'{PRIMER}; click {sx} {sy}; waitstill 2000', note=f'巡路卡住 {map_id}:{x},{y} → 點地面 {d[0]:+d},{d[1]:+d} 格')
+    return sx, sy
+
+
 # ---------------- NPC ----------------
 def npc_screen(npc: tuple[int, int], at: tuple[int, int], dy: int = NPC_DY) -> tuple[int, int]:
     """站在 at 時，NPC（所在格 npc）身體的截圖座標"""

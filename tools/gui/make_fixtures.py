@@ -2,7 +2,7 @@
 """離線 fixture 抽取（P0；只用標準函式庫、不碰遊戲）：用 shotcache（像素快取，底層 pngread 解碼一次）從 tools/.cache 既有 1440×830 截圖抽像素，
 存成 tools/gui/fixtures/{switch,pet,depot,exp}_px.json，給 uikit / char / team / pet / grind 的離線測試用。
 截圖不存在就印出「跳過」並回報（不報錯）。計畫：notes/plan-scriptify.md §1.4。
-用法：uv run --no-project python tools/gui/make_fixtures.py
+用法：uv run --no-project python tools/gui/make_fixtures.py [--only bag_slots,leader_badge,world]
 注意：來源是舊截圖（新帳號 Lv1、別的地圖），各值要在對應實機量測時重確認。"""
 import json
 import os
@@ -194,7 +194,88 @@ def make_questlist_fixture() -> list:
     return miss
 
 
+# ---- 背包格空 / 有道具（bag.slot_occupied；2026-10-12 S3「顯示道具名」被關、find 回全 null 修正）----
+# 檔名 → 人工看圖的 15 格標記（X = 有道具、. = 空）
+BAG_SLOTS_SRC = {
+    'bag-names-off.png': 'XXXX...........',                      # 「顯示道具名」關：只有圖示（2026-10-12 04:07 DKBO 實機）
+    'ui-log/173724-bag-noitem.png': 'XXXXXXXXX......',          # 名稱開：儀之兜…空想的衣服 9 件
+    'ui-log/232817-bag-depot-btn.png': '...............',       # 倉庫頁：右半背包全空
+}
+
+
+def make_bag_slots_fixture() -> list:
+    import bag
+    pts = [(x + dx, y + dy) for i in range(bag.n_slots()) for x, y in [bag.slot_xy(i)] for dx, dy in bag.SLOT_PROBE]
+    imgs, miss = {}, []
+    for rel, want in BAG_SLOTS_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = grab(p, pts)
+        imgs[rel] = {'expect': want, 'px': ['%02x%02x%02x' % tuple(px[f'{x},{y}']) for x, y in pts]}
+    if imgs:
+        write('bag_slots_px.json', {'note': '背包 15 格 × bag.SLOT_PROBE 像素（順序 = 格 0..14、每格 SLOT_PROBE 順序）；expect = 人工標記 X 有道具 / . 空（2026-10-12）', 'images': imgs})
+    return miss
+
+
+# ---- 左側組隊分頁隊長標（quest.has_leader_badge；2026-10-12 S3：舊紅「隊」字標換成小「L」標）----
+# 檔名 → 期望（True = 隊長列有標、False = 沒隊伍 / 已解散）；人工看圖
+LEADER_BADGE_SRC = {
+    'quest-log/020133-disband-already-solo.png': True,      # 新版小「L」標（DKBO 隊長，4 人）
+    'quest-log/031326-disband-already-solo.png': True,
+    'quest-log/140029-disband-no-tab.png': True,            # 舊版紅「隊」字標（2026-10-10）
+    'quest-log/013914-disbanded.png': False,
+    'quest-log/142426-disbanded.png': False,
+    'quest-log/151602-disbanded.png': False,
+}
+
+
+def make_leader_badge_fixture() -> list:
+    import quest
+    pts = quest.LEADER_BADGE_PTS
+    imgs, miss = {}, []
+    for rel, want in LEADER_BADGE_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = grab(p, pts)
+        imgs[rel] = {'expect': want, 'px': ''.join('%02x%02x%02x' % tuple(px[f'{x},{y}']) for x, y in pts)}
+    if imgs:
+        write('leader_badge_px.json', {'note': '左側組隊分頁隊長列頭像左上角的隊長標（舊紅「隊」字 / 新小「L」）；px 順序 = quest.LEADER_BADGE_PTS（2026-10-12）', 'images': imgs})
+    return miss
+
+
+# ---- 巡路卡住的畫面備援（quest.world_same；座標讀不到時比世界畫面取樣）----
+# 每張圖取 WORLD_PTS 與「鏡頭往右上捲 1 格」(+32,-23) 的同一組點：同一張 = 鏡頭沒動、位移 = 鏡頭動了
+WORLD_SRC = ['quest-log/140029-disband-no-tab.png', 'quest-log/020133-disband-already-solo.png', 'shot-31706-idle.png']
+
+
+def make_world_fixture() -> list:
+    import quest
+    imgs, miss = {}, []
+    for rel in WORLD_SRC:
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        base = grab(p, quest.WORLD_PTS)
+        moved = grab(p, [(x + 32, y - 23) for x, y in quest.WORLD_PTS])
+        imgs[rel] = {'base': ['%02x%02x%02x' % tuple(base[f'{x},{y}']) for x, y in quest.WORLD_PTS],
+                     'moved': ['%02x%02x%02x' % tuple(moved[f'{x + 32},{y - 23}']) for x, y in quest.WORLD_PTS]}
+    if imgs:
+        write('world_px.json', {'note': 'quest.WORLD_PTS 取樣：base = 原位、moved = 同圖位移 (+32,-23)（模擬鏡頭捲 1 格）；2026-10-12', 'images': imgs})
+    return miss
+
+
 def main() -> int:
+    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge
+        names = sys.argv[sys.argv.index('--only') + 1].split(',')
+        for n in names:
+            miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture}[n]()
+            print(n, '缺', miss) if miss else None
+        return 0
     done, skipped = [], []
 
     def need(*rel):
@@ -247,6 +328,9 @@ def main() -> int:
     done.append('panel_px.json' + (f'（缺 {miss_panel}）' if miss_panel else ''))
     miss_ql = make_questlist_fixture()
     done.append('questlist_px.json' + (f'（缺 {miss_ql}）' if miss_ql else ''))
+    for n, fn in (('bag_slots_px.json', make_bag_slots_fixture), ('leader_badge_px.json', make_leader_badge_fixture), ('world_px.json', make_world_fixture)):
+        m = fn()
+        done.append(n + (f'（缺 {m}）' if m else ''))
     print('完成：', done)
     for n, m in skipped:
         print('跳過', n, '缺', m)
