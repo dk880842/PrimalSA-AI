@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-"""監測 5 個角色的「金布伊」等級，到門檻就把該角色的鎖定戰寵換回迪基格斯。同時兼做 heal.py --watch 的血量檢查。
+"""監測 5 個角色的練功寵（預設「金布伊」）等級，到門檻就把該角色的鎖定戰寵換回原戰寵（預設「朵拉比斯」）。同時兼做 heal.py --watch 的血量檢查。
 
 用法（專案根目錄；一次只能跑一支，同時也不要跑 heal.py --watch，兩邊會搶畫面）：
   uv run --no-project python tools/gui/petwatch.py                     # 常駐：每 30 秒掃一輪，≥ 77 級就換回；5 人都換完就結束
   uv run --no-project python tools/gui/petwatch.py --once              # 只掃一輪（只讀，不換、不補血；加 --apply 才會換）
   uv run --no-project python tools/gui/petwatch.py --interval 30 --target-level 77 --spot 地雷區
+  uv run --no-project python tools/gui/petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --pet-slot 3 --back-slot 2   # 全部參數（以上是預設值）
+  --pet / --level（= --target-level）：被監測的練功寵名與換回門檻；--back：換回的戰寵名；--pet-slot / --back-slot：
+  兩隻在寵物欄的第幾格（1～4，預設 練功寵 3、戰寵 2；轉生後 布拉奇多斯騎寵第 1 格、朵拉比斯第 2 格；5 個角色排列要一樣）。
+  換回時外掛下拉項目 y = 419 + 42×(戰寵格 − 1)（下拉順序 = 寵物欄順序）；寵物名只比對前 2 字（OCR 容錯）
   uv run --no-project python tools/gui/petwatch.py --no-heal           # 不做補血檢查
 
 「鎖定戰寵」= 外掛 ASS →「一般設置」→ 鎖定戰寵（勾選框 + 下拉選寵物），鎖定後寵物面板的出戰 / 休息會被擋
@@ -45,7 +49,7 @@ SLOT_Y = [200, 322, 445, 567]                      # 寵物欄 1～4 格（x=250
 SLOT_X = 250
 BTN_FIGHT = (390, 702)                             # 出戰
 LOCK_BOX, LOCK_DROP = (656, 377), (1285, 377)      # 外掛一般設置：鎖定戰寵 勾選框 / 下拉鈕
-LOCK_ITEM = {'迪基格斯': (1050, 419), '瑪斯貝卡': (1050, 461), '金布伊': (1050, 503)}   # 下拉選單項目（順序 = 寵物欄順序，本帳號實測）
+LOCK_ITEM_X, LOCK_ITEM_Y0, LOCK_ITEM_DY = 1050, 419, 42   # 外掛鎖定戰寵下拉項目（第 n 格 y = Y0 + DY×(n−1)，順序 = 寵物欄順序，本帳號實測 419 / 461 / 503 / 545）
 SIG_PET = '1310,108,197,71,49'                     # 寵物面板右上紅 ✕
 SIG_ASS = '1318,90,195,127,8'                      # 外掛面板右上橘 ✕
 NAME_BOX = (430, 160, 200, 45)                     # 寵物面板選中寵物的名字
@@ -55,7 +59,34 @@ LOCK_NAME_BOX = (880, 358, 300, 38)                # 外掛鎖定戰寵欄目前
 
 
 VERIFY_NAME = False
-SLOT_CACHE: dict = {}                              # 角色 → 金布伊所在格（0 起算）
+SLOT_CACHE: dict = {}                              # 角色 → 練功寵所在格（0 起算）
+# 可由命令列改：練功寵名 / 所在格（1 起算）、換回的戰寵名 / 所在格。預設 = 轉生後的狀態（金布伊第 3 格、朵拉比斯第 2 格）
+PET_NAME, PET_SLOT = '金布伊', 3
+BACK_NAME, BACK_SLOT = '朵拉比斯', 2
+
+
+def configure(pet: str = '金布伊', pet_slot: int = 3, back: str = '朵拉比斯', back_slot: int = 2) -> None:
+    """設定練功寵 / 戰寵（格號 1～4）；格號超出範圍丟 ValueError"""
+    global PET_NAME, PET_SLOT, BACK_NAME, BACK_SLOT
+    for n in (pet_slot, back_slot):
+        if not 1 <= n <= len(SLOT_Y):
+            raise ValueError(f'寵物格 {n} 超出 1～{len(SLOT_Y)}')
+    if pet_slot == back_slot:
+        raise ValueError('練功寵與戰寵不能同一格')
+    if not pet.strip() or not back.strip():
+        raise ValueError('寵物名不能空白')
+    PET_NAME, PET_SLOT, BACK_NAME, BACK_SLOT = pet.strip(), pet_slot, back.strip(), back_slot
+    SLOT_CACHE.clear()
+
+
+def name_key(name: str) -> str:
+    """OCR 比對用的寵物名關鍵字：前 2 字（金布伊 → 金布；朵拉比斯 → 朵拉；OCR 常掉字 / 錯字）"""
+    return name[:2]
+
+
+def lock_item_xy(slot: int) -> tuple:
+    """外掛鎖定戰寵下拉：寵物欄第 slot 格（1 起算）的項目座標"""
+    return (LOCK_ITEM_X, LOCK_ITEM_Y0 + LOCK_ITEM_DY * (slot - 1))
 
 
 def ocr(box, *opts) -> list:
@@ -157,7 +188,7 @@ def lock_checked() -> bool:
 
 # ---------------- 掃描 ----------------
 def scan(done: set) -> dict | None:
-    """開寵物面板 → 逐角色讀金布伊等級。回傳 {角色: 等級 / None}；面板開不起來回 None（跳過這輪）"""
+    """開寵物面板 → 逐角色讀練功寵等級。回傳 {角色: 等級 / None}；面板開不起來回 None（跳過這輪）"""
     if not open_pet():
         close_panel()
         return None
@@ -166,19 +197,19 @@ def scan(done: set) -> dict | None:
         if c in done:
             continue
         seq(f'click 83 {AVATAR_Y[c]}; wait 500')
-        # 金布伊固定在第 3 格（5 個角色都實測過）；名字 OCR 又慢又不穩，只在 --verify-name 時才核對
-        slot = SLOT_CACHE.get(c, 2)
+        # 練功寵固定在 PET_SLOT 格（5 個角色排列相同）；名字 OCR 又慢又不穩，只在 --verify-name 時才核對
+        slot = SLOT_CACHE.get(c, PET_SLOT - 1)
         seq(f'click {SLOT_X} {SLOT_Y[slot]}; wait 500')
-        if VERIFY_NAME and '布伊' not in ocr_name():
-            log(f'{c}：第 {slot + 1} 格名字不是金布伊（OCR：{ocr_name()!r}）')
+        if VERIFY_NAME and name_key(PET_NAME) not in ocr_name():
+            log(f'{c}：第 {slot + 1} 格名字不是{PET_NAME}（OCR：{ocr_name()!r}）')
         res[c] = ocr_level()
     close_panel()
     return res
 
 
-# ---------------- 換回迪基格斯 ----------------
+# ---------------- 換回原戰寵 ----------------
 def swap_back(c: str) -> bool:
-    """c 的鎖定戰寵 金布伊 → 迪基格斯。呼叫前要先關原地遇敵、等戰鬥結束。成功回 True。"""
+    """c 的鎖定戰寵 練功寵 → BACK_NAME（預設朵拉比斯）。呼叫前要先關原地遇敵、等戰鬥結束。成功回 True。"""
     x, y = ASS_RADIO[c]
     # 1. 外掛：取消鎖定戰寵
     if not open_ass():
@@ -192,28 +223,28 @@ def swap_back(c: str) -> bool:
         log(f'{c}：取消鎖定失敗，跳過')
         close_panel()
         return False
-    # 2. 寵物面板：迪基格斯 出戰
+    # 2. 寵物面板：戰寵 出戰
     if not open_pet():
         log(f'{c}：寵物面板開不起來，跳過（鎖定已被取消！之後要重掃補回）')
         close_panel()
         return False
     seq(f'click 83 {AVATAR_Y[c]}; wait 500')
-    seq(f'click {SLOT_X} {SLOT_Y[0]}; wait 400')      # 迪基格斯固定第 1 格；用名字 OCR 或等級（≥100）核對
-    if '迪基' not in ocr_name() and '迪基' not in ocr_name() and (ocr_level() or 0) < 100:
-        log(f'{c}：第 1 格不像迪基格斯，不動作')
+    seq(f'click {SLOT_X} {SLOT_Y[BACK_SLOT - 1]}; wait 400')      # 戰寵在 BACK_SLOT 格；用名字核對（讀兩次，OCR 偶爾空白）
+    if name_key(BACK_NAME) not in ocr_name() and name_key(BACK_NAME) not in ocr_name():
+        log(f'{c}：第 {BACK_SLOT} 格不像{BACK_NAME}，不動作')
         close_panel()
         return False
     seq(f'click {BTN_FIGHT[0]} {BTN_FIGHT[1]}; wait 700')
-    # 3. 外掛：下拉選迪基格斯 + 重新勾選
+    # 3. 外掛：下拉選戰寵 + 重新勾選
     if not open_ass():
         log(f'{c}：外掛面板開不起來（出戰已換、尚未重新鎖定）')
         close_panel()
         return False
     seq(f'click {x} {y}; wait 500; click {LOCK_DROP[0]} {LOCK_DROP[1]}; wait 400; '
-        f'click {LOCK_ITEM["迪基格斯"][0]} {LOCK_ITEM["迪基格斯"][1]}; wait 400')
+        f'click {lock_item_xy(BACK_SLOT)[0]} {lock_item_xy(BACK_SLOT)[1]}; wait 400')
     if not lock_checked():
         seq(f'click {LOCK_BOX[0]} {LOCK_BOX[1]}; wait 400')
-    ok = lock_checked() and '迪基' in ocr_name(LOCK_NAME_BOX)
+    ok = lock_checked() and name_key(BACK_NAME) in ocr_name(LOCK_NAME_BOX)
     gui('shot', winenv.to_windows(CACHE / f'petwatch_{c}.png'))
     close_panel()
     return ok
@@ -256,11 +287,15 @@ def take_lock() -> bool:
 
 def main() -> int:
     winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
-    ap = argparse.ArgumentParser(description='監測金布伊等級，到門檻換回迪基格斯')
+    ap = argparse.ArgumentParser(description='監測練功寵（預設金布伊）等級，到門檻換回戰寵（預設朵拉比斯）')
     ap.add_argument('--once', action='store_true', help='只掃一輪（預設只讀；加 --apply 才換）')
     ap.add_argument('--apply', action='store_true', help='--once 時也執行換回')
     ap.add_argument('--interval', type=int, default=30, help='掃描間隔秒數（預設 30）')
-    ap.add_argument('--target-level', type=int, default=77, help='金布伊 ≥ 這個等級就換回（預設 77）')
+    ap.add_argument('--target-level', '--level', dest='target_level', type=int, default=77, help='練功寵 ≥ 這個等級就換回（預設 77）')
+    ap.add_argument('--pet', default='金布伊', help='被監測的練功寵名（預設 金布伊）')
+    ap.add_argument('--pet-slot', type=int, default=3, help='練功寵在寵物欄第幾格 1～4（預設 3）')
+    ap.add_argument('--back', default='朵拉比斯', help='換回的戰寵名（預設 朵拉比斯；轉生前的舊流程是 迪基格斯）')
+    ap.add_argument('--back-slot', type=int, default=2, help='戰寵在寵物欄第幾格 1～4（預設 2；舊流程迪基格斯是第 1 格）')
     ap.add_argument('--spot', default='地雷區', choices=heal.SPOTS, help='補血後回去的練功點')
     ap.add_argument('--no-heal', action='store_true', help='不做補血檢查')
     ap.add_argument('--heal-every', type=int, default=15, help='補血檢查間隔秒數（預設 15）')
@@ -268,6 +303,11 @@ def main() -> int:
     ap.add_argument('--mp', type=int, default=20)
     ap.add_argument('--for', dest='duration', type=int, default=0, help='跑幾秒後自己結束（測試用）')
     a = ap.parse_args()
+    try:
+        configure(a.pet, a.pet_slot, a.back, a.back_slot)
+    except ValueError as e:
+        print(f'petwatch：參數錯誤：{e}', file=sys.stderr)
+        return 2
     if layout.current() not in ('2880x1659',):
         log(f'petwatch 只量過 2880×1659，目前 {layout.current()}')
         return 2
@@ -279,7 +319,7 @@ def main() -> int:
     end = time.time() + a.duration if a.duration else None
     next_scan = 0.0
     vg = watchstate.VerifyGuard('petwatch', log=log)   # watch 標出疑似驗證視窗 → 暫停動作，最多 10 分鐘（超過停止、寫 errlog，不自動恢復）
-    log(f'開始：每 {a.interval} 秒掃一輪，金布伊 ≥ {a.target_level} 級就換回迪基格斯；已完成 {sorted(done) or "無"}')
+    log(f'開始：每 {a.interval} 秒掃一輪，{PET_NAME} ≥ {a.target_level} 級就換回{BACK_NAME}（第 {BACK_SLOT} 格）；已完成 {sorted(done) or "無"}')
     try:
         while len(done) < len(CHARS) and (end is None or time.time() < end):
             if vg.check() == 'timeout':
@@ -318,7 +358,7 @@ def main() -> int:
                 if res is None:
                     log('寵物面板開不起來（戰鬥 / 對話中？），跳過這輪')
                 else:
-                    log('金布伊等級：' + '、'.join(f'{c} {v if v is not None else "?"}' for c, v in res.items()))
+                    log(f'{PET_NAME}等級：' + '、'.join(f'{c} {v if v is not None else "?"}' for c, v in res.items()))
                     st['levels'] = {**st.get('levels', {}), **{c: v for c, v in res.items() if v is not None}}
                     st['ts'] = time.strftime('%H:%M:%S')
                     save_state(st)
@@ -335,9 +375,9 @@ def main() -> int:
                                     done.add(c)
                                     st['done'] = sorted(done)
                                     save_state(st)
-                                    log(f'{c}：鎖定戰寵已換回迪基格斯（金布伊 {res[c]} 級）')
+                                    log(f'{c}：鎖定戰寵已換回{BACK_NAME}（{PET_NAME} {res[c]} 級）')
                                 else:
-                                    i = errlog.add(f'petwatch：{c} 換回迪基格斯失敗（見 tools/.cache/petwatch_{c}.png）', source='petwatch')
+                                    i = errlog.add(f'petwatch：{c} 換回{BACK_NAME}失敗（見 tools/.cache/petwatch_{c}.png）', source='petwatch')
                         if was_on or not a.once:
                             heal.set_encounter(True)
             if a.once:
@@ -352,7 +392,7 @@ def main() -> int:
             pass
         gui('end')
     if len(done) == len(CHARS):
-        log('5 個角色都已換回迪基格斯，結束')
+        log(f'5 個角色都已換回{BACK_NAME}，結束')
     return 0
 
 

@@ -28,8 +28,8 @@ def rows(name):
 
 
 tasks, explan = rows('Task'), {r['ID']: r for r in rows('TaskExplan')}
-check('id 不重複', len(questdefs.BY_ID) == len(questdefs.Q182))
-for d in questdefs.Q182:
+check('id 不重複', len(questdefs.BY_ID) == len(questdefs.ALL))
+for d in questdefs.ALL:
     tid = d['id']
     ts = sorted((t for t in tasks if t.get('group') == tid), key=lambda t: t.get('step', 0))
     check(f'{tid} Task 表有此任務組且步數 = steps_total', len(ts) == d['steps_total'], f'表 {len(ts)} / 資料 {d["steps_total"]}')
@@ -53,6 +53,9 @@ check('resolve：保留順序、回報不認得', [d['id'] for d in ds] == [2017
 check('resolve：空 = 全部預設順序', [d['id'] for d in questdefs.resolve([])[0]] == questdefs.DEFAULT_ORDER)
 check('step_kind', questdefs.step_kind(questdefs.get(2999), 1) == 'walk' and questdefs.step_kind(questdefs.get(2999), 2) == 'default'
       and questdefs.step_kind(questdefs.get(2017), 1) == 'default')
+check('洞窟不進預設順序', not ({2000, 2001, 2002, 2003} & set(questdefs.DEFAULT_ORDER)) and questdefs.get(2002)['boss'])
+check('3003 步 1 / 2016 步 1、2 為 manual', questdefs.step_kind(questdefs.get(3003), 1) == 'manual' and questdefs.step_kind(questdefs.get(3003), 2) == 'default'
+      and questdefs.step_kind(questdefs.get(2016), 1) == 'manual' and questdefs.step_kind(questdefs.get(2016), 2) == 'manual')
 check('P2 順序：2999 排第一', questdefs.DEFAULT_ORDER[0] == 2999)
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

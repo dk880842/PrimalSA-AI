@@ -46,9 +46,52 @@ Q182 = [
     dict(id=2023, detail='解救老爺爺(1.82)', track='解救老爺爺', accept_npc='村莊小姑娘 3110:16,15', steps_total=2,
          steps={}, bag_slots=0, boss=False, est_min=5, live=False,
          note='純巡路（哈羅山的醫生 20105:16,20 拿藥 → 村莊小姑娘交藥）；攻略名「塔姆塔姆村的草藥」'),
+    dict(id=2028, detail='強恩一族(1.82)', track='強恩一族', accept_npc='吉德的朋友 3400:59,66', steps_total=10,
+         steps={}, bag_slots=1, boss=True, est_min=10, live=False,
+         note='3 場任務戰（4～6 樓山賊守衛）+ 強恩 / 妻 / 莎拉對話；接取左鈕要按「接受」2 次（questdetail presses=2）；每步結束 quest.py 會提前結束 → questrun 迴圈續跑；獎勵山賊的羽飾（可丟）'),
+    dict(id=2025, detail='伐木證書(1.82)', track='伐木證書', accept_npc='樵夫巴爾 3300:60,75', steps_total=6,
+         steps={}, bag_slots=3, boss=False, est_min=23, live=False,
+         note='純巡路 + 對話（哈恩 20508 / 科巴爾特 20507 地下 7F / 巴爾 / 加加村賽尚 3000:114,69）；中間道具 2～3 件（空壺 / 水壺 / 斧頭）→ 背包留空位；10-10 步 1 曾跳「接取任務條件不達標」（原因沒查到）→ questrun 停 119 / 128 時先關提示重試 1 次；獎勵杉的手環（可丟）'),
+    dict(id=2010, detail='四寶玉之謎(1.82)', track='四寶玉之謎', accept_npc='村子的學者 6000:58,44', steps_total=5,
+         steps={}, bag_slots=1, boss=True, est_min=18, live=False,
+         note='4 場守護獸任務戰（薩伊那斯 / 加魯卡 / 吉魯島 / 沙姆島，完整戰鬥畫面，5 人自動戰鬥要開）；步 5 回奇努伊村學者；接取前先關原地遇敵較穩；獎勵月光的手鐲（可丟）'),
+    dict(id=2014, detail='黃金羚羊之謎(1.82)', track='黃金羚羊之謎', accept_npc='採石所管理人 31902:9,7', steps_total=11,
+         steps={}, bag_slots=1, boss=False, est_min=14, live=False,
+         note='純巡路 + 對話（採石場 → 達那 / 福爾德長老 → 庫伊老爺爺）；精靈之木（大樹）點不到 → 走追蹤列表；頭上黃「!」不是任務目標；獎勵寵物摩娜西普（佔寵物欄 → 存個人倉庫）'),
+    dict(id=2012, detail='五兄弟之謎(1.82)', track='五兄弟之謎', accept_npc='吉諾 31701:29,44', steps_total=8,
+         steps={}, bag_slots=5, boss=True, est_min=22, live=False,
+         note='步 7 浦魯德任務戰（其餘為對話）；中間 5 張答案用紙佔背包（bag_slots 5）；10-10 完成未被認出 → 現在以「領獎後追蹤列表找不到 = 完成」判斷；獎勵人龍隨機蛋 → 存公共倉庫'),
+    dict(id=3003, detail='猜謎三兄弟(1.82)', track='猜謎三兄弟', accept_npc='受理A 811:30,20', steps_total=3,
+         steps={1: dict(kind='manual')}, bag_slots=1, boss=False, est_min=50, live=False,
+         note='步 1 爬塔（811→810 共 11 層，810 屬 noTaskNavigate 不能自動巡路）+ 金布伊 Lv77 要人 / 手動：每層點守衛 →「猜謎答題」→ 4 張寵物圖選一（玩家觸發的任務答題，准許查 quests/answers.md 作答；若不是此畫面一律當驗證停手）。'
+              '接取：詳情 →「接藍暴任務」→「接受」要按 2 次，questdetail.accept 預設 presses=2 已支援；questrun 接取後進步 1 即停 115。'
+              '步 2、3 預設：金布伊練到 77（約 9 分）後 `questrun run 3003` 續跑，點追蹤直接巡到 810 伊那多，不用重爬塔；交接前 5 人戰寵換金布伊；獎勵左迪洛斯（丟）'),
+    dict(id=2016, detail='恐龍博士(1.82)', track='恐龍博士', accept_npc='恐龍博士哈魯 11006:11,11', steps_total=2,
+         steps={1: dict(kind='manual'), 2: dict(kind='manual')}, bag_slots=0, boss=False, est_min=45, live=False,
+         note='交寵物類（Task type=7，要抓魯尼帖斯 Lv18+ ×5 / 貝魯卡 Lv30+ ×5，見 psa-pet-quest skill）：questrun 只負責接取，之後步 1、2 都停 115 交人；交時解散逐人交，跳「選擇寵物」視窗要看名字點卡片（quest.py 不處理）；交前寵物改「等待」；獎勵布克布克（丟）'),
+    dict(id=2019, detail='卡坦的願望(1.82)', track='卡坦的願望', accept_npc='卡坦 100:230,180', steps_total=2,
+         steps={}, bag_slots=0, boss=False, est_min=80, live=False,
+         note='交寵物（4 色鯊魚 / 4 色雞各 ≥25 級）；**交前先 `pet.py rest-all`**（10-10 一隻在出戰 → 按完成 21 次不前進）；隊長交一次 5 人完成；步 1 獎勵修寶（丟）、步 2 朵拉比斯（存個人倉庫）；寵物準備是手動流程'),
 ]
 
-BY_ID = {d['id']: d for d in Q182}
+# 四大洞窟（二轉前置；詳情 / 追蹤標題都沒有 (1.82) 後綴）。放獨立表：不進 DEFAULT_ORDER（questrun 空 ids 的「全部」仍只跑 1.82），指定 ID 才用
+QCAVE = [
+    dict(id=2000, detail='琉璃洞窟', track='琉璃洞窟', accept_npc='拉魯 3413:16,18', steps_total=5,
+         steps={}, bag_slots=1, boss=True, est_min=15, live=False,
+         note='組隊 + 自動巡路走得通（10-10 實測 14 分）；步 3、4 守護獸、步 5 女神 2 場；開跑前 5 人自動戰鬥 on（DKBO 關著會卡在下指令）；接取後別誤觸左側面板'),
+    dict(id=2003, detail='深紅洞窟', track='深紅洞窟', accept_npc='真紅 5106:26,15', steps_total=5,
+         steps={}, bag_slots=1, boss=True, est_min=20, live=False,
+         note='步 1 拉多拉山山頂不死鳥路長遇敵多（適合吃龍王的守護）；直接組隊跑，不要單人逃跑（10-10 解散失敗）；步 3、4 守護獸、步 5 伊拉 2 場'),
+    dict(id=2001, detail='玄黃洞窟', track='玄黃洞窟', accept_npc='卡坦的村長 1406:22,14', steps_total=10,
+         steps={}, bag_slots=1, boss=True, est_min=40, live=False,
+         note='5 場戰鬥（8F / 14F 守護獸打兩輪 + 唐）；步 10 對話後又開戰，questrun 會再起一片；建議 --max-min 45'),
+    dict(id=2002, detail='碧青洞窟', track='碧青洞窟', accept_npc='水的使者 3400:63,72', steps_total=11,
+         steps={}, bag_slots=1, boss=True, est_min=40, live=False,
+         note='5 場戰鬥；10-10 在戰鬥中開外掛「自動逃跑」→ DKBO 脫隊（現已廢除，跑洞窟期間任何 agent 不准開外掛面板）；BOSS 後照 37 / 38 查滿 5 人；建議 --max-min 45'),
+]
+
+ALL = Q182 + QCAVE
+BY_ID = {d['id']: d for d in ALL}
 DEFAULT_ORDER = [d['id'] for d in Q182]
 STEP_KINDS = ('walk', 'manual')
 
