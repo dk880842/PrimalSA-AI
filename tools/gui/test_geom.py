@@ -63,11 +63,11 @@ check('筆電：phys / logical / resolve / 樣板都是 2880x1659、不縮放', 
 old = with_info('client=2880x1659 origin=(0,45) scale=2 shot=1440x830 foreground=False\n')
 check('舊格式 info（沒有 layout=）：行為同筆電', old['phys'] == old['logical'] == old['resolve'] == '2880x1659' and old['tpl'] == '2880x1659')
 ext = with_info('client=1728x995 origin=(96,31) scale=1.2 shot=1440x830 foreground=False layout=2880x1659 phys=1728x995 sx=1.2 sy=1.1995 proportional=True\n')
-check('1728x995：current 仍回實體（守衛照舊擋）、座標常數 2880x1659、樣板未就緒、縮放中',
-      ext['phys'] == '1728x995' and ext['logical'] == '2880x1659' and ext['resolve'] == '2880x1659' and ext['tpl'] is None and ext['st']['scaled'] and not ext['st']['templates'], str(ext))
+check('1728x995：current 仍回實體、座標常數 2880x1659、樣板就緒（P3 TEMPLATE_PHYS）、縮放中、守衛放行',
+      ext['phys'] == '1728x995' and ext['logical'] == '2880x1659' and ext['resolve'] == '2880x1659' and ext['tpl'] == '1728x995' and ext['st']['scaled'] and ext['st']['templates'] and ext['st']['ok'], str(ext))
 check('1728x995：不被當成 SUPPORTED（上層 current() in SUPPORTED 守衛不放行）', ext['phys'] not in layout.SUPPORTED)
 off = with_info('client=1728x995 origin=(96,31) scale=2 shot=864x498 foreground=False\n')   # PSA_GEOM=off：沒有 layout=
-check('PSA_GEOM=off 的 1728x995：logical 退回實體、座標常數 DEFAULT（與舊行為相同）、不算縮放', off['logical'] == '1728x995' and off['resolve'] == '2880x1659' and off['tpl'] is None and not off['st']['scaled'])
+check('PSA_GEOM=off 的 1728x995：logical 退回實體、座標常數 DEFAULT（與舊行為相同）、不算縮放、守衛擋', off['logical'] == '1728x995' and off['resolve'] == '2880x1659' and not off['st']['scaled'] and not off['st']['ok'])
 w19 = with_info('client=1920x1017 origin=(0,23) scale=2 shot=960x508 foreground=False layout=1920x1017 phys=1920x1017 sx=2 sy=2 proportional=False\n')
 check('1920x1017 舊版面：座標常數 / 樣板都是 1920x1017', w19['resolve'] == w19['tpl'] == '1920x1017' and not w19['st']['scaled'])
 n19 = with_info('client=1920x1009 origin=(0,23) scale=2 shot=960x504 foreground=False layout=1920x1009 phys=1920x1009 sx=2 sy=2 proportional=False\n')

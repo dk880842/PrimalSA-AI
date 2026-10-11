@@ -13,6 +13,8 @@
   uv run --no-project python tools/gui/namematch.py list             # 現有樣板（名字 → 變體數）
 程式用：namematch.read_names() → {slot: name|None}（沒樣板 / 版面不對 / 截圖失敗 → {}，不呼叫 PowerShell 的情況：沒有樣板檔）。
 名字白名單 = charstate.chars()（watch-config.json）；樣板檔裡不在白名單的名字一律忽略。
+版面（P3，2026-10-11）：樣板依「實體」客戶區分檔：2880×1659 = name-tpl/2880x1659.json（原檔）、外接同比例 1728×995 = name-tpl/1728x995.json
+（layout.TEMPLATE_PHYS）。digitmatch.ps1 -Boxes 回的點陣是實體大小（1728×995 時 108×29），所以墨點門檻依面積比縮（min_ink()）。
 """
 import argparse
 import json
@@ -45,6 +47,25 @@ MARGIN = 0.05                   # 與次佳名字至少差這麼多
 MIN_INK = 150                   # 墨點太少 = 空卡位 / 沒字，不比對
 MAX_VARIANTS = 4
 DUP_IOU = 0.995                 # 與既有變體幾乎一樣就不重複存
+
+
+def layout_ok(key) -> bool:
+    """digitmatch.ps1 回報的實體版面能不能用樣板（2880×1659 或 layout.TEMPLATE_PHYS）"""
+    return key == LAYOUT or key in _tpl_phys()
+
+
+def _tpl_phys() -> tuple:
+    import layout
+    return tuple(layout.TEMPLATE_PHYS)
+
+
+def min_ink(key: str = LAYOUT) -> int:
+    """墨點門檻依實體寬 / 2880 的面積比縮放（1728×995 → 150×0.36 = 54）；2880×1659 原值"""
+    try:
+        w = int(str(key).split('x')[0])
+    except ValueError:
+        return MIN_INK
+    return MIN_INK if w >= 2880 else max(20, int(MIN_INK * (w / 2880) ** 2))
 
 
 def boxes() -> list:
@@ -137,14 +158,15 @@ def decide(scores: dict, hit_min: float = HIT_MIN, margin: float = MARGIN):
     return best_n, best, second
 
 
-def match_rows(rows_by_slot: dict, tpl: dict) -> dict:
+def match_rows(rows_by_slot: dict, tpl: dict, key: str = LAYOUT) -> dict:
     """{slot: 二值列} + 樣板 → {slot: {'name','score','second','ink'}}；墨點太少（空卡位）name = None"""
     ti = _ints(tpl)
     out = {}
+    need = min_ink(key)
     for slot, rows in rows_by_slot.items():
         img = rows_to_int(rows)
         ink = img.bit_count()
-        if ink < MIN_INK:
+        if ink < need:
             out[slot] = {'name': None, 'score': 0.0, 'second': 0.0, 'ink': ink}
             continue
         name, best, second = decide(score_all(img, ti))
@@ -153,8 +175,11 @@ def match_rows(rows_by_slot: dict, tpl: dict) -> dict:
 
 
 # ---- 截圖（要碰遊戲；測試替換 namematch.capture）----
+LAST_KEY = [LAYOUT]      # 最近一次 capture() 的實體版面（樣板檔鍵）
+
+
 def capture() -> dict | None:
-    """切換面板開著時裁 6 張名字框 → {slot: 二值列}；失敗 / 版面不是 2880x1659 → None"""
+    """切換面板開著時裁 6 張名字框 → {slot: 二值列}；失敗 / 版面不能用樣板（見 layout_ok）→ None。版面記在 LAST_KEY[0]"""
     import digitmatch
     spec = ';'.join(f'{x},{y},{w},{h},{MODE_BROWN}' for x, y, w, h in boxes())
     try:
@@ -162,22 +187,28 @@ def capture() -> dict | None:
     except Exception:
         return None
     cap = digitmatch.parse_capture(r.stdout)
-    if not cap.get('ok') or cap.get('layout') != LAYOUT:
+    if not cap.get('ok') or not layout_ok(cap.get('layout')):
         return None
+    LAST_KEY[0] = cap['layout']
     f = cap.get('fields', {})
     return {i: f[f'b{i}'] for i in range(6) if f'b{i}' in f}
 
 
-def read_detail(rows_by_slot: dict | None = None) -> dict:
-    """→ {slot: {'name','score','second','ink'}}；沒有樣板 → {}（不截圖）；截圖失敗 → {}"""
-    tpl = load_tpl()
-    if not tpl:
-        return {}
+def read_detail(rows_by_slot: dict | None = None, key: str | None = None) -> dict:
+    """→ {slot: {'name','score','second','ink'}}；沒有任何樣板檔 → {}（不截圖）；截圖失敗 / 該版面沒有樣板 → {}。
+    rows_by_slot 給了就用 key（預設 2880×1659）那份樣板；沒給就截圖，用截圖回報的實體版面那份"""
     if rows_by_slot is None:
+        if not any(load_tpl(k) for k in (LAYOUT,) + _tpl_phys()):
+            return {}
         rows_by_slot = capture()
         if not rows_by_slot:
             return {}
-    return match_rows(rows_by_slot, tpl)
+        key = LAST_KEY[0]
+    key = key or LAYOUT
+    tpl = load_tpl(key)
+    if not tpl:
+        return {}
+    return match_rows(rows_by_slot, tpl, key)
 
 
 def read_names(rows_by_slot: dict | None = None) -> dict:
@@ -195,12 +226,12 @@ def add_variant(tpl: dict, name: str, img: int) -> bool:
     return True
 
 
-def learn_from(rows_by_slot: dict, labels: dict, tpl: dict, log=print) -> int:
+def learn_from(rows_by_slot: dict, labels: dict, tpl: dict, log=print, key: str = LAYOUT) -> int:
     """labels = {slot: 名字}（呼叫端已確認）→ 新增樣板數。已有別的名字樣板 IoU 也高（>= HIT_MIN）→ 視為標籤可疑，整次不學"""
     ti = _ints(tpl)
     imgs = {s: rows_to_int(rows_by_slot[s]) for s in labels if s in rows_by_slot}
     for s, name in labels.items():
-        if s not in imgs or imgs[s].bit_count() < MIN_INK:
+        if s not in imgs or imgs[s].bit_count() < min_ink(key):
             log(f'namematch：slot{s} 沒有名字墨點，不學')
             return 0
         for n, sc in score_all(imgs[s], ti).items():
@@ -243,11 +274,12 @@ def learn(log=print) -> int:
     if not rows or not all(s in rows for s in labels):
         log('namematch learn：名字截圖失敗')
         return 1
-    tpl = load_tpl()
-    n = learn_from(rows, labels, tpl, log)
+    key = LAST_KEY[0]
+    tpl = load_tpl(key)
+    n = learn_from(rows, labels, tpl, log, key)
     if n:
-        save_tpl(tpl)
-    log(f'namematch learn：新增 {n} 個變體；樣板現況 ' + '、'.join(f'{k}×{len(v)}' for k, v in sorted(tpl.items())))
+        save_tpl(tpl, key)
+    log(f'namematch learn（{key}）：新增 {n} 個變體；樣板現況 ' + '、'.join(f'{k}×{len(v)}' for k, v in sorted(tpl.items())))
     return 0
 
 
@@ -263,8 +295,9 @@ def main() -> int:
     sub.add_parser('list', help='列出樣板')
     a = ap.parse_args()
     if a.cmd == 'list':
-        for n, vs in sorted(load_tpl().items()):
-            print(f'{n}: {len(vs)} 個變體')
+        for k in (LAYOUT,) + _tpl_phys():
+            for n, vs in sorted(load_tpl(k).items()):
+                print(f'{k} {n}: {len(vs)} 個變體')
         return 0
     if a.cmd == 'learn':
         return learn()

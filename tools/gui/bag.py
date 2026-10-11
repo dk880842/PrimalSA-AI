@@ -388,9 +388,17 @@ POPUP_SETTLE_S = 1.0
 ICON_TOL, ICON_RATIO, ICON_RATIO_LOOSE = 40, 0.85, 0.45
 
 
+def icon_file() -> Path:
+    """目前版面的道具圖示樣板檔：2880×1659 = fixtures/item_icons.json（原檔）；外接同比例 1728×995 等（layout.TEMPLATE_PHYS）=
+    tools/.cache/item-icons/<實體尺寸>.json（pixel 取實體最近點，顏色與筆電不同；沒有檔 = 沒有樣板 → 走名稱 OCR / 彈窗核對，P3 2026-10-11）"""
+    import layout
+    k = layout.tpl_key()
+    return ICON_FILE if k == layout.DEFAULT else uikit.CACHE / 'item-icons' / f'{k}.json'
+
+
 def load_icons() -> dict:
     try:
-        return json.loads(ICON_FILE.read_text(encoding='utf-8'))
+        return json.loads(icon_file().read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
 

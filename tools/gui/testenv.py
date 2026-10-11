@@ -5,3 +5,5 @@ import os
 import tempfile
 
 os.environ['PSA_LOG_DIR'] = tempfile.mkdtemp(prefix='psatest-')
+# 樣板模組（petmatch / titlematch / questdetail…）依 layout.tpl_key() 選樣板檔；離線測試一律當 2880×1659、不問遊戲（測試要別的版面自己改 layout 函式）
+os.environ.setdefault('PSA_LAYOUT', '2880x1659')

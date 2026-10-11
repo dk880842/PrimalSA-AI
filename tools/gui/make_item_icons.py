@@ -23,8 +23,10 @@ def main(name):
     heal.set_encounter(False)                       # 戰鬥中存取倉庫會被擋
     heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')
     icons = bag.load_icons()
+    out = bag.icon_file()                           # 依版面：2880×1659 = fixtures/item_icons.json，外接 = tools/.cache/item-icons/<實體尺寸>.json
+    out.parent.mkdir(parents=True, exist_ok=True)
     icons[name] = {}
-    bag.ICON_FILE.write_text(json.dumps(icons, ensure_ascii=False), encoding='utf-8')     # 先清掉舊樣板，下面找格走名稱 / 彈窗核對
+    out.write_text(json.dumps(icons, ensure_ascii=False), encoding='utf-8')     # 先清掉舊樣板，下面找格走名稱 / 彈窗核對
     with bag.Session() as s:
         if s.rc or bag.select_role('DKBO') or bag.open_depot('public'):
             return 1
@@ -37,7 +39,7 @@ def main(name):
         j = bag.find_item(name)
         if j is not None:
             icons[name]['bag'] = grab(*bag.slot_xy(j))
-        bag.ICON_FILE.write_text(json.dumps(icons, ensure_ascii=False), encoding='utf-8')
+        out.write_text(json.dumps(icons, ensure_ascii=False), encoding='utf-8')
         print('depot 格', i, 'bag 格', j, '存回 rc', bag.depot_store('DKBO', name))
     return 0 if 'bag' in icons[name] else 4
 

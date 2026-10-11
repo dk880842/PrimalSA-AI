@@ -106,7 +106,8 @@ $key = "${W}x${Hh}"; $lk = $Gm.Layout; $L = $Layouts[$lk]    # lk = 座標用的
 if (-not $L) { Out-Json @{ ok = $false; error = "視窗大小 $key，只支援 2880x1659、同長寬比的視窗（gui.sh fit）或 1920x1017" } }
 $stride = 0; $buf = [DM]::Bytes($full, [ref]$stride); $full.Dispose()
 $f = [ordered]@{}
-foreach ($k in $L.Keys) { $a = $L[$k]; $pb = Convert-PsaBox $Gm $a[0] $a[1] $a[2] $a[3]; $f[$k] = ([DM]::Crop($buf, $stride, $W, $Hh, $pb[0], $pb[1], $pb[2], $pb[3], ($a[4] -eq 1)) -join ",") }
+# 縮放視窗（1728×995，P3 實測）：寵物等級框頂端吃到上方亮色木框（二值化成整排墨點、與「轉126」連成一塊），框頂往下 14 邏輯 px（數字從框頂下約 16 px 才開始；「轉」頂端被切掉 2 px，樣板照切後的學）
+foreach ($k in $L.Keys) { $a = $L[$k]; if ($scaled -and $k -eq 'plv') { $a = @($a[0], ($a[1] + 14), $a[2], ($a[3] - 14), $a[4]) }; $pb = Convert-PsaBox $Gm $a[0] $a[1] $a[2] $a[3]; $f[$k] = ([DM]::Crop($buf, $stride, $W, $Hh, $pb[0], $pb[1], $pb[2], $pb[3], ($a[4] -eq 1)) -join ",") }
 $bb = $Bars[$lk]
 $fxb = if ($scaled) { $Gm.Sx / 2.0 } else { 1.0 }; $fyb = if ($scaled) { $Gm.Sy / 2.0 } else { 1.0 }
 $hpPct = [DM]::Bar($buf, $stride, $W, $Hh, $bb[2], $bb[0], $bb[1], $true, $fxb, $fyb); $mpPct = [DM]::Bar($buf, $stride, $W, $Hh, $bb[3], $bb[0], $bb[1], $false, $fxb, $fyb)

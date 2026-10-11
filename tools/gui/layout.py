@@ -9,13 +9,15 @@
   layout.current()        # 實體客戶區 → '2880x1659' | '1920x1017' | 其他 'WxH' | None（遊戲沒開）；同一個行程只問一次（physical() 同義）
   layout.logical()        # 換算層認定的邏輯版面：與 2880×1659 同長寬比（例 1728×995）→ '2880x1659'
   layout.resolve()        # 套哪套座標常數：邏輯版面在 SUPPORTED 內就用它，否則 DEFAULT
-  layout.template_layout()  # 樣板該存哪一份：實體尺寸在 SUPPORTED 內才有，否則 None（樣板未就緒）
+  layout.template_layout()  # 樣板該存哪一份：實體尺寸在 SUPPORTED 或 TEMPLATE_PHYS 內才有，否則 None（樣板未就緒）
+  layout.tpl_key()        # 樣板檔名鍵：template_layout() 有值用它，否則 DEFAULT（digit / name / pet / title / questdetail / item icon 共用）
   layout.supported()      # 腳本守衛 → (ok, reason)：2880×1659 ok；同比例視窗要 template_layout() 有值才 ok
   layout.SUPPORTED        # 支援的版面
 
 P1（2026-10-11）：外接螢幕可用 `gui.sh fit` 把視窗設成 2880×1659 同比例（1728×995），gui.ps1 的換算層讓 1440×830 截圖座標仍然成立，
 所以 resolve() / logical() 認它是 '2880x1659'（座標常數）；但 current() 仍回實體 '1728x995'，守衛改呼叫 supported()（P4 已接線）：
-樣板未就緒（template_layout() 為 None）時仍擋，P3 補上樣板後自動放行。
+樣板未就緒（template_layout() 為 None）時仍擋。P3（2026-10-11 實機）：1728×995 的樣板已分版面存放並重學（TEMPLATE_PHYS），守衛放行；
+樣板檔一律依 tpl_key()：2880×1659 沿用原檔名，其他實體尺寸另存一份（例 digit-tpl/1728x995.json、task-titles/1728x995/）。
 
 環境變數 PSA_LAYOUT=1920x1017 可直接指定（不問遊戲；例：遊戲沒開時用 walk.py --plan 試算）。
 命令列：python tools/gui/layout.py   → 印出目前版面
@@ -30,6 +32,9 @@ import winenv  # noqa: E402
 
 SUPPORTED = ('2880x1659', '1920x1017')
 DEFAULT = '2880x1659'
+# 同比例縮放視窗中，已有自己一套樣板（digit / name / pet / title / questdetail）的實體尺寸（P3，2026-10-11 外接螢幕實機重學）。
+# 新的同比例尺寸要先在該尺寸重學樣板再加進來；不在表內 = 樣板未就緒 → 守衛擋下
+TEMPLATE_PHYS = ('1728x995',)
 _cache: list = []   # [{'phys': 'WxH', 'logical': 'WxH' | None, 'info': 原始 info 文字}]；空 = 還沒問
 
 
@@ -82,10 +87,16 @@ def resolve() -> str:
 
 
 def template_layout(phys: str | None = None) -> str | None:
-    """樣板該存哪一份（第二個判斷）：樣板（digit / name / pet / title…）依「實體」尺寸渲染；實體大小在 SUPPORTED 內才有樣板，
-    其他（含同比例的 1728×995）回 None = 樣板未就緒（P3 之後才會有 `<root>/<phys>/`）"""
+    """樣板該存哪一份（第二個判斷）：樣板（digit / name / pet / title…）依「實體」尺寸渲染；實體大小在 SUPPORTED 或 TEMPLATE_PHYS 內才有樣板，
+    其他回 None = 樣板未就緒（守衛擋下）"""
     cur = phys or current()
-    return cur if cur in SUPPORTED else None
+    return cur if cur in SUPPORTED or cur in TEMPLATE_PHYS else None
+
+
+def tpl_key(phys: str | None = None) -> str:
+    """樣板檔名鍵：template_layout() 有值用它，否則 DEFAULT（維持舊行為：不支援的版面守衛本來就擋，樣板模組照舊讀 2880×1659 那份）。
+    沒給 phys 會問一次遊戲（同一行程快取；PSA_LAYOUT 優先，離線測試靠它不碰遊戲）"""
+    return template_layout(phys) or DEFAULT
 
 
 def evaluate(phys: str | None, logical_: str | None) -> tuple:

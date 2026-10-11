@@ -150,6 +150,15 @@ def watch_preflight_ok() -> bool:
     return True
 
 
+def sync_sig_layout() -> None:
+    """依目前實體版面套 screen_sigs 的外接覆寫表（PHYS_OVERRIDES；同比例縮放視窗例 1728×995），筆電 / 其他 = 原值（set_layout(None) 不改任何值）。
+    preflight 放行時呼叫；layout 已有快取（watch prime 或 supported() 問過）就不再問遊戲"""
+    import layout
+    phys = layout.current()
+    scaled = bool(phys) and phys != layout.DEFAULT and layout.logical() == layout.DEFAULT
+    screen_sigs.set_layout(phys if scaled else None)
+
+
 def preflight(src: str, fast: bool = True) -> int:
     """開跑前檢查，回退出碼（0 = 可以動）：版面不是 2880x1659 → 2；netwatch halt → 直接 sys.exit(10)；
     battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）。
@@ -168,6 +177,7 @@ def preflight(src: str, fast: bool = True) -> int:
     if lk:
         print(f'{src}：battle.lock 有效（{lk.get("note", "")} pid {lk.get("pid")}），別的腳本在用畫面，不搶', file=sys.stderr)
         return EXIT_IN_BATTLE
+    sync_sig_layout()
     if fast_ok:
         mark('preflight(watch)')
         return EXIT_OK

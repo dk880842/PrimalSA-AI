@@ -307,10 +307,19 @@ check('覆寫表只有 1728x995，key 都是 WxH', set(S.PHYS_OVERRIDES) == {'17
 check('預設（沒呼叫 set_layout）= 筆電原值，與另載的原始模組逐位元組相同', snap(S) == snap(PRISTINE) and S.active_layout() is None)
 check('layout_key：1728×995 有表、2880×1659 / 1920×1017 沒有（精確比對不猜）', S.layout_key(1728, 995) == '1728x995' and S.layout_key(2880, 1659) is None and S.layout_key(1920, 1017) is None)
 check('set_layout(None) / 筆電 key / 沒表的 key 回 False，原值不變', not S.set_layout(None) and not S.set_layout('2880x1659') and not S.set_layout('1920x1017') and snap(S) == snap(PRISTINE))
-check('set_layout(1728x995) 回 True、HUD_GROUPS / ENC_ON 變了、classify 的 points() 不變',
-      S.set_layout('1728x995') and S.active_layout() == '1728x995' and S.HUD_GROUPS != PRISTINE.HUD_GROUPS and S.ENC_ON != PRISTINE.ENC_ON and S.points() == PRISTINE.points())
-check('套用後其餘特徵（SIG_*、PANEL_*、AW…）仍與筆電原值相同（只覆寫表內列的）',
-      all(repr(getattr(S, n)) == repr(getattr(PRISTINE, n)) for n in S._OVERRIDABLE if n not in ('HUD_GROUPS', 'ENC_ON')))
+OVN = set(S.PHYS_OVERRIDES['1728x995'])
+_i = PRISTINE.points().index(PRISTINE.VS_PROBE)
+check('set_layout(1728x995) 回 True、HUD_GROUPS / ENC_ON / PANEL_TITLE / PANEL_PTS / VS_PROBES 變了、points() 只有 VS 牌點換掉',
+      S.set_layout('1728x995') and S.active_layout() == '1728x995' and S.HUD_GROUPS != PRISTINE.HUD_GROUPS and S.ENC_ON != PRISTINE.ENC_ON
+      and S.PANEL_TITLE != PRISTINE.PANEL_TITLE and len(S.VS_PROBES) == 5 and S.VS_PROBE == PRISTINE.VS_PROBE
+      and S.points() == PRISTINE.points()[:_i] + S.VS_PROBES + PRISTINE.points()[_i + 1:])
+check('套用後其餘特徵（SIG_*、PANEL_X、AW…）仍與筆電原值相同（只覆寫表內列的）',
+      all(repr(getattr(S, n)) == repr(getattr(PRISTINE, n)) for n in S._OVERRIDABLE if n not in OVN))
+import battleguard  # noqa: E402
+check('battleguard 的 VS 取樣點跟著覆寫（外接 5 點）', battleguard._vs_probes() == S.VS_PROBES and len(S.VS_PROBES) == 5)
+S.set_layout(None)
+check('battleguard 的 VS 取樣點還原為筆電 [706,295]', battleguard._vs_probes() == [battleguard.VS_PROBE] == [(706, 295)])
+S.set_layout('1728x995')
 check('覆寫的點座標都在 1440×830 內、每組點數 ≥ HUD_MISS+3', all(0 <= x < 1440 and 0 <= y < 830 for pts in S.HUD_GROUPS.values() for x, y, *_ in pts + S.ENC_ON) and all(len(v) >= S.HUD_MISS + 3 for v in S.HUD_GROUPS.values()))
 _hg, _enc, _bot = S.HUD_GROUPS, S.ENC_ON, S.HUD_GROUPS['bottom']
 S.set_layout(None)
@@ -392,16 +401,32 @@ if idx_ok:
         c1, h1 = S.classify(px), S.hud_main(px)
         S.set_layout(None)
         n += 1
-        diff += c0 != c1
+        # 筆電渲染的圖套外接覆寫只是「代理反例」：外接專用點（VS 牌世界座標、面板標題的外接渲染色）在筆電圖上本來就不中（變 idle），
+        # 那不是外接的行為；要擋的是覆寫讓別的畫面「多認出」東西（誤判），所以只數 c1 認成具體畫面且與原值不同的
+        diff += c0 != c1 and c1['state'] not in ('idle', 'unknown')
         if label in ('idle', 'walking'):
             pos += 1
             tp0 += h0
             tp1 += h1
-    print(f'  [筆電樣本庫 {n} 張] 套外接覆寫後 classify 差異 {diff}；主畫面 hud_main 命中 原值 {tp0}/{pos}、覆寫 {tp1}/{pos}')
-    check('樣本庫：套覆寫後 classify 與原值 0 差異（覆寫點仍是同元件顏色，不會讓別的畫面誤判）', diff == 0)
+    print(f'  [筆電樣本庫 {n} 張] 套外接覆寫後多認出 {diff}；主畫面 hud_main 命中 原值 {tp0}/{pos}、覆寫 {tp1}/{pos}')
+    check('樣本庫（筆電圖當代理反例）：套外接覆寫後 0 張被「多認出」成別的畫面（外接專用點在筆電圖不中而退成 idle / unknown 的不算）', diff == 0)
     check('樣本庫：覆寫後主畫面 hud_main 命中不低於原值 −1', tp1 >= tp0 - 1)
 else:
     print('  （略過）沒有 tools/.cache 樣本索引')
+# P4 實機樣本（2026-10-11，外接 1728×995、gui pixel 的四捨五入取樣）：10 面板 + 主畫面 + 對話框 + VS 牌，classify 與人工標籤 100% 相同
+S.set_layout('1728x995')
+hit = 0
+for k, (st_, pn_) in fxp['expect'].items():
+    c = S.classify(phys_px(k))
+    hit += (c['state'], c['panel']) == (st_, pn_)
+    if (c['state'], c['panel']) != (st_, pn_):
+        print('   不符', k, c['state'], c['panel'], '期望', st_, pn_)
+    if st_ == 'panel':
+        px = phys_px(k)
+        t = S._count_ok(px, S.PANEL_TITLE[pn_], S.TITLE_TOL)
+        check(f'外接 {k}：標題 8 點全中（覆寫後）', t == 8, str(t))
+check(f'外接實機樣本 {len(fxp["expect"])} 張：classify 全對（覆寫後）', hit == len(fxp['expect']), f'{hit}/{len(fxp["expect"])}')
+S.set_layout(None)
 check('測試結束時已還原筆電原值', snap(S) == snap(PRISTINE))
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')

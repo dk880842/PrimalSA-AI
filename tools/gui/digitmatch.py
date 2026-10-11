@@ -67,19 +67,33 @@ def _components(rows: list[str]) -> list[dict]:
     return comps
 
 
-def segment(rows: list[str], pos_mode: bool = False) -> list[tuple[int, int, list[str]]]:
+def seg_scale(layout: str | None) -> float:
+    """點陣的實體縮放（實體寬 / 2880）：digitmatch.ps1 在同比例縮放視窗回的是實體大小點陣（1728×995 → 0.6），切字的 px 常數要跟著縮；
+    2880×1659 / 不認得 = 1.0（原行為）"""
+    try:
+        w = int(str(layout).split('x')[0])
+    except ValueError:
+        return 1.0
+    return 1.0 if w >= 2880 else w / 2880
+
+
+def segment(rows: list[str], pos_mode: bool = False, scale: float = 1.0) -> list[tuple[int, int, list[str]]]:
     """切字 → [(x0, y0, 字元點陣列字串)]（依 x 排序）。
     連通元件 → 丟掉高 <= 4 px 的細線（血條殘邊）→ x 重疊 >= 4 px 或 >= 60%（較窄者）的元件合併（轉 / 級 / 冒號）→ 丟掉高度 < 最高字 45% 的群
-    （座標欄 pos_mode 保留落在數字帶內的小群 : , .）→ 只留最大的一簇（相鄰字距 < GAP；去掉兩端的場景雜訊）。"""
+    （座標欄 pos_mode 保留落在數字帶內的小群 : , .）→ 只留最大的一簇（相鄰字距 < GAP；去掉兩端的場景雜訊）。
+    scale < 1（外接縮放視窗的實體點陣，見 seg_scale）：細線高 / 合併重疊門檻改 max(2, round(4×scale))、GAP×scale
+    （1728×995 實測：冒號兩點各高 3 px 原本被當細線丟掉、「級」左右兩半只重疊 2 px 沒合併）；scale = 1 與原行為逐位元相同"""
     if not rows:
         return []
-    comps = [c for c in _components(rows) if c['y1'] - c['y0'] >= 4]
+    thin = 4 if scale >= 1 else max(2, round(4 * scale))
+    gap = GAP if scale >= 1 else round(GAP * scale)
+    comps = [c for c in _components(rows) if c['y1'] - c['y0'] >= thin]
     comps.sort(key=lambda c: c['x0'])
     merged = []
     for c in comps:
         for m in merged:
             ov = min(m['x1'], c['x1']) - max(m['x0'], c['x0']) + 1
-            if ov >= 4 or (ov > 0 and ov >= 0.6 * min(m['x1'] - m['x0'] + 1, c['x1'] - c['x0'] + 1)):
+            if ov >= thin or (ov > 0 and ov >= 0.6 * min(m['x1'] - m['x0'] + 1, c['x1'] - c['x0'] + 1)):
                 m['x0'], m['x1'] = min(m['x0'], c['x0']), max(m['x1'], c['x1'])
                 m['y0'], m['y1'] = min(m['y0'], c['y0']), max(m['y1'], c['y1'])
                 m['pts'] += c['pts']
@@ -99,7 +113,7 @@ def segment(rows: list[str], pos_mode: bool = False) -> list[tuple[int, int, lis
             keep.append(c)
     clusters, cur = [], []
     for c in keep:
-        if cur and c['x0'] - cur[-1]['x1'] > GAP:
+        if cur and c['x0'] - cur[-1]['x1'] > gap:
             clusters.append(cur)
             cur = []
         cur.append(c)
@@ -186,10 +200,10 @@ class Matcher:
 
 
 # ---------- 欄位解析 ----------
-def read_text(matcher: Matcher, rows: list[str], pos_mode: bool = False) -> str | None:
-    """整欄 → 字元串；有任何字認不出來回 None；整欄沒墨回 ''"""
+def read_text(matcher: Matcher, rows: list[str], pos_mode: bool = False, scale: float = 1.0) -> str | None:
+    """整欄 → 字元串；有任何字認不出來回 None；整欄沒墨回 ''。scale 見 seg_scale"""
     s = ''
-    for _, _, g in segment(rows, pos_mode):
+    for _, _, g in segment(rows, pos_mode, scale):
         ch, _, _ = matcher.classify(g)
         if ch is None:
             return None
@@ -239,7 +253,8 @@ def read_fields(cap: dict, tpl: dict | None = None) -> dict:
     tpl = tpl if tpl is not None else load_tpl(cap['layout'])
     m = Matcher(tpl)
     f = cap['fields']
-    txt = {k: read_text(m, f[k], k.startswith('pos')) for k in FIELDS if k in f}
+    sc = seg_scale(cap.get('layout'))
+    txt = {k: read_text(m, f[k], k.startswith('pos'), sc) for k in FIELDS if k in f}
     pos = parse_pos(txt.get('pos'))
     if pos is None:
         pos = parse_pos(txt.get('pos2'))
@@ -297,7 +312,7 @@ def live_pos(cap: dict | None = None) -> str | None:
         m = Matcher(load_tpl(cap['layout']))
         for k in ('pos', 'pos2'):
             if k in cap['fields']:
-                p = parse_pos(read_text(m, cap['fields'][k], True))
+                p = parse_pos(read_text(m, cap['fields'][k], True, seg_scale(cap.get('layout'))))
                 if p:
                     return p
     except (KeyError, ValueError, IndexError):
@@ -339,7 +354,7 @@ def learn_from(cap_a: dict, cap_b: dict, st: dict, tpl: dict, dm: dict | None = 
         if cap_a['fields'].get(k) != cap_b['fields'].get(k):
             log(f'  {k}: 前後畫面不同，略過')
             continue
-        segs = segment(cap_a['fields'][k], k.startswith('pos'))
+        segs = segment(cap_a['fields'][k], k.startswith('pos'), seg_scale(cap_a.get('layout')))
         if len(segs) != len(label):
             log(f'  {k}: 切出 {len(segs)} 字、標籤「{label}」{len(label)} 字，略過')
             continue

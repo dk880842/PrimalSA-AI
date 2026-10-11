@@ -13,6 +13,8 @@
 樣板是**學出來的**（沒有預建檔）：呼叫端用可信的標籤（OCR 精確命中 Monster 表、等級多組 OCR 設定共識）呼叫 learn_*。
 學習很保守：與既有「別的標籤」IoU 也高 → 視為標籤可疑，整次不學；同一標籤最多 MAX_VARIANTS 個變體。
 測試可替換 petmatch.TPL_DIR；所有碰遊戲的呼叫都走 uikit.px。
+版面（P3，2026-10-11）：`gui pixel` 在同比例縮放視窗取的是實體最近點，同一個字的點陣與 2880×1659 不同，所以樣板依實體尺寸分檔：
+2880×1659 = pet-tpl/2880x1659.json、species.json（原檔）；外接 1728×995 = pet-tpl/1728x995.json、species-1728x995.json（key() = layout.tpl_key()）。
 """
 import json
 import re
@@ -108,12 +110,18 @@ def iou(a: int, b: int, stride: int) -> float:
 
 
 # ---- 樣板檔 ----
-def tpl_path(layout: str = LAYOUT) -> Path:
-    return TPL_DIR / f'{layout}.json'
+def key() -> str:
+    """目前遊戲的樣板檔鍵（layout.tpl_key()：2880×1659 或 TEMPLATE_PHYS 內的實體尺寸）；同一行程只問一次遊戲"""
+    import layout as layout_mod
+    return layout_mod.tpl_key()
 
 
-def load_tpl(layout: str = LAYOUT) -> dict:
-    """{'name': {標籤: [hex]}, 'avatar': {標籤: [hex]}, 'digit': {字元: [點陣列字串]}}；沒檔 / 壞檔 → 空"""
+def tpl_path(layout: str | None = None) -> Path:
+    return TPL_DIR / f'{layout or key()}.json'
+
+
+def load_tpl(layout: str | None = None) -> dict:
+    """{'name': {標籤: [hex]}, 'avatar': {標籤: [hex]}, 'digit': {字元: [點陣列字串]}}；沒檔 / 壞檔 → 空。layout 沒給 = key()"""
     try:
         d = json.loads(tpl_path(layout).read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -121,7 +129,7 @@ def load_tpl(layout: str = LAYOUT) -> dict:
     return {k: d.get(k) if isinstance(d.get(k), dict) else {} for k in ('name', 'avatar', 'digit')}
 
 
-def save_tpl(tpl: dict, layout: str = LAYOUT) -> None:
+def save_tpl(tpl: dict, layout: str | None = None) -> None:
     TPL_DIR.mkdir(parents=True, exist_ok=True)
     p = tpl_path(layout)
     tmp = p.with_suffix('.tmp')
@@ -263,7 +271,9 @@ def inner_same(a, b, n: int = THUMB_N, tol: int = THUMB_TOL) -> bool:
 
 
 def species_path() -> Path:
-    return TPL_DIR / 'species.json'
+    """物種登錄檔：2880×1659 = species.json（原檔）；其他樣板版面 = species-<實體尺寸>.json（縮圖簽名是實體最近點取樣，不能共用）"""
+    k = key()
+    return TPL_DIR / ('species.json' if k == LAYOUT else f'species-{k}.json')
 
 
 def load_species() -> dict:

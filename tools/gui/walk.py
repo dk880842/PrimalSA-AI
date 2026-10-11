@@ -288,6 +288,7 @@ def step_to(map_id: int, tx: int, ty: int, exit_map: int | None = None) -> tuple
     """慢速：每段點地面最多 MAX_TILES 格、等鏡頭停、OCR 讀座標再點下一段。
     座標沒變（點到 UI、點到障礙、被擋）就把每段格數減半再點，減到 0 = 卡住。
     exit_map = 這格是出口，走到就換地圖（讀到 exit_map 就回傳）。"""
+    world_guard()
     lim, last = MAX_TILES, None
     for _ in range(25):
         p = wait_pos()
@@ -311,7 +312,22 @@ def step_to(map_id: int, tx: int, ty: int, exit_map: int | None = None) -> tuple
     raise RuntimeError(f'走太久還沒到 {tx},{ty}')
 
 
+# 世界畫面（地圖 / 角色）已量過每格位移的同比例縮放實體尺寸。2026-10-11 外接 1728×995 實機：UI 等比例，但世界畫面比筆電放大約 2 倍
+# （鏡頭高度同為最左），上面 TILE / ME / NPC_DY 不適用 → 量好之前一律擋下點地面（座標換算層只管 UI）
+WORLD_OK_PHYS: tuple = ()
+
+
+def world_guard() -> None:
+    """同比例縮放視窗（例 1728×995）的世界倍率還沒量 → RuntimeError，不點地面。筆電 2880×1659 / 1920×1017 / PSA_LAYOUT 指定時不擋"""
+    if os.environ.get('PSA_LAYOUT'):
+        return
+    phys = layout.current()
+    if phys and phys != layout.DEFAULT and layout.logical() == layout.DEFAULT and phys not in WORLD_OK_PHYS:
+        raise RuntimeError(f'外接同比例視窗 {phys}：世界畫面倍率與筆電不同（約 2 倍，未量），walk 不點地面；請用筆電或先量 TILE 常數（notes/plan-display-scale.md）')
+
+
 def _start(map_id: int, start: tuple[int, int] | None) -> tuple[int, int]:
+    world_guard()
     if start is not None:
         return start
     p = wait_pos(4)
@@ -415,7 +431,8 @@ def npc_steps(npc: tuple[int, int], at: tuple[int, int], sig: str = SIG_NPC_DIAL
 
 
 def talk_npc(npc: tuple[int, int], at: tuple[int, int], sig: str = SIG_NPC_DIALOG, then: str = '', pre: str = '') -> bool:
-    """點 NPC 並等對話框；pre = 同一個 seq 前面先做的動作。回傳對話框有沒有出現"""
+    """點 NPC 並等對話框；pre = 同一個 seq 前面先做的動作。回傳對話框有沒有出現（NPC 位置是世界座標：外接縮放視窗擋下，見 world_guard）"""
+    world_guard()
     out = gui('seq', (pre + '; ' if pre else '') + npc_steps(npc, at, sig, then))
     return any(l.split()[:1] == ['ok'] for l in out.splitlines())
 

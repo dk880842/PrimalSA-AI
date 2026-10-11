@@ -1188,6 +1188,8 @@ lap_state = watchstate.read  # 保留引用只為可讀性
 w.cycle()
 check('筆電：state=idle、game.screen_supported、覆寫未套', watchstate.read()['screen']['state'] == 'idle' and watchstate.read()['game']['screen_supported']
       and screen_sigs.active_layout() is None and not watchstate.read()['game']['proportional'])
+real_tl = layout_mod.template_layout
+layout_mod.template_layout = lambda phys=None: None          # 模擬 P3 之前（樣板未就緒）
 fk.info = (0, INFO_EXT, ''); fk.pixel = phys_out('enc'); w.last_info = -1e9
 w.cycle()
 st = watchstate.read()
@@ -1198,13 +1200,11 @@ check('外接：樣板未就緒 → screen_supported False + 理由', g_['screen
 check('外接：仍有送 pixel、state 不是 unsupported（驗證視窗偵測照跑）', st['screen']['state'] not in ('unsupported', 'error') and any(c[1][0] == 'pixel' for c in fk.calls[-3:]))
 check('外接：HUD 標籤說清楚版面與樣板', '外接 1728×995' in st['screen']['label'] and '樣板未就緒' in st['screen']['label'], st['screen']['label'])
 check('外接：遇敵鈕（覆寫點）讀得到 enc_on', st['screen']['enc_on'] is True)
-# 樣板就緒（模擬 P3）→ 放行
-real_tl = layout_mod.template_layout
-layout_mod.template_layout = lambda phys=None: '1728x995'
+# 實際 layout（P3 之後 1728x995 在 TEMPLATE_PHYS）→ 放行
+layout_mod.template_layout = real_tl
 w.last_info = -1e9; w.cycle()
 g_ = watchstate.read()['game']
-check('模擬樣板就緒：screen_supported True', g_['screen_supported'] is True and g_['layout_reason'] == '' and g_['templates'] is True)
-layout_mod.template_layout = real_tl
+check('P3 樣板就緒（TEMPLATE_PHYS）：screen_supported True', g_['screen_supported'] is True and g_['layout_reason'] == '' and g_['templates'] is True)
 # 版面切回筆電 → 還原
 fk.info = (0, INFO_LAP, ''); fk.pixel = (0, px_out('idle'), ''); w.last_info = -1e9
 w.cycle()
