@@ -9,6 +9,8 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 座標是截圖座標（客戶區 2880×1659）。`G="bash tools/gui/gui.sh"`，在專案根目錄執行。實測日 2026-10-10，隊伍 DKB0、DKB02～05（0 轉 128 級）。
 **轉生或吃封印書後這些任務會重置，要整套重做**（先用 `psa.py` 查任務等級、寵物 ID 是否改變）。
 寵物存取工具：`pet.py list / set-state / rest-all / store / take`（見 psa-game-ui SKILL.md；先用工具、非 0 才手動）。
+批次：`pet.py store-many / take-many`（同一個面板 session 連續存 / 取，頭像直接切）；新抓的寵物沒名字（名字框是成長字串）見下方「轉生後寵物重整」。
+
 
 ## 何時用
 - Task 步驟類型是交寵物（`psa.py steps <任務ID>` / `knowledge/quests/`：寵物 ID × 數量 + petLevel），或使用者說抓寵 / 練寵交任務。
@@ -135,3 +137,16 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 - 外掛左欄「自動轉換戰寵」勾選框座標（只知使用者已設 30 級，勾選用 `ass.py` 左欄或截圖找）。
 - 練級傳送「柯奧4F龜洞」的按鈕座標（照 `/psa-grind-start` 選練功區）。
 - （已解決 2026-10-11）寵物倉庫取出鈕實際位置 = 530,697（與存入同一顆）；675,703 是白色方塊，不要點。
+
+## 轉生後寵物重整（2026-10-11，腳本 `tools/gui/rebirth_pets.py`）
+轉生後 5 人寵物欄清空重來：舊寵物全存個人倉庫 → DKBO2 外掛抓 5 隻騎寵（布拉奇多斯，系別「雷龍系」）→ 經公共倉庫分給其他 4 人 → 設騎乘 → 各自取朵拉比斯設出戰 → 外掛重新鎖定。手動版紀錄見 `notes/quest-log.md`「轉生後寵物重整」。
+```
+uv run --no-project python tools/gui/rebirth_pets.py --dry-run                       # 先看計畫（不碰遊戲）
+uv run --no-project python tools/gui/rebirth_pets.py --trans 1 --store-mount 瑪斯貝卡   # --store-mount 只有使用者當次明講才加
+uv run --no-project python tools/gui/rebirth_pets.py --from catch                    # 中斷後從某階段續跑（進度 tools/.cache/rebirth_pets.json）
+```
+階段與退出碼：preflight 100 / boxes 101 / store 102 / catch 103 / distribute 104 / ride 105 / battle 106 / lock 107 / cleanup 108 / 參數與進度不一致 109（全文見檔頭）。
+- **實機驗證狀態：只有離線測試**（test_rebirth_pets.py + test_pet.py 新案例）。pet.py 舊的 store / take 實機驗證過；store-many / take-many / 沒名字寵物辨識 / learn-species、bag.py、外掛捉寵設置與鎖定的「讀字找列」都沒在遊戲上跑過。第一次實跑請在旁邊看，並先唯讀確認：`pet.py list`（沒名字的寵物顯示 `?(49/9/8/2)`）。
+- **沒名字的新寵物**：名字框顯示成長字串，樣板 / Monster 表認不得。`pet.py learn-species DKBO 1 布拉奇多斯 --confirm-growth <該格字串>` 先登錄一次（縮圖簽名 + 字串；5 人現有騎寵是已知的布拉奇多斯，可以拿來學），之後用物種名 `--pet 布拉奇多斯` 找得到；同物種多隻要 `--pick first|last`。腳本抓寵時用「外掛只選了單一物種 + 試抓 1 隻剛好多 1 隻沒名字」三重確認才登錄，再抓 4 隻靠縮圖認。登錄檔沒有 = 不猜（72 / 73）。
+- 外掛下拉顯示成長字串、順序每人不同：腳本用 ocr.ps1 回傳的文字座標，剛好 1 列吻合才點，點完再讀欄位確認才勾。OCR 框（CATCH_LIST_* / LOCK_LIST_* / OCR_TAB_*）是猜的，第一次實跑看 snap 修。
+- 拆分誘餌（公共取整疊 → 拆分只留 N → 其餘存回）座標取自 plan-dino-katan.md 手動實測；不點捉寵「+」（花石幣）、不碰丟棄區塊。

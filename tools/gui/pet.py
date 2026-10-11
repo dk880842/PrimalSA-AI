@@ -7,6 +7,10 @@
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
   uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1] [--allow-mount-store 名字]
   uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N [--expect 迪基格斯]
+  uv run --no-project python tools/gui/pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 瑪斯貝卡] [--skip-missing] [--pick first|last]
+  uv run --no-project python tools/gui/pet.py take DKBO --depot public --pet 朵拉比斯        # 不給格號：現場逐張選卡讀名字找（沒名字的卡靠成長字串登錄檔）
+  uv run --no-project python tools/gui/pet.py take-many --role all --pets 朵拉比斯 [--depot personal|public] [--skip-missing]
+  uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--timing
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
 
@@ -19,6 +23,11 @@
   - 狀態：下方三顆鈕（出戰 / 騎乘 / 休息）亮的（棕底）就是目前狀態。
   - 騎寵（uikit.MOUNTS = 瑪斯貝卡 / 布拉奇多斯）：名字「像」騎寵（is_mount_like，鬆）或狀態 = 騎乘 → set-state / rest-all 不動（73），要動需 --allow-mount。
 
+沒名字的新寵物（#87 / #92，2026-10-11；離線驗證，實機待驗）：剛抓到的寵物名字框顯示「成長字串」a/b/c/d（實測 49/9/8/2、49/9/7/2、48/9/7/1、47/10/7/1、45/10/8/1），
+  名字樣板與 Monster 表 OCR 都認不出。list 會給 name=None、unnamed='49/9/8/2'、raw_name='?(49/9/8/2)'（OCR ≥ 2 行完整相同才採用，否則不當字串）。
+  物種（species）靠「縮圖簽名 + 成長字串登錄檔」多重確認（tools/.cache/pet-tpl/species.json，學出來的）：學法 = learn-species（呼叫端要有可信標籤，
+  並給 --confirm-growth 當第二重確認）；store 時會把「成長字串 → 物種」記進登錄檔，倉庫卡（沒縮圖）之後靠字串認。沒登錄 = 不知道是什麼 → --pet 物種名找不到（72）、store 拒絕（73）。
+  物種是騎寵（布拉奇多斯）→ mountlike，store 要 --allow-mount-store 完全同名。
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；pet 自己 70～78）：
   70 寵物面板打不開 / 中途消失（沒點任何面板內座標）
   71 左欄角色或寵物格沒選到（黃框不對 / 頭像名字樣板不符）
@@ -27,7 +36,7 @@
   74 狀態點了沒變（多半是外掛鎖定戰寵：「你已鎖定戰寵，請取消後再操作」；或戰鬥中）→ 不自動去外掛解鎖（計畫 §9 第 9 條），只點 1 次
   78 戰鬥中（預設不動遇敵；--pause-encounter 才會關遇敵等戰鬥結束）
   75 倉庫分頁 / 子分頁 / 按鈕文字（存入寵物 / 取出寵物）/ 選取 / 縮圖簽名不符 → 不點存取鈕（零點擊）
-  76 存 / 取後驗證失敗（**不重點**，請人看 snap；take 名字不符也是 76 / 72，不自動存回）
+  76 存 / 取後驗證失敗（**不重點**，請人看 snap；take 名字不符也是 76 / 72，不自動存回）。store 的驗證不認固定格位（倉庫存入後會重排，#84）：寵物欄空格 +1、倉庫張數 +1、倉庫逐張選卡讀名字找得到該寵物（沒名字的比成長字串）
   77 倉庫滿（store）或寵物欄滿（take）→ 零點擊
   store 的硬性禁止（73，零存取點擊）：名字是 / 像騎寵（瑪斯貝卡 / 布拉奇多斯，含 OCR 錯字）、狀態 = 騎乘、第 1 格（要 --allow-slot1 才放行）、名字讀不出來
   例外 --allow-mount-store <名字>（只有使用者當次明講才用）：只放行「名字完全等於此值」的騎寵（像但不同仍擋）、且該寵物狀態必須已是等待（騎乘中仍 73，先 set-state ... 等待 --allow-mount）；
@@ -304,19 +313,60 @@ def ocr_level_consensus():
 
 
 def resolve_name(name_rows, ctx: dict) -> tuple:
-    """名字框的點陣 → (名字或 None, 'tpl' / 'ocr' / None, OCR 原文清單)。樣板優先；沒樣板才 OCR（精確命中 Monster 表才學）"""
+    """名字框的點陣 → (名字或 None, 'tpl' / 'ocr' / None, OCR 原文清單)。樣板優先；沒樣板才 OCR（精確命中 Monster 表才學）。
+    名字框是「成長字串」（沒名字的新寵物）→ (None, 'growth', 原文)，字串用 resolve_ident 取"""
+    r = resolve_ident(name_rows, ctx)
+    return r['name'], r['via'], r['raw']
+
+
+def resolve_ident(name_rows, ctx: dict) -> dict:
+    """名字框 → {'name', 'via', 'raw', 'growth'}。growth = 成長字串 'a/b/c/d'（名字框顯示這個 = 沒名字的新寵物，name 一定是 None、不猜物種；
+    OCR 至少 2 行完整相同才採用；同一張圖用 ctx['gcache'] 記住，不重複 OCR）"""
     tpl = ctx['tpl']
     label, sc, _ = petmatch.match_whole('name', name_rows, tpl)
     if label:
-        return label, 'tpl', None
+        return {'name': label, 'via': 'tpl', 'raw': None, 'growth': None}
+    gc = ctx.setdefault('gcache', {})
+    key = hash('\n'.join(name_rows)) if name_rows else None
+    if key is not None and key in gc:
+        return {'name': None, 'via': 'growth', 'raw': None, 'growth': gc[key]}
     if petmatch.ink(name_rows) >= petmatch.MIN_INK['name']:
         nm, raw, exact = ocr_pet_name()
+        if not nm:
+            g = petmatch.parse_growth(raw)
+            if g:
+                gc[key] = g
+                return {'name': None, 'via': 'growth', 'raw': raw, 'growth': g}
         if nm and exact and ctx['learn']:
             again, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
             if again and again[0] == name_rows and petmatch.learn_whole('name', nm, name_rows, tpl, log):    # 前後兩次截圖相同才學（避免畫面還沒換）
                 ctx['dirty'] = True
-        return nm, ('ocr' if nm else None), raw
-    return None, None, None
+        return {'name': nm, 'via': 'ocr' if nm else None, 'raw': raw, 'growth': None}
+    return {'name': None, 'via': None, 'raw': None, 'growth': None}
+
+
+def species_reg(ctx: dict) -> dict:
+    if 'reg' not in ctx:
+        ctx['reg'] = petmatch.load_species()
+    return ctx['reg']
+
+
+def ident_species(i: int, growth: str | None, ctx: dict) -> str | None:
+    """沒名字的寵物（在寵物欄第 i 格，0 起算）→ 物種：縮圖簽名 + 成長字串登錄檔多重確認；沒登錄 = None（不猜）"""
+    cols = uikit.px(thumb_pts(i))
+    return petmatch.identify_species(cols, growth, species_reg(ctx))
+
+
+def slot_ident(sl: dict):
+    """格子的有效身分名：有名字用名字；沒名字但物種已確認 → 物種；否則 None"""
+    return sl.get('name') or (sl.get('species') if sl.get('unnamed') else None)
+
+
+def ident_matches(ident: dict, sl: dict) -> bool:
+    """現場讀到的名字框（resolve_ident 結果）是不是 sl 這隻：有名字比名字；沒名字比成長字串（同一隻固定）"""
+    if sl.get('unnamed'):
+        return ident.get('growth') == sl['unnamed']
+    return bool(sl.get('name')) and ident.get('name') == sl['name']
 
 
 def read_slot(i: int, ctx: dict) -> dict:
@@ -338,9 +388,14 @@ def read_slot(i: int, ctx: dict) -> dict:
         return d
     d['state'] = btn_state({s: extra[2 * k:2 * k + 2] for k, s in enumerate(STATES)})
     name_rows, lvl_rows = rows
-    d['name'], d['via'], raw = resolve_name(name_rows, ctx)
+    ident = resolve_ident(name_rows, ctx)
+    d['name'], d['via'], raw = ident['name'], ident['via'], ident['raw']
     if raw:
         d['ocr'] = raw
+    if ident['growth']:                                  # 沒名字的新寵物：成長字串 = 這隻的身分；物種由縮圖 / 登錄檔確認
+        d['unnamed'] = ident['growth']
+        d['raw_name'] = f'?({ident["growth"]})'
+        d['species'] = ident_species(i, ident['growth'], ctx)
     lv = petmatch.read_level(lvl_rows, tpl)
     if lv is not None:
         d['level'], d['lv_via'] = lv, 'tpl'
@@ -353,7 +408,7 @@ def read_slot(i: int, ctx: dict) -> dict:
                 if again and again[0] == lvl_rows and petmatch.learn_level(lvl_rows, v, tpl):
                     ctx['dirty'] = True
     ocr_texts = ([d['name']] if d['name'] else []) + d.get('ocr', [])
-    d['mountlike'] = any(uikit.is_mount_like(t) for t in ocr_texts)
+    d['mountlike'] = any(uikit.is_mount_like(t) for t in ocr_texts) or d.get('species') in uikit.MOUNTS
     return d
 
 
@@ -449,6 +504,12 @@ def load_ctx(learn: bool) -> dict:
 
 
 def save_ctx(ctx: dict) -> None:
+    if ctx.get('rdirty'):
+        try:
+            petmatch.save_species(ctx['reg'])
+        except OSError as e:
+            log(f'物種登錄檔存檔失敗：{e}')
+        ctx['rdirty'] = False
     if ctx['dirty']:
         try:
             petmatch.save_tpl(ctx['tpl'])
@@ -481,7 +542,7 @@ def role_list(arg: str) -> list | None:
 def fmt_slot(s: dict) -> str:
     if s.get('empty'):
         return f'  {s["slot"]}  （空）'
-    nm = s.get('name') or '?'
+    nm = s.get('name') or (s.get('raw_name', '?') + (f'≈{s["species"]}' if s.get('species') else ''))
     lv = s.get('level')
     return f'  {s["slot"]}  {nm:<8} {s.get("state") or "?":<3} Lv{lv if lv is not None else "?"}'
 
@@ -512,20 +573,23 @@ def list_roles(role_arg: str = 'all', as_json: bool = False, pause: bool = False
     return _out(0, info, t0)
 
 
-def find_slot(slots: list, want: str, slot_no: int | None) -> tuple:
+def find_slot(slots: list, want: str, slot_no: int | None, pick: str | None = None) -> tuple:
     """slots 中名字 = want 的格 → (slot dict | None, 訊息)。slot_no（1 起算）指定時該格名字必須吻合；同名多隻沒給 slot_no → None"""
     if slot_no is not None:
         sl = next((x for x in slots if x['slot'] == slot_no), None)
         if sl is None or sl.get('empty'):
             return None, f'第 {slot_no} 格是空的'
-        return (sl, '') if sl.get('name') == want else (None, f'第 {slot_no} 格是 {sl.get("name") or "?"}，不是 {want}')
-    hits = [x for x in slots if not x.get('empty') and x.get('name') == want]
+        return (sl, '') if slot_ident(sl) == want else (None, f'第 {slot_no} 格是 {sl.get("name") or sl.get("raw_name") or "?"}，不是 {want}')
+    hits = [x for x in slots if not x.get('empty') and slot_ident(x) == want]
     if len(hits) == 1:
         return hits[0], ''
+    if len(hits) > 1 and pick in ('first', 'last'):          # store-many --pick：同物種的新寵物互相可替換，取最前 / 最後一格
+        return (hits[0] if pick == 'first' else hits[-1]), ''
     if len(hits) > 1:
         return None, f'有 {len(hits)} 隻 {want}（格 {[h["slot"] for h in hits]}），請用 --slot 指定'
-    unk = [x['slot'] for x in slots if not x.get('empty') and not x.get('name')]
-    return None, f'找不到 {want}' + (f'（格 {unk} 名字讀不出來）' if unk else '')
+    unk = [x['slot'] for x in slots if not x.get('empty') and not slot_ident(x)]
+    unn = [f'{x["slot"]}:{x["raw_name"]}' for x in slots if x.get('unnamed') and not x.get('species')]
+    return None, f'找不到 {want}' + (f'（格 {unk} 名字讀不出來' + (f'；沒名字且物種未確認：{unn}，先 learn-species' if unn else '') + '）' if unk else '')
 
 
 def apply_state(role: str, sl: dict, target: str, ctx: dict) -> tuple:
@@ -717,13 +781,8 @@ def thumb_same(a, b) -> bool:
 def mount_same(a, b) -> bool:
     """騎寵位縮圖比對：只比內側 3 欄（x 250 / 265 / 280），不比最右欄 x 292 —— 那欄會被「選中框」的橘色光暈蓋到
     （2026-10-11 P8 實機：存走第 2 格後選取移到騎寵格，x 292 那 4 點 (167,55,10)→(209,119,5)，其餘 12 點逐位元組相同，
-    舊的 14 / 16 門檻誤報 76）。12 點至少 11 點相符"""
-    if not a or not b or len(a) != len(b) or len(a) % len(THUMB_X):
-        return False
-    n = len(THUMB_X)
-    pairs = [(c, d) for k, (c, d) in enumerate(zip(a, b)) if k % n < n - 1]
-    ok = sum(1 for c, d in pairs if all(abs(u - v) <= THUMB_TOL for u, v in zip(c, d)))
-    return ok >= len(pairs) - 1
+    舊的 14 / 16 門檻誤報 76）。12 點至少 11 點相符（實作在 petmatch.inner_same，物種辨識共用）"""
+    return petmatch.inner_same(a, b, len(THUMB_X), THUMB_TOL)
 
 
 def _card_pts() -> list:
@@ -854,11 +913,28 @@ def read_name_now(ctx: dict, retries: int = BANNER_RETRIES, wait: float = BANNER
     return None, None
 
 
+def read_ident(ctx: dict, retries: int = BANNER_RETRIES, wait: float = BANNER_WAIT_S) -> dict:
+    """名字框現在顯示的身分（read_name_now 的完整版）→ resolve_ident 的 dict（讀不到像素 → 全 None）。
+    EXIT 橫幅 / 浮字蓋住時等 wait 秒重讀（名字框有墨但名字 / 成長字串都認不出）"""
+    ident = {'name': None, 'via': None, 'raw': None, 'growth': None}
+    for attempt in range(retries + 1):
+        rows, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
+        if rows is None:
+            return ident
+        ident = resolve_ident(rows[0], ctx)
+        if ident['name'] or ident['growth'] or attempt == retries or petmatch.ink(rows[0]) < petmatch.MIN_INK['name']:
+            return ident
+        uikit.sleep(wait)
+    return ident
+
+
 def guard_store(sl: dict, allow_slot1: bool, allow_mount_store: str | None = None) -> str | None:
     """存倉硬性禁止：回拒絕原因（None = 可以）。騎寵絕不存；唯一例外 allow_mount_store = 該寵物的「正式名」且 sl 名字完全相同（不接受像）、
     狀態須已是等待（騎乘 / 出戰都擋，先 set-state 等待）；其餘規則（名字 / 狀態讀不出、第 1 格要 --allow-slot1）照舊"""
-    nm = sl.get('name')
+    nm = slot_ident(sl)
     if not nm:
+        if sl.get('unnamed'):
+            return f'{sl.get("raw_name")} 沒名字且物種未確認（縮圖 / 成長字串登錄檔對不上；可能是騎寵），拒絕存倉；先 learn-species'
         return '名字讀不出來（不猜，拒絕存倉）'
     if sl.get('state') == '騎乘':
         return f'{nm} 正在騎乘中（騎寵），絕不存倉'
@@ -994,12 +1070,13 @@ def _back_to_pet_tab() -> None:
         pass
 
 
-def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ctx: dict, info: dict, am: str | None = None) -> int:
+def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ctx: dict, info: dict, am: str | None = None,
+                pre: tuple | None = None) -> int:
     def bad(rc, msg):
         info['msg'] = msg
         return uikit_fail(rc, msg)
 
-    rc, slots = list_role(role, ctx)
+    rc, slots = pre if pre is not None else list_role(role, ctx)      # pre = store-many 已讀好的 (rc, slots)
     info['slots'] = slots
     if rc:
         return rc
@@ -1020,9 +1097,11 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     if rc:
         return rc
     cur = read_slot(i, ctx)
-    reason = guard_store({**sl, **{k: cur.get(k) for k in ('name', 'state', 'mountlike')}}, allow_slot1, am)
-    if reason or cur.get('name') != want:
-        return bad(EXIT_FORBID if reason else EXIT_NAME, f'選中第 {sl["slot"]} 格後重讀：{reason or "名字是 " + str(cur.get("name"))}，不存')
+    cur_sl = {**sl, **{k: cur.get(k) for k in ('name', 'state', 'mountlike', 'unnamed', 'raw_name', 'species')}}
+    reason = guard_store(cur_sl, allow_slot1, am)
+    if reason or slot_ident(cur_sl) != want or (sl.get('unnamed') and cur_sl.get('unnamed') != sl['unnamed']):
+        return bad(EXIT_FORBID if reason else EXIT_NAME, f'選中第 {sl["slot"]} 格後重讀：{reason or "名字是 " + str(cur.get("name") or cur.get("raw_name"))}，不存')
+    sl = cur_sl
     pre_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
     if pre_cols is None:
         return bad(EXIT_PANEL, '讀不到縮圖簽名')
@@ -1042,9 +1121,9 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
         rc = select_slot(i, f or {'sel': [False] * 5})
         if rc:
             return rc
-    nm, _ = read_name_now(ctx)
-    if nm != want:
-        return bad(EXIT_DEPOT, f'倉庫分頁中選取的是 {nm}（要 {want}），不點存入')
+    ident = read_ident(ctx)
+    if not ident_matches(ident, sl):
+        return bad(EXIT_DEPOT, f'倉庫分頁中選取的是 {ident["name"] or ident["growth"]}（要 {want}），不點存入')
     now_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
     if now_cols is None or not thumb_same(pre_t, now_cols[:16]) or (i != 0 and not mount_same(pre_mount, now_cols[16:])):
         uikit.snap('pet-store-thumb')
@@ -1067,16 +1146,19 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     if i != 0 and (m_cols is None or not mount_same(pre_mount, m_cols)):        # 存第 1 格（--allow-slot1）時後面的寵物會補位上來，不比
         uikit.snap('pet-store-mount')
         return bad(EXIT_VERIFY, '存入後第 1 格（騎寵）縮圖變了！請人立刻看截圖確認')
+    # 事後驗證（#84）：倉庫存入後會重新排序，不能認固定格位 → 寵物欄空格 +1 / 倉庫張數 +1（上面 wait_counts 已確認）
+    # 再「現場逐張選卡讀名字」確認倉庫裡找得到這隻（先看新增的那格，再依序其他格）；沒名字的寵物比成長字串
     new_idx = next((k for k in range(20) if not d2['empty'][k] and d['empty'][k]), free_idx)
-    info['depot_index'] = new_idx + 1
-    if click_card(new_idx, f'pet 驗證倉庫第 {new_idx + 1} 格名字'):
-        g, okc = wait_for_card(new_idx, depot)
-        nm2, _ = read_name_now(ctx, 4, 1.0) if okc else (None, None)
-        info['depot_name'] = nm2
-        if nm2 and nm2 != want:
-            return bad(EXIT_VERIFY, f'存進倉庫第 {new_idx + 1} 格的是 {nm2}，不是 {want}！請人看截圖')
+    found = find_card(d2, depot, lambda idn: ident_matches(idn, sl), ctx, first=new_idx, info=info)
+    info['depot_index'] = None if found is None else found + 1
+    if found is None:
+        uikit.snap('pet-store-notfound')
+        return bad(EXIT_VERIFY, f'存入後寵物欄 / 倉庫張數都對，但倉庫 {depot} 裡逐張看不到 {want}（{sl.get("raw_name") or want}）！請人看截圖')
+    if sl.get('unnamed') and sl.get('species'):                  # 記住這隻的成長字串 → 物種（倉庫卡沒縮圖，之後取出靠字串認）
+        if petmatch.learn_species(species_reg(ctx), sl['species'], None, sl['unnamed']):
+            ctx['rdirty'] = True
     uikit.mark('store verified')
-    print(f'pet：{role} 的 {want}（原第 {sl["slot"]} 格）存入{"個人" if depot == "personal" else "公共"}倉庫第 {new_idx + 1} 格')
+    print(f'pet：{role} 的 {want}（原第 {sl["slot"]} 格）存入{"個人" if depot == "personal" else "公共"}倉庫第 {found + 1} 格')
     return 0
 
 
@@ -1092,15 +1174,58 @@ def wait_for_card(idx: int, depot: str):
         uikit.sleep(POLL_S)
 
 
+def card_is(idn: dict, want: str | None, reg: dict) -> bool:
+    """倉庫卡 / 名字框身分 idn 是不是 want：有名字比名字；沒名字比「成長字串 → 登錄檔物種」（沒登錄 = 不是，不猜）"""
+    if not want:
+        return False
+    if idn.get('name'):
+        return idn['name'] == want
+    g = idn.get('growth')
+    return bool(g) and (reg.get('growth') or {}).get(g) == want
+
+
+def card_order(filled: list, first: int | None) -> list:
+    """逐張驗證的順序：first（新增 / 優先的那格）先，其餘已用格照序（純函式）"""
+    idxs = [k for k, f in enumerate(filled) if f]
+    if first is not None and first in idxs:
+        idxs.remove(first)
+        idxs.insert(0, first)
+    return idxs
+
+
+def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, info: dict | None = None):
+    """倉庫（d = scan_depot 結果）逐張選卡讀名字框，pred(ident) 成立的第一格 index（0 起算）；找不到 / 面板消失 → None。
+    選卡只是選取（無副作用）；每張卡先等選取框移過去才讀（讀到上一張的名字是舊資料）。info['cards'] 記讀到的每張（debug / take 用）"""
+    seen = {}
+    for k in card_order([not e for e in d['empty']], first):
+        if not click_card(k, f'pet 找倉庫卡 第 {k + 1} 格'):
+            break
+        g, ok = wait_for_card(k, depot)
+        if not ok:
+            continue
+        idn = read_ident(ctx, 4, 1.0)
+        seen[k + 1] = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
+        if pred(idn):
+            if info is not None:
+                info['cards'] = seen
+            return k
+    if info is not None:
+        info['cards'] = seen
+    return None
+
+
 def take(role_arg: str, depot: str = 'personal', index: int | None = None, expect: str | None = None,
-         pause: bool = False, learn: bool = True) -> int:
-    """倉庫第 index 格（1 起算）→ 寵物欄。名字框會顯示選中倉庫卡的名字：有 --expect 時先驗名字（不符不點）、取出後再驗新寵物名字（不符 76，不自動存回）"""
+         pause: bool = False, learn: bool = True, pet_name: str | None = None) -> int:
+    """倉庫第 index 格（1 起算）→ 寵物欄。名字框會顯示選中倉庫卡的名字：有 --expect 時先驗名字（不符不點）、取出後再驗新寵物名字（不符 76，不自動存回）。
+    pet_name（--pet）：不給格號，現場逐張選卡讀名字找第一張吻合的（沒名字的卡比成長字串 → 登錄檔物種）；找不到 72、不點取出"""
     t0 = time.time()
     role, info = _depot_prologue(role_arg, depot, 'take')
     if role is None:
         return _out(uikit.EXIT_USAGE, info, t0, '角色或倉庫參數不對')
-    if index is None or not 1 <= index <= 20:
-        print('pet：--index 要 1～20（倉庫格，列優先、1 起算）', file=sys.stderr)
+    if pet_name and index is None:
+        expect = expect or pet_name
+    elif index is None or not 1 <= index <= 20:
+        print('pet：--index 要 1～20（倉庫格，列優先、1 起算），或給 --pet 名字', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '--index 不對')
     want = None
     if expect:
@@ -1114,14 +1239,14 @@ def take(role_arg: str, depot: str = 'personal', index: int | None = None, expec
         if s.rc:
             return _out(s.rc, info, t0)
         try:
-            rc = _take_body(role, depot, index - 1, want, ctx, info)
+            rc = _take_body(role, depot, None if index is None else index - 1, want, ctx, info)
         finally:
             save_ctx(ctx)
             _back_to_pet_tab()
     return _out(rc, info, t0, info.get('msg', ''))
 
 
-def _take_body(role: str, depot: str, idx: int, want, ctx: dict, info: dict) -> int:
+def _take_body(role: str, depot: str, idx, want, ctx: dict, info: dict) -> int:
     def bad(rc, msg):
         info['msg'] = msg
         return uikit_fail(rc, msg)
@@ -1138,6 +1263,15 @@ def _take_body(role: str, depot: str, idx: int, want, ctx: dict, info: dict) -> 
     if rc:
         info['msg'] = '倉庫分頁沒切成功'
         return rc
+    if idx is None:                                            # --pet：現場逐張找
+        idx = find_card(d, depot, lambda idn: card_is(idn, want, species_reg(ctx)), ctx, info=info)
+        if idx is None:
+            if ctx.get('skip_missing'):                        # take-many --skip-missing：這個角色倉庫沒有，略過（不記 errlog）
+                info['missing'] = True
+                info['msg'] = f'{depot} 倉庫沒有 {want}（讀到 {info.get("cards")}）'
+                return EXIT_NAME
+            return bad(EXIT_NAME, f'{depot} 倉庫裡逐張看不到 {want}（讀到 {info.get("cards")}）；沒取出')
+        info['index'] = idx + 1
     if d['empty'][idx]:
         return bad(EXIT_NAME, f'{depot} 倉庫第 {idx + 1} 格是空的，沒有點')
     depot_before = 20 - sum(d['empty'])
@@ -1147,9 +1281,10 @@ def _take_body(role: str, depot: str, idx: int, want, ctx: dict, info: dict) -> 
     if not ok:
         uikit.snap('pet-take-select')
         return bad(EXIT_DEPOT, f'點了倉庫第 {idx + 1} 格但選取框沒到那格；不點取出')
-    nm, raw = read_name_now(ctx)
+    idn = read_ident(ctx)
+    nm = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
     info['depot_name'] = nm
-    if want and nm and nm != want:
+    if want and nm and not card_is(idn, want, species_reg(ctx)):
         return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {want}；沒取出（請人確認 --index）')
     ok, why = btn_ready('take')
     if not ok:
@@ -1168,13 +1303,174 @@ def _take_body(role: str, depot: str, idx: int, want, ctx: dict, info: dict) -> 
     rc = select_slot(new_slot - 1, f2)
     if rc:
         return bad(EXIT_VERIFY, f'取出後選不到新寵物所在的第 {new_slot} 格')
-    nm2, _ = read_name_now(ctx, 4, 1.0)
+    idn2 = read_ident(ctx, 4, 1.0)
+    nm2 = idn2['name'] or (f'?({idn2["growth"]})' if idn2['growth'] else None)
     info['name'] = nm2
-    if want and nm2 != want:
+    if idn2['growth']:                                         # 沒名字：縮圖確認物種（取出的新寵物縮圖在寵物欄，倉庫分頁也看得到）
+        sp = ident_species(new_slot - 1, idn2['growth'], ctx)
+        info['species'] = sp
+        if sp and petmatch.learn_species(species_reg(ctx), sp, None, idn2['growth']):
+            ctx['rdirty'] = True
+        if want and sp != want and not (sp is None and card_is(idn2, want, species_reg(ctx))):
+            return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格，物種 {sp}），不是預期的 {want}！停手交人處理，不自動存回')
+    elif want and nm2 != want:
         return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {want}！停手交人處理，不自動存回')
     uikit.mark('take verified')
     print(f'pet：{role} 倉庫第 {idx + 1} 格 → 寵物欄第 {new_slot} 格：{nm2 or nm or "?"}（取出的寵物預設「等待」）')
     return 0
+
+
+def roles_multi(arg: str) -> list | None:
+    """'all' / 'DKBO,DKBO3'（逗號分隔多個角色）→ 白名單順序的角色清單；任一不認得 → None"""
+    if str(arg).lower() == 'all':
+        return role_list('all')
+    out = []
+    for t in str(arg).split(','):
+        r = role_list(t.strip())
+        if not r:
+            return None
+        if r[0] not in out:
+            out.append(r[0])
+    return out or None
+
+
+def _many_prologue(role_arg: str, pets_text, depot: str, cmd: str, t0: float):
+    roles = roles_multi(role_arg)
+    names = [uikit.snap_pet(x) for x in pets_text]
+    info = {'cmd': cmd, 'depot': depot, 'roles': roles, 'pets': names, 'ops': []}
+    if not roles or depot not in ('personal', 'public') or not pets_text or None in names:
+        bad = [t for t, n in zip(pets_text, names) if n is None]
+        print(f'pet：{cmd} 參數不對（角色 {role_arg!r}、倉庫 {depot!r}、寵物名對不到 Monster 表：{bad}）', file=sys.stderr)
+        return None, info
+    return (roles, names), info
+
+
+def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_slot1: bool = False, allow_mount_store: list | None = None,
+               skip_missing: bool = False, pause: bool = False, learn: bool = True, pick: str | None = None) -> int:
+    """多角色 × 多寵物連續存倉：同一個 Session（面板只開一次）、每次直接點左欄頭像換角色（黃框 + 頭像名字驗證在 select_role）；
+    每隻都走 store 同一套驗證（名字 / 縮圖 / 按鈕 / 計數 / 倉庫逐張找得到），失敗立即停（不重點）。
+    騎寵只放行 allow_mount_store 名單內的名字（名字必須完全相同、且已是等待；第 1 格另需 allow_slot1）；其他規則同 store"""
+    t0 = time.time()
+    prep, info = _many_prologue(role_arg, pets_text, depot, 'store-many', t0)
+    if prep is None:
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    roles, names = prep
+    ams = [uikit.snap_pet(x) or x for x in (allow_mount_store or [])]
+    for nm in names:
+        if (nm in uikit.MOUNTS or uikit.is_mount_like(nm)) and nm not in ams:
+            rc = uikit_fail(EXIT_FORBID, f'拒絕存倉：{nm} 是 / 像騎寵，--allow-mount-store 沒列它；零點擊')
+            return _out(rc, info, t0, '騎寵不能存倉')
+    ctx = load_ctx(learn)
+    final = 0
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            for r in roles:
+                for nm in names:
+                    op = {'role': r, 'pet': nm, 'depot': depot, 'clicked': False}
+                    info['ops'].append(op)
+                    _back_to_pet_tab()
+                    rc, slots = list_role(r, ctx)
+                    if not rc:
+                        sl, why = find_slot(slots, nm, None, pick)
+                        if sl is None and skip_missing and not any(x.get('unnamed') and not x.get('species') for x in slots):
+                            op['skipped'] = why
+                            print(f'pet：{r} 沒有 {nm}，略過')
+                            continue
+                        rc = _store_body(r, nm, depot, sl['slot'] if sl else None, allow_slot1, ctx, op, nm if nm in ams else None, pre=(0, slots))
+                    op['rc'] = rc
+                    if rc:
+                        final = rc
+                        break
+                if final:
+                    break
+        finally:
+            save_ctx(ctx)
+            _back_to_pet_tab()
+    return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
+
+
+def take_many(role_arg: str, pets_text: list, depot: str = 'personal', skip_missing: bool = False, pause: bool = False, learn: bool = True) -> int:
+    """多角色 × 多寵物連續取出（倉庫 → 寵物欄）：同 store_many，現場逐張找名字（沒名字的卡靠成長字串 → 登錄檔）、取出後驗新寵物"""
+    t0 = time.time()
+    prep, info = _many_prologue(role_arg, pets_text, depot, 'take-many', t0)
+    if prep is None:
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    roles, names = prep
+    ctx = load_ctx(learn)
+    ctx['skip_missing'] = skip_missing
+    final = 0
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            for r in roles:
+                for nm in names:
+                    op = {'role': r, 'pet': nm, 'depot': depot, 'clicked': False}
+                    info['ops'].append(op)
+                    _back_to_pet_tab()
+                    rc = _take_body(r, depot, None, nm, ctx, op)
+                    op['rc'] = rc
+                    if rc and op.get('missing') and skip_missing:
+                        op['skipped'] = op.pop('msg', '')
+                        op['rc'] = 0
+                        print(f'pet：{r} 倉庫沒有 {nm}，略過')
+                        continue
+                    if rc:
+                        final = rc
+                        break
+                if final:
+                    break
+        finally:
+            save_ctx(ctx)
+            _back_to_pet_tab()
+    return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
+
+
+def learn_species_cmd(role_arg: str, slot_no: int, species_text: str, confirm_growth: str, pause: bool = False) -> int:
+    """登錄「這隻沒名字的寵物是 X 物種」：選取只讀（無副作用）。要求呼叫端給 --confirm-growth（= 該格名字框現在的成長字串，第二重確認，避免格位弄錯）、
+    物種名必須在 Monster 表、該格必須真的是沒名字的寵物；縮圖已被別的物種樣板吻合 → 拒絕"""
+    t0 = time.time()
+    roles = role_list(role_arg)
+    sp = uikit.snap_pet(species_text)
+    info = {'cmd': 'learn-species', 'role': roles[0] if roles and len(roles) == 1 else None, 'slot': slot_no, 'species': sp}
+    if not roles or len(roles) != 1 or not sp or not 1 <= slot_no <= 5:
+        print('pet：learn-species 參數不對（單一角色、格 1～5、物種名要在 Monster 表）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    role = roles[0]
+    ctx = load_ctx(True)
+    with Session(pause) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        rc = select_role(role, ctx)
+        if rc:
+            return _out(rc, info, t0)
+        f = scan_frames()
+        if f is None or f['empty'][slot_no - 1]:
+            rc = uikit_fail(EXIT_NAME, f'第 {slot_no} 格是空的或讀不到')
+            return _out(rc, info, t0, '格位是空的')
+        rc = select_slot(slot_no - 1, f)
+        if rc:
+            return _out(rc, info, t0)
+        cur = read_slot(slot_no - 1, ctx)
+        info['read'] = {k: cur.get(k) for k in ('name', 'unnamed', 'species', 'state')}
+        if not cur.get('unnamed'):
+            rc = uikit_fail(EXIT_NAME, f'第 {slot_no} 格不是「沒名字」的寵物（名字 {cur.get("name")}），不登錄')
+            return _out(rc, info, t0, '不是沒名字的寵物')
+        if cur['unnamed'] != confirm_growth.strip():
+            rc = uikit_fail(EXIT_NAME, f'第 {slot_no} 格的成長字串是 {cur["unnamed"]}，與 --confirm-growth {confirm_growth} 不符，不登錄')
+            return _out(rc, info, t0, '成長字串不符')
+        cols = uikit.px(thumb_pts(slot_no - 1))
+        reg = species_reg(ctx)
+        if cols is None or (petmatch.species_by_thumb(cols, reg) not in (None, sp)):
+            rc = uikit_fail(EXIT_NAME, '縮圖讀不到，或已被別的物種樣板吻合（標籤可疑），不登錄')
+            return _out(rc, info, t0, '縮圖衝突')
+        if petmatch.learn_species(reg, sp, cols, cur['unnamed']):
+            ctx['rdirty'] = True
+        save_ctx(ctx)
+        print(f'pet：{role} 第 {slot_no} 格 {cur["raw_name"]} 登錄為 {sp}')
+    return _out(0, info, t0)
 
 
 def main() -> int:
@@ -1209,10 +1505,29 @@ def main() -> int:
     p.add_argument('--slot', type=int, default=None, help='同名多隻時指定第幾格（1 起算）')
     p.add_argument('--allow-slot1', action='store_true', help='允許存第 1 格的寵物（仍擋騎寵 / 騎乘中）')
     p.add_argument('--allow-mount-store', default=None, metavar='名字', help='只放行名字完全等於此值的騎寵存倉（須已是等待；第 1 格另加 --allow-slot1）；只有使用者當次明講才用')
+    p = sub.add_parser('store-many', help='多角色 × 多寵物連續存倉（同一個面板 session，直接換頭像）', parents=[cp])
+    p.add_argument('--role', required=True, help='all 或逗號分隔 DKBO,DKBO3')
+    p.add_argument('--pets', required=True, help='寵物名（逗號分隔）；沒名字的新寵物用物種名（須已 learn-species）')
+    p.add_argument('--depot', default='personal', choices=['personal', 'public'])
+    p.add_argument('--allow-slot1', action='store_true')
+    p.add_argument('--allow-mount-store', default=None, metavar='名,名', help='放行存倉的騎寵名單（名字完全相同、須已是等待）；只有使用者當次明講才用')
+    p.add_argument('--skip-missing', action='store_true', help='角色沒有這隻就略過（預設 72 停手）')
+    p.add_argument('--pick', default=None, choices=['first', 'last'], help='同物種有多隻時取最前 / 最後一格（預設 72 停手）')
+    p = sub.add_parser('take-many', help='多角色 × 多寵物連續取出（現場逐張找名字）', parents=[cp])
+    p.add_argument('--role', required=True)
+    p.add_argument('--pets', required=True)
+    p.add_argument('--depot', default='personal', choices=['personal', 'public'])
+    p.add_argument('--skip-missing', action='store_true')
+    p = sub.add_parser('learn-species', help='登錄「某格沒名字的寵物是什麼物種」（縮圖 + 成長字串）', parents=[cp])
+    p.add_argument('role')
+    p.add_argument('slot', type=int)
+    p.add_argument('species')
+    p.add_argument('--confirm-growth', required=True, metavar='49/9/8/2', help='該格名字框現在的成長字串（第二重確認）')
     p = sub.add_parser('take', help='倉庫第 N 格 → 寵物欄（取出的寵物預設等待）', parents=[cp])
     p.add_argument('role')
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
-    p.add_argument('--index', type=int, required=True, help='倉庫格 1～20（列優先，每列 5 格）')
+    p.add_argument('--index', type=int, default=None, help='倉庫格 1～20（列優先，每列 5 格）')
+    p.add_argument('--pet', default=None, help='不給格號：現場逐張找這個名字（沒名字的卡靠成長字串登錄檔）')
     p.add_argument('--expect', default=None, help='預期的寵物名（取出前 / 後都驗，不符不自動存回）')
     a = ap.parse_args()
     if a.timing:
@@ -1228,7 +1543,14 @@ def main() -> int:
     if a.cmd == 'store':
         return store(a.role, a.pet, a.depot, a.slot, a.allow_slot1, a.pause_encounter, learn, a.allow_mount_store)
     if a.cmd == 'take':
-        return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn)
+        return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn, a.pet)
+    csv = lambda t: [x.strip() for x in (t or '').split(',') if x.strip()]    # noqa: E731
+    if a.cmd == 'store-many':
+        return store_many(a.role, csv(a.pets), a.depot, a.allow_slot1, csv(a.allow_mount_store), a.skip_missing, a.pause_encounter, learn, a.pick)
+    if a.cmd == 'take-many':
+        return take_many(a.role, csv(a.pets), a.depot, a.skip_missing, a.pause_encounter, learn)
+    if a.cmd == 'learn-species':
+        return learn_species_cmd(a.role, a.slot, a.species, a.confirm_growth, a.pause_encounter)
     split = lambda t: None if t is None else [x.strip() for x in t.split(',') if x.strip()]    # noqa: E731
     return rest_all(a.role, split(a.keep), split(a.only), a.dry_run, a.pause_encounter, learn)
 

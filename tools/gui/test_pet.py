@@ -671,5 +671,179 @@ rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', **MS)
 check('接著 store --allow-mount-store：rc 0、不跳確認視窗（等待）、倉庫有瑪斯貝卡', rc == 0 and '瑪斯貝卡' in depot_names(g) and g.dialog_clicks == [], f'rc={rc} {err[-200:]}')
 
 
+# ---------------- 沒名字的新寵物 / 存倉驗證 / store-many / take-many（2026-10-11）----------------
+check('parse_growth：實測 OCR 3 行（2 行相同 + 殘行）→ 49/9/8/2', petmatch.parse_growth(['49/9/8/2', '49/9/8/2', '49/8']) == '49/9/8/2')
+check('parse_growth：只有 1 行完整 / 兩個不同字串各 1 行 / 空 → None（不猜）', petmatch.parse_growth(['49/9/8/2', '49/8']) is None
+      and petmatch.parse_growth(['49/9/8/2', '48/9/7/1']) is None and petmatch.parse_growth([]) is None and petmatch.parse_growth(['迪基格斯'] * 3) is None)
+check('parse_growth：空白 / 前導 0 正規化', petmatch.parse_growth([' 47 / 10/7/1', '47/10/7/01']) == '47/10/7/1')
+cols_a = [(100 + i, 80, 60) for i in range(16)]
+cols_b = [(20 + 7 * i, 200, 150) for i in range(16)]
+reg0 = {'thumb': {}, 'growth': {}}
+check('identify_species：沒登錄 → None', petmatch.identify_species(cols_a, '49/9/8/2', reg0) is None)
+check('learn_species：縮圖 + 字串登錄、再學同物種不動', petmatch.learn_species(reg0, '布拉奇多斯', cols_a, '49/9/8/2') and not petmatch.learn_species(reg0, '布拉奇多斯', cols_a, '49/9/8/2'))
+check('identify_species：同縮圖 → 物種；不同縮圖 → None；沒縮圖（倉庫卡）靠字串；字串矛盾 → None',
+      petmatch.identify_species(cols_a, '45/10/8/1', reg0) == '布拉奇多斯' and petmatch.identify_species(cols_b, '45/10/8/1', reg0) is None
+      and petmatch.identify_species(None, '49/9/8/2', reg0) == '布拉奇多斯' and petmatch.identify_species(None, '1/1/1/1', reg0) is None
+      and petmatch.identify_species(cols_a, '49/9/8/2', {'thumb': reg0['thumb'], 'growth': {'49/9/8/2': '朵拉比斯'}}) is None)
+check('learn_species：縮圖已屬別的物種 → 拒絕（標籤可疑）', not petmatch.learn_species(reg0, '朵拉比斯', cols_a, '1/2/3/4') and '朵拉比斯' not in reg0['thumb'])
+check('card_order：新增格先、其餘照序、空格不列', pet.card_order([True, False, True, True, False], 3) == [3, 0, 2] and pet.card_order([False, True], None) == [1])
+
+BRA = '布拉奇多斯'
+GS = ['49/9/8/2', '49/9/7/2', '48/9/7/1', '47/10/7/1', '45/10/8/1']
+
+
+def unn(i, state='騎乘', species=BRA):
+    return {'name': BRA, 'unnamed': GS[i], 'species': species, 'state': state, 'level': 1}
+
+
+def five(state='騎乘'):
+    """5 人：第 1 格沒名字的布拉奇多斯（成長字串各不同）、第 2 格 朵拉比斯（有名字）"""
+    return mk_pets(**{r: [unn(i, state), {'name': '朵拉比斯', 'state': '出戰', 'level': 1}, None, None, None] for i, r in enumerate(fake_pet.ROLES)})
+
+
+fresh_tpl()
+g = new(pets=five())
+rc, out, err = run(pet.list_roles, 'DKBO2')
+j = last_json(out)['roles']['DKBO2']
+g.panel, g.sel = True, 0
+check('list：沒名字的寵物 → name None、unnamed = 成長字串、物種 None（沒登錄不猜）、顯示 ?(…)', rc == 0 and j[0]['name'] is None and j[0]['unnamed'] == GS[1] and j[0]['species'] is None and j[0]['raw_name'] == f'?({GS[1]})'
+      and j[0]['state'] == '騎乘' and j[1]['name'] == '朵拉比斯', str(j[0]))
+check('fmt_slot 顯示 ?(49/9/7/2)', '?(49/9/7/2)' in pet.fmt_slot(j[0]) and '≈' not in pet.fmt_slot(j[0]))
+n0 = len(g.ocr_calls)
+ctx = pet.load_ctx(True)
+rows, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
+r1 = pet.resolve_ident(rows[0], ctx)
+n1 = len(g.ocr_calls)
+r2 = pet.resolve_ident(rows[0], ctx)
+check('resolve_ident：第一次 OCR、第二次走 gcache（0 次 OCR）', r1['growth'] and r1['growth'] == r2['growth'] and len(g.ocr_calls) == n1 and n1 > n0)
+rc, out, err = run(pet.set_state, 'DKBO2', BRA, '等待', allow_mount=True)
+check('沒登錄物種 → find_slot 找不到 布拉奇多斯（72）、零狀態點擊、訊息提 learn-species', rc == 72 and g.state_clicks == [] and 'learn-species' in last_json(out)['msg'], last_json(out).get('msg', ''))
+g = new(pets=five())
+rc, out, err = run(pet.learn_species_cmd, 'DKBO2', 1, BRA, '1/1/1/1')
+check('learn-species：--confirm-growth 不符 → 72、registry 沒檔', rc == 72 and not petmatch.species_path().exists())
+rc, out, err = run(pet.learn_species_cmd, 'DKBO2', 2, BRA, '1/1/1/1')
+check('learn-species：第 2 格是有名字的朵拉比斯 → 72', rc == 72 and not petmatch.species_path().exists())
+rc, out, err = run(pet.learn_species_cmd, 'DKBO2', 1, '不存在的寵', GS[1])
+check('learn-species：物種名不在 Monster 表 → 1（用法錯）', rc == 1)
+rc, out, err = run(pet.learn_species_cmd, 'DKBO2', 1, BRA, GS[1])
+reg = petmatch.load_species()
+check('learn-species：成功 → registry 有縮圖 + 字串，面板只有選取沒有任何狀態 / 存取點擊', rc == 0 and BRA in reg['thumb'] and reg['growth'] == {GS[1]: BRA} and g.state_clicks == [] and depot_free(g) == 0, f'rc={rc} {err[-200:]}')
+rc, out, err = run(pet.list_roles, 'all')
+j = last_json(out)['roles']
+check('登錄後 list all：5 人第 1 格都認出物種 布拉奇多斯（縮圖樣板，字串不同也行）、mountlike',
+      all(j[r][0]['species'] == BRA and j[r][0]['mountlike'] and j[r][0]['name'] is None for r in fake_pet.ROLES), str([j[r][0].get('species') for r in fake_pet.ROLES]))
+check('fmt_slot：?(…)≈布拉奇多斯', '≈布拉奇多斯' in pet.fmt_slot(j['DKBO3'][0]))
+rc, out, err = run(pet.set_state, 'DKBO3', BRA, '騎乘', allow_mount=True)
+check('set-state --pet 布拉奇多斯（沒名字但物種確認）→ 找得到、本來就是騎乘不點', rc == 0 and g.state_clicks == [] and last_json(out)['slot'] == 1, f'rc={rc}')
+rc, out, err = run(pet.set_state, 'DKBO3', BRA, '等待')
+check('沒給 --allow-mount：布拉奇多斯（物種確認 = 騎寵）→ 73', rc == 73 and g.state_clicks == [])
+# 縮圖被換成別種 → 不再認得
+g.pets['DKBO4'][0]['species'] = '烏力斯坦'
+rc, out, err = run(pet.list_roles, 'DKBO4')
+check('縮圖不同（別的物種）→ species None（不把別種當布拉奇多斯）', last_json(out)['roles']['DKBO4'][0]['species'] is None)
+g.pets['DKBO4'][0]['species'] = BRA
+
+# ---- store：沒名字的騎寵 ----
+g = new(pets=five(state='等待'))
+rc, out, err = run(pet.store, 'DKBO2', BRA, 'personal', allow_slot1=True)
+check('store 沒名字的布拉奇多斯（物種確認、無旗標）→ 73 零存入點擊', rc == 73 and depot_free(g) == 0, f'rc={rc}')
+rc, out, err = run(pet.store, 'DKBO2', BRA, 'personal', allow_slot1=True, allow_mount_store=BRA)
+dn = g.depot['DKBO2']['personal']
+check('store --allow-mount-store 布拉奇多斯（沒名字、等待、第 1 格 + slot1）→ rc 0、倉庫 1 張、存入鈕 1 次', rc == 0 and depot_free(g) == 1 and sum(1 for x in dn if x) == 1 and dn[0].get('unnamed') == GS[1], f'rc={rc} {err[-300:]}')
+check('  倉庫逐張驗證找到（depot_index 有值）', last_json(out)['depot_index'] == 1)
+fresh_tpl()
+g = new(pets=five(state='等待'))
+rc, out, err = run(pet.store, 'DKBO2', BRA, 'personal', allow_slot1=True, allow_mount_store=BRA)
+check('登錄檔是空的（物種未知）：store 沒名字的 → 72（找不到）零存入點擊', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+check('  且 --pet 不會把「沒名字」當成任何物種', 'learn-species' in last_json(out)['msg'])
+
+# ---- #84：倉庫存入後重新排序 ----
+fresh_tpl()
+dep0 = fake_pet.mk_depot(DKBO={'personal': ['摩娜西普', '朵拉比斯', '巴朵蘭恩']})
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, {'name': '迪基格斯', 'state': '等待', 'level': 1}, None, None, None]), depot=dep0)
+g.resort = True
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+names = [c['name'] for c in g.depot['DKBO']['personal'] if c]
+check('倉庫存入後重新排序：store 仍 rc 0（不再誤報 76）、倉庫逐張找得到迪基格斯', rc == 0 and '迪基格斯' in names and names != ['摩娜西普', '朵拉比斯', '巴朵蘭恩', '迪基格斯'], f'rc={rc} names={names} {err[-200:]}')
+check('  騎寵沒動、存入鈕 1 次', depot_free(g) == 1 and g.pets['DKBO'][0]['name'] == '瑪斯貝卡')
+# 倉庫裡真的找不到（存入鈕按了但被別人拿走）→ 76
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, {'name': '迪基格斯', 'state': '等待', 'level': 1}, None, None, None]), depot=fake_pet.mk_depot())
+orig = g._store_or_take
+
+
+def vanish():
+    orig()
+    for k, c in enumerate(g.depot['DKBO']['personal']):
+        if c and c['name'] == '迪基格斯':
+            c['name'] = '別的寵'                               # 張數對、但名字不是它（模擬倉庫裡找不到）
+g._store_or_take = vanish
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal')
+check('倉庫張數對但逐張看不到該寵物 → 76（不重點）', rc == 76 and depot_free(g) == 1, f'rc={rc}')
+
+# ---- store-many / take-many ----
+fresh_tpl()
+mkdp = lambda: fake_pet.mk_depot(**{r: {'personal': ['朵拉比斯']} for r in fake_pet.ROLES})    # noqa: E731
+mk = lambda: mk_pets(**{r: [{'name': '瑪斯貝卡', 'state': '等待', 'level': 1}, {'name': '迪基格斯', 'state': '出戰', 'level': 1}, {'name': '魯尼帖斯', 'state': '等待', 'level': 1}, None, None] for r in fake_pet.ROLES})   # noqa: E731
+g = new(pets=mk(), depot=mkdp())
+rc, out, err = run(pet.store_many, 'all', ['迪基格斯', '魯尼帖斯'], 'personal')
+j = last_json(out)
+nm_of = lambda r: [c['name'] for c in g.depot[r]['personal'] if c]    # noqa: E731
+ok_all = all(nm_of(r).count('迪基格斯') == 1 and nm_of(r).count('魯尼帖斯') == 1 for r in fake_pet.ROLES)
+check('store-many all × 2 隻：rc 0、10 次存入、每人倉庫各多 2 張、寵物欄剩 瑪斯貝卡', rc == 0 and len(j['ops']) == 10 and depot_free(g) == 10 and ok_all
+      and all([x['name'] for x in g.pets[r] if x] == ['瑪斯貝卡'] for r in fake_pet.ROLES), f'rc={rc} {err[-300:]}')
+check('  面板只開關一次（只有 1 次 ✕）、5 個頭像都點過', g.clicks.count(uikit.PET.close_xy) == 1 and all((83, petmatch.AVATAR_Y[r]) in g.clicks for r in fake_pet.ROLES))
+check('  瑪斯貝卡 5 人都沒動（沒點狀態鈕）', g.state_clicks == [])
+g = new(pets=mk(), depot=mkdp())
+rc, out, err = run(pet.store_many, 'DKBO,DKBO3', ['瑪斯貝卡'], 'personal')
+check('store-many 騎寵沒在 --allow-mount-store 名單 → 73 零點擊', rc == 73 and g.clicks == [], f'rc={rc}')
+rc, out, err = run(pet.store_many, 'DKBO,DKBO3', ['瑪斯貝卡'], 'personal', allow_slot1=True, allow_mount_store=['瑪斯貝卡'])
+check('store-many 騎寵 + 名單 + slot1：2 人各存 1 隻（狀態 = 等待）', rc == 0 and depot_free(g) == 2 and '瑪斯貝卡' in [c['name'] for c in g.depot['DKBO3']['personal'] if c], f'rc={rc} {err[-200:]}')
+g = new(pets=mk(), depot=mkdp())
+rc, out, err = run(pet.store_many, 'DKBO,DKBO2', ['烏力斯坦'], 'personal', skip_missing=True)
+check('store-many --skip-missing：角色沒有就略過 rc 0、0 存入', rc == 0 and depot_free(g) == 0 and all(o.get('skipped') for o in last_json(out)['ops']), f'rc={rc}')
+rc, out, err = run(pet.store_many, 'DKBO,DKBO2', ['烏力斯坦'], 'personal')
+check('store-many 沒 --skip-missing：沒有 → 72', rc == 72 and depot_free(g) == 0)
+check('store-many 角色不認得 / 寵物名不在 Monster 表 → 1', run(pet.store_many, 'DKBO9', ['迪基格斯'])[0] == 1 and run(pet.store_many, 'all', ['亂碼寵'])[0] == 1)
+g = new(pets=mk(), depot=mkdp())
+for r in fake_pet.ROLES:
+    g.pets[r] = [x for x in g.pets[r] if x and x['name'] == '瑪斯貝卡'] + [None] * 4
+rc, out, err = run(pet.take_many, 'all', ['朵拉比斯'], 'personal')
+j = last_json(out)
+check('take-many all：5 人各從個人倉庫取出 朵拉比斯（現場逐張找）、寵物欄第 2 格、預設等待、倉庫清空', rc == 0 and len(j['ops']) == 5 and all(g.pets[r][1] and g.pets[r][1]['name'] == '朵拉比斯' and g.pets[r][1]['state'] == '等待' for r in fake_pet.ROLES)
+      and all(not [c for c in g.depot[r]['personal'] if c] for r in fake_pet.ROLES), f'rc={rc} {err[-300:]}')
+check('  取出鈕只點 5 次、面板只關 1 次', depot_free(g) == 5 and g.clicks.count(uikit.PET.close_xy) == 1)
+g = new(pets=mk(), depot=mkdp())
+rc, out, err = run(pet.take_many, 'DKBO', ['迪基格斯'], 'personal')
+check('take-many 倉庫沒有 → 72、零取出點擊', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+rc, out, err = run(pet.take_many, 'DKBO,DKBO2', ['迪基格斯'], 'personal', skip_missing=True)
+check('take-many --skip-missing：略過 rc 0', rc == 0 and depot_free(g) == 0 and all(o.get('skipped') for o in last_json(out)['ops']), f'rc={rc}')
+g = new(pets=five(state='等待'), depot=fake_pet.mk_depot(DKBO2={'public': [{'name': BRA, 'unnamed': GS[1], 'species': BRA, 'level': 1}, '朵拉比斯']}))
+g.pets['DKBO'] = [None] * 5
+rc, out, err = run(pet.take, 'DKBO', 'public', None, None, False, True, BRA)
+check('take --pet 布拉奇多斯：登錄檔空 → 倉庫裡只有沒名字的卡 → 72、零取出點擊', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+reg = {'thumb': {BRA: [[(1, 2, 3)] * 16]}, 'growth': {GS[1]: BRA}}
+petmatch.save_species(reg)
+g.pets['DKBO2'] = [None] * 5
+g.role = 'DKBO2'
+rc, out, err = run(pet.take, 'DKBO2', 'public', None, None, False, True, BRA)
+check('take --pet 布拉奇多斯：成長字串在登錄檔 → 找到並取出；取出後縮圖物種不符登錄樣板（縮圖空登錄）→ 仍因字串吻合通過', rc == 0 and depot_free(g) == 1 and g.pets['DKBO2'][0] and g.pets['DKBO2'][0].get('unnamed') == GS[1], f'rc={rc} {err[-300:]}')
+check('take 沒給 --index 也沒給 --pet → 1', run(pet.take, 'DKBO', 'public')[0] == 1)
+
+# ---- store-many --pick：同物種多隻新寵物 ----
+fresh_tpl()
+g = new(pets=mk_pets(DKBO=[{'name': '朵拉比斯', 'state': '出戰', 'level': 1}, unn(0, '等待'), unn(1, '等待'), unn(2, '等待'), None]))
+rc, out, err = run(pet.learn_species_cmd, 'DKBO', 2, BRA, GS[0])
+check('pick 前置：learn-species 第 2 格', rc == 0, f'rc={rc}')
+rc, out, err = run(pet.store_many, 'DKBO', [BRA, BRA], 'public', False, [BRA])
+check('同物種 3 隻、沒給 --pick → 72（同名多隻要指定）零存入點擊', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+rc, out, err = run(pet.store_many, 'DKBO', [BRA, BRA], 'public', False, [BRA], pick='last')
+left = [p for p in g.pets['DKBO'] if p]
+pub = [c for c in g.depot['DKBO']['public'] if c]
+check('--pick last：存最後 2 隻進公共，欄位留 朵拉比斯 + 第 1 隻布拉奇多斯（成長字串 49/9/8/2）', rc == 0 and len(pub) == 2 and [p.get('unnamed') for p in left] == [None, GS[0]], f'rc={rc} {[p.get("unnamed") for p in left]} {err[-300:]}')
+check('  存的是 slot 3 / 4 的（成長字串 49/9/7/2、48/9/7/1）', sorted(c['unnamed'] for c in pub) == sorted([GS[1], GS[2]]))
+rc, out, err = run(pet.take_many, 'DKBO', [BRA], 'public')
+check('take-many 從公共取回 1 隻沒名字的布拉奇多斯（成長字串靠登錄檔）', rc == 0 and g.pets['DKBO'][2] is not None and g.pets['DKBO'][2].get('unnamed') in (GS[1], GS[2]), f'rc={rc} {err[-200:]}')
+
+
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

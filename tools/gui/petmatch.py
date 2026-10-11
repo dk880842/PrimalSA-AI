@@ -15,7 +15,9 @@
 測試可替換 petmatch.TPL_DIR；所有碰遊戲的呼叫都走 uikit.px。
 """
 import json
+import re
 import sys
+from collections import Counter
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -225,3 +227,98 @@ def learn_level(rows, value: int, tpl: dict) -> int:
         vs.append(g)
         n += 1
     return n
+
+
+# ---- 沒有名字的新寵物（errlog #87 / #92）----
+# 剛抓到的寵物（或沒取過名的）名字框顯示的是「成長字串」a/b/c/d（實測 2026-10-11 布拉奇多斯 Lv1：49/9/8/2、49/9/7/2、48/9/7/1、47/10/7/1、45/10/8/1），
+# 整塊圖樣板（以名字為標籤）和 Monster 表 OCR 都認不出。同一隻寵物的字串固定、不同隻不同，所以字串 = 這隻的身分（不是物種）。
+# 物種靠「縮圖簽名」（寵物格縮圖 16 點，同物種同姿勢 = 相同）與「成長字串 → 物種」登錄檔多重確認；登錄檔是學出來的（learn-species，
+# 呼叫端必須有可信標籤，例如外掛捉寵設置只選了單一物種、且該格是剛抓到的新寵物），沒登錄 = 不知道是什麼 → 一律不猜。
+GROWTH_RE = re.compile(r'^\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d{1,3})\s*$')
+THUMB_N, THUMB_TOL = 4, 24               # 縮圖每列 4 點（pet.THUMB_X）、每通道容差
+
+
+def parse_growth(lines) -> str | None:
+    """OCR 各行 → 成長字串 'a/b/c/d'：完整吻合的行至少 2 行相同且沒有別的完整字串 → 該字串；否則 None（實測 5 / 5 個角色有 ≥ 2 行相同，另有殘行如「49/8」）"""
+    full = Counter()
+    for t in lines or []:
+        m = GROWTH_RE.match(str(t))
+        if m:
+            full['/'.join(str(int(g)) for g in m.groups())] += 1
+    if not full:
+        return None
+    top = full.most_common()
+    if top[0][1] < 2 or (len(top) > 1 and top[1][1] >= top[0][1]):
+        return None
+    return top[0][0]
+
+
+def inner_same(a, b, n: int = THUMB_N, tol: int = THUMB_TOL) -> bool:
+    """縮圖比對：只比每列前 n-1 點（最右欄會被選取框光暈蓋到，P8 實測），至少全部 - 1 點相符"""
+    if not a or not b or len(a) != len(b) or len(a) % n:
+        return False
+    pairs = [(c, d) for k, (c, d) in enumerate(zip(a, b)) if k % n < n - 1]
+    ok = sum(1 for c, d in pairs if all(abs(u - v) <= tol for u, v in zip(c, d)))
+    return ok >= len(pairs) - 1
+
+
+def species_path() -> Path:
+    return TPL_DIR / 'species.json'
+
+
+def load_species() -> dict:
+    """{'thumb': {物種: [[(r,g,b)×16]...]}, 'growth': {成長字串: 物種}}；沒檔 / 壞檔 → 空"""
+    try:
+        d = json.loads(species_path().read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        d = {}
+    th = d.get('thumb') if isinstance(d.get('thumb'), dict) else {}
+    return {'thumb': {k: [[tuple(c) for c in v] for v in vs] for k, vs in th.items()},
+            'growth': d.get('growth') if isinstance(d.get('growth'), dict) else {}}
+
+
+def save_species(reg: dict) -> None:
+    TPL_DIR.mkdir(parents=True, exist_ok=True)
+    p = species_path()
+    tmp = p.with_suffix('.tmp')
+    tmp.write_text(json.dumps(reg, ensure_ascii=False), encoding='utf-8')
+    tmp.replace(p)
+
+
+def species_by_thumb(cols, reg: dict) -> str | None:
+    """縮圖 → 物種：剛好只有一個物種的樣板吻合才回；多個物種都吻合（樣板太像）→ None"""
+    hits = {sp for sp, vs in (reg.get('thumb') or {}).items() if any(inner_same(cols, v) for v in vs)}
+    return hits.pop() if len(hits) == 1 else None
+
+
+def identify_species(cols, growth: str | None, reg: dict) -> str | None:
+    """多重確認：縮圖樣板命中（有縮圖時必要）；成長字串已登錄時兩者必須同物種（矛盾 → None）；
+    沒縮圖（倉庫卡，縮圖版面沒量過）時只接受「成長字串已登錄」。兩者都沒有 → None"""
+    sg = (reg.get('growth') or {}).get(growth) if growth else None
+    if cols is None:
+        return sg
+    st = species_by_thumb(cols, reg)
+    if st and sg and st != sg:
+        return None
+    return st
+
+
+def learn_species(reg: dict, species: str, cols, growth: str | None = None, max_variants: int = 4) -> bool:
+    """登錄物種（呼叫端要有可信標籤）。縮圖已被「別的物種」樣板吻合 → 標籤可疑，不學。回是否有改動"""
+    changed = False
+    if cols:
+        other = species_by_thumb(cols, reg)
+        if other and other != species:
+            return False
+        vs = reg.setdefault('thumb', {}).setdefault(species, [])
+        if not any(inner_same(cols, v) for v in vs) and len(vs) < max_variants:
+            vs.append([tuple(c) for c in cols])
+            changed = True
+    if growth:
+        g = reg.setdefault('growth', {})
+        if g.get(growth) not in (None, species):
+            return changed
+        if g.get(growth) != species:
+            g[growth] = species
+            changed = True
+    return changed

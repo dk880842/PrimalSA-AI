@@ -93,6 +93,7 @@ class Game:
         self.dtab = 'personal'
         self.sel_kind = 'pet'            # pet | card（最後選的是哪種；右側面板與按鈕依它）
         self.sel_card = None
+        self.resort = False              # 存入後倉庫依名字重新排序（實機 #84）
         self.store_dead = False          # 存入 / 取出鈕沒反應
         self.on_depot = None             # 進倉庫分頁時執行的 callback（模擬寵物欄被別人改動）
         self.btn_ocr_override = None
@@ -176,7 +177,7 @@ class Game:
                 return AV_SEL if r == self.role else AV_OFF
         p = self.cur()
         if dv and self.sel_kind == 'card' and self.sel_card is not None:
-            p = {'name': self.depot[self.role][self.dtab][self.sel_card]['name'], 'state': '等待', 'level': 1}
+            p = dict(self.depot[self.role][self.dtab][self.sel_card], state='等待', level=1)
         for s, pts in pet.BTN_PROBES.items():
             if (x, y) in pts:
                 return BTN_ON if p and p['state'] == s else BTN_OFF
@@ -186,7 +187,7 @@ class Game:
                 return BG_NAME
             if self._banner_now:
                 return INK_NAME if blob_bitmap('banner', bw, bh, 0.3)[y - by][x - bx] else BG_NAME
-            return INK_NAME if blob_bitmap(p['name'], bw, bh)[y - by][x - bx] else BG_NAME
+            return INK_NAME if blob_bitmap(p.get('unnamed') or p['name'], bw, bh)[y - by][x - bx] else BG_NAME
         bx, by, bw, bh = petmatch.BOX_LVL
         if bx <= x < bx + bw and by <= y < by + bh:
             if not p:
@@ -333,9 +334,12 @@ class Game:
                 return
 
             def do(p=p):
-                dep[dep.index(None)] = {'name': p['name'], 'level': p['level']}
+                dep[dep.index(None)] = {k: p[k] for k in ('name', 'level', 'unnamed', 'species') if k in p}
                 pets.pop(pets.index(p))
                 pets.append(None)
+                if self.resort:
+                    fl = sorted([c for c in dep if c], key=lambda c: c['name'] + str(c.get('unnamed', '')))
+                    dep[:] = fl + [None] * (len(dep) - len(fl))
             if self.confirm_on_store and p['state'] in ('出戰', '騎乘'):
                 self.dialog, self.dialog_pending = True, do
                 return
@@ -344,7 +348,7 @@ class Game:
             self.dialog, self.dialog_pending = True, None
         elif self.sel_card is not None and None in pets:
             c = dep[self.sel_card]
-            pets[pets.index(None)] = {'name': c['name'], 'state': '等待', 'level': c['level']}
+            pets[pets.index(None)] = dict(c, state='等待')
             dep[self.sel_card] = None
             self.sel_card = None
 
@@ -361,10 +365,12 @@ class Game:
             return list(self.confirm_text) if self.dialog else []
         p = self.cur()
         if self.view == 'depot' and self.sel_kind == 'card' and self.sel_card is not None and tuple(box) == petmatch.BOX_NAME:
-            p = {'name': self.depot[self.role][self.dtab][self.sel_card]['name']}
+            p = dict(self.depot[self.role][self.dtab][self.sel_card])
         if tuple(box) == petmatch.BOX_NAME:
             if self.ocr_name_override is not None:
                 return list(self.ocr_name_override)
+            if p and p.get('unnamed'):
+                return [p['unnamed'], p['unnamed'], p['unnamed'].rsplit('/', 2)[0] + '/' + p['unnamed'].split('/')[-1]]
             return [p['name']] * 3 if p else []
         import petwatch
         if tuple(box) == tuple(petwatch.LEVEL_BOX) and p:
@@ -385,7 +391,7 @@ def mk_depot(**kw):
     out = {}
     for r in ROLES:
         d = kw.get(r, {})
-        out[r] = {t: [({'name': n, 'level': 1} if n else None) for n in (list(d.get(t, [])) + [None] * 20)[:20]] for t in ('personal', 'public')}
+        out[r] = {t: [((n if isinstance(n, dict) else {'name': n, 'level': 1}) if n else None) for n in (list(d.get(t, [])) + [None] * 20)[:20]] for t in ('personal', 'public')}
     return out
 
 
@@ -408,7 +414,7 @@ def thumb_color(p):
     """寵物格縮圖點的顏色：同名同等級固定、不同名差很多；空格 = 爪印底"""
     if p is None:
         return (170, 138, 92)
-    h = hashlib.md5(('%s/%s' % (p['name'], p['level'])).encode()).digest()
+    h = hashlib.md5(('%s/%s' % (p.get('species') or p['name'], p['level'])).encode()).digest()
     return (40 + h[0] % 180, 40 + h[1] % 180, 40 + h[2] % 180)
 
 
