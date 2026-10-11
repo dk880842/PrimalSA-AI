@@ -427,6 +427,17 @@ for k, (st_, pn_) in fxp['expect'].items():
         check(f'外接 {k}：標題 8 點全中（覆寫後）', t == 8, str(t))
 check(f'外接實機樣本 {len(fxp["expect"])} 張：classify 全對（覆寫後）', hit == len(fxp['expect']), f'{hit}/{len(fxp["expect"])}')
 S.set_layout(None)
+# vs_on：外接樣本中 expect=battle 的（看得到 VS 牌）全部 vs_on 為真、非 battle 的為假；原值（筆電單點）對外接樣本不中（證明需要覆寫）
+vs_pos = [k for k, (st_, _) in fxp['expect'].items() if st_ == 'battle']
+vs_neg = [k for k in fxp['samples'] if k not in vs_pos]
+S.set_layout('1728x995')
+check(f'外接 vs_on：{len(vs_pos)} 張 VS 樣本全中', all(S.vs_on(phys_px(k)) for k in vs_pos), str([k for k in vs_pos if not S.vs_on(phys_px(k))]))
+check(f'外接 vs_on：其餘 {len(vs_neg)} 張（主畫面 / 面板 / 對話框 / 非 VS）全不中', not any(S.vs_on(phys_px(k)) for k in vs_neg), str([k for k in vs_neg if S.vs_on(phys_px(k))]))
+S.set_layout(None)
+check('筆電 vs_on：只看 VS_PROBE 單點、缺點視為沒中', S.vs_on({S.VS_PROBE: S.VS_COLOR}) and not S.vs_on({S.VS_PROBE: (0, 0, 0)}) and not S.vs_on({}))
+check('筆電 vs_on 外接樣本不中（單點）', not any(S.vs_on(phys_px(k)) for k in vs_pos))
+import quest as _Q
+check('quest 與 screen_sigs 共用 vs_on', _Q.vs_on is S.vs_on)
 check('測試結束時已還原筆電原值', snap(S) == snap(PRISTINE))
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')

@@ -264,6 +264,11 @@ def match(px: dict, sig) -> bool:
     return all(close(px[(x, y)], (r, g, b), tol) for x, y, r, g, b, tol in sig)
 
 
+def vs_on(px: dict) -> bool:
+    """快速戰鬥頭上 VS 牌綠框：VS_PROBES（筆電 1 點、外接覆寫多點）任一點在 VS_TOL 內就算。呼叫前要先套目前版面（uikit.sync_sig_layout）；px 缺點視為沒中"""
+    return any(p in px and close(px[p], VS_COLOR, VS_TOL) for p in VS_PROBES)
+
+
 def points() -> list:
     """classify 需要的所有取樣點（順序固定，fixture 也照這個順序）"""
     return [(x, y) for x, y, *_ in SIG_DIALOG + SIG_REWARD + SIG_PANEL + SIG_SELECT + SIG_HUD + SIG_BATTLE + SIG_CMD + SIG_AUTO_OFF] + VS_PROBES + AW_POINTS
@@ -327,7 +332,7 @@ def classify(px: dict) -> dict:
         st = 'panel'
     elif match(px, SIG_SELECT):
         st = 'select'
-    elif any(close(px[p], VS_COLOR, VS_TOL) for p in VS_PROBES):
+    elif vs_on(px):
         st = 'battle'
     elif gold >= AW_MIN:
         st = 'walking'
