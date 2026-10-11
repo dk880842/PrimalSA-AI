@@ -255,19 +255,32 @@ def _probe(p: Panel) -> tuple:
             all(screen_sigs.close(c, (r, g, b), t) for c, (_, _, r, g, b, t) in zip(cols[n:], screen_sigs.SIG_HUD)))
 
 
-def open_panel_ex(p: Panel, timeout: float = 4.0) -> tuple:
+LAST_OPEN: dict = {}             # 最近一次 open_panel_ex 的過程：clicked（點開啟鈕次數）/ hud_seen / hud_waited（等 HUD 回來的秒數）；失敗訊息分辨原因用
+
+
+def open_panel_ex(p: Panel, timeout: float = 4.0, hud_wait: float = 0.0) -> tuple:
     """開面板並驗證 → (成功, 一開始就開著)。**只在主畫面（SIG_HUD）看得到時才點開啟鈕**；面板特徵沒出現就回 False，絕不點面板內座標。
-    點開啟鈕用 seq「click; waitpix 面板特徵」代替固定等待（面板約 0.1～0.3 s 就出現；舊的固定 wait 700 + 輪詢 0.5 s）"""
+    點開啟鈕用 seq「click; waitpix 面板特徵」代替固定等待（面板約 0.1～0.3 s 就出現；舊的固定 wait 700 + 輪詢 0.5 s）
+    hud_wait > 0：一直沒看到 HUD 也沒點過（戰鬥 / 轉場 / 對話蓋住）時，最多再等這麼久讓 HUD 回來（不點任何東西），
+    HUD 一出現才開始算 timeout；errlog #32：掛機中剛好在戰鬥，4 s 逾時就誤報打不開。"""
+    LAST_OPEN.clear()
+    LAST_OPEN.update(clicked=0, hud_seen=False, hud_waited=0.0)
     if p.open_fn:
         return bool(p.open_fn()), False
     if p.sig is None or p.open_xy is None:
         return False, False
-    end = clock() + timeout
+    t_start = clock()
+    end = t_start + timeout
+    hud_deadline = t_start + hud_wait
     clicked = 0
     was_open = None
     tol = _uniform_tol(p.sig)
     while True:
         opened, hud = _probe(p)
+        if hud and not LAST_OPEN['hud_seen']:
+            LAST_OPEN['hud_seen'] = True
+            if clicked == 0 and hud_wait > 0:
+                end = max(end, clock() + timeout)        # HUD 剛回來：從現在起算開面板的 timeout
         if was_open is None:
             was_open = opened
         if opened:
@@ -276,14 +289,24 @@ def open_panel_ex(p: Panel, timeout: float = 4.0) -> tuple:
             if tol is not None:
                 out = gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; waitpix {WAIT_OPEN_MS} {screen_sigs.sig_str(p.sig)} {tol}', note=f'uikit 開 {p.name} 面板')
                 clicked += 1
+                LAST_OPEN['clicked'] = clicked
                 if _seq_ok(out) or is_open(p):
                     return True, was_open
             else:
                 gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; wait {p.settle_ms}', note=f'uikit 開 {p.name} 面板')
                 clicked += 1
+                LAST_OPEN['clicked'] = clicked
                 if is_open(p):
                     return True, was_open
+        if clicked == 0 and not hud and clock() < hud_deadline:
+            LAST_OPEN['hud_waited'] = round(clock() - t_start, 1)
+            sleep(POLL_S)                                # 還沒看到 HUD、沒點過：繼續等（不點）
+            continue
         if clock() >= end:
+            if clicked:                                  # 點過但特徵沒出現：最後再等一下看是不是晚開（不再點）
+                sleep(0.5)
+                if is_open(p):
+                    return True, was_open
             return False, was_open
         sleep(POLL_S)
 

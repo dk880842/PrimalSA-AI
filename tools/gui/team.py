@@ -233,15 +233,22 @@ def ocr_names(n_cards: int, only=None) -> dict:
     return out
 
 
+OPEN_HUD_WAIT_S = 15.0           # 開切換面板時 HUD 不在（戰鬥 / 轉場）最多等這麼久；errlog #32
+
+
 def read_state(ocr: bool = True, keep_open: bool = False) -> dict:
     """開切換面板 → 讀 → 關（只關自己開的；keep_open=True 讀完不關，char.py 要接著點卡片，呼叫端負責關）。回 {'ok': bool, 'cards': [...], 'summary': {...}, 'err': str, 'ms': {...}}。
     面板打不開 / 讀圖中途消失 → ok=False（呼叫端回 40）。不點任何面板內座標（開關只用 open_panel / close_panel 的開啟鈕與 ✕）"""
     res = {'ok': False, 'cards': [], 'summary': {}, 'err': '', 'ms': {}}
     t0 = time.time()
-    opened, was_open = uikit.open_panel_ex(uikit.SWITCH)
+    opened, was_open = uikit.open_panel_ex(uikit.SWITCH, hud_wait=OPEN_HUD_WAIT_S)
     uikit.mark('open')
     if not opened:
-        res['err'] = '切換面板打不開（HUD 不在或特徵沒出現）'
+        lo = uikit.LAST_OPEN
+        why = (f'HUD 不在（等了 {lo.get("hud_waited", 0)} s 沒回來，可能在戰鬥 / 對話 / 驗證視窗，沒點任何東西）' if not lo.get('hud_seen')
+               else f'點了開啟鈕 {lo.get("clicked", 0)} 次，面板特徵沒出現')
+        res['err'] = '切換面板打不開（' + why + '）'
+        uikit.snap('team-panel-open-fail')
         return res
     res['ms']['open'] = int((time.time() - t0) * 1000)
     try:

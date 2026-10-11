@@ -129,6 +129,25 @@ check('面板沒開 safe_click 回 False', uikit.safe_click(620, 300, uikit.SWIT
 check('面板沒開 0 次點擊', g.clicks == [])
 g = install(Game(panel=False, hud=False))
 check('HUD 不在（對話框等）不點開啟鈕、open_panel 失敗', uikit.open_panel(uikit.SWITCH, timeout=2) is False and g.clicks == [], str(g.clicks))
+# errlog #32：HUD 暫時不在（戰鬥）→ 等 HUD 回來才點；不點任何東西直到 HUD 出現
+g = install(Game(panel=False, hud=False))
+_orig_gui = g.gui
+
+
+def _gui_hud_back(*args, note=''):
+    if g.t >= 6.0:
+        g.hud = True                         # 6 s 後戰鬥結束
+    return _orig_gui(*args, note=note)
+
+
+uikit.gui = _gui_hud_back
+check('hud_wait：HUD 6 s 後回來 → 開成功、只點 1 次開啟鈕', uikit.open_panel_ex(uikit.SWITCH, hud_wait=15)[0] is True and g.clicks == [uikit.SWITCH.open_xy], str(g.clicks))
+check('hud_wait：LAST_OPEN 記 hud_seen / clicked 1', uikit.LAST_OPEN.get('hud_seen') and uikit.LAST_OPEN.get('clicked') == 1, str(uikit.LAST_OPEN))
+g = install(Game(panel=False, hud=False))
+check('hud_wait：HUD 一直不在 → 失敗、0 次點擊、記錄等了多久', uikit.open_panel_ex(uikit.SWITCH, hud_wait=15)[0] is False and g.clicks == []
+      and uikit.LAST_OPEN.get('hud_seen') is False and uikit.LAST_OPEN.get('hud_waited', 0) >= 14, str(uikit.LAST_OPEN))
+g = install(Game(panel=False, hud=False))
+check('hud_wait=0（預設）HUD 不在仍 4 s 逾時、不等', uikit.open_panel_ex(uikit.SWITCH)[0] is False and g.t < 5, str(g.t))
 g = install(Game(panel=False, hud=True))
 check('HUD 在 → 點開啟鈕開成功', uikit.open_panel(uikit.SWITCH) is True and g.clicks == [uikit.SWITCH.open_xy], str(g.clicks))
 check('is_open 開著', uikit.is_open(uikit.SWITCH))
