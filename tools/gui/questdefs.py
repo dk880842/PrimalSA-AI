@@ -40,6 +40,9 @@ Q182 = [
     dict(id=2024, detail='龍的巢穴(1.82)', track='龍的巢穴', accept_npc='守護者 20801:13,63', steps_total=4,
          steps={}, bag_slots=1, boss=True, est_min=7, live=True,
          note='巡路 + 對話 + 3 場任務戰（疾速 / 剛氣 / 鋼格之龍，2026-10-11 實測；10-10 舊紀錄「無戰鬥」有誤）；終點 7 樓 20807:23,7 剛氣龍；追蹤名「龍的巢穴」，漆黑洞窟(二轉) 不可誤點'),
+    dict(id=2020, detail='強盜的洞穴(1.82)', track='強盜的洞穴', accept_npc='老人薩頓 1112:16,15', steps_total=4,
+         steps={}, bag_slots=1, boss=True, est_min=13, live=False,
+         note='3 場任務戰（怪力的小陣 10701 / 鐵壁的小守 10703 / 疾風的咪雅 10705，各得一件傳家寶）；盜賊對話框是「戰鬥 / 再見」，左鈕 948,461 = 戰鬥；10-09 quest.py 判成 idle 沒按（quest.py 已加按鈕 OCR 後備，未用樣本驗證，需實機確認）；末步回薩頓交付（薩頓家的秘藥、聲望 2）'),
 ]
 
 BY_ID = {d['id']: d for d in Q182}

@@ -148,6 +148,14 @@ DIALOG_BODY_BOX = (805, 285, 565, 115)     # 對話框內文區（淺米色字�
 DIALOG_BTN_BOX = (815, 428, 540, 68)       # 兩顆米色鈕（深棕字：max(R,G,B) <= 100）
 DIALOG_BODY_LIGHT = 140                    # ocr.ps1 -Light 門檻（亮字）
 DIALOG_BTN_DARK = 140                      # ocr.ps1 -Dark 門檻（深字）
+# 盜賊式「戰鬥 / 再見」對話框後備判斷（強盜的洞穴 2026-10-09 實測 classify 判成 idle；樣本已清掉，原因是推斷：SIG_DIALOG 取樣點 y=445 離鈕中心 461 近，
+# 「戰鬥」深字筆畫可能壓到點，或內文棕底取樣點不同）：classify 判 idle / unknown 時，再看兩顆鈕「字旁」4 點是否都是米色（>= 3 點），是才 OCR 按鈕，
+# 左鈕是「戰鬥」才當 dialog（只允許「戰鬥」，其他兩鈕對話框仍不處理；不可逆關鍵字照舊由主迴圈 check_dialog_irreversible 擋）。**未用樣本驗證，需實機確認**
+DIALOG_BTN_PROBES = [(880, 461), (1010, 461), (1150, 461), (1290, 461)]
+DIALOG_BTN_BEIGE = (229, 197, 155)
+DIALOG_BTN_BEIGE_TOL = 40
+DIALOG_BTN_NEED = 3
+FIGHT_BUTTON = '戰鬥'
 DIALOG_OCR_TRIES = 2                       # 內文讀不到時最多重讀幾次；仍讀不到 = 無法確認 → 不按（保守）
 # 對話框：棕底 2 點 + 兩顆米色鈕（heal.py 同款）。主畫面沙地很像米色，所以一定要配棕底
 # SIG_DIALOG / SIG_REWARD / SIG_PANEL / SIG_HUD（容差 40）在 screen_sigs.py
@@ -180,11 +188,34 @@ def read_screen() -> dict:
     """一次 gui pixel 讀完所有特徵點 → screen_sigs.classify 判斷狀態（判定邏輯與特徵都在 screen_sigs.py）"""
     _sync_layout_once()
     pts = screen_sigs.points()
-    out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
+    allp = pts + [p for p in DIALOG_BTN_PROBES if p not in pts]
+    out = gui('pixel', ' '.join(f'{x},{y}' for x, y in allp)).split()
     cols = [tuple(int(v) for v in c.split(',')) for c in out]
-    if len(cols) != len(pts):
+    if len(cols) != len(allp):
         return {'state': 'error', 'raw': out[:3]}
-    return screen_sigs.classify(dict(zip(pts, cols)))
+    px = dict(zip(allp, cols))
+    r = screen_sigs.classify(px)
+    if r['state'] in ('idle', 'unknown') and button_probe_ok(px) and fight_button_open():
+        r = dict(r, state='dialog', fight_fallback=True)
+    return r
+
+
+def button_probe_ok(px: dict) -> bool:
+    """兩顆鈕字旁 4 點至少 DIALOG_BTN_NEED 點是米色（純像素，便宜；主畫面沙地偶爾也像，所以還要 OCR 確認）"""
+    n = sum(1 for p in DIALOG_BTN_PROBES if p in px and screen_sigs.close(px[p], DIALOG_BTN_BEIGE, DIALOG_BTN_BEIGE_TOL))
+    return n >= DIALOG_BTN_NEED
+
+
+def fight_button_open() -> bool:
+    """OCR 兩顆鈕：左鈕是「戰鬥」（在「再見」之前）才回 True；讀不到 / 別的字一律 False（保守，不當對話框）"""
+    tx, ty, tw, th = DIALOG_BTN_BOX
+    r = ps_json('ocr.ps1', tx, ty, tw, th, '-Zooms', '2,3', '-Dark', DIALOG_BTN_DARK)
+    flat = re.sub(r'\s+', '', ''.join(ln.get('text', '') for ln in r.get('lines', [])))
+    i = flat.find(FIGHT_BUTTON)
+    if i < 0:
+        return False
+    j = flat.find('再見')
+    return j < 0 or i < j
 
 
 def ps_json(script: str, *args) -> dict:

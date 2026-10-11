@@ -1146,5 +1146,51 @@ r = quest.hide_close_row()
 ok &= check('輪詢途中戰鬥打完（回主畫面）→ 不再點下一下、回 False', r is False and len([c for c in g.clicks if c.startswith('click 510 ')]) <= 1, str(g.clicks))
 quest.read_screen = REAL_READ_SCREEN
 
+print('(盜賊) 「戰鬥 / 再見」兩鈕對話框後備判斷（強盜的洞穴；classify 判 idle 時用按鈕字旁像素 + 按鈕 OCR）')
+BEIGE = {p: quest.DIALOG_BTN_BEIGE for p in quest.DIALOG_BTN_PROBES}
+_keep_ps2, _keep_gui2 = quest.ps_json, quest.gui
+OCR_CALLS = []
+
+
+def fake_btn_ocr(text):
+    def f(script, *args):
+        OCR_CALLS.append(script)
+        return {'lines': [{'text': text}] if text else []}
+    return f
+
+
+quest.gui = fake_pixel_gui({**HUD_COL, **BEIGE})
+quest.ps_json = fake_btn_ocr('戰鬥 再見')
+r = REAL_READ_SCREEN()
+ok &= check('idle + 鈕旁米色 + OCR「戰鬥 再見」→ state dialog', r['state'] == 'dialog' and r.get('fight_fallback'), str(r))
+quest.ps_json = fake_btn_ocr('完成 再見')
+ok &= check('OCR 左鈕不是戰鬥（完成 / 再見）→ 維持 idle，不當對話框', REAL_READ_SCREEN()['state'] == 'idle')
+quest.ps_json = fake_btn_ocr('再見 戰鬥')
+ok &= check('「戰鬥」在「再見」之後（左鈕不是戰鬥）→ 維持 idle', REAL_READ_SCREEN()['state'] == 'idle')
+quest.ps_json = fake_btn_ocr('')
+ok &= check('OCR 讀不到 → 維持 idle（保守）', REAL_READ_SCREEN()['state'] == 'idle')
+del OCR_CALLS[:]
+quest.gui = fake_pixel_gui(dict(HUD_COL))
+quest.ps_json = fake_btn_ocr('戰鬥 再見')
+ok &= check('主畫面（鈕旁不是米色）→ idle、不跑 OCR', REAL_READ_SCREEN()['state'] == 'idle' and not OCR_CALLS)
+quest.gui = fake_pixel_gui({**HUD_COL, **{p: quest.DIALOG_BTN_BEIGE for p in quest.DIALOG_BTN_PROBES[:2]}})
+ok &= check('鈕旁只有 2 點米色（< 3）→ idle、不跑 OCR', REAL_READ_SCREEN()['state'] == 'idle' and not OCR_CALLS)
+# 真對話框（SIG_DIALOG 命中）照舊 dialog，不跑後備 OCR
+DLG_COL = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_DIALOG}
+quest.gui = fake_pixel_gui({**DLG_COL, **BEIGE})
+ok &= check('SIG_DIALOG 命中 → dialog、不是後備', REAL_READ_SCREEN()['state'] == 'dialog' and not OCR_CALLS and not REAL_READ_SCREEN().get('fight_fallback'))
+# 主迴圈：後備 dialog → 按左鈕 948,461；不可逆內文仍擋
+s = Sim(dialog_at=2.0)
+DLG.update(body=['盜賊：想搶走東西就打倒我吧！'], buttons=['戰鬥', '再見'])
+rc = run(['--no-track', '--max-seconds', '20'], s)
+ok &= check('主迴圈：戰鬥 / 再見對話框 → 按左鈕 948,461', bool(has(s, 'click 948 461')), str(s.clicks[:3]))
+DLG.update(body=['要進行轉生的儀式嗎？'], buttons=['戰鬥', '再見'])
+s = Sim(dialog_at=2.0)
+rc = run(['--no-track', '--max-seconds', '20'], s)
+ok &= check('內文含「轉生」即使左鈕是戰鬥 → 不按、退出碼 39', rc == 39 and not has(s, 'click 948 461'), f'rc={rc}')
+DLG.update(body=['你要進入裏面嗎？那趕緊通過吧！'], buttons=['完成', '再見'])
+quest.ps_json, quest.gui = _keep_ps2, _keep_gui2
+quest.read_screen = REAL_READ_SCREEN
+
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)
