@@ -602,11 +602,17 @@ def _dialog_screen() -> dict:
     return uikit.screen()
 
 
-def accept(title: str, dry_run: bool = False, dy: int = DEFAULT_DY, presses: int = 2) -> int:
+LAST: dict = {}                    # accept 的結果：state = 'done' / 'doing'（skip_ok 略過）/ 'accepted'
+
+
+def accept(title: str, dry_run: bool = False, dy: int = DEFAULT_DY, presses: int = 2, skip_ok: bool = False, verify: bool = True) -> int:
     """接取「待接取」任務 title（完整名稱，例 彌生和日美子(1.82)）：找列 → 點 → 驗中間標題 → 驗藍色傳送鈕 → 傳送 → 等 NPC 對話框 →
     驗對話框（內文 / 按鈕可讀、無不可逆字、左鈕是「接受」）→ 按左鈕（最多 presses 次）→ 重開詳情驗證「進行中」。
-    任何驗證不過都不往下點；回退出碼（見檔頭）。dry_run 只做到「驗證傳送鈕」為止（不點傳送）"""
+    任何驗證不過都不往下點；回退出碼（見檔頭）。dry_run 只做到「驗證傳送鈕」為止（不點傳送）。
+    questrun 用（每任務只開一次詳情）：skip_ok=True → 列表裡該任務已完成 / 進行中時不當錯誤：關面板、回 0，LAST['state'] = 'done' / 'doing'；
+    verify=False → 按完接受後不再重開詳情確認（改看畫面：對話框已收起），成功回 0、LAST['state'] = 'accepted'（呼叫端直接點追蹤欄卡片）"""
     src = 'questdetail'
+    LAST.clear()
     name = snap_name(title, 0.9)
     if not name:
         return uikit.fail(src, uikit.EXIT_USAGE, f'「{title}」不在任務表（TaskExplan）名稱裡')
@@ -641,6 +647,10 @@ def accept(title: str, dry_run: bool = False, dy: int = DEFAULT_DY, presses: int
             scroll(True, dy)
         if not row:
             return uikit.fail(src, EXIT_NOT_FOUND, f'列表裡找不到「{name}」')
+        if skip_ok and row['status'] in (DONE, DOING):
+            LAST['state'] = 'done' if row['status'] == DONE else 'doing'
+            print(f'{src}：「{name}」狀態 {row["status"]}，不接（關面板）')
+            return 0
         if row['status'] != PENDING:
             return uikit.fail(src, EXIT_NOT_PENDING, f'「{name}」狀態是 {row["status"]}，不是待接取，不接（不傳送）')
         if not uikit.safe_click(ROW_CLICK_X, row['cy'], PANEL, note=f'questdetail 選 {name}', wait_ms=int(SETTLE_S * 1000)):
@@ -665,7 +675,7 @@ def accept(title: str, dry_run: bool = False, dy: int = DEFAULT_DY, presses: int
     finally:
         if not clicked_transfer:
             close_detail()
-    return _after_transfer(src, name, presses)
+    return _after_transfer(src, name, presses, verify)
 
 
 NOTICE_OK, NOTICE_X = (714, 557), (946, 208)            # 「提示」視窗的確定鈕 / ✕
@@ -698,7 +708,7 @@ def _dialog_wait(timeout: float = 20.0) -> str | None:
     return None
 
 
-def _after_transfer(src: str, name: str, presses: int) -> int:
+def _after_transfer(src: str, name: str, presses: int, verify: bool = True) -> int:
     got = _dialog_wait()
     if got == 'notice':
         shot = uikit.snap('questdetail-notice')
@@ -720,6 +730,13 @@ def _after_transfer(src: str, name: str, presses: int) -> int:
         s = uikit.screen()
         if s.get('state') != 'dialog':
             break
+    if not verify:
+        sleep(1.0)
+        if uikit.screen().get('state') == 'dialog':
+            return uikit.fail(src, EXIT_NOT_ACCEPTED, '按了接受但對話框還在（沒接成？），不重點')
+        LAST['state'] = 'accepted'
+        print(f'{src}：「{name}」已按接受（對話框已收起；不重開詳情驗證）')
+        return 0
     # 驗證：重開詳情看狀態
     sleep(1.0)
     if not open_detail():

@@ -165,16 +165,45 @@ def _sub_on(sub: str) -> bool:
     return bool(cols) and all(abs(a - b) <= 24 for a, b in zip(cols[0], SUB_ON))
 
 
-def _buff_icon() -> bool:
-    """buff 圖示：深藍底 + 青色亮點（樣本 quest-log/093317）。讀不到 = False"""
-    x0, y0, w, h = BUFF_BOX
-    pts = [(x0 + i * 5, y0 + j * 5) for i in range(w // 5) for j in range(h // 5)]
+BUFF_SLOTS = [(76 + 46 * k, 150, 44, 45) for k in range(3)]      # 左上 buff 列（頭像下方）：每格約 46 px 寬，最多 3 格並排
+BUFF_STEP = 3
+
+
+def buff_classify(getpx) -> list:
+    """純函式：getpx(x, y) → (r, g, b)；回每個 buff 格的種類 'dragon'（龍王的守護：深藍底 + 青白發光人形剪影）/ 'exp'（2倍智慧果：藍底 + 白色 EXP 字與箭頭）/ None（空格）。
+    1440×830 截圖實測（2026-10-11，tools/gui/fixtures/buff_row.png）：人形 青 cyan(r<140,g>110,b>140) 約 280/2025 點（EXP 143）、深藍 navy 805（EXP 422）、白 white(>200) 10（EXP 283）→
+    以 white 分：white 多 = EXP；cyan 夠多且 white 少 = 人形；兩者都不夠 = 空格。步距 3 px 取樣（點數 /9）"""
+    out = []
+    for x0, y0, w, h in BUFF_SLOTS:
+        cyan = navy = white = 0
+        for y in range(y0, y0 + h, BUFF_STEP):
+            for x in range(x0, x0 + w, BUFF_STEP):
+                r, g, b = getpx(x, y)
+                cyan += r < 140 and g > 110 and b > 140
+                navy += r < 60 and g < 70 and b < 110
+                white += r > 200 and g > 200 and b > 200
+        if white >= 12:
+            out.append('exp')
+        elif cyan >= 15 and navy >= 40 and white <= 6:
+            out.append('dragon')
+        else:
+            out.append(None)
+    return out
+
+
+def buff_row() -> list | None:
+    """現場讀 buff 列 → buff_classify 結果；讀不到 None"""
+    pts = [(x, y) for x0, y0, w, h in BUFF_SLOTS for y in range(y0, y0 + h, BUFF_STEP) for x in range(x0, x0 + w, BUFF_STEP)]
     cols = uikit.px(pts)
     if not cols:
-        return False
-    cyan = sum(1 for r, g, b in cols if r < 140 and g > 110 and b > 140)
-    navy = sum(1 for r, g, b in cols if r < 60 and g < 70 and b < 110)
-    return cyan >= 3 and navy >= 6
+        return None
+    d = dict(zip(pts, cols))
+    return buff_classify(lambda x, y: d[(x, y)])
+
+
+def _buff_icon() -> bool:
+    """龍王的守護人形圖示在 buff 列嗎（不會被 2倍智慧果 EXP 圖示騙到）；讀不到 = False"""
+    return 'dragon' in (buff_row() or [])
 
 
 def _click(x: int, y: int, panel, note: str, allow=(), wait_ms: int = 350) -> bool:

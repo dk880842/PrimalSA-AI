@@ -101,6 +101,7 @@ uv run --no-project python tools/gui/errlog.py list
 | 看角色屬性 / 抗性 / 潛力點 | [ui/role.md](ui/role.md) |
 | 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則 OCR 核對追蹤列表任務名再點；`ocr.ps1` / `findmark.ps1`；**預設模式任務 BOSS 戰打完先驗隊伍再停：退出碼 37 滿員 / 38 不滿，`--no-stop-after-boss` 才連跑；對話框內文 / 按鈕含轉生 / 封印 / 刪除 / 丟棄 → 不按、退出碼 39，確認後 `--allow-irreversible`**，errlog #68） | [ui/quest.md](ui/quest.md) |
 | **單人逃跑解任務**（DKB0 單人跑 NPC、遇怪逃跑 → 組隊對話 / 打；紅暴 2031；`quest.py --solo / --fight`、`psa.py steps`、`heal.py --no-return`） | **`/psa-quest-solo` skill**（介面參考 [ui/quest.md](ui/quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
+| **1.82 任務驅動器**（`questrun.py plan / run <任務ID…>`，每任務只開一次詳情、自動巡路優先、龍王的守護看 buff 人形圖示） | [ui/quest.md](ui/quest.md) 的 questrun 段 |
 | **任務詳情讀取 / 接取**（1.82 各任務狀態、接取一個待接取任務；`questdetail.py status / list / accept`，退出碼 120～128；**詳情「傳送」鈕位置進行中任務是「重置任務」，只有腳本驗證後才點**） | [ui/quest.md](ui/quest.md) 的 questdetail 段 |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
 | 看 / 改寵物出戰 · 等待（不碰存倉） | **先跑 `pet.py list` / `set-state` / `rest-all`**（介面參考 [ui/pet.md](ui/pet.md)） |

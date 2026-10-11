@@ -61,6 +61,7 @@ class Fake:
         self.grind_rc = kw.get('grind_rc', 0)
         self.pre_rc = kw.get('pre_rc', 0)
         self.screen = kw.get('screen', 'idle')
+        self.active = kw.get('active', False)
 
     def rec(self, *a):
         self.calls.append(a)
@@ -112,7 +113,13 @@ class Fake:
 
     def accept(self, detail):
         self.rec('accept', detail)
-        return self.accept_rc
+        if self.accept_rc:
+            return self.accept_rc, None
+        q = self.status.get(detail)
+        if q is None:
+            return 121, None
+        first = q.pop(0) if len(q) > 1 else q[0]
+        return 0, {'已完成': 'done', '進行中': 'doing', '待接取': 'accepted'}[first]
 
     def read_step(self, track):
         return self.steps.pop(0) if self.steps else None
@@ -128,6 +135,9 @@ class Fake:
 
     def bag_free(self, roles):
         return 0, dict(self.bag)
+
+    def dragon_active(self):
+        return self.active
 
     def dragon(self, have=False):
         self.rec('dragon', have)
@@ -171,6 +181,24 @@ def go(fake, ids, **kw):
     return quiet(questrun.run, ids, tools=fake, **kw)
 
 
+# ================= buff 列判斷（真實截圖 fixture）=================
+import bag  # noqa: E402
+import pngread  # noqa: E402
+_, _, _bpp, _rows = pngread.decode((HERE / 'fixtures' / 'buff_row.png').read_bytes())
+_OX, _OY = 70, 145
+
+
+def _px(x, y):
+    xx, yy = x - _OX, y - _OY
+    if 0 <= yy < len(_rows) and 0 <= xx * _bpp < len(_rows[0]):
+        i = xx * _bpp
+        return _rows[yy][i], _rows[yy][i + 1], _rows[yy][i + 2]
+    return 0, 0, 0
+
+
+check('buff_classify：第 1 格 EXP、第 2 格龍王人形、第 3 格空', bag.buff_classify(_px) == ['exp', 'dragon', None], str(bag.buff_classify(_px)))
+check('buff_classify：全黑 = 全空', bag.buff_classify(lambda x, y: (0, 0, 0)) == [None, None, None])
+
 # ================= 純函式 / plan =================
 check('classify 對照', [questrun.classify(c) for c in (0, 37, 38, 3, 5, 30, 32, 33, 25, 39, 2, 10, 21, 99)]
       == ['check', 'boss', 'boss_team', 'no_track', 'gone', 'team', 'team', 'stall', 'battle', 'irrev', 'verify', 'halt', 'knocked', 'other'])
@@ -196,15 +224,21 @@ check('龍王的守護跑第一片前吃（have=False）', ('dragon', False) in 
 check('進度檔記完成；quest-log 追加一筆', '"done"' in questrun.PROGRESS.read_text(encoding='utf-8') and '彌生和日美子' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
 check('LAST', questrun.LAST.get('ok') and questrun.LAST.get('done') == [2017])
 
+# 1b) quest.py 印「任務完成」→ 完全不再開詳情（整個任務詳情只開 1 次 = 接取那次）
+f = Fake(status={D17: [questrun.PENDING, questrun.PENDING]}, quest=[(0, ['任務完成：彌生和日美子'])])
+rc = go(f, [2017])
+check('「任務完成」→ 不再讀詳情；詳情只開 1 次', rc == 0 and f.names().count('accept') == 1 and 'status' not in f.names())
+check('quest-log 記詳情開啟次數 1', '詳情開啟 1 次' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
+
 # 2) 已完成 → 跳過（不接、不跑、不吃龍王），仍恢復掛機
 f = Fake(status={D17: [questrun.DONE]})
 rc = go(f, [2017])
-check('已完成 → 跳過', rc == 0 and 'accept' not in f.names() and 'quest' not in f.names() and 'dragon' not in f.names() and ('grind_start', '地雷區') in f.calls)
+check('已完成 → 跳過（只開一次詳情）', rc == 0 and f.names().count('accept') == 1 and 'status' not in f.names() and 'quest' not in f.names() and 'dragon' not in f.names() and ('grind_start', '地雷區') in f.calls)
 
 # 3) 進行中（續跑）→ 不 accept、先 team.form
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
 rc = go(f, [2017])
-check('進行中 → 續跑（不接取、先組隊）', rc == 0 and 'accept' not in f.names() and 'quest' in f.names() and f.names().count('team_form') >= 2)
+check('進行中 → 續跑（詳情只開 1 次、先組隊）', rc == 0 and f.names().count('accept') == 1 and 'quest' in f.names() and f.names().count('team_form') >= 2)
 
 # 4) 續跑 / 一片沒完成：回 0 但狀態進行中 → 下一片
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])])
@@ -260,7 +294,7 @@ check('accept 9 → 9 透傳', go(f, [2017]) == 9)
 
 # 13) preflight：任務不在列表 / 狀態讀不到 → 110；follow 還在跑 → 先停；背包不足 → 110；HP 低 → 補血
 f = Fake(status={})
-check('詳情列表找不到 → 110', go(f, [2017]) == questrun.EXIT_PREFLIGHT)
+check('詳情列表找不到 → 119（接取失敗）', go(f, [2017]) == questrun.EXIT_ACCEPT)
 f = Fake(status={D17: [questrun.DONE]}, follow=True)
 go(f, [2017])
 check('follow 在跑 → follow_stop', 'follow_stop' in f.names())
@@ -281,6 +315,13 @@ f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], screen=
 go(f, [2999])
 check('畫面停在對話窗 → 先 ESC 再交接', f.names().index('esc') < f.names().index('enc_off') and f.names().count('quest') == 1)
 
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=True)
+go(f, [2017])
+check('人形圖示在 → 不吃', 'dragon' not in f.names())
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=None)
+go(f, [2017])
+check('圖示讀不到 → 退回計時（第一次會吃）', f.names().count('dragon') == 1)
+
 # 14) --after none：不恢復；grind 失敗 → 回 grind 碼
 f = Fake(status={D17: [questrun.DONE]})
 check('--after none 不恢復掛機', go(f, [2017], after='none') == 0 and 'grind_start' not in f.names())
@@ -300,7 +341,7 @@ f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(
 rc = go(f, [2017])
 check('龍王失敗只警告、任務照跑', rc == 0 and f.names().count('quest') == 2)
 check('龍王取出後失敗 → 下次 have=True', ('dragon', True) in f.calls, str([c for c in f.calls if c[0] == 'dragon']))
-f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])])
+f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], active=None)
 go(f, [2017])
 check('9 分鐘內第二片不重吃', f.names().count('dragon') == 1)
 f = Fake(status={D17: [questrun.DONE]})

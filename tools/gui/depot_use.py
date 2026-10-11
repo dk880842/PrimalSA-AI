@@ -123,7 +123,7 @@ def is_pair_layout() -> bool:
     return r > 200 and g > 130 and b < 100 and b2 > r2          # 橘黃 + 藍
 
 
-def run(role: str, item: str, depot: str = 'public', restore: bool = True, have: bool = False) -> tuple:
+def run(role: str, item: str, depot: str = 'public', restore: bool = True, have: bool = False, reopen: bool = True) -> tuple:
     """→ (rc, info)。encounter 先關、結束後一定開回（原本就關著也開回：本工具只在掛機時用）"""
     info = {'role': role, 'item': item, 'depot': depot}
     enc_off = False
@@ -144,13 +144,20 @@ def run(role: str, item: str, depot: str = 'public', restore: bool = True, have:
                     if step != 'take':
                         info['warn'] = f'{item} 已取出在 {role} 背包，沒存回倉庫'
                     return rc, info
+        if item == '龍王的守護':                                         # 成功判定看 buff 列的人形圖示（不是 2倍智慧果 EXP 圖示）
+            info['buff'] = bag._wait(bag._buff_icon, 4.0)
+            if not info['buff']:
+                info['warn_buff'] = '使用後 buff 列沒看到龍王的人形圖示'
+                info['step'] = 'verify'
+                return bag.EXIT_VERIFY, info
         info['step'] = 'done'
         return 0, info
     finally:
-        try:
-            heal.set_encounter(True)
-        except RuntimeError as e:
-            info['enc_warn'] = str(e)
+        if reopen:
+            try:
+                heal.set_encounter(True)
+            except RuntimeError as e:
+                info['enc_warn'] = str(e)
 
 
 def main() -> int:
@@ -163,13 +170,14 @@ def main() -> int:
     ap.add_argument('item')
     ap.add_argument('--depot', choices=['public', 'personal'], default='public')
     ap.add_argument('--have', action='store_true', help='道具已經在背包（上次取出後失敗）：跳過取出')
+    ap.add_argument('--no-reopen', action='store_true', help='吃完不開回原地遇敵（跑任務用）')
     ap.add_argument('--no-restore', action='store_true', help='用完不把剩下的存回倉庫')
     a = ap.parse_args()
     roles = bag._roles(a.role)
     if not roles:
         print('角色名不在白名單', file=sys.stderr)
         return uikit.EXIT_USAGE
-    rc, info = run(roles[0], a.item, a.depot, not a.no_restore, a.have)
+    rc, info = run(roles[0], a.item, a.depot, not a.no_restore, a.have, not a.no_reopen)
     info.update(ok=rc == 0, rc=rc)
     print(json.dumps(info, ensure_ascii=False))
     return rc

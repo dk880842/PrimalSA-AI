@@ -183,5 +183,7 @@
 入口 `uv run --no-project python tools/gui/questrun.py plan|run|status [任務ID …]`；資料表 `questdefs.py`（2999 / 2017 / 2015 live，2027 / 2018 / 2011 只有資料）；特殊步驟 `questhandlers.py`（walk：成人儀式步 1 走到 10204:188,13）。退出碼 110～119（見 questrun.py 檔頭）。
 - 流程：交接（關遇敵、DKBO、組隊）→ 每任務 task_status（已完成跳過 / 待接取接取 / 進行中續跑）→ 龍王的守護（depot_use，9 分鐘重吃）→ quest.py 迴圈依退出碼分支 → 詳情確認已完成 → 全部成功才 `grind.py start --spot 地雷區`；失敗不恢復。
 - 實機發現：追蹤標題樣板可能因選中底色只有 0.68 分而沒命中 → quest.track_task 現在樣板整輪沒找到會退回 OCR 再掃並學新樣板。
-- **2026-10-11 實機狀態**：龍王流程、交接、狀態讀取、背包檢查實測可用；成人儀式步 1 因上述樣板問題停在 112，修好後被使用者暫停，**walk handler 與三個任務端到端尚未實機跑完**。
+- **2026-10-11 實機結果**：成人儀式 / 彌生和日美子 / 亞姆的斧頭三個任務都由 questrun 跑完，結束 `grind.py start --spot 地雷區` rc 0。成人儀式步 1：點追蹤會傳送進 10204 並自動巡路到差使 → walk handler 只當備援（quest.py 回 3 才用）。
+- **詳情只開一次**：每任務只在接取那次開詳情（同一趟捲動讀狀態：已完成跳過 / 進行中續跑 / 待接取接受，不重開驗證）；完成看 quest.py「任務完成」（領獎後追蹤欄沒有該任務），沒這字樣才讀一次詳情。接取後直接點追蹤欄卡片（`quest.track_task` 先看目前頁、標題相符才點，不符才捲動；樣板整輪沒命中會退回 OCR）。
+- **龍王的守護**：buff 列（頭像下方，約 y 150～195，每格 46 px）可用 `bag.buff_row()` 區分「人形青色剪影」與「EXP 字」（fixtures/buff_row.png 為樣本）；questrun 以人形圖示在不在決定要不要再吃，`depot_use.run(..., reopen=False)` 吃完不開原地遇敵。
 - 離線測試：test_questrun.py / test_questdefs.py / test_questdetail.py（task_status）。
