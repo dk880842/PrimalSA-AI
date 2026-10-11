@@ -183,12 +183,39 @@ for smp in PX['samples']:
         if c['panel'] is not None or c['state'] == 'panel':
             bad.append((smp['f'], 'FP', c['state'], c['panel']))
 check(f'panel fixture：{pos_n} 張正例 100% 認對面板名、{neg_n} 張負例 0 誤判、凍結結果一致', not bad, str(bad[:4]))
+title_hit = {}
+cover_bad = []
+for smp in PX['samples']:
+    if not smp['expect_panel']:
+        continue
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(ppts)}
+    nm = smp['expect_panel']
+    if S._count_ok(px, S.PANEL_TITLE[nm], S.TITLE_TOL) >= S.TITLE_NEED:
+        title_hit[nm] = title_hit.get(nm, 0) + 1
+        # 框線被蓋：✕ 與 PANEL_PTS 全蓋成灰，標題還在 → 仍認得
+        p2 = dict(px)
+        for pt in [S.PANEL_X[nm][:2]] + [q[:2] for q in S.PANEL_PTS[nm]]:
+            p2[pt] = (70, 70, 70)
+        if S.panel_of(p2) != nm:
+            cover_bad.append((smp['f'], 'frame-covered'))
+    # 標題被蓋：標題點全蓋成灰，框線備援仍認得（原本 ✕ + PANEL_PTS 就認得的樣本）
+    p3 = dict(px)
+    for pt in [q[:2] for q in S.PANEL_TITLE[nm]]:
+        p3[pt] = (70, 70, 70)
+    if S.panel_of(p3) != nm:
+        cover_bad.append((smp['f'], 'title-covered'))
+check('正例：標題點命中（每種面板至少一張；全部正例僅 switch 被 EXP 橫幅蓋住的 1 張例外）', set(title_hit) == set(S.PANEL_X)
+      and sum(title_hit.values()) >= pos_n - 1, str(title_hit))
+check('框線點（✕ + 8 點）被蓋但標題在 → 仍認得；標題被蓋 → 退回框線備援（含 role 樣本）', not cover_bad, str(cover_bad[:3]))
 check('panel fixture 涵蓋 pet / bag / ass / quest / switch / transfer / setting / team / qteam / role', set(per) == set(S.PANEL_X), str(per))
 check('panel fixture 有人物資訊 4 張正例（watch-panels/role-0～3）', {f'watch-panels/role-{i}.png' for i in range(4)} <= {x['f'] for x in PX['samples'] if x['expect_panel'] == 'role'})
 check('panel fixture 有今天使用者開的寵物視窗（watch-panels/pet-0、pet-1）', {'watch-panels/pet-0.png', 'watch-panels/pet-1.png'} <= {x['f'] for x in PX['samples']})
 check('panel fixture 負例涵蓋 unknown / idle / dialog / battle / loading / login', {x['state'] for x in PX['samples'] if not x['expect_panel']} >= {'unknown', 'idle', 'dialog', 'battle'}
       and any(x['annot'] == ['loading'] for x in PX['samples']) and any(x['annot'] == ['login'] for x in PX['samples']))
 check('PANEL_X / PANEL_PTS / PANEL_NAMES 的面板一致、每面板 8 點', set(S.PANEL_X) == set(S.PANEL_PTS) == set(S.PANEL_NAMES) and all(len(v) == 8 for v in S.PANEL_PTS.values()))
+check('PANEL_TITLE 每面板 8 點、都在 panel_points() 內', set(S.PANEL_TITLE) == set(S.PANEL_X) and all(len(v) == 8 for v in S.PANEL_TITLE.values())
+      and all((x, y) in set(S.panel_points()) for v in S.PANEL_TITLE.values() for x, y, *_ in v))
 check('panel_points 與 classify 的 points 不重複', not (set(S.panel_points()) & set(S.points())))
 import uikit  # noqa: E402
 check('uikit 沿用 screen_sigs 的 ✕ 特徵（PET / TEAMPANEL / QTEAM / SWITCH）', uikit.PET.sig == [S.X_PET] and uikit.TEAMPANEL.sig[0] == S.X_TEAM
@@ -212,6 +239,20 @@ for nm in S.PANEL_X:
     check(f'{nm}：3 點不符 → 不認得（unknown）', S.classify(panel_px(nm, 3, S.PANEL_TOL + 1))['state'] == 'unknown')
     check(f'{nm}：點偏 PANEL_TOL 剛好仍中', S.classify(panel_px(nm, 8, S.PANEL_TOL))['panel'] == nm)
     check(f'{nm}：✕ 偏 tol+1 → 不認得', S.classify(panel_px(nm, 0, 0, S.PANEL_X[nm][5] + 1))['state'] == 'unknown')
+
+
+def title_px(name, miss=0, delta=0):
+    """合成：全灰底 + 某面板標題 8 點（框線 / ✕ 不給）；前 miss 個點偏 delta"""
+    px = {pt: (70, 70, 70) for pt in S.points() + S.panel_points()}
+    for i, (x, y, r, g, b) in enumerate(S.PANEL_TITLE[name]):
+        px[(x, y)] = shifted((r, g, b), delta) if i < miss else (r, g, b)
+    return px
+
+
+for nm in S.PANEL_X:
+    check(f'{nm}：只有標題（沒有 ✕ / 框線）→ panel={nm}', S.classify(title_px(nm))['panel'] == nm)
+    check(f'{nm}：標題 1 點不符仍認得、2 點不符 → 不認得', S.classify(title_px(nm, 1, S.TITLE_TOL + 1))['panel'] == nm and S.classify(title_px(nm, 2, S.TITLE_TOL + 1))['state'] == 'unknown')
+    check(f'{nm}：標題點偏 TITLE_TOL 剛好仍中', S.classify(title_px(nm, 8, S.TITLE_TOL))['panel'] == nm)
 check('沒讀 panel_points（舊 fixture / quest.read_screen）→ 不認得新面板、不丟例外', S.classify({pt: (70, 70, 70) for pt in S.points()})['panel'] is None)
 check('label：面板：寵物 / 外掛 / 快速組隊；舊切換面板', S.label({'state': 'panel', 'panel': 'pet'}) == '面板：寵物' and S.label({'state': 'panel', 'panel': 'ass'}) == '面板：外掛'
       and S.label({'state': 'panel', 'panel': 'qteam'}) == '面板：快速組隊' and S.label({'state': 'panel'}) == '切換角色面板')
