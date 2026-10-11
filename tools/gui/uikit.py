@@ -391,7 +391,7 @@ norm_char = charstate.norm_char
 
 
 # ---- 寵物名 ----
-MOUNTS = ['瑪斯貝卡']              # 騎寵名單（計畫決定 4：只有瑪斯貝卡）
+MOUNTS = ['瑪斯貝卡', '布拉奇多斯']   # 騎寵名單（2026-10-11 加布拉奇多斯；存倉例外見 pet.py --allow-mount-store）
 SNAP_CUTOFF = 0.8
 _names_cache: dict = {}
 

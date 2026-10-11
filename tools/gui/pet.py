@@ -5,7 +5,7 @@
   uv run --no-project python tools/gui/pet.py list [--role DKBO|all] [--json]           # 唯讀：每格 名字 / 狀態 / 等級
   uv run --no-project python tools/gui/pet.py set-state DKBO 迪基格斯 出戰|等待|騎乘 [--slot N] [--allow-mount]
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
-  uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1]
+  uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1] [--allow-mount-store 名字]
   uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N [--expect 迪基格斯]
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--timing
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
@@ -17,7 +17,7 @@
   - 名字：petmatch 整塊圖樣板（同名 IoU = 1.000）→ 沒樣板才 OCR（-Dark 0 -Zooms 2,3,4 精確命中 Monster 表才學）；
     等級：黃字切字 + 單字樣板 → 沒樣板才 OCR（三組設定共識才學）。名字 / 等級都讀不出來 → None，**不猜**。
   - 狀態：下方三顆鈕（出戰 / 騎乘 / 休息）亮的（棕底）就是目前狀態。
-  - 騎寵（uikit.MOUNTS = 瑪斯貝卡）：名字「像」騎寵（is_mount_like，鬆）或狀態 = 騎乘 → set-state / rest-all 不動（73），要動需 --allow-mount。
+  - 騎寵（uikit.MOUNTS = 瑪斯貝卡 / 布拉奇多斯）：名字「像」騎寵（is_mount_like，鬆）或狀態 = 騎乘 → set-state / rest-all 不動（73），要動需 --allow-mount。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；pet 自己 70～78）：
   70 寵物面板打不開 / 中途消失（沒點任何面板內座標）
@@ -29,7 +29,9 @@
   75 倉庫分頁 / 子分頁 / 按鈕文字（存入寵物 / 取出寵物）/ 選取 / 縮圖簽名不符 → 不點存取鈕（零點擊）
   76 存 / 取後驗證失敗（**不重點**，請人看 snap；take 名字不符也是 76 / 72，不自動存回）
   77 倉庫滿（store）或寵物欄滿（take）→ 零點擊
-  store 的硬性禁止（73，零存取點擊）：名字是 / 像騎寵（瑪斯貝卡，含 OCR 錯字）、狀態 = 騎乘、第 1 格（要 --allow-slot1 才放行）、名字讀不出來
+  store 的硬性禁止（73，零存取點擊）：名字是 / 像騎寵（瑪斯貝卡 / 布拉奇多斯，含 OCR 錯字）、狀態 = 騎乘、第 1 格（要 --allow-slot1 才放行）、名字讀不出來
+  例外 --allow-mount-store <名字>（只有使用者當次明講才用）：只放行「名字完全等於此值」的騎寵（像但不同仍擋）、且該寵物狀態必須已是等待（騎乘中仍 73，先 set-state ... 等待 --allow-mount）；
+    第 1 格另需 --allow-slot1；沒帶旗標時行為不變；縮圖簽名 / 按鈕文字 / 確認視窗驗證都照舊
   store / take 的存入 / 取出鈕（530,697）每次呼叫最多單擊 1 次；只在「倉庫分頁特徵 + 個人 / 公共分頁 + 按鈕底色 + 按鈕 OCR 文字」全部吻合時才點
   （注意：寵物分頁的「騎乘」鈕 532,702 與倉庫分頁的存入鈕 530,697 幾乎同位置，點錯分頁會換騎寵，所以按鈕前一定現場驗證）
 """
@@ -852,14 +854,18 @@ def read_name_now(ctx: dict, retries: int = BANNER_RETRIES, wait: float = BANNER
     return None, None
 
 
-def guard_store(sl: dict, allow_slot1: bool) -> str | None:
-    """存倉硬性禁止：回拒絕原因（None = 可以）。沒有 --allow-mount 這種旗標：騎寵絕不存"""
+def guard_store(sl: dict, allow_slot1: bool, allow_mount_store: str | None = None) -> str | None:
+    """存倉硬性禁止：回拒絕原因（None = 可以）。騎寵絕不存；唯一例外 allow_mount_store = 該寵物的「正式名」且 sl 名字完全相同（不接受像）、
+    狀態須已是等待（騎乘 / 出戰都擋，先 set-state 等待）；其餘規則（名字 / 狀態讀不出、第 1 格要 --allow-slot1）照舊"""
     nm = sl.get('name')
     if not nm:
         return '名字讀不出來（不猜，拒絕存倉）'
     if sl.get('state') == '騎乘':
         return f'{nm} 正在騎乘中（騎寵），絕不存倉'
-    if sl.get('mountlike') or uikit.is_mount_like(nm) or nm in uikit.MOUNTS:
+    if allow_mount_store and nm == allow_mount_store:                          # 名字完全相同才放行，且必須已是「等待」
+        if sl.get('state') != '等待':
+            return f'{nm} 狀態是 {sl.get("state")}（--allow-mount-store 只放行「等待」中的；先 set-state {nm} 等待 --allow-mount）'
+    elif sl.get('mountlike') or uikit.is_mount_like(nm) or nm in uikit.MOUNTS:
         return f'{nm} 是 / 像騎寵（{"/".join(uikit.MOUNTS)}），絕不存倉'
     if sl.get('slot') == 1 and not allow_slot1:
         return '第 1 格預設禁止存倉（騎寵位置）；確定要存加 --allow-slot1'
@@ -945,7 +951,7 @@ def _depot_prologue(role_arg: str, depot: str, cmd: str) -> tuple:
 
 
 def store(role_arg: str, pet_text: str, depot: str = 'personal', slot_no: int | None = None, allow_slot1: bool = False,
-          pause: bool = False, learn: bool = True) -> int:
+          pause: bool = False, learn: bool = True, allow_mount_store: str | None = None) -> int:
     """寵物 → 倉庫（計畫 §5.3）。硬性禁止（騎寵 / 騎乘 / 第 1 格 / 名字讀不出）→ 73 且完全不碰倉庫與存入鈕；存入鈕每次最多點 1 次"""
     t0 = time.time()
     role, info = _depot_prologue(role_arg, depot, 'store')
@@ -953,7 +959,16 @@ def store(role_arg: str, pet_text: str, depot: str = 'personal', slot_no: int | 
         return _out(uikit.EXIT_USAGE, info, t0, '角色或倉庫參數不對')
     want = uikit.snap_pet(pet_text)
     info['pet'] = want
-    if uikit.is_mount_like(pet_text) or (want and want in uikit.MOUNTS):         # 連名字都像騎寵（含 OCR 錯字「瑪斯貝卞」）→ 完全不開面板
+    am = None                                                                       # --allow-mount-store：參數名 / 旗標值 / 正式名三者 norm 後必須完全相同
+    if allow_mount_store:
+        k = uikit._pet_key(allow_mount_store)
+        if want and k and k == uikit._pet_key(pet_text) == uikit._pet_key(want):
+            am = want
+        else:
+            rc = uikit_fail(EXIT_FORBID, f'拒絕存倉：--allow-mount-store {allow_mount_store!r} 與寵物名 {pet_text!r} 不完全相同；零點擊')
+            return _out(rc, info, t0, '--allow-mount-store 與寵物名不符')
+    info['allow_mount_store'] = am
+    if am is None and (uikit.is_mount_like(pet_text) or (want and want in uikit.MOUNTS)):    # 連名字都像騎寵（含 OCR 錯字「瑪斯貝卞」）→ 完全不開面板
         rc = uikit_fail(EXIT_FORBID, f'拒絕存倉：{pet_text!r} 是 / 像騎寵（{"/".join(uikit.MOUNTS)}），絕不存倉；零點擊')
         return _out(rc, info, t0, '騎寵不能存倉')
     if not want:
@@ -964,7 +979,7 @@ def store(role_arg: str, pet_text: str, depot: str = 'personal', slot_no: int | 
         if s.rc:
             return _out(s.rc, info, t0)
         try:
-            rc = _store_body(role, want, depot, slot_no, allow_slot1, ctx, info)
+            rc = _store_body(role, want, depot, slot_no, allow_slot1, ctx, info, am)
         finally:
             save_ctx(ctx)
             _back_to_pet_tab()
@@ -979,7 +994,7 @@ def _back_to_pet_tab() -> None:
         pass
 
 
-def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ctx: dict, info: dict) -> int:
+def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ctx: dict, info: dict, am: str | None = None) -> int:
     def bad(rc, msg):
         info['msg'] = msg
         return uikit_fail(rc, msg)
@@ -993,7 +1008,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
         return bad(EXIT_NAME, why)
     i = sl['slot'] - 1
     info['slot'] = sl['slot']
-    reason = guard_store(sl, allow_slot1)
+    reason = guard_store(sl, allow_slot1, am)
     if reason:
         return bad(EXIT_FORBID, f'拒絕存倉：{reason}')
     pets_empty = sum(1 for x in slots if x.get('empty'))
@@ -1005,7 +1020,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     if rc:
         return rc
     cur = read_slot(i, ctx)
-    reason = guard_store({**sl, **{k: cur.get(k) for k in ('name', 'state', 'mountlike')}}, allow_slot1)
+    reason = guard_store({**sl, **{k: cur.get(k) for k in ('name', 'state', 'mountlike')}}, allow_slot1, am)
     if reason or cur.get('name') != want:
         return bad(EXIT_FORBID if reason else EXIT_NAME, f'選中第 {sl["slot"]} 格後重讀：{reason or "名字是 " + str(cur.get("name"))}，不存')
     pre_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
@@ -1193,6 +1208,7 @@ def main() -> int:
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
     p.add_argument('--slot', type=int, default=None, help='同名多隻時指定第幾格（1 起算）')
     p.add_argument('--allow-slot1', action='store_true', help='允許存第 1 格的寵物（仍擋騎寵 / 騎乘中）')
+    p.add_argument('--allow-mount-store', default=None, metavar='名字', help='只放行名字完全等於此值的騎寵存倉（須已是等待；第 1 格另加 --allow-slot1）；只有使用者當次明講才用')
     p = sub.add_parser('take', help='倉庫第 N 格 → 寵物欄（取出的寵物預設等待）', parents=[cp])
     p.add_argument('role')
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
@@ -1210,7 +1226,7 @@ def main() -> int:
     if a.cmd == 'set-state':
         return set_state(a.role, a.pet, a.state, a.slot, a.allow_mount, a.pause_encounter, learn)
     if a.cmd == 'store':
-        return store(a.role, a.pet, a.depot, a.slot, a.allow_slot1, a.pause_encounter, learn)
+        return store(a.role, a.pet, a.depot, a.slot, a.allow_slot1, a.pause_encounter, learn, a.allow_mount_store)
     if a.cmd == 'take':
         return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn)
     split = lambda t: None if t is None else [x.strip() for x in t.split(',') if x.strip()]    # noqa: E731

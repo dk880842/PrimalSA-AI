@@ -601,5 +601,75 @@ one[0] = (0, 0, 0)
 check('mount_same：內側 1 點雜訊可容忍、2 點不行', pet.mount_same(base, one) and not pet.mount_same(base, [(0, 0, 0)] * 2 + base[2:]))
 check('mount_same：長度不符 / 空 → False', not pet.mount_same(base, base[:8]) and not pet.mount_same(None, base))
 
+# ---------------- D0：--allow-mount-store / MOUNTS 加布拉奇多斯 ----------------
+check('MOUNTS = 瑪斯貝卡 + 布拉奇多斯', uikit.MOUNTS == ['瑪斯貝卡', '布拉奇多斯'])
+check('is_mount_like：布拉奇多斯 / 錯字布拉奇多卡 / 瑪斯貝卡 = True', all(uikit.is_mount_like(t) for t in ['布拉奇多斯', '布拉奇多卡', '瑪斯貝卡']))
+check('is_mount_like：朵拉比斯 / 迪基格斯 / 魯尼帖斯 / 左迪洛斯 / 烏力斯坦 = False（不誤擋）', not any(uikit.is_mount_like(t) for t in ['朵拉比斯', '迪基格斯', '魯尼帖斯', '左迪洛斯', '烏力斯坦']))
+check('guard_store 騎寵新名字：布拉奇多斯 等待 → 擋；加 allow_mount_store 同名 → 放行', pet.guard_store(sl(2, '布拉奇多斯', '等待'), False) and pet.guard_store(sl(2, '布拉奇多斯', '等待'), False, '布拉奇多斯') is None)
+check('guard_store allow_mount_store：名字不同 / 像但不同 / 騎乘中 / 出戰中 / 第 1 格沒 slot1 → 擋',
+      all(pet.guard_store(x, False, am) for x, am in [(sl(2, '瑪斯貝卡', '等待'), '布拉奇多斯'), (sl(2, '瑪斯貝卞', '等待', mountlike=True), '瑪斯貝卡'), (sl(2, '瑪斯貝卡', '騎乘'), '瑪斯貝卡'),
+                                                     (sl(2, '瑪斯貝卡', '出戰'), '瑪斯貝卡'), (sl(1, '瑪斯貝卡', '等待'), '瑪斯貝卡')])
+      and pet.guard_store(sl(1, '瑪斯貝卡', '等待'), True, '瑪斯貝卡') is None)
+todo, ref = pet.plan_rest([sl(1, '布拉奇多斯', '出戰', mountlike=True), sl(2, '迪基格斯', '出戰')], list(uikit.MOUNTS), None)
+check('plan_rest 預設 keep=MOUNTS：布拉奇多斯不動、迪基格斯要改', [s['slot'] for s in todo] == [2] and not ref)
+
+
+def mount_game(state='等待', first='瑪斯貝卡', second='迪基格斯'):
+    return new(pets=mk_pets(DKBO=[{'name': first, 'state': state, 'level': 128}, {'name': second, 'state': '等待', 'level': 130}, None, None, None]))
+
+
+def depot_names(g):
+    return [d['name'] for d in g.depot['DKBO']['personal'] if d]
+
+
+MS = dict(allow_slot1=True, allow_mount_store='瑪斯貝卡')
+fresh_tpl()
+g = mount_game()
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', **MS)
+check('allow-mount-store：瑪斯貝卡 第 1 格 等待 + slot1 + 同名 → rc 0、存進個人倉庫、存入鈕 1 次', rc == 0 and '瑪斯貝卡' in depot_names(g) and depot_free(g) == 1 and g.pets['DKBO'][0]['name'] == '迪基格斯', f'rc={rc} {err[-200:]} {out[-200:]}')
+check('allow-mount-store：沒有任何狀態鈕被點', g.state_clicks == [])
+fresh_tpl()
+g = mount_game()
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', allow_slot1=True)
+check('只有 --allow-slot1、沒帶 --allow-mount-store → 73、零點擊', rc == 73 and g.clicks == [] and depot_free(g) == 0, f'rc={rc}')
+g = mount_game()
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', allow_mount_store='瑪斯貝卡')
+check('第 1 格沒帶 --allow-slot1 → 73、倉庫存入鈕 0 次', rc == 73 and depot_free(g) == 0 and not g.depot_clicks and g.pets['DKBO'][0]['name'] == '瑪斯貝卡', f'rc={rc}')
+g = mount_game(state='騎乘')
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', **MS)
+check('騎乘中 → 73、存入鈕 0 次', rc == 73 and depot_free(g) == 0 and g.pets['DKBO'][0]['state'] == '騎乘' and '瑪斯貝卡' not in depot_names(g), f'rc={rc}')
+g = mount_game()
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', allow_slot1=True, allow_mount_store='布拉奇多斯')
+check('旗標名字不同（布拉奇多斯 vs 瑪斯貝卡）→ 73、零點擊', rc == 73 and g.clicks == [] and depot_free(g) == 0, f'rc={rc}')
+g = mount_game()
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卞', 'personal', allow_slot1=True, allow_mount_store='瑪斯貝卡')
+check('參數名「像但不同」（瑪斯貝卞）→ 73、零點擊', rc == 73 and g.clicks == [] and depot_free(g) == 0, f'rc={rc}')
+g = mount_game()
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卞', 'personal', allow_slot1=True, allow_mount_store='瑪斯貝卞')
+check('旗標與參數都是「像」的錯字（瑪斯貝卞）→ 73、零點擊（snap 的正式名與其不同）', rc == 73 and g.clicks == [] and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = mount_game()
+g.ocr_name_override = ['瑪斯貝卞'] * 3
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', **MS)
+check('面板上名字讀成「像」的錯字（沒樣板）→ 不存（72 / 73）、存入鈕 0 次', rc in (72, 73) and depot_free(g) == 0, f'rc={rc}')
+g = mount_game(first='迪基格斯', second='瑪斯貝卡')
+rc, out, err = run(pet.store, 'DKBO', '迪基格斯', 'personal', allow_slot1=True, allow_mount_store='瑪斯貝卡')
+check('旗標名字與要存的寵物不同（要存迪基格斯、旗標瑪斯貝卡）→ 73、零點擊（旗標只對同名寵物有意義）', rc == 73 and g.clicks == [] and depot_free(g) == 0, f'rc={rc}')
+fresh_tpl()
+g = mount_game(first='迪基格斯', second='布拉奇多斯')
+rc, out, err = run(pet.store, 'DKBO', '布拉奇多斯', 'personal')
+check('MOUNTS 新名字：store 布拉奇多斯（無旗標）→ 73、零點擊', rc == 73 and g.clicks == [] and depot_free(g) == 0, f'rc={rc}')
+g = mount_game(first='迪基格斯', second='布拉奇多斯')
+rc, out, err = run(pet.store, 'DKBO', '布拉奇多斯', 'personal', allow_mount_store='布拉奇多斯')
+check('布拉奇多斯 第 2 格 等待 + 同名旗標 → rc 0、存進倉庫', rc == 0 and '布拉奇多斯' in depot_names(g) and depot_free(g) == 1, f'rc={rc} {err[-200:]}')
+# set-state 瑪斯貝卡 等待 --allow-mount（流程第 2 步）→ 接著 store
+fresh_tpl()
+g = mount_game(state='騎乘')
+rc, out, err = run(pet.set_state, 'DKBO', '瑪斯貝卡', '等待', allow_mount=True)
+check('set-state 瑪斯貝卡 等待 --allow-mount：只點休息鈕 1 次、騎乘 → 等待', rc == 0 and btn_clicks(g) == [(672, 702)] and g.pets['DKBO'][0]['state'] == '等待', f'rc={rc} {err[-200:]}')
+rc, out, err = run(pet.store, 'DKBO', '瑪斯貝卡', 'personal', **MS)
+check('接著 store --allow-mount-store：rc 0、不跳確認視窗（等待）、倉庫有瑪斯貝卡', rc == 0 and '瑪斯貝卡' in depot_names(g) and g.dialog_clicks == [], f'rc={rc} {err[-200:]}')
+
+
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)
