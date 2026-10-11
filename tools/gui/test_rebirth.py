@@ -318,6 +318,7 @@ class FakeBag:
         self.open = True
 
     def install(self):
+        bag.load_icons = lambda: {}                       # 假背包沒有真實圖示像素：走名稱 OCR / 彈窗核對的舊路徑
         uikit.preflight = lambda src, fast=True: 0
         uikit.sleep = lambda s: None
         uikit.snap = lambda tag: None

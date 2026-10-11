@@ -73,7 +73,20 @@ POPUP_SIG = [(958, 250, 200, 138, 69, 22), (958, 400, 197, 136, 67, 22), (720, 7
 BAGANY = uikit.Panel('BAGANY', BAG_BTN, CHROME, CLOSE_XY, forbidden=FORBID)
 BAG = uikit.Panel('BAG', None, CHROME + TAB_BAG_SIG, CLOSE_XY, forbidden=FORBID)
 DEPOT = uikit.Panel('BAGDEPOT', None, CHROME + TAB_DEPOT_SIG, CLOSE_XY, forbidden=FORBID)
-POPUP = uikit.Panel('BAGPOPUP', None, POPUP_SIG, None, forbidden={'discard': (770, 625, 130, 60)})
+# 第二組：右下框線 + 彈窗內暗底兩點（多行說明的倉庫取出彈窗；2倍智慧果實測，樣本 tools/.cache/ui-log/110407-bag-depot-nopopup.png 為無彈窗負例）。
+POPUP_SIG2 = [(968, 500, 183, 127, 64, 25), (730, 230, 38, 28, 22, 22), (600, 600, 35, 26, 22, 22)]
+# 第三組：說明只有 1 行的短彈窗（龍王的守護，標題 y≈270、框高約 228～704）：左 / 右 / 下三邊金框（2026-10-11 實測）。
+POPUP_SIG3 = [(492, 400, 189, 130, 65, 25), (968, 400, 184, 127, 64, 25), (700, 704, 196, 133, 65, 25)]
+# 第四組：裝備彈窗（穿戴 / 丟棄，高框 y≈137～718，右框 x=958、下框 y=718，2026-10-11 實測馬祖的斧頭）；前三組都不吻合 → close_popup 以為沒彈窗不送 ESC，彈窗留著擋住後續點格
+POPUP_SIG4 = [(958, 160, 185, 128, 66, 22), (958, 300, 185, 128, 66, 22), (700, 718, 187, 128, 63, 22), (800, 718, 187, 128, 63, 22)]
+
+
+def _popup_sig_open() -> bool:
+    """三種彈窗高度（多行 / 中 / 短說明）任一組特徵吻合就算彈窗開著"""
+    return any(uikit.sig_match(g) for g in (POPUP_SIG, POPUP_SIG2, POPUP_SIG3, POPUP_SIG4))
+
+
+POPUP = uikit.Panel('BAGPOPUP', None, POPUP_SIG, None, forbidden={'discard': (770, 625, 130, 60)}, is_open_fn=_popup_sig_open)
 
 # 絕不能丟 / 存的名稱（模糊吻合就擋）
 PROTECT = ['精靈王之弓']
@@ -249,11 +262,11 @@ class Session:
         self.rc, self.was_open = 0, False
 
     def __enter__(self):
-        self.rc = uikit.preflight(SRC)
-        if self.rc:
-            return self
-        self.was_open = uikit.is_open(BAGANY)
+        self.was_open = uikit.is_open(BAGANY)            # 已開著（外層 Session / 呼叫端開的）就不再 preflight：背包開著時 screen() 會判 unknown，巢狀進入會誤報驗證視窗
         if not self.was_open:
+            self.rc = uikit.preflight(SRC)
+            if self.rc:
+                return self
             ok, _ = uikit.open_panel_ex(BAGANY)
             if not ok:
                 self.rc = _fail(EXIT_PANEL, '背包面板打不開（沒看到主畫面 HUD 或背包外框特徵）；沒點任何面板內座標', 'bag-open-fail')
@@ -329,8 +342,22 @@ def read_slot_name(i: int, depot: bool = False) -> str:
     return _ocr_join((x - dx, y - dy, w, h), SLOT_OPTS)
 
 
+POPUP_NAME_ALT = (600, 250, 330, 45)                                # 說明越長標題越高（2倍智慧果 y≈270）；只含標題列
+
+
 def popup_name() -> str:
-    return _ocr_join(POPUP_NAME_BOX, NAME_OPTS)
+    """兩個標題框都讀、串起來（短彈窗時 y133 框在彈窗外，讀到的是 HUD / 聊天雜訊而非空字串，不能「讀不到才用備援」）"""
+    return (_ocr_join(POPUP_NAME_BOX, NAME_OPTS) + ' ' + _ocr_join(POPUP_NAME_ALT, NAME_OPTS)).strip()
+
+
+def is_pair_layout() -> bool:
+    """彈窗按鈕列是「使用（藍）+ 更多（橘）」並排：取按鈕左側空白處（不踩到字）560,648 藍、775,648 橘（2026-10-11 龍王的守護實測 (55,106,163) / (183,115,54)；
+    單鈕版這兩點是暗底 / 藍）。舊版取 619 / 825 剛好踩到「使用」「更多」的字，永遠判成單鈕 → 點 732 沒反應"""
+    cols = uikit.px([(560, 648), (775, 648)]) or []
+    if len(cols) != 2:
+        return False
+    (r, g, b), (r2, g2, b2) = cols
+    return b > 130 and r < 110 and r2 > 150 and b2 < 100 and r2 - b2 > 80
 
 
 def popup_open() -> bool:
@@ -356,8 +383,53 @@ def n_slots(depot: bool = False) -> int:
     return 20 if depot else 15
 
 
+ICON_FILE = HERE / 'fixtures' / 'item_icons.json'         # {名稱: {'bag': [[dx,dy,r,g,b],…], 'depot': […]}}：格子中心周圍 9×9 點的圖示顏色（背包格與倉庫格圖示大小不同，各一份）
+ICON_TOL, ICON_RATIO = 40, 0.85
+
+
+def load_icons() -> dict:
+    try:
+        return json.loads(ICON_FILE.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+
+
+def icon_match_slots(want: str, depot: bool = False) -> list | None:
+    """兩段式找道具的第一段：用圖示樣板（格子中心周圍像素）比對所有格，回吻合的格號（0 起算，可為空）。
+    沒有該道具的樣板 → None（呼叫端改走名稱 OCR / 彈窗核對）。一次 uikit.px 讀完所有格，只讀不點"""
+    tpl = (load_icons().get(want) or {}).get('depot' if depot else 'bag')
+    if not tpl:
+        return None
+    pts, owner = [], []
+    for i in range(n_slots(depot)):
+        cx, cy = depot_xy(i) if depot else slot_xy(i)
+        for d in tpl:
+            pts.append((cx + d[0], cy + d[1]))
+            owner.append(i)
+    cols = uikit.px(pts)
+    if not cols:
+        return []
+    hit = {}
+    for k, (i, c) in enumerate(zip(owner, cols)):
+        d = tpl[k % len(tpl)]
+        hit[i] = hit.get(i, 0) + (all(abs(a - b) <= ICON_TOL for a, b in zip(c, d[2:])))
+    return [i for i in range(n_slots(depot)) if hit.get(i, 0) >= ICON_RATIO * len(tpl)]
+
+
 def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> int | None:
-    """want 在目前頁（背包 / 倉庫左半）的格號（0 起算）。先逐格 OCR 名稱；找不到再逐格開彈窗讀名稱（慢、保險）"""
+    """want 在目前頁（背包 / 倉庫左半）的格號（0 起算）。
+    有圖示樣板：① 圖示比對只挑吻合的格（不掃全部格）→ ② 點進去核對彈窗名稱，相符才回傳（不靠格名 OCR，不逐格開彈窗）。
+    沒樣板：逐格 OCR 名稱；找不到再逐格開彈窗讀名稱（慢、保險）"""
+    cand = icon_match_slots(want, depot)
+    if cand is not None:
+        for i in cand:
+            if not open_slot_popup(i, depot):
+                continue
+            nm = popup_name()
+            close_popup()
+            if nm and name_match(nm, want):
+                return i
+        return None
     unread = []
     for i in range(n_slots(depot)):
         t = read_slot_name(i, depot)
@@ -366,7 +438,7 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> in
         unread.append((-sum(1 for c in set(norm_name(want)) if c in norm_name(t)), i))
     if not popup_fallback:
         return None
-    for _, i in sorted(unread):                       # 名稱 OCR 有重疊字的格先開（2026-10-11：龍王的守護格被讀成「守 4-0」，背包滿 / 順序在後時逐格開彈窗太慢）
+    for _, i in sorted(unread):                       # 名稱 OCR 有重疊字的格先開（龍王的守護格曾被讀成「守 4-0」）
         if not open_slot_popup(i, depot):
             continue                                  # 空格不會開彈窗
         nm = popup_name()
@@ -409,6 +481,8 @@ def click_popup_button(label: str, allow=()) -> tuple:
     if label not in b:
         return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，找不到「{label}」鈕（不點）', 'bag-popup-btn'), b.get('kind')
     x, y = b[label]
+    if label == '使用' and b.get('kind') == 'single' and is_pair_layout():
+        x = 619                                       # OCR 漏讀「更多」→ 誤判單鈕，732 點在兩鈕中間沒反應（2026-10-11 龍王的守護根因）
     if not _click(x, y, POPUP, f'bag 彈窗 {label}', allow=allow, wait_ms=500):
         return _fail(EXIT_PANEL, '彈窗特徵消失，沒點按鈕', 'bag-popup-gone'), b.get('kind')
     return 0, b['kind']
@@ -437,7 +511,10 @@ def use_item(role: str, want: str, verify_buff: bool = False) -> int:
             close_popup()
             return rc
         if not _wait(lambda: not popup_open(), 2.0):
-            return _fail(EXIT_VERIFY, '按了使用但彈窗沒關（不重點）', 'bag-use-verify')
+            if not verify_buff:
+                return _fail(EXIT_VERIFY, '按了使用但彈窗沒關（不重點）', 'bag-use-verify')
+            close_popup()                                # 疊加道具使用後彈窗可能還開著：ESC 關掉，不重點，成敗交給 buff 圖示判斷
+            LAST['popup_stayed'] = True
         if verify_buff:
             LAST['buff'] = _wait(_buff_icon, 3.0)
             if not LAST['buff']:
@@ -604,7 +681,7 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
         rc = goto_page('bag')
         if rc:
             return rc
-        if find_item(want, popup_fallback=False) is None:
+        if find_item(want) is None:                      # 格名稱 OCR 會讀歪（「守 4-0」），要逐格開彈窗核對
             return _fail(EXIT_VERIFY, f'取出後背包讀不到「{want}」', 'bag-depot-verify')
     return 0
 
@@ -626,22 +703,27 @@ def depot_store(role: str, want: str, depot: str = 'public') -> int:
         rc = open_depot(depot)
         if rc:
             return rc
-        # 倉庫頁右半是背包，座標同背包頁
-        if not open_slot_popup(i):
+        # 倉庫頁右半是背包，座標同背包頁；面板特徵要用倉庫頁的（背包頁特徵在倉庫頁不吻合，safe_click 會擋）
+        x, y = slot_xy(i)
+        if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
             return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
         nm = popup_name()
         if not name_match(nm, want):
             close_popup()
             return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
-        rc, _ = click_popup_button('存入')
-        if rc:
+        txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
+        if '存入' not in re.sub(r'\s+', '', txt):
             close_popup()
-            return rc
+            return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「存入」（不點）', 'bag-store-btn')
+        if not _click(732, 648, POPUP, f'bag 存入「{want}」', wait_ms=700):
+            return _fail(EXIT_PANEL, '彈窗特徵消失，沒點存入', 'bag-store-gone')
         if not _wait(lambda: not popup_open(), 2.5):
             return _fail(EXIT_VERIFY, '按了存入但彈窗沒關（不重點）', 'bag-store-verify')
-        t = read_slot_name(i)
-        if t and name_match(t, want):
-            return _fail(EXIT_VERIFY, f'存入後第 {i + 1} 格仍讀到「{want}」', 'bag-store-verify')
+        rc = goto_page('bag')
+        if rc:
+            return rc
+        if find_item(want) is not None:
+            return _fail(EXIT_VERIFY, f'存入後背包仍找到「{want}」', 'bag-store-verify')
     return 0
 
 
