@@ -21,6 +21,7 @@ import netwatch
 import screen_sigs
 import watchstate
 import winenv
+import walk
 from walk import LAYOUT, PRIMER, gui, log, npc_screen, npc_steps, safe, screen, stat, wait_pos, walk_path, step_to
 
 # 練級傳送分頁的目的地：名稱 → (截圖座標 x, y, 抵達地圖 ID)；唯一來源 spots.py（= ui/transfer.md 表，9 點含柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟）
@@ -35,8 +36,15 @@ VILLAGE_START = (92, 99)             # 城鎮傳送抵達點
 # 先往左下離開傳送點石台（x88～98 y95～100 是障礙），再分 4 段往上；中間有雕像（x78～83, y74～79）從右邊過。
 # 每段點擊都控制在主畫面中央（x ≥ 420），避開左邊任務 / 組隊面板與「詳情」「<」鈕（x 75～395）。2026-10-09 實測。
 VILLAGE_FAST = [(87, 96), (86, 88), (84, 81), (83, 73), (81, 66)]
+# 外接同比例視窗（每格較大）：(92,99)→(87,96) 因點擊點落在左側面板上被 split 切成經過 (90,97) 的兩段，(90,97) 點下去不動（石台邊緣），
+# 之後整條路線少走 2 格（實測停在 83,68 而不是 81,66，快速走路 5 秒逾時 → 慢速補走，村子走路 26 秒）→ 第一段直接走 (−3,−1) 到 (89,98)
+if walk.PHYS in walk.WORLD_PHYS:
+    VILLAGE_FAST = [(89, 98)] + VILLAGE_FAST
 # 沒進醫院時 walk_path 會用 maps.bin 通行格從目前位置重新找路、慢速逐段走（walk.py）
 HOSPITAL_SPOT = (23, 62)             # 站這裡，小護士在面板右邊點得到（入口 25,65 時她在左側面板底下）
+# 外接同比例視窗（walk.WORLD_PHYS）每格是筆電 1.67 倍：站 (23,62) 時小護士點擊點 x=285 落在左側面板上 → 改站她右下更近的 (22,60)（x=445；2026-10-11 實機）
+if walk.PHYS in walk.WORLD_PHYS:
+    HOSPITAL_SPOT = (22, 60)
 NURSE = (20, 57)                     # 小護士所在格（點她身體的高度差 walk.NPC_DY）
 HEAL_BUTTON = (948, 460)             # 對話框「恢復氣血」
 ENCOUNTER = (1365, 660)              # 主畫面「遇敵 / 取消遇敵」
@@ -58,10 +66,14 @@ SIG_ARRIVE = {
 }
 # 剛走進醫院（1005:25,65）：右邊一片黑 + 左上地板。走出口也有 Loading（約 0.3 秒），所以要配 HUD 一起判斷
 SIG_HOSPITAL = '1300,500,0,0,0/1200,650,0,0,0/1100,300,0,0,0/900,250,170,180,171'
-SIG_NO_BATTLE = '706,295,122,227,0!'  # 容差 40；騎寵不同、頭頂高度變了要重量
+SIG_NO_BATTLE = '706,295,122,227,0!'  # 容差 40；騎寵不同、頭頂高度變了要重量（外接版面走 no_battle_sig()：VS_PROBES 多點）
 BARS = [(258, 56), (258, 90)]        # 血條 / 魔條最右端（滿的時候是紅 / 藍）
 # 「取消遇敵」（原地遇敵開著）圖示是紅色龍頭；關著是灰色圖示
 ENC_PROBES = [(1365, 645), (1380, 630), (1360, 632), (1388, 640)]
+# 外接同比例視窗：右半黑的 3 點同樣成立（2026-10-12 實機 p4/hospital_entry.png），但左上地板點（900,250）外接是白石柱（243,239,241）→ 不用地板點，
+# 靠 HUD + 3 個黑點判斷（原本外接這條 5 秒逾時才改 OCR 讀座標，村子走路白白多等 5 秒）
+if walk.PHYS in walk.WORLD_PHYS:
+    SIG_HOSPITAL = '1300,500,0,0,0/1200,650,0,0,0/1100,300,0,0,0'
 # 引子點擊 PRIMER、角色螢幕座標、每格位移、每次最多格數、左側面板限制：見 walk.py
 
 # ======== 1920×1017 版面（截圖 960×508）：2026-10-09 在 31401 → 薩姆吉爾 → 醫院 → 31401 實際走一趟量的 ========
@@ -85,6 +97,18 @@ if LAYOUT == '1920x1017':
     SIG_NO_BATTLE = '481,168,177,244,10!'                  # 頭上 VS 牌綠框
     BARS = [(164, 36), (164, 57)]
     ENC_PROBES = [(910, 386), (920, 390), (905, 394), (925, 398)]
+
+
+def no_battle_sig() -> str:
+    """「頭上沒有 VS 牌」的 waitpix 特徵（容差 screen_sigs.VS_TOL = 40）：筆電 / 1920 = 上面的單點 SIG_NO_BATTLE（原值不變）；
+    外接同比例視窗 = screen_sigs.VS_PROBES 多點全部「不是 VS 綠」（套版面覆寫後，與 screen_sigs.vs_on 同一組點，AND）"""
+    if LAYOUT == '1920x1017':
+        return SIG_NO_BATTLE
+    import uikit
+    uikit.sync_sig_layout()
+    if screen_sigs.active_layout() is None:
+        return SIG_NO_BATTLE
+    return '/'.join(f'{x},{y},{screen_sigs.VS_COLOR[0]},{screen_sigs.VS_COLOR[1]},{screen_sigs.VS_COLOR[2]}!' for x, y in screen_sigs.VS_PROBES)
 
 
 def pixels(points: list[tuple[int, int]]) -> list[tuple[int, int, int]]:
@@ -165,11 +189,16 @@ def talk_nurse(p: tuple[int, int, int]) -> None:
     """站到小護士點得到的位置 → 點她 → 等對話框。入口 25,65 時她在左邊面板底下，要先走 3 格到 23,62。"""
     hx, hy = HOSPITAL_SPOT
     dx, dy = hx - p[1], hy - p[2]
-    walk = f'click {" ".join(map(str, screen(dx, dy)))}; waitstill 2500; ' if dx or dy else ''
+    if (dx or dy) and not safe(*screen(dx, dy)):       # 一次點不到（外接每格大、落點在左側面板上）→ step_to 自己分段（split 避開 UI）
+        p = step_to(HOSPITAL, hx, hy)
+        dx, dy = hx - p[1], hy - p[2]
+    # 走路後的等待：waitstill 能用的版面照舊 2500 ms；外接（walk.USE_WAITSTILL False，騎寵待機動畫讓 waitstill 幾乎都 timeout）改 walk.settle() 依格數估時
+    wait = 'waitstill 2500' if walk.USE_WAITSTILL else walk.settle(max(abs(dx), abs(dy)))
+    walk_s = f'click {" ".join(map(str, screen(dx, dy)))}; {wait}; ' if dx or dy else ''
     # 走完要停穩再點（走路中點她會變成點到地面）：等鏡頭停（3 格實測約 0.9 秒）；沒開再重點。
     # 對話框一出現（實測點下去 0.1～0.3 秒）就在同一個 seq 裡按「恢復氣血」。
     then = f'click {HEAL_BUTTON[0]} {HEAL_BUTTON[1]}'
-    out = gui('seq', f'{PRIMER}; {walk}' + npc_steps(NURSE, HOSPITAL_SPOT, SIG_DIALOG, then))
+    out = gui('seq', f'{PRIMER}; {walk_s}' + npc_steps(NURSE, HOSPITAL_SPOT, SIG_DIALOG, then))
     for i in range(4):
         if 'ok' in out.split():
             return
@@ -210,7 +239,7 @@ def heal_trip(spot: str, no_return: bool = False, reopen: bool = True) -> None:
         last = now
 
     # 關遇敵 → 等 VS 牌消失（關遇敵不會中止正在打的那場，一場約 2～5 秒；不等的話傳送會被擋）→ 傳送，同一個 seq
-    out = gui('seq', encounter_steps(False) + f'; waitpix 20000 {SIG_NO_BATTLE} 40')
+    out = gui('seq', encounter_steps(False) + f'; waitpix 20000 {no_battle_sig()} {screen_sigs.VS_TOL}')
     if not encounter_done(out):
         set_encounter(False)
     else:
@@ -281,9 +310,10 @@ def main() -> int:
     ap.add_argument('--verbose', action='store_true', help='監看時每次都印出讀數')
     ap.add_argument('--for', dest='duration', type=int, default=0, help='監看幾秒後自己結束（測試用；不會在補血途中停）')
     a = ap.parse_args()
-    # 傳送面板、醫院、遇敵鈕的座標與特徵色量過 2880×1659、1920×1017；別的版面會點錯，先擋下來
-    if layout.current() not in layout.SUPPORTED:
-        log(f"heal.py 不支援 {layout.current()} 版面（只量過 2880×1659、1920×1017），見 ui/layout-1920x1017.md")
+    # 傳送面板、醫院、遇敵鈕的座標與特徵色量過 2880×1659、1920×1017（外接同比例視窗 1728×995 走 layout.supported()：UI 座標由換算層處理、世界常數在 walk.WORLD_PHYS）；別的版面會點錯，先擋下來
+    ok, why = (True, '') if layout.current() == '1920x1017' else layout.supported()
+    if not ok:
+        log(f"heal.py 不支援 {layout.current()} 版面：{why}（只量過 2880×1659、1920×1017、外接 1728×995），見 ui/layout-1920x1017.md")
         return 2
     if a.no_return and a.watch:
         log('--no-return 不能和 --watch 併用')

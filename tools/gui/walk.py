@@ -107,11 +107,11 @@ WORLD_PHYS = {
 }
 PHYS = layout.current() if LAYOUT == layout.DEFAULT else None
 USE_WAITSTILL = True
-# 點擊點必須在截圖範圍內（None = 不檢查）。外接每格大 1.67 倍，10 格常超出畫面（實測 -6,+6 算出 y=867 > 830）→ 外接版面才檢查。
-# 筆電 / 1920 維持原行為（不檢查）；注意筆電原本就有 (+1,-1)×9～10 格 y<0、(-1,+1)×10 格 y>830 被當可點的潛在問題（未改，見計畫檔）
-SHOT = None
+# 點擊點必須在截圖範圍內（safe() 一律檢查）：筆電 / 外接 1440×830、1920×1017 為 960×508。超出畫面的段長會被縮短 / 拆段。
+# 外接每格大 1.67 倍，10 格常超出（實測 -6,+6 算出 y=867 > 830）；筆電斜走 9～10 格也一樣（(+1,-1)×9～10 格 y<0、(-1,+1)×10 格 y>830），
+# 2026-10-12 起筆電 / 1920 也套同一檢查（以前照點，點到畫面外被 clamp 或沒反應）。STEP_COST / plan 因此隨之更新。
+SHOT = (960, 508) if LAYOUT == '1920x1017' else (1440, 830)
 if PHYS in WORLD_PHYS:
-    SHOT = (1440, 830)
     _w = WORLD_PHYS[PHYS]
     ME, TILE_X, TILE_Y, NPC_DY, USE_WAITSTILL = _w['ME'], _w['TILE_X'], _w['TILE_Y'], _w['NPC_DY'], _w['still']
 SETTLE_MS = (500, 220)       # 不能用 waitstill 時的固定等待：起步 + 判停 500 ms，每格 220 ms（實測每格 0.15～0.17 s，留餘裕）
@@ -157,6 +157,26 @@ def settle(tiles: int) -> str:
     return f'wait {SETTLE_MS[0] + SETTLE_MS[1] * max(1, tiles)}'
 
 
+# 點地面點到隊友 / 路人 → 右上角跳「玩家選單」小窗（beige 底、玩家頭像 + 名字，x 1033～1420、y 160～300；ESC 關）。
+# 2026-10-12 外接 1728×995 實機（醫院點 DKBO4）：5 點全中，對 970 張 1440×830 樣本只有那一張全中（最多的 3 點是設置面板，所以要求全中）。
+# 只驗過 2880×1659 座標系（含外接縮放視窗，UI 錨點同座標）；1920×1017 沒量，不檢查。
+PLAYER_POPUP_SIG = '1230,170,242,216,174/1230,285,244,214,173/1300,230,245,229,195/1040,230,94,69,39/1415,230,100,74,44'
+PLAYER_POPUP_TOL = 25
+
+
+def dismiss_player_popup() -> bool:
+    """畫面上有「玩家選單」小窗就按 ESC 關掉（回傳有沒有關）；沒有就什麼都不做（不按任何鍵，避免誤關別的視窗）"""
+    if LAYOUT == '1920x1017':
+        return False
+    out = gui('seq', f'waitpix 0 {PLAYER_POPUP_SIG} {PLAYER_POPUP_TOL}')
+    if not out.startswith('ok'):
+        return False
+    log('點到隊友 / 玩家，開出玩家選單小窗 → ESC 關掉')
+    gui('key', '{ESC}')
+    time.sleep(0.4)
+    return True
+
+
 def prime() -> None:
     """換地圖後的引子點擊（之後的第一下左鍵才有效）"""
     gui('seq', PRIMER)
@@ -170,7 +190,7 @@ def screen(dx: int, dy: int) -> tuple[int, int]:
 
 def safe(sx: int, sy: int) -> bool:
     """點這個截圖座標在畫面內、不會點到 UI（面板、按鈕）"""
-    if SHOT and not (0 <= sx < SHOT[0] and 0 <= sy < SHOT[1]):
+    if not (0 <= sx < SHOT[0] and 0 <= sy < SHOT[1]):
         return False
     return not any(x1 <= sx < x2 and y1 <= sy < y2 for x1, y1, x2, y2 in UI_RECTS)
 
@@ -325,6 +345,7 @@ def step_to(map_id: int, tx: int, ty: int, exit_map: int | None = None) -> tuple
     world_guard()
     lim, last = MAX_TILES, None
     for _ in range(25):
+        dismiss_player_popup()           # 上一段點到隊友開出的玩家選單小窗（不關的話後面的點擊會被它吃掉）
         p = wait_pos()
         if p is None:
             raise RuntimeError('讀不到座標（戰鬥中？）')
@@ -404,6 +425,7 @@ def walk_path(map_id: int, pts: list[tuple[int, int]], start: tuple[int, int] | 
     p = wait_pos(4, exit_map or map_id, 0.3)
     if p and ((exit_map is not None and p[0] == exit_map) or (exit_map is None and p == (map_id, *goal))):
         return p
+    dismiss_player_popup()
     log(f'快速走路沒到 {goal}（現在 {p}），改慢速逐段走')
     if not p or p[0] != map_id:
         raise RuntimeError(f'不在地圖 {map_id}：{p}')

@@ -110,3 +110,8 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 547 200; wait 600
   2. 龍王圖示樣板取自被選取框圍住的格子，未選取的格只吻合約 0.56 → 嚴格（≥0.85）全不中。修法：`icon_match_slots` 嚴格無中時放寬到 `ICON_RATIO_LOOSE = 0.45`（依命中率排序），後面仍有彈窗標題 + 按鈕列核對，名稱不符就 ESC 不按。**樣板尚未改**：要實機截圖才能擷取，下次實機用 `make_item_icons.py` 補「未選取」樣板（在格子沒被選取框圍住時擷取），讓嚴格比對本身就能命中。
      - 外接 1728×995（2026-10-11 實機）：`tools/.cache/item-icons/1728x995.json` 已學（`make_item_icons.py 龍王的守護 --grab bag|depot --slot 1 [--sel]` 唯讀取樣，未選取存 `bag` / `depot`、選取存 `*_sel`）。**選取 vs 未選取吻合 1.0**（黃框在格邊，不在 ±16 取樣內），嚴格門檻命中背包第 1 格 / 倉庫第 1 格、其他道具不中。外接上 `bag.depot_take / depot_store` 的彈窗按鈕列 OCR（`POPUP_BTN_BOX`）讀不到 → 退出碼 96、不點（彈窗名稱 OCR 正常）；當次取出 / 存回是截圖核對名稱後手動點 732,648（公共倉庫龍王的守護 4 → 4）。
   - `depot_use.run`：倉庫沒有但背包有 → 直接用背包那份（note）；取出動作後驗證失敗（背包找不到）也一定 `depot_store` 試著存回（背包沒有只回 92，無害）。
+
+## 外接 1728×995 的彈窗按鈕列 OCR（2026-10-12）
+- 症狀：`bag.py take / store` 在外接回 rc 96（按鈕列 OCR 讀成空，一下都沒點）。根因：UI 縮成 0.6 倍後按鈕白字被重取樣，最亮處 `min(R,G,B)` 只剩約 140～160，筆電的 `-Light 170`（放大 2～3 倍）與 `-Dark 140` 都全空。
+- 修法：`bag.btn_opts()` 外接（`layout.status()['scaled']`）先試 `bag.BTN_OPTS_SCALED`（`-Light 150` 放大 3,4,5 → `-Light 140` 3,4 → `-Light 120` 3），再退回筆電那組；筆電 / 1920 原樣。實測（樣本 `tools/.cache/p4/depot_popup_dragon_full.png` / `bag_popup_dragon_full.png`，經 `ocr.ps1 -Image` 離線）：倉庫彈窗讀到「取出」、背包彈窗讀到「使用」「更多」；`-Light 160` 以上全空、放大 2 倍多半空。離線測試 `test_ext_heal_bag.py`。
+- 實機：`bag.py take DKBO 龍王的守護 --depot public` rc 0（約 14 秒）、`bag.py store ... --depot public` rc 0（約 12 秒），公共倉庫龍王的守護前後都是 4（沒吃）。
