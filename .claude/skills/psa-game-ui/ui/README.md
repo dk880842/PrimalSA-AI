@@ -66,7 +66,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | `unknown` + annot `login` / `charsel` / `loading` / `black` | 登入畫面 / 選角畫面 / 載入畫面 / 黑畫面（轉場） | 已知畫面，不計 unknown |
 | `unknown`（其餘） | 不認得的畫面 | 連續 10 s → `alerts.unknown_long`（自動存截圖 `tools/.cache/watch-alerts/`）+ `verify_suspect` |
 
-**還沒樣本、所以 watch 不認得（出現會算 unknown，10 s 後報警）**：人物 / 角色資訊（頭像 119,68）、寵物管理以外的圖鑑、商城 / 贊助 / 交易所 / LuckyCard、家族、排行榜、信箱 / 鈴鐺、聲音設置小窗、面板上疊的彈窗（提示 / 數量輸入 / 道具詳情 / 數字鍵盤）。要補：開該面板時 `gui.sh shot watch-panels/<名>-0.png`（存 tools/.cache/watch-panels/），再把檔案加進 `make_fixtures.py` 的 `PANEL_POS` 並重學特徵。
+**還沒樣本、所以 watch 不認得（出現會算 unknown，10 s 後報警）**：人物 / 角色資訊（頭像 119,68）、寵物管理以外的圖鑑、商城 / 贊助 / 交易所 / LuckyCard、家族、排行榜、信箱 / 鈴鐺、聲音設置小窗、面板上疊的彈窗（提示 / 數量輸入 / 道具詳情 / 數字鍵盤）。要補：開該面板時 `gui.sh shot watch-panels/<名>-0.png`（存 tools/.cache/watch-panels/），再把檔案加進 `make_fixtures.py` 的 `PANEL_POS` 並重學特徵。挑點 / 統計樣本時用 `tools/gui/shotcache.py`（離線）：`build` 增量更新索引 `tools/.cache/shots-index.json`（每張圖的畫面標籤與來源 manual / fixture / rule / auto），`stats` / `list --label pet --suspect` 查分類，`iter_shots(label)` 取 (路徑, 標籤, 取點函式)；取過的點存在點快取，同一組點重跑全部樣本 < 1 秒；新截圖丟進 tools/.cache 後再 `build` 即可。
 
 ## 新增 / 更新規則
 - 驗證過、會重複執行的流程拆成獨立 skill（`.claude/skills/psa-<流程>/SKILL.md`），功能檔與兩邊索引改成引用它。目前有：`psa-quick-team`、`psa-disband-team`、`psa-grind-start`、`psa-quest-solo`。

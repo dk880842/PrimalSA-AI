@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""離線 fixture 抽取（P0；只用標準函式庫、不碰遊戲）：用 pngread 從 tools/.cache 既有 1440×830 截圖抽像素，
+"""離線 fixture 抽取（P0；只用標準函式庫、不碰遊戲）：用 shotcache（像素快取，底層 pngread 解碼一次）從 tools/.cache 既有 1440×830 截圖抽像素，
 存成 tools/gui/fixtures/{switch,pet,depot,exp}_px.json，給 uikit / char / team / pet / grind 的離線測試用。
 截圖不存在就印出「跳過」並回報（不報錯）。計畫：notes/plan-scriptify.md §1.4。
 用法：uv run --no-project python tools/gui/make_fixtures.py
@@ -12,6 +12,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import pngread  # noqa: E402
+import shotcache  # noqa: E402
 import screen_sigs  # noqa: E402
 
 CACHE = HERE.parent / '.cache'
@@ -35,14 +36,13 @@ EXP_SRC = [(f'watch-m0/p{i}.png', f'p{i}') for i in range(1, 21)] + [(f'exp-r1/r
 EXP_POSITIVE = ['p14', 'p16', 'p19', 'now'] + [f'r{i:02d}' for i in (7, 10, 12, 15, 18, 20, 22, 25, 27, 30, 32, 35, 37, 40)]
 
 
-def load(path: Path):
-    w, h, bpp, rows = pngread.decode(path.read_bytes())
-    return rows, bpp
-
-
 def grab(path: Path, pts) -> dict:
-    rows, bpp = load(path)
-    px = pngread.pixels(rows, bpp, pts)
+    """取點：優先走 shotcache 像素快取（tools/gui/shotcache.py；沒有就自動補建），非 1440×830 或快取失敗才退回 pngread 解碼"""
+    try:
+        px = shotcache.get(path).pixels(pts)
+    except (ValueError, OSError):
+        w, h, bpp, rows = pngread.decode(path.read_bytes())
+        px = pngread.pixels(rows, bpp, pts)
     return {f'{x},{y}': list(c) for (x, y), c in px.items()}
 
 
