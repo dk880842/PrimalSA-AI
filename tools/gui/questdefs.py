@@ -8,7 +8,7 @@
   accept_npc  接取任務的 NPC（只給 plan 顯示；實際由 questdetail.accept 用「傳送」直達）
   steps_total 步數（test_questdefs 與 Task.jsonl 核對）
   steps       {步號: dict(kind=...)}；沒列的步驟 = 預設（quest.py 預設模式：點追蹤 → 巡路 → 對話 → 戰鬥）
-              kind：walk（遊戲不巡路，要 walk.py 走到 map / xy；handler 在 questhandlers.py）
+              kind：walk（備援：預設先讓遊戲自動巡路，quest.py 回 3 = 原地不動才用 walk.py 走到 map / xy；handler 在 questhandlers.py）
                     manual（停下交人，退出碼 115）
   bag_slots   開始前每人背包至少要有幾格空位（0 = 不檢查）
   boss        True = 有任務戰 / BOSS 戰（quest.py 預設模式打完回 37 / 38；P2 只收資料，不實跑）
@@ -24,7 +24,7 @@ Q182 = [
     dict(id=2999, detail='成人儀式', track='成人儀式', accept_npc='儀式的審判 10204:14,6', steps_total=2,
          steps={1: dict(kind='walk', map=10204, xy=(188, 13), npc='儀式審判的差使')},
          bag_slots=1, boss=False, est_min=7, live=True,
-         note='1.82 全部任務的前置。步 1（去差使拿儀的玉×15）點追蹤不巡路 → walk handler 走到 10204:188,13；步 2 點追蹤自動巡路回儀式的審判'),
+         note='1.82 全部任務的前置。步 1（去差使拿儀的玉×15）2026-10-11 實測點追蹤會傳送進 10204 並自動巡路（10-09 從 14,6 原地點才不動）→ walk 只當備援；步 2 點追蹤自動巡路回儀式的審判'),
     dict(id=2017, detail='彌生和日美子(1.82)', track='彌生和日美子', accept_npc='彌生 2000:54,97', steps_total=1,
          steps={}, bag_slots=0, boss=False, est_min=3, live=True, note='純巡路（日美子 1000:57,124）'),
     dict(id=2015, detail='亞姆的斧頭(1.82)', track='亞姆的斧頭', accept_npc='亞姆亞姆 1400:69,89', steps_total=2,

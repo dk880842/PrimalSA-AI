@@ -17,7 +17,7 @@
     2 接取         team.form → questdetail.accept（傳送 → NPC 對話 → 接受 → 重讀確認「進行中」）；失敗 119
     3 跑步驟       迴圈（每片 ≤ --slice-s 秒，總計 ≤ --max-min 分，片數 ≤ --max-slices）：
                    龍王的守護（距上次吃 > 9 分鐘才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵）
-                   → defs.steps 有特殊步驟時 quest.read_step_no 讀目前步號，kind=walk → questhandlers.walk_step（走到定點），kind=manual → 115
+                   → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
                    → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）
     4 收尾         questdetail.task_status 確認「已完成」→ 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
@@ -83,6 +83,12 @@ class Tools(rebirth.Tools):
     def follow_stop(self):
         import follow
         return follow.stop_other()
+
+    def screen_state(self):
+        return uikit.screen().get('state')
+
+    def esc(self):
+        uikit.gui('key', '{ESC}', note='questrun 交接：關閉殘留的對話窗')
 
     def encounter_off_wait(self):
         """關原地遇敵並等這場戰鬥打完（關遇敵不會中止正在打的那場）"""
@@ -197,8 +203,8 @@ def print_plan(defs, opts: dict) -> None:
         print(f'  - 隊長 HP < {opts["hp_min"]}% → heal.heal_trip --no-return + team.form')
         for st, sd in sorted((d.get('steps') or {}).items()):
             if sd['kind'] == 'walk':
-                print(f'  - 步 {st}：kind=walk → questhandlers.walk_step 走到 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]}'
-                      f'（{sd.get("npc", "")}；不在該地圖先點追蹤；walk.py 中斷外層重試）')
+                print(f'  - 步 {st}：kind=walk（備援）：先讓遊戲自動巡路，quest.py 回 3 才走到 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]}'
+                      f'（{sd.get("npc", "")}；walk.py 中斷外層重試）')
             else:
                 print(f'  - 步 {st}：kind={sd["kind"]} → 停下交人（115）')
         if d.get('boss'):
@@ -278,6 +284,10 @@ class Run:
         rc = T.preflight()
         if rc:
             return rc
+        if T.screen_state() == 'dialog':                            # 上次中斷在 NPC 對話窗（HUD 不在，面板打不開）：ESC 關掉（不回答），quest.py 之後會再點 NPC 開
+            event('畫面停在 NPC 對話窗（上次中斷）→ ESC 關閉後再交接')
+            T.esc()
+            T.sleep(1)
         try:
             T.encounter_off_wait()
         except RuntimeError as e:
@@ -390,10 +400,11 @@ class Run:
                 return self.fail(EXIT_SLICES, f'任務 {tid} 超過 {self.o["max_min"]} 分鐘仍未完成')
             ts['slices'] = k + 1
             self.ensure_dragon()
+            from_pending = self.pending is not None
             step, kind, sd = self.special_step(d)
             if kind == 'manual':
                 return self.fail(EXIT_MANUAL, f'任務 {tid} 步 {step} kind=manual：停下交人', step=step)
-            if kind == 'walk':
+            if kind == 'walk' and from_pending:                         # 自動巡路優先：quest.py 回 3（追蹤沒反應）才用 walk 備援（2026-10-11 實測點追蹤會傳送 + 巡路）
                 rc = self.do_walk(d, step, sd)
                 if rc:
                     return rc

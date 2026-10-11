@@ -60,6 +60,7 @@ class Fake:
         self.pos = kw.get('pos', (10204, 14, 7))
         self.grind_rc = kw.get('grind_rc', 0)
         self.pre_rc = kw.get('pre_rc', 0)
+        self.screen = kw.get('screen', 'idle')
 
     def rec(self, *a):
         self.calls.append(a)
@@ -79,6 +80,13 @@ class Fake:
     def follow_stop(self):
         self.rec('follow_stop')
         self.follow = False
+
+    def screen_state(self):
+        return self.screen
+
+    def esc(self):
+        self.rec('esc')
+        self.screen = 'idle'
 
     def encounter_off_wait(self):
         self.rec('enc_off')
@@ -269,6 +277,10 @@ check('交接 team.form 失敗 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER
 f = Fake(status={D17: [questrun.DONE]}, pre_rc=9)
 check('uikit.preflight 非 0 → 原碼', go(f, [2017]) == 9)
 
+f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], screen='dialog')
+go(f, [2999])
+check('畫面停在對話窗 → 先 ESC 再交接', f.names().index('esc') < f.names().index('enc_off') and f.names().count('quest') == 1)
+
 # 14) --after none：不恢復；grind 失敗 → 回 grind 碼
 f = Fake(status={D17: [questrun.DONE]})
 check('--after none 不恢復掛機', go(f, [2017], after='none') == 0 and 'grind_start' not in f.names())
@@ -321,8 +333,11 @@ check('walk：座標一直讀不到 → 112', rc == questrun.EXIT_STEP)
 # 2999 整段：步 1（walk）→ quest 回 0（處理對話、巡路回審判）→ 已完成
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[1], quest=[(0, [])], pos=(10204, 14, 7))
 rc = go(f, [2999])
+check('2999：步 1 自動巡路優先（quest 回 0、不 walk）', rc == 0 and 'walk_to' not in f.names() and f.names().count('quest') == 1)
+f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[1, 1], quest=[(3, []), (0, [])], pos=(10204, 14, 7))
+rc = go(f, [2999])
 n = f.names()
-check('2999：步 1 先 walk 再 quest；背包 / HP 檢查；完成後恢復掛機', rc == 0 and n.index('walk_to') < n.index('quest') and ('grind_start', '地雷區') in f.calls, str(n))
+check('2999：步 1 quest 回 3 → 才 walk 再 quest；完成後恢復掛機', rc == 0 and n.count('quest') == 2 and n.index('quest') < n.index('walk_to') < len(n) - n[::-1].index('quest') - 1 and ('grind_start', '地雷區') in f.calls, str(n))
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[2], quest=[(0, [])])
 go(f, [2999])
 check('2999：步 2（default）不 walk', 'walk_to' not in f.names() and 'quest' in f.names())
