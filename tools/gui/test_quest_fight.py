@@ -668,19 +668,27 @@ ROW_BTN = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_CLOSE_ROW}
 class RowGame:
     """假遊戲：底部關閉列可見 / 不可見；點關閉 510,745 隱藏（eat = 前幾下被吃掉）"""
 
-    def __init__(self, visible=True, eat=0, stuck=False):
+    def __init__(self, visible=True, eat=0, stuck=False, lag=0):
         self.visible, self.eat, self.stuck, self.clicks = visible, eat, stuck, []
+        self.lag, self.pending = lag, False      # lag = 點中後還要再被讀幾次像素才消失（模擬收起動畫 > 600ms）
 
     def gui(self, *args, note=''):
         if args[0] == 'seq':
             self.clicks.append(args[1])
-            if args[1].startswith('click 510 745'):
+            if args[1].startswith('click 510 '):
                 if self.eat > 0:
                     self.eat -= 1
                 elif not self.stuck:
-                    self.visible = False
+                    if self.lag:
+                        self.pending = True
+                    else:
+                        self.visible = False
             return ''
         if args[0] == 'pixel':
+            if self.pending:
+                self.lag -= 1
+                if self.lag <= 0:
+                    self.visible, self.pending = False, False
             out = []
             for p in args[1].split():
                 xy = tuple(int(v) for v in p.split(','))
@@ -694,11 +702,14 @@ class RowGame:
         return ''
 
 
+quest.CLOSE_ROW_POLL_GAP = 0.0
 for nm, g, want_close, want_switch in [('有列 → 點關閉後才按切換', RowGame(True), 1, True), ('第一下被吃掉 → 點第 2 下', RowGame(True, eat=1), 2, True),
-                                       ('沒有列 → 不點關閉直接切換', RowGame(False), 0, True), ('關不掉 → 不點切換（會點到頭像）', RowGame(True, stuck=True), quest.REFRESH_GAP and 2, False)]:
+                                       ('沒有列 → 不點關閉直接切換', RowGame(False), 0, True), ('關不掉 → 不點切換（會點到頭像）', RowGame(True, stuck=True), len(quest.CLOSE_ROW_CLICKS), False),
+                                       ('動畫慢（點中後 3 次輪詢才消失）→ 只點 1 下就等到', RowGame(True, lag=3), 1, True),
+                                       ('前 3 下被吃掉 → 第 4 下收起', RowGame(True, eat=3), 4, True)]:
     quest.gui = g.gui
     r = quest.refresh_characters(True)
-    cl = [i for i, c in enumerate(g.clicks) if c.startswith('click 510 745')]
+    cl = [i for i, c in enumerate(g.clicks) if c.startswith('click 510 ')]
     sw = [i for i, c in enumerate(g.clicks) if c.startswith('click 850 765')]
     ok &= check(nm, len(cl) == want_close and bool(sw) == want_switch and r == want_switch and (not sw or not cl or cl[-1] < sw[0]), f'{g.clicks}')
 g = RowGame(False)

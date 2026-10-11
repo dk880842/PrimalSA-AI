@@ -31,7 +31,7 @@
   戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
   組隊預設模式（非 --solo / --fight）：**每一場戰鬥**（完整戰鬥或快速戰鬥、不分任務 / 路上）都刷新角色；完整戰鬥自動戰鬥鈕是關的 → 先按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   刷新角色規則：--solo / --fight 只有任務 / BOSS 戰（點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）刷新，路上小怪直接逃、不刷新；預設模式每場都刷新（--no-refresh 全關）。同一場最多每 REFRESH_GAP 秒刷新一次。
-           刷新前底部若出現「關閉」直式鈕 + 5 個角色頭像列（上方綠字「如果遇到下指令出錯等問題，可使用下方[切換]按鈕切換至其他角色」）→ 先點左側「關閉」510,745 隱藏，再按切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ 刷新角色 910,578。
+           刷新前底部若出現「關閉」直式鈕 + 5 個角色頭像列（上方綠字「如果遇到下指令出錯等問題，可使用下方[切換]按鈕切換至其他角色」）→ 先點左側「關閉」510,745 隱藏（每下等 0.9 秒再輪詢驗證，最多 4 下：745 / 745 / 725 / 765，都在關閉鈕範圍內；收不掉存 snap close-row-stuck，errlog #61），再按切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ 刷新角色 910,578。
   選擇對象面板（點 NPC 後右側跳出的米色面板：頭像卡片 + 名字，NPC 是黃 / 金字、隊友白字）：偵測到就依黃字位置點 NPC 那張卡片（不寫死第一格），再等對話框；--fight 點 NPC 後與對話步（--stop-after-dialog 點 NPC / 黃問號）都處理。
   模擬測試：uv run --no-project python tools/gui/test_quest_fight.py
   事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）；啟動時自動刪 tools/.cache/quest-log/ 內超過 3 天的圖檔（cleanup_old_shots）。
@@ -520,14 +520,36 @@ def close_row_visible() -> bool | None:
     return btn_ok and all(max(c) < 95 for c in cols[len(SIG_CLOSE_ROW):])
 
 
-def hide_close_row(max_clicks: int = 2) -> bool:
-    """底部關閉列在 → 點左側「關閉」510,745 收起來（第一下常被吃掉，最多點 max_clicks 次、每次驗證）。回 True = 現在沒有關閉列（可以安全點切換）"""
-    for _ in range(max_clicks):
-        if not close_row_visible():
+CLOSE_ROW_CLICKS = [(510, 745), (510, 745), (510, 725), (510, 765)]   # 都在「關閉」直式鈕範圍內（約 y 686～783）；errlog #61：BOSS 戰 2 下收不掉，改成最多 4 下、每下等動畫 + 輪詢驗證
+CLOSE_ROW_POLL = 4                   # 每點一下後最多輪詢幾次（每次間隔 CLOSE_ROW_POLL_GAP 秒）等關閉列消失（收起動畫 / 戰鬥播放中可能 > 600ms 才生效）
+CLOSE_ROW_POLL_GAP = 0.4
+
+
+def hide_close_row(max_clicks: int = len(CLOSE_ROW_CLICKS)) -> bool:
+    """底部關閉列在 → 點左側「關閉」收起來（第一下常被吃掉，最多點 max_clicks 次；每下點完等 0.9 秒再輪詢驗證最多 CLOSE_ROW_POLL 次，
+    避免動畫還沒跑完就誤判「還在」而連點 / 放棄）。讀不到像素（None）沿用舊行為視為沒有列。
+    回 True = 確認沒有關閉列（可以安全點切換）；False = 收不掉（存 snap 圖 close-row-stuck，呼叫端不點切換）"""
+    def gone():
+        for i in range(CLOSE_ROW_POLL):
+            v = close_row_visible()
+            if not v:        # False = 沒有列；None = 讀不到像素（維持舊行為視為沒有列，不卡住刷新）
+                return True
+            if i < CLOSE_ROW_POLL - 1:
+                time.sleep(CLOSE_ROW_POLL_GAP)
+        return False
+    if not close_row_visible():
+        return True
+    for x, y in CLOSE_ROW_CLICKS[:max_clicks]:
+        gui('seq', f'click {x} {y}; wait 900', note='戰鬥底部列：點「關閉」收起頭像列')
+        event(f'刷新前底部有「關閉 + 頭像」列 → 點關閉收起（{x},{y}）')
+        if gone():
             return True
-        gui('seq', f'click {CLOSE_ROW_BTN[0]} {CLOSE_ROW_BTN[1]}; wait 600', note='戰鬥底部列：點「關閉」收起頭像列')
-        event('刷新前底部有「關閉 + 頭像」列 → 點關閉收起')
-    return not close_row_visible()
+    try:
+        shot = snap('close-row-stuck')
+    except Exception:
+        shot = None
+    event(f'底部「關閉」列點了 {min(max_clicks, len(CLOSE_ROW_CLICKS))} 下仍收不掉', shot)
+    return False
 
 
 def panel_visible() -> bool:
