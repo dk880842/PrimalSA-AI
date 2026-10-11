@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """重做 fixtures/item_icons.json（道具圖示樣板，bag.icon_match_slots 用）。需要遊戲開著、該道具在公共倉庫第 1 格。
-流程：開背包 → 倉庫公共頁取第 1 格當 depot 樣板 → 取出 → 背包頁找格取 bag 樣板 → 存回。用法：uv run --no-project python tools/gui/make_item_icons.py 龍王的守護"""
+流程：開背包 → 倉庫公共頁取第 1 格當 depot 樣板 → 取出 → 背包頁找格取 bag 樣板 → 存回。注意：目前樣板取自被選取框圍住的格子，未選取格只吻合約 0.56（bag 已放寬到 0.45 擋著）；下次實機要改成在「未選取」狀態擷取（或兩種都存）。用法：uv run --no-project python tools/gui/make_item_icons.py 龍王的守護"""
 import json
 import sys
 from pathlib import Path

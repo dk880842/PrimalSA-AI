@@ -25,6 +25,14 @@ POPUP_SIG2, POPUP_SIG3 = bag.POPUP_SIG2, bag.POPUP_SIG3
 is_pair_layout = bag.is_pair_layout
 
 
+def _in_bag(item: str) -> bool:
+    """背包頁有 item 嗎（找不到或切頁失敗 = False）"""
+    try:
+        return not bag.goto_page('bag') and bag.find_item(item) is not None
+    except Exception:
+        return False
+
+
 def store_back(role: str, want: str, depot: str = 'public') -> int:
     return bag.depot_store(role, want, depot)
 
@@ -53,7 +61,14 @@ def run(role: str, item: str, depot: str = 'public', restore: bool = True, have:
             if not have:
                 rc = bag.depot_take(role, item, depot)
                 info['step'] = 'take'
+                if rc == bag.EXIT_ITEM and _in_bag(item):               # 倉庫空但背包有（上次取出後失敗沒存回）→ 用背包那份
+                    info['note'] = '倉庫沒有但背包有，直接用背包那份'
+                    rc = 0
                 if rc:
+                    if restore and rc != bag.EXIT_ITEM:                  # 取出動作可能已生效只是驗證不到（格子更新延遲）→ 一定試著存回；背包沒有會回 92，無害
+                        st = bag.depot_store(role, item, depot)
+                        if not st:
+                            info['store_note'] = '取出驗證失敗但背包其實有，已存回'
                     return rc, info
             # 取出後不管吃成不成功，剩下的都要存回倉庫（借出的道具要還）
             use_rc = bag.use_item(role, item)                             # buff 列被背包面板蓋住，成敗等關背包後再看（見下）
