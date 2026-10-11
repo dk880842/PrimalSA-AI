@@ -94,6 +94,7 @@ class Fake:
         self.rec('enc_off')
 
     def current(self):
+        self.rec('current')
         return 0, self.cur
 
     def char_ensure(self, n):
@@ -224,8 +225,9 @@ f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
 rc = go(f, [2017])
 n = f.names()
 check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', '地雷區') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
-check('接取前 / 後都 team.form（交任務前一定組隊）', n.count('team_form') >= 3)
-check('quest 指令帶追蹤標題（不含 1.82）與 --max-seconds', ('quest', ('--task', '彌生和日美子', '--max-seconds', '300')) in f.calls)
+check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
+check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh', ('quest', ('--task', '彌生和日美子', '--max-seconds', '300', '--team-fresh')) in f.calls, str(f.calls))
+check('交接不再另讀當前角色（team.form 同一次面板確認）', 'current' not in n and 'char_ensure' not in n)
 check('龍王的守護跑第一片前吃（have=False）', ('dragon', False) in f.calls and n.index('dragon') < n.index('quest'))
 check('進度檔記完成；quest-log 追加一筆', '"done"' in questrun.PROGRESS.read_text(encoding='utf-8') and '彌生和日美子' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
 check('LAST', questrun.LAST.get('ok') and questrun.LAST.get('done') == [2017])
@@ -244,7 +246,21 @@ check('已完成 → 跳過（只開一次詳情）', rc == 0 and f.names().coun
 # 3) 進行中（續跑）→ 不 accept、先 team.form
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
 rc = go(f, [2017])
-check('進行中 → 續跑（詳情只開 1 次、先組隊）', rc == 0 and f.names().count('accept') == 1 and 'quest' in f.names() and f.names().count('team_form') >= 2)
+check('進行中 → 續跑（詳情只開 1 次；交接剛組過隊，接取前不重組）', rc == 0 and f.names().count('accept') == 1 and 'quest' in f.names() and f.names().count('team_form') == 1, str(f.names()))
+_tf = questrun.TEAM_FRESH_S
+questrun.TEAM_FRESH_S = -1.0                                   # 隊伍確認永遠「不新鮮」
+f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2017])
+check('隊伍確認過期 → 交接 / 接取前 / 接取後各 form 一次、quest 不帶 --team-fresh', f.names().count('team_form') == 3 and not any('--team-fresh' in c[1] for c in f.calls if c[0] == 'quest'), str(f.calls))
+questrun.TEAM_FRESH_S = _tf
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(37, []), (0, ['時間到，結束']), (0, ['任務完成：x'])])
+go(f, [2017])
+qa = [c[1] for c in f.calls if c[0] == 'quest']
+check('37（quest.py 剛驗過滿 5 人）→ 下一片帶 --team-fresh；「時間到」之後的那片不帶', len(qa) == 3 and '--team-fresh' in qa[1] and '--team-fresh' not in qa[2], str(qa))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, ['任務完成：x'])])
+go(f, [2017])
+qa = [c[1] for c in f.calls if c[0] == 'quest']
+check('30 → form 成功 → 下一片帶 --team-fresh', len(qa) == 2 and '--team-fresh' in qa[1], str(qa))
 
 # 4) 續跑 / 一片沒完成：回 0 但狀態進行中 → 下一片
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])])
@@ -311,7 +327,7 @@ go(f, [2017])
 check('HP 30% < 50% → 補血後重組隊', 'heal' in f.names() and f.names().index('heal') < f.names().index('quest'))
 f = Fake(status={D17: [questrun.DONE]}, cur='DKBO3')
 go(f, [2017])
-check('當前角色不是 DKBO → char.ensure', ('char_ensure', 'DKBO') in f.calls)
+check('當前角色不是 DKBO：交接不另開面板讀（交給 team.form._finish 的 char.ensure）', 'current' not in f.names() and f.names().count('team_form') == 1, str(f.names()))
 f = Fake(status={D17: [questrun.DONE]}, team_rcs=[41, 41, 41])
 check('交接 team.form 連續失敗 3 次 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER and 'status' not in f.names() and f.names().count('team_form') == 3 and f.names().count('close_stray') == 3)
 f = Fake(status={D17: [questrun.DONE]}, team_rcs=[42])
@@ -458,15 +474,117 @@ quest.log = lambda *a, **k: None
 quest.scroll_list = lambda *a, **k: (scrolls.append(a), (True, 'sig2'))[1]
 def _fp(want, mode):
     quest._PAGE_ROWS_N = 1
+    quest._PAGE_ROWS = [{'y': 310, 'texts': ['漆黑洞窟(二轉)']}]
     return None
 quest._find_on_page = _fp
 check('無捲動空間（1 張別的卡）→ False、0 次捲動、旗標 True', quest.track_task('龍的巢穴') is False and not scrolls and quest.LAST_SCAN_NO_SCROLL is True)
 def _fp2(want, mode):
     quest._PAGE_ROWS_N = 2
+    quest._PAGE_ROWS = [{'y': 310, 'texts': ['漆黑洞窟(二轉)']}, {'y': 425, 'texts': ['龍的巢穴X']}]
     return None
 quest._find_on_page = _fp2
 check('2 張卡沒目標 → 照舊捲動掃，旗標 False', quest.track_task('龍的巢穴') is False and scrolls and quest.LAST_SCAN_NO_SCROLL is False)
 (quest.gui, quest.ensure_task_tab, quest._tm_has, quest._find_on_page, quest.scroll_list, quest.list_signature, quest.event, quest.log, quest.read_list_titles) = _sv2
+
+# ================= 追蹤列表冗餘捲動修正（2026-10-12 解救老爺爺：111 秒裡約 48 秒在捲列表）=================
+import json as _json  # noqa: E402
+check('is_noise_title：虛線讀成「一乛乛」/ 單字 / 空 → 雜訊', quest.is_noise_title('一乛乛') and quest.is_noise_title('一') and quest.is_noise_title('') and quest.is_noise_title('—— ·'))
+check('is_noise_title：真標題（含 OCR 讀壞的括號）不是雜訊', not any(quest.is_noise_title(t) for t in ('解救老爺爺', '漆黑洞窟(;轉)', '漆黑洞窟(一轉)', '龍的巢穴', '伐木證書')))
+_sv3 = (quest.ps_json,)
+quest.ps_json = lambda *a, **k: {'lines': [{'y': 310, 'text': '漆黑洞窟(二轉)'}, {'y': 338, 'text': '一乛乛'}, {'y': 312, 'text': '漆黑洞窟(二轉)'}]}
+_rows = quest.read_list_titles()
+check('read_list_titles：濾掉「一乛乛」雜訊列 → 只剩 1 張卡（無捲動空間規則才會觸發）', len(_rows) == 1 and _rows[0]['y'] == 310, str(_rows))
+(quest.ps_json,) = _sv3
+_fx = _json.loads((HERE / 'fixtures' / 'questlist_px.json').read_text(encoding='utf-8'))
+for _name, _img in _fx['images'].items():
+    _cols = [tuple(_img['px'][f'{x},{y}']) for x, y in _fx['points']]
+    _got = quest.classify_arrows(_cols)
+    check(f'classify_arrows 真實截圖 {_name} → {_img["expect"]}', _got == _img['expect'], str(_got))
+check('classify_arrows：點數不夠 → None', quest.classify_arrows([]) is None and quest.classify_arrows(None) is None)
+
+
+class FakeList:
+    """假追蹤列表：cards = 由上到下的任務名；pos = 捲動位置（0 = 頂）；每頁標題 y 依 pages[pos]（任務名 → y）；
+    arrows[pos] = {'up','down'} 或 None（讀不到）；tpl = 樣板是否命中（模擬剛點完 / 剛領獎時樣板暫時比不中）"""
+
+    def __init__(self, pages, arrows, pos=0, tpl=True, has_tpl=True):
+        self.pages, self.arrows, self.pos, self.tpl, self.has_tpl = pages, arrows, pos, tpl, has_tpl
+        self.drags, self.clicks, self.ocr = [], [], 0
+
+    def gui(self, *a, **k):
+        cmd = ' '.join(str(x) for x in a)
+        if cmd.startswith('seq') and 'click 1215 18' in cmd:
+            return ''                                  # PRIMER（點遠方空地喚醒畫面）不算點卡片
+        if 'drag 200 420 200 300' in cmd:
+            self.drags.append('down')
+            self.pos = min(self.pos + 1, len(self.pages) - 1)
+        elif 'drag 200 300 200 420' in cmd:
+            self.drags.append('up')
+            self.pos = max(self.pos - 1, 0)
+        elif 'click' in cmd:
+            self.clicks.append(cmd.split('click ')[1].split(';')[0].strip())
+        return ''
+
+    def titles(self):
+        self.ocr += 1
+        return [{'y': y, 'texts': [n]} for n, y in sorted(self.pages[self.pos].items(), key=lambda kv: kv[1])]
+
+    def tm_find(self, want):
+        return self.pages[self.pos].get(want) if self.tpl else None
+
+
+def run_track(fl, want, click=True):
+    sv = (quest.gui, quest.ensure_task_tab, quest._tm_has, quest._tm_find, quest._tm_learn, quest.read_list_titles, quest.list_signature,
+          quest.list_arrows, quest.read_screen, quest.event, quest.log)
+    quest.gui, quest.ensure_task_tab = fl.gui, (lambda: None)
+    quest._tm_has, quest._tm_find, quest._tm_learn = (lambda w: fl.has_tpl), fl.tm_find, (lambda w, y: None)
+    quest.read_list_titles, quest.list_signature = fl.titles, (lambda: str(fl.pos))
+    quest.list_arrows = lambda: fl.arrows[fl.pos]
+    quest.read_screen = lambda: {'state': 'idle'}
+    quest.event = quest.log = lambda *a, **k: None
+    try:
+        return quest.track_task(want, click=click)
+    finally:
+        (quest.gui, quest.ensure_task_tab, quest._tm_has, quest._tm_find, quest._tm_learn, quest.read_list_titles, quest.list_signature,
+         quest.list_arrows, quest.read_screen, quest.event, quest.log) = sv
+
+
+# 2026-10-12 實況：漆黑洞窟(二轉) + 解救老爺爺 兩張卡；頂端時解救老爺爺標題 y=425（下半截被裁、正下方 ▼），往下捲一格後 y=366
+P2023 = [{'漆黑洞窟(二轉)': 310, '解救老爺爺': 425}, {'解救老爺爺': 366}]
+A2023 = [{'up': False, 'down': True}, {'up': True, 'down': False}]
+fl = FakeList(P2023, A2023, pos=0, has_tpl=False)
+r = run_track(fl, '解救老爺爺')
+check('下緣被裁的卡（y=425）→ 先往下捲一格再點整張卡 205,382；不點 205,441（▼ 上緣）', r is True and fl.drags == ['down'] and fl.clicks == ['205 382'], f'{fl.drags} {fl.clicks}')
+fl = FakeList(P2023, A2023, pos=1, tpl=False)
+r = run_track(fl, '解救老爺爺')
+check('有樣板但這頁暫時比不中 → 同一頁直接 OCR 找到、0 次拖曳（舊版先拖 4 下 12～14 秒）', r is True and fl.drags == [] and fl.clicks == ['205 382'] and fl.ocr == 1 and quest._HIT_MODE == 'ocr', f'{fl.drags} {fl.clicks} ocr={fl.ocr}')
+fl = FakeList(P2023, A2023, pos=1, tpl=True)
+r = run_track(fl, '解救老爺爺')
+check('樣板命中 → 不 OCR、不拖', r is True and fl.drags == [] and fl.ocr == 0 and quest._HIT_MODE == 'tpl')
+fl = FakeList(P2023, A2023, pos=1, has_tpl=False)
+r = run_track(fl, '漆黑洞窟(二轉)')
+check('捲到底時只看得到 1 列（y=366，上一張標題捲出框外）→ 不可判「沒有捲動空間」，要往上捲找到', r is True and fl.drags == ['up'] and fl.clicks == ['205 326'], f'{fl.drags} {fl.clicks}')
+fl = FakeList([{'漆黑洞窟(二轉)': 310}], [{'up': True, 'down': False}], pos=0, tpl=False)
+r = run_track(fl, '解救老爺爺', click=False)
+check('完成判斷：只剩 1 張別的卡（▲ 殘留）→ 一輪判不在、0 次拖曳、LAST_SCAN_NO_SCROLL（舊版 8 下 21 秒）', r is False and fl.drags == [] and quest.LAST_SCAN_NO_SCROLL is True, f'{fl.drags}')
+P3 = [{'A任務': 310, 'B任務': 425}, {'B任務': 366, 'C任務': 425}, {'C任務': 366}]
+A3 = [{'up': False, 'down': True}, {'up': True, 'down': True}, {'up': True, 'down': False}]
+fl = FakeList(P3, A3, pos=0, has_tpl=False)
+r = run_track(fl, '不存在的任務', click=False)
+check('3 張卡、在頂端、目標不在：沒有 ▲ 不往上拖；往下拖到 ▼ 消失就停（不多拖一下確認）→ 2 下', r is False and fl.drags == ['down', 'down'], str(fl.drags))
+fl = FakeList(P3, A3, pos=2, has_tpl=False)
+r = run_track(fl, 'A任務')
+check('在底端找最上面那張：往上拖到找到為止、點它', r is True and fl.drags == ['up', 'up'] and fl.clicks == ['205 326'], f'{fl.drags} {fl.clicks}')
+fl = FakeList(P3, [None, None, None], pos=0, has_tpl=False)
+r = run_track(fl, '不存在的任務', click=False)
+check('箭頭讀不到 → 照舊拖到像素不變（上 1 下沒動、下 3 下最後一下沒動）', r is False and fl.drags == ['up', 'down', 'down', 'down'], str(fl.drags))
+fl = FakeList([{'A任務': 310, 'B任務': 425}, {'B任務': 366}], [{'up': False, 'down': False}] * 2, pos=0, has_tpl=False)
+r = run_track(fl, '不存在的任務', click=False)
+check('箭頭說「都捲不動」但有 2 張卡（矛盾）→ 不信箭頭，照舊拖到盡頭', r is False and 'down' in fl.drags, str(fl.drags))
+fl = FakeList([{'解救老爺爺': 425}], [{'up': False, 'down': True}], pos=0, has_tpl=False)
+fl.pages = [{'解救老爺爺': 425, 'X任務': 310}]
+r = run_track(fl, '解救老爺爺')
+check('下緣的卡捲不動 → 點標題本身 205,425（避開 ▼）', r is True and fl.clicks == ['205 425'], f'{fl.drags} {fl.clicks}')
 
 # ================= quest.close_stray_panel：誤開的組隊 / 切換面板自動關、不算驗證視窗 =================
 _so = (uikit.is_open, uikit.close_panel, quest.event, quest.log)

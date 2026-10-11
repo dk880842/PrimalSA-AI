@@ -494,6 +494,15 @@ s = Script([IDLE, IDLE])
 rc = run2(['--no-track', '--max-seconds', '4'], s, team=True)
 ok &= check('預設模式 --no-track 也先驗隊伍：不符 → 30、沒點擊', rc == quest.EXIT_TEAM_MISMATCH and not s.clicks and len(TEAM['calls']) == 1, f'rc={rc} {s.clicks}')
 
+TEAM['calls'], TEAM['ret'] = [], (False, "不在隊 ['DKBO3']")
+s = Script([IDLE, IDLE])
+rc = run2(['--no-track', '--team-fresh', '--max-seconds', '4'], s, team=True)
+ok &= check('--team-fresh（questrun 剛驗過隊伍）：開始前不開切換面板驗隊伍（2026-10-12）', not TEAM['calls'] and rc == 0, f'rc={rc} {TEAM["calls"]}')
+TEAM['calls'], TEAM['ret'] = [], (True, 'ok')
+s = Script([IDLE, DIALOG, REWARD, IDLE, IDLE, IDLE])
+rc = run2(['--task', 'x', '--team-fresh', '--max-seconds', '8'], s, team=True, marker=lambda: None, track=lambda *a, **k: True)
+ok &= check('--team-fresh 只略過開始前那次：領獎後點追蹤前照舊驗隊伍', any(t.startswith('領獎後') for _, t in TEAM['calls']) and not any(t.startswith('開始前') for _, t in TEAM['calls']), str(TEAM['calls']))
+
 print('(n4) 2026-10-10 18:44 事件：--solo 後隊伍散成單人，--stop-after-rewards 啟動 → 先驗隊伍，不符退出碼 30、沒有任何點擊')
 TEAM['calls'], TEAM['ret'] = [], (False, "隊長 無、隊員 無、不在隊 / 單人 / 離線 ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']")
 for first in (IDLE, DIALOG):

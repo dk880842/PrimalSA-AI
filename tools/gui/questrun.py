@@ -11,14 +11,17 @@
 任務資料在 questdefs.py（id / 詳情標題 / 追蹤標題 / 特殊步驟）。全部組隊模式（使用者 2026-10-11）；解任務靠遊戲自動巡路（quest.py 點追蹤、對話按確認、每場戰鬥刷新角色）。
 
 流程：
-  交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 關原地遇敵 + 等戰鬥結束 → char.ensure DKBO → team.form 滿 5 人
+  交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 關原地遇敵 + 等戰鬥結束 → team.form 滿 5 人（同一次切換面板讀「當前」，不是 DKBO 才 char.ensure；
+                        2026-10-12 起不另跑 char.current，省 1～2 次開關面板）
   每個任務
     1 preflight    背包空位（defs.bag_slots）、隊長 HP < --hp-min% → heal 後重組隊
-    2 接取         team.form → questdetail.accept(skip_ok, verify=False)：**整個任務只開一次詳情**，同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 傳送 → NPC 對話 → 接受，不重開詳情驗證，看對話框收起）；失敗 119
+    2 接取         team.form（距上次組隊 / 驗隊伍 ≤ TEAM_FRESH_S 秒就略過，例：交接剛組完）→ questdetail.accept(skip_ok, verify=False)：**整個任務只開一次詳情**，同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 傳送 → NPC 對話 → 接受，不重開詳情驗證，看對話框收起）；失敗 119
     3 跑步驟       迴圈（每片 ≤ --slice-s 秒，總計 ≤ --max-min 分，片數 ≤ --max-slices）：
                    龍王的守護（人形圖示不在才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵）
                    → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
-                   → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）
+                   → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）；
+                     questrun 在 TEAM_FRESH_S 秒內驗過隊伍（接取後 form、quest.py 37 的 BOSS 後檢查、30 / 32 後 form）→ 加 --team-fresh，quest.py 開始前不再開切換面板
+                     （領獎後 / 任務戰後的隊伍檢查、37 / 38 照舊）
     4 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
@@ -49,7 +52,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-import charstate  # noqa: E402
 import questdefs  # noqa: E402
 import questhandlers  # noqa: E402
 import rebirth  # noqa: E402
@@ -72,6 +74,7 @@ SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 300, 12, 30, 50
 WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
 DEFAULT_SPOT = '地雷區'
 FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出）
+TEAM_FRESH_S = 30.0             # 隊伍在這麼多秒內驗過（form 成功 / quest.py 37）→ 接取前不重組、quest.py 加 --team-fresh（2026-10-12 解救老爺爺：開始前 4 次 + quest.py 啟動 1 次開關切換面板）
 DONE_TRUST_S = 2 * 3600         # 進度檔記「已完成」且在這段時間內 → 重啟續跑直接跳過（超過視為可能轉生 / 封印書重置過，重新讀一次詳情）
 DONE, DOING, PENDING = '已完成', '進行中', '待接取'
 LAST: dict = {}
@@ -220,12 +223,12 @@ def print_plan(defs, opts: dict) -> None:
     print(f'questrun 計畫：{len(defs)} 個任務，預估 {est_total(defs)} 分鐘（組隊模式；0 轉 123 級 5 人隊實測值，1 轉可能更久）')
     print(f'選項：{opts}')
     print('[交接]')
-    for ln in ('follow 還在跑就 grind.py follow --stop（已停用，只防呆）', '關原地遇敵 + 等戰鬥結束', 'char.ensure DKBO（面板左欄「當前登錄」）',
-               'team.form 滿 5 人'):
+    for ln in ('follow 還在跑就 grind.py follow --stop（已停用，只防呆）', '關原地遇敵 + 等戰鬥結束',
+               'team.form 滿 5 人（同一次切換面板讀「當前登錄」，不是 DKBO 才 char.ensure）'):
         print('  - ' + ln)
     for d in defs:
         print(f'[任務 {d["id"]}] {d["detail"]}（追蹤標題「{d["track"]}」，接取 {d["accept_npc"]}，{d["steps_total"]} 步，預估 {d.get("est_min", "?")} 分）')
-        print('  - team.form → questdetail.accept（只開一次詳情）：已完成 → 跳過；待接取 → 接受（不重開詳情）；進行中 → 續跑')
+        print(f'  - team.form（{TEAM_FRESH_S:.0f} 秒內剛確認過就略過）→ questdetail.accept（只開一次詳情）：已完成 → 跳過；待接取 → 接受（不重開詳情）；進行中 → 續跑')
         if d.get('bag_slots'):
             print(f'  - 背包空位：5 人各 ≥ {d["bag_slots"]} 格（bag.find_items）')
         print(f'  - 隊長 HP < {opts["hp_min"]}% → heal.heal_trip --no-return + team.form')
@@ -257,6 +260,7 @@ class Run:
         self.info: dict = {}
         self.warnings: list = []
         self.pending = None
+        self.team_ok_at = 0.0                                          # 最近一次確認 5 人隊伍完整的時間（form 成功 / quest.py 37）；0 = 不新鮮
 
     # -- 共用 --
     def save(self):
@@ -280,7 +284,10 @@ class Run:
         rc = 0
         for i in range(tries):
             rc = self.T.team_form()
-            if not rc or rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            if not rc:
+                self.team_ok_at = time.time()
+                return rc
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
                 return rc
             event(f'{what}：team.form 失敗 rc={rc}（{i + 1}/{tries}）→ 關誤開面板、2 秒後原地重試')
             cs = getattr(self.T, 'close_stray', None)
@@ -291,6 +298,10 @@ class Run:
                     event(f'close_stray 例外：{e}')
             self.T.sleep(2)
         return rc
+
+    def team_fresh(self) -> bool:
+        """隊伍在 TEAM_FRESH_S 秒內確認過完整（中間沒有傳送 / 戰鬥）→ 不必再開切換面板"""
+        return bool(self.team_ok_at) and time.time() - self.team_ok_at <= TEAM_FRESH_S
 
     def warn(self, msg: str):
         self.warnings.append(msg)
@@ -338,11 +349,7 @@ class Run:
             T.encounter_off_wait()
         except RuntimeError as e:
             return self.fail(EXIT_HANDOVER, f'關原地遇敵失敗：{e}')
-        rc, cur = T.current()
-        if rc or not cur or not charstate.same(cur, LEADER):
-            rc2 = T.char_ensure(LEADER)
-            if rc2:
-                return self.fail(EXIT_HANDOVER, f'當前角色不是 {LEADER}（讀到 {cur}），切換失敗 rc={rc2}')
+        # 當前角色 = DKBO 由 team.form 同一次讀切換面板時確認（不是才 char.ensure，team._finish）；不再另跑 char.current（2026-10-12：多開關 1～2 次面板）
         rc = self.form('交接')
         if rc:
             if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
@@ -415,9 +422,12 @@ class Run:
             ts['detail_opens'] = 0
             return 0
         ts.pop('skipped', None)
-        rc = self.form('接取前')                                       # 接取 / 對話前一定先快速組隊；切換面板偶爾讀到 0 張卡片（rc 42）→ form 內原地重試
-        if rc:
-            return self.fail(EXIT_HANDOVER, f'接取前 team.form 失敗 rc={rc}')
+        if self.team_fresh():                                          # 交接剛組完（同一秒內連開 2 次切換面板，2026-10-12）→ 沿用
+            event(f'接取前：{time.time() - self.team_ok_at:.0f} 秒前剛確認 5 人隊伍 → 不重開切換面板')
+        else:
+            rc = self.form('接取前')                                   # 接取 / 對話前一定先快速組隊；切換面板偶爾讀到 0 張卡片（rc 42）→ form 內原地重試
+            if rc:
+                return self.fail(EXIT_HANDOVER, f'接取前 team.form 失敗 rc={rc}')
         # 整個任務只開一次詳情：同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 接取）
         rc, state = T.accept(d['detail'])
         self.opens(ts)
@@ -435,6 +445,7 @@ class Run:
         ts.update(state='running', started=time.strftime('%H:%M:%S'), slices=0)
         self.save()
         if state == 'accepted':
+            self.team_ok_at = 0.0                                      # 傳送過 → 之前的確認不算
             rc = self.form('接取後')                                    # 傳送後確認隊伍還在
             if rc:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
@@ -453,7 +464,11 @@ class Run:
                 rc = self.do_walk(d, step, sd)
                 if rc:
                     return rc
-            rc, tail = T.quest(['--task', track, '--max-seconds', self.o['slice_s']], self.o['slice_s'] + WALK_CAP_S + 120)
+            qargs = ['--task', track, '--max-seconds', self.o['slice_s']]
+            if self.team_fresh():
+                qargs.append('--team-fresh')                           # 剛驗過隊伍：quest.py 開始前不再開切換面板（之後的領獎後 / 任務戰後檢查照舊）
+            rc, tail = T.quest(qargs, self.o['slice_s'] + WALK_CAP_S + 120)
+            self.team_ok_at = time.time() if rc == 37 else 0.0         # 37 = quest.py 剛驗過滿 5 人；其他結束方式隊伍狀態未知
             walked = walk_secs(tail)
             if walked:
                 t0 += walked                                           # 自動巡路 = 任務進行中：不計入 --max-min（quest.py 自己的 slice 時限也不計巡路）

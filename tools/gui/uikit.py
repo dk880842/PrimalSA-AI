@@ -260,7 +260,7 @@ def _probe(p: Panel) -> tuple:
             all(screen_sigs.close(c, (r, g, b), t) for c, (_, _, r, g, b, t) in zip(cols[n:], screen_sigs.SIG_HUD)))
 
 
-LAST_OPEN: dict = {}             # 最近一次 open_panel_ex 的過程：clicked（點開啟鈕次數）/ hud_seen / hud_waited（等 HUD 回來的秒數）；失敗訊息分辨原因用
+LAST_OPEN: dict = {}             # 最近一次 open_panel_ex 的過程：clicked（點開啟鈕次數）/ hud_seen / hud_waited（等 HUD 回來的秒數）/ hud_lost_after_click（點完 HUD 消失過）；失敗訊息分辨原因用
 
 
 def open_panel_ex(p: Panel, timeout: float = 4.0, hud_wait: float = 0.0) -> tuple:
@@ -281,6 +281,7 @@ def open_panel_ex(p: Panel, timeout: float = 4.0, hud_wait: float = 0.0) -> tupl
     last_click_t = 0.0
     was_open = None
     tol = _uniform_tol(p.sig)
+    hud_gone_after_click = False
     while True:
         opened, hud = _probe(p)
         if hud and not LAST_OPEN['hud_seen']:
@@ -291,6 +292,17 @@ def open_panel_ex(p: Panel, timeout: float = 4.0, hud_wait: float = 0.0) -> tupl
             was_open = opened
         if opened:
             return True, was_open
+        if clicked and hud_wait > 0:
+            # 點了開啟鈕之後 HUD 消失（2026-10-12：任務詳情「接受」後約 3～7 秒畫面有一段 HUD 不在，第一下被吃掉、又因為 HUD 不在不補點 → 4 s 逾時 rc 40，
+            # 龍的巢穴 / 夢幻洞窟 / 解救老爺爺 3 次都一樣）：HUD 不在的期間不算逾時（最多從點擊起 hud_wait 秒），HUD 回來後從頭算 timeout 並允許補點
+            if not hud:
+                if not hud_gone_after_click:
+                    hud_gone_after_click = True
+                    LAST_OPEN['hud_lost_after_click'] = True
+                end = max(end, min(clock() + 1.0, last_click_t + hud_wait))
+            elif hud_gone_after_click:
+                hud_gone_after_click = False
+                end = max(end, clock() + timeout)
         if hud and clicked < 3 and (clicked == 0 or clock() - last_click_t >= RECLICK_S):
             if tol is not None:
                 out = gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; waitpix {WAIT_OPEN_MS} {screen_sigs.sig_str(p.sig)} {tol}', note=f'uikit 開 {p.name} 面板')

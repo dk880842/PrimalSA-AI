@@ -11,6 +11,8 @@
   點卡片前先用 namematch 確認名字 + 狀態線上（命中不了 → 61，不猜），點完等「加載中」→ HUD 回來 → 重開面板用「當前藍框 + 名字」驗證，成功才寫 current-char.json；最後一行印 JSON（`changed`、`current`…）。
   退出碼 60 面板打不開 / 61 目標卡找不到或名字沒確認 / 62 點了但當前沒變（不重點）/ 63 當前框 ≠ 1 / 64 名字矛盾 / 65 點了但 HUD 6 s 沒回來，加共用 1 / 2 / 8 / 9 / 10。
   開面板時 HUD 不在（戰鬥 / 轉場 / 對話）會先等 HUD 回來最多 15 s（`team.OPEN_HUD_WAIT_S`，不點任何東西，errlog #32）；仍打不開的錯誤訊息分「HUD 不在（等了 N s）」與「點了 N 次特徵沒出現」，並存 snap `team-panel-open-fail`。
+  2026-10-12：**點了開啟鈕之後 HUD 才消失**（任務「接受」後約 3 秒開切換面板，第一下被吃掉、接著 HUD 不見一段時間，龍的巢穴 / 夢幻洞窟 / 解救老爺爺 3 次都 rc 40）→ HUD 不在的期間不算 4 s 逾時（最多從點擊起 15 s），HUD 回來後補點（全程最多 3 下）；失敗訊息多「（點完 HUD 曾消失）」，`uikit.LAST_OPEN['hud_lost_after_click']`。`hud_wait=0` 的其他面板行為不變。**實機未驗證**。
+  grind.py start / ensure（2026-10-12）：`grind.leader_team_read` 一次開切換面板同時確認「當前 = DKBO」與「5 人隊伍」（`char.read_analyse` + `team.judge`），關遇敵後 5 s 內沒打仗就沿用、不再 `team.check`；watch 名牌已確認是 DKBO（char.ensure 快路徑不開面板）/ 讀不準 / 當前不是 DKBO → 照舊 char.ensure + team.check。questrun 交接也不再另跑 `char.current`（team.form 同一次讀面板，不是隊長才 char.ensure）。
   **不會自動切回 DKBO**，呼叫端用完要 `ensure DKBO`。加 `--timing` 在最後一行 JSON 多一個 `t`（各階段毫秒，含 import、server-start）。
   **實測耗時（2026-10-11 加速後，整個 uv 行程 wall）**：current 4.2 → **2.3 s**；switch 7.0～7.3 → **4.4～4.5 s**；ensure 已是目標 **1.1 s**（watch 快路徑，見下）或 2.3 s（開面板確認）。
   其中約 0.85～0.9 s 是「本行程第一次呼叫遊戲時起 serve.ps1」（每個 python 行程各起一次，CLI 逃不掉）→ **要連續呼叫的腳本（grind.py / pet.py…）直接 `import char` 用 `char.current()` / `char.switch(name)` / `char.ensure(name)`，同一行程只付一次**；回傳退出碼，結果 dict 在 `char.LAST`（同最後一行 JSON）。

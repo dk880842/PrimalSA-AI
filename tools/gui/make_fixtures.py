@@ -169,6 +169,31 @@ def make_panel_fixture() -> list:
     return miss
 
 
+# ---- 追蹤列表 ▲ / ▼ 捲動箭頭（quest.classify_arrows；2026-10-12 解救老爺爺冗餘捲動修正）----
+# 檔名 → 期望 {'up','down'}（None = 遮罩 / 不可信）；人工看圖確認
+QUESTLIST_SRC = {
+    'ui-log/003824-team-panel-open-fail.png': {'up': False, 'down': True},    # 列表在頂：漆黑洞窟(二轉) + 解救老爺爺（y=425 被裁）+ ▼
+    'quest-log/004047-task-done.png': {'up': True, 'down': False},            # 只剩 1 張卡，▲ 殘留（不能當「可以往上捲」的證據）
+    'watch-m0/p1.png': {'up': False, 'down': False},                          # 只有 1 張卡，沒有箭頭
+    'quest-log/003950-reward.png': None,                                      # 領獎視窗半透明遮罩：分頁鈕暗掉 → 不可信
+}
+
+
+def make_questlist_fixture() -> list:
+    import quest
+    pts = quest.ARROW_UP_PTS + quest.ARROW_DOWN_PTS + [quest.ARROW_SANITY]
+    imgs, miss = {}, []
+    for rel, want in QUESTLIST_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        imgs[rel] = {'expect': want, 'px': grab(p, pts)}
+    if imgs:
+        write('questlist_px.json', {'note': '任務追蹤列表 ▲ / ▼ 捲動箭頭樣本（quest.classify_arrows；2026-10-12）。expect None = 遮罩、不可信', 'points': pts, 'images': imgs})
+    return miss
+
+
 def main() -> int:
     done, skipped = [], []
 
@@ -220,6 +245,8 @@ def main() -> int:
 
     miss_panel = make_panel_fixture()
     done.append('panel_px.json' + (f'（缺 {miss_panel}）' if miss_panel else ''))
+    miss_ql = make_questlist_fixture()
+    done.append('questlist_px.json' + (f'（缺 {miss_ql}）' if miss_ql else ''))
     print('完成：', done)
     for n, m in skipped:
         print('跳過', n, '缺', m)

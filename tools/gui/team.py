@@ -246,7 +246,7 @@ def read_state(ocr: bool = True, keep_open: bool = False) -> dict:
     if not opened:
         lo = uikit.LAST_OPEN
         why = (f'HUD 不在（等了 {lo.get("hud_waited", 0)} s 沒回來，可能在戰鬥 / 對話 / 驗證視窗，沒點任何東西）' if not lo.get('hud_seen')
-               else f'點了開啟鈕 {lo.get("clicked", 0)} 次，面板特徵沒出現')
+               else f'點了開啟鈕 {lo.get("clicked", 0)} 次，面板特徵沒出現' + ('（點完 HUD 曾消失）' if lo.get('hud_lost_after_click') else ''))
         res['err'] = '切換面板打不開（' + why + '）'
         uikit.snap('team-panel-open-fail')
         return res

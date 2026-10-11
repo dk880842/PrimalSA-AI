@@ -183,6 +183,29 @@ g = install(EatFirst(panel=False, hud=True))
 g.eat = 99
 ok_ = uikit.open_panel(uikit.SWITCH, timeout=4.0)
 check('一直點不開：timeout 4 秒內最多 2 下、每下間隔 >= RECLICK_S', ok_ is False and len(g.times) <= 2 and all(b - a >= uikit.RECLICK_S for a, b in zip(g.times, g.times[1:])), f'times={g.times}')
+
+
+class AcceptGap(EatFirst):
+    """2026-10-12 解救老爺爺 / 龍的巢穴 / 夢幻洞窟：任務「接受」後開切換面板，第 1 下被吃掉，之後 HUD 有一段時間不在（點擊後 1.5～6 s）"""
+
+    def gui(self, *args, note=''):
+        if self.times:
+            dt = self.t - self.times[0]
+            self.hud = not (1.5 <= dt < 6.0)
+        return super().gui(*args, note=note)
+
+
+g = install(AcceptGap(panel=False, hud=True))
+ok_ = uikit.open_panel_ex(uikit.SWITCH, hud_wait=15)[0]
+check('接受後 HUD 消失：hud_wait 時不逾時，HUD 回來後補點第 2 下並開成功（舊版 4 s 逾時 rc 40）', ok_ is True and len(g.times) == 2 and g.times[1] - g.times[0] >= 6.0
+      and uikit.LAST_OPEN.get('hud_lost_after_click') is True, f'times={g.times} {uikit.LAST_OPEN}')
+g = install(AcceptGap(panel=False, hud=True))
+ok_ = uikit.open_panel_ex(uikit.SWITCH)[0]
+check('同情況 hud_wait=0（一般面板）→ 照舊 4 s 逾時、只點 1 下（不改變其他面板行為）', ok_ is False and len(g.times) == 1, f'times={g.times}')
+g = install(AcceptGap(panel=False, hud=True))
+g.eat = 99
+ok_ = uikit.open_panel_ex(uikit.SWITCH, hud_wait=15)[0]
+check('HUD 回來後一直點不開 → 最多 3 下就放棄（不無限等）', ok_ is False and len(g.times) <= 3 and g.t < 30, f'times={g.times} t={g.t}')
 check('TEAMPANEL 有特徵、✕ 在 1250,77', bool(uikit.TEAMPANEL.sig) and uikit.TEAMPANEL.close_xy == (1250, 77))
 check('切換面板開著時 TEAMPANEL 不會誤判開著', uikit.is_open(uikit.TEAMPANEL) is False)
 try:

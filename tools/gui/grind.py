@@ -23,6 +23,8 @@
 
 流程（與計畫 §3.3 的差異：外掛設定「先讀 5 人、只改不對的」，不是 5 人全點）：
   preflight → char.ensure(隊長) → 關遇敵 + 等戰鬥結束 → team.check / form → [start：選點 / 補血 / 傳送]
+  （2026-10-12：char.ensure 與 team.check 合併成一次開切換面板 = leader_team_read：當前是隊長且隊伍完整、關遇敵後 TEAM_REUSE_S 秒內沒打仗 → 不再 team.check；
+   watch 名牌已確認是隊長 / 讀不準 / 當前不是隊長 → 照舊兩步）
   → 一次開外掛面板（ass.set_many）逐人讀快速戰鬥 + 自動戰鬥、只點不對的 → 隊長開遇敵（主畫面鈕，紅龍頭確認）
   → 確認視窗（1 s 一次 pixel）：EXP 橫幅 ≥2 次 → 成功；完整戰鬥連 2 次 → 56（--fix 重設一次）；unknown 連 3 次 → 9。
 外掛只動 快速戰鬥 / 自動戰鬥 兩項；傳送、遇敵鈕屬紅區，使用者要求練功 / 掛機就等於授權（psa-grind-start）。
@@ -43,6 +45,7 @@ sys.path.insert(0, str(HERE))
 import ass  # noqa: E402
 import battleguard  # noqa: E402
 import char  # noqa: E402
+import charstate  # noqa: E402
 import heal  # noqa: E402
 import screen_sigs  # noqa: E402
 import spots  # noqa: E402
@@ -106,6 +109,21 @@ def lap(label: str) -> None:
 
 def log(msg: str) -> None:
     print(f'grind：{msg}', flush=True)
+
+
+TEAM_REUSE_S = 5.0                    # 開頭那次切換面板讀過隊伍，關遇敵 + 等戰鬥在這麼多秒內結束（沒打仗）→ 沿用結果，不再 team.check（完整 = 跳過；不完整 = 直接 form）
+
+
+def leader_team_read() -> dict | None:
+    """一次開切換面板同時確認「當前 = 隊長」與「5 人隊伍完整」（取代 char.ensure + team.check 各開一次；2026-10-12 questrun 收尾連開 2 次）。
+    → {'current', 'team_rc', 'desc', 't'}；watch 名牌已確認是隊長（char.ensure 快路徑不開面板）/ 面板打不開 / 名字讀不準 → None（呼叫端照舊兩步）"""
+    if char.watch_confirms(LEADER):
+        return None
+    r, a = char.read_analyse(LEADER)
+    if not r.get('ok') or a is None or a['rc']:
+        return None
+    code, desc = team.judge(r['cards'], 5, LEADER)
+    return {'current': a['current'], 'team_rc': code, 'desc': desc, 't': clock()}
 
 
 # ---- 鎖 ----
@@ -350,18 +368,30 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
     lap('preflight')
     if mode == 'check':
         return run_check(info)
-    # 1) 當前角色 = 隊長（遇敵鈕作用在當前角色）
-    rc = char.ensure(LEADER)
-    lap('char.ensure')
-    if rc:
-        info['char_rc'] = rc
-        return rc if rc in (uikit.EXIT_IN_BATTLE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else EXIT_CHAR
+    # 1) 當前角色 = 隊長（遇敵鈕作用在當前角色）；同一次讀面板順便看隊伍（leader_team_read）
+    pre = leader_team_read()
+    if pre and charstate.same(pre['current'], LEADER):
+        charstate.write(LEADER, src='grind.py')
+        log(f'當前已是 {LEADER}；隊伍 {pre["desc"]}（一次開面板）')
+        lap('當前 + 隊伍（一次讀）')
+    else:
+        rc = char.ensure(LEADER)
+        lap('char.ensure')
+        if rc:
+            info['char_rc'] = rc
+            return rc if rc in (uikit.EXIT_IN_BATTLE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else EXIT_CHAR
+        pre = None
     # 2) 先關遇敵再設外掛（外掛面板在戰鬥中打不開）；等戰鬥結束（VS 牌消失）
     heal.set_encounter(False)
     heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')
     lap('關遇敵 + 等戰鬥結束')
-    # 3) 隊伍
-    rc = team.check(5, LEADER)
+    # 3) 隊伍（開頭那次讀過、中間沒打仗 → 沿用結果，不再開面板；不完整就直接 form）
+    rc = None
+    if pre and clock() - pre['t'] <= TEAM_REUSE_S:
+        rc = pre['team_rc']
+        log(f'隊伍沿用開頭那次讀到的結果（{pre["desc"]}，退出碼 {rc}），不再開切換面板')
+    if rc is None:
+        rc = team.check(5, LEADER)
     if rc:
         if rc in (uikit.EXIT_IN_BATTLE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
             return rc

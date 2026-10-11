@@ -29,7 +29,7 @@
            （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
   --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過；切換面板開啟後等卡片內容穩定再讀：連 2 次讀到相同標籤才算，最多 TEAM_STABLE_MAX_S=1.5 秒，全部「不在隊」時至少重讀才判失敗 = read_team_labels_stable）：只在必要時檢查（2026-10-11）：開始前、--fight 點 NPC 前、領獎後（一步結束要去下一步 / 交任務）點追蹤前、任務 / BOSS 戰打完後的下一次點之前；其他點擊（每次點追蹤 / 黃問號）不檢查。開切換面板（uikit.open_panel / close_panel，輪詢驗證；打不開原地重試 CHECK_TEAM_TRIES=3 次、間隔 1 秒、先確認是主畫面）763,760，
            讀 5 張卡片的隊伍標籤，要「1 隊長 + (N-1) 隊員」（N=5 即 5 人都要在隊）；面板上其他卡片是單人 / 不在隊（例如單人 DKB0）不算錯；隊員不夠 / 隊長不是 1 個 / 讀不到 → 不點、事件 log 寫出誰不在隊、關面板（✕ 1064,208）；--fight 開打前退出碼 30、執行中發現脫隊退出碼 32。
-           --solo / --fight --no-click 不檢查。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
+           --solo / --fight --no-click 不檢查。--team-fresh（questrun 用：它在 30 秒內剛驗過隊伍）→ 只略過「開始前」那一次。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
   戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
   組隊預設模式（非 --solo / --fight）：**每一場戰鬥**（完整戰鬥或快速戰鬥、不分任務 / 路上）都刷新角色；完整戰鬥自動戰鬥鈕是關的 → 先按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   刷新角色規則：--solo / --fight 只有任務 / BOSS 戰（點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）刷新，路上小怪直接逃、不刷新；預設模式每場都刷新（--no-refresh 全關）。同一場最多每 REFRESH_GAP 秒刷新一次。
@@ -166,10 +166,20 @@ DIALOG_OCR_TRIES = 2                       # 內文讀不到時最多重讀幾�
 
 # ---- 任務追蹤列表（左側，「任務 / 組隊」分頁下方；一格一個任務，標題 + 步驟說明，可上下捲動）----
 LIST_BOX = (75, 270, 260, 180)       # OCR 區域 x,y,w,h（截圖座標）：標題深棕字
-LIST_Y_MAX = 425                     # 標題中心 y 超過這個的格子被面板裁掉一半，不點
+LIST_Y_MAX = 432                     # 標題中心 y 超過這個 = 標題字本身被列表框裁掉，不認（舊 425；樣板量到的 y 會比 OCR 大 1 px，例 426 vs 425，2026-10-12 放寬；點擊另看 LIST_CLICK_Y_MAX）
 CARD_DY = 16                         # 點擊位置 = 標題中心往下一點（格子中心）
+# 標題中心 y 超過這個 = 卡片下半截被列表框裁掉，正下方就是黃色 ▼ 捲動箭頭（y 442～458）：
+# 2026-10-12 解救老爺爺：標題 y=425 → 點 205,441 只讓列表往下捲一格（卡片移到 y=366），沒有開始巡路，白花 18 秒重找。
+# 所以這種卡先把列表往下捲一格（卡片會整張露出）再點；捲不動才改點標題本身（不點卡片中心）。
+LIST_CLICK_Y_MAX = 405
 SCROLL_UP = (200, 420, 200, 300)     # 往上拖 120px ≈ 捲一格（列表往下走）
 SCROLL_DOWN = (200, 300, 200, 420)   # 反向
+# 列表上下的黃色捲動箭頭（2026-10-12 用 tools/.cache 634 張截圖核對：有 ▼ 的全是「第 2 張卡被裁掉」，只有 1 張卡的列表沒有 ▼；
+# ▲ 在任務完成、卡片變少後可能殘留〔例 quest-log/*-task-done.png 只剩 1 張卡仍有 ▲〕→ ▲ 只當「可能可以往上捲」，沒有 ▲ / ▼ 才當「那個方向捲不動」）
+ARROW_UP_PTS = [(x, y) for y in (280, 284, 288) for x in (199, 205, 211)]     # ▲ 本體（黃 ≈ ffe800）
+ARROW_DOWN_PTS = [(x, y) for y in (446, 450, 454) for x in (199, 205, 211)]   # ▼ 本體
+ARROW_SANITY = (130, 222)            # 「任務」分頁鈕亮米色（≈ dfc39b 以上）：暗掉 = 有半透明遮罩（領獎視窗等），箭頭顏色不可信
+ARROW_MIN = 3                        # 9 點裡至少幾點是黃色才算有箭頭（實測 ▲ 5 點、▼ 7 點，沒箭頭 0 點）
 
 
 def read_screen() -> dict:
@@ -235,6 +245,16 @@ def match_title(want: str, got: str) -> bool:
     return w in g or (len(g) >= 3 and g in w) or difflib.SequenceMatcher(None, w, g).ratio() >= 0.75
 
 
+# OCR 把卡片的虛線分隔 / 木框花紋讀成的「字」：單筆畫的橫豎撇點、破折號、標點（2026-10-12 解救老爺爺：虛線被讀成「一乛乛」，
+# 被當成第 2 張卡 → 「只有 1 張卡 = 沒捲動空間」的規則沒觸發，完成判斷多捲 4 下 8 秒）
+NOISE_CHARS = set('一乛丨丿乀乚亅丶ノ丄丅〡〢〣－—–‐_-~～ー=＝.。,，:：;；|｜/\\\'"`·•、…()（）[]【】<>《》^＾*＊+＋')
+
+
+def is_noise_title(t: str) -> bool:
+    """OCR 讀到的一行是不是雜訊（不是任務標題）：去掉空白與 NOISE_CHARS 後剩不到 2 個字。任務標題最短也是 2 個實字（例「伐木證書」4 字）"""
+    return len([c for c in t if not c.isspace() and c not in NOISE_CHARS]) < 2
+
+
 def read_list_titles() -> list[dict]:
     """OCR 追蹤列表的標題行 → [{y, texts: [各倍數讀到的字]}]（依 y 排序）。
     Windows OCR 對同一張圖換放大倍數，結果差很多（有時整行讀不到、有時只讀到右半），
@@ -243,7 +263,7 @@ def read_list_titles() -> list[dict]:
     r = ps_json('ocr.ps1', x, y, w, h, '-Zooms', '2,3,4,5,6,7', '-Dark', 150)
     rows: list[dict] = []
     for ln in sorted(r.get('lines', []), key=lambda o: o['y']):
-        if len(ln['text']) < 2:
+        if is_noise_title(ln['text']):
             continue
         for row in rows:
             if abs(row['y'] - ln['y']) < 14:
@@ -261,8 +281,14 @@ def list_signature() -> list[tuple]:
 
 
 NO_SCROLL_ROWS_MAX = 1               # 目前頁標題列 ≤ 這個數且目標不在 → 列表沒有捲動空間（一頁至少放得下 2 張卡），不捲、一輪判不在
+# 「只有 1 列」還要那一列在列表最上面一格（標題 y ≤ 這個）才算沒有捲動空間：卡片間距約 115 px、列表框約 1.5 張高，
+# 捲到底時最後一張的標題在 y≈366、上一張的標題已捲出框外（2026-10-12 解救老爺爺實測）→ 這時只看得到 1 列，但上面還有卡。
+# 推算：只有 1 張卡時它一定在頂格 y≈310；≥2 張卡時頂格那張下面一定還看得到第 2 列（y≈425）→ 單列且在頂格 ⇔ 整個列表就 1 張卡。
+NO_SCROLL_TOP_Y = 335
 LAST_SCAN_NO_SCROLL = False          # 最近一次 track_task 是否因「沒有捲動空間」直接判目標不在（呼叫端據此一輪就判任務完成）
-_PAGE_ROWS_N = None                  # 最近一次 OCR 讀到的標題列數
+_PAGE_ROWS_N = None                  # 最近一次 OCR 讀到的標題列數（已濾掉雜訊列）
+_PAGE_ROWS = None                    # 最近一次 OCR 讀到的標題列（[{y, texts}]）
+_HIT_MODE = ''                       # 最近一次命中用的方法（tpl / ocr）；auto 模式記實際用到的那個
 
 
 class _Interrupted(Exception):
@@ -276,49 +302,98 @@ def scroll_list(drag: tuple[int, int, int, int], note: str, before: list) -> tup
     return after != before, after
 
 
+def classify_arrows(cols) -> dict | None:
+    """純函式：ARROW_UP_PTS + ARROW_DOWN_PTS + ARROW_SANITY 的顏色 → {'up': 有 ▲, 'down': 有 ▼}。
+    「任務」分頁鈕暗掉（領獎視窗等半透明遮罩）或點數不對 → None（箭頭顏色不可信，呼叫端照舊靠拖曳 + 像素取樣判斷到頂 / 到底）"""
+    nu, nd = len(ARROW_UP_PTS), len(ARROW_DOWN_PTS)
+    if not cols or len(cols) < nu + nd + 1:
+        return None
+    s = cols[nu + nd]
+    if s[0] < 180 or s[1] < 150:
+        return None
+
+    def yel(c):
+        return c[0] > 220 and c[1] > 170 and c[2] < 80
+    return {'up': sum(1 for c in cols[:nu] if yel(c)) >= ARROW_MIN, 'down': sum(1 for c in cols[nu:nu + nd] if yel(c)) >= ARROW_MIN}
+
+
+def list_arrows() -> dict | None:
+    """一次 pixel 讀追蹤列表的 ▲ / ▼ 捲動箭頭（約 0.1 秒）→ classify_arrows；讀不到 None"""
+    pts = ARROW_UP_PTS + ARROW_DOWN_PTS + [ARROW_SANITY]
+    try:
+        cols = [tuple(int(v) for v in c.split(',')[:3]) for c in gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()]
+    except (ValueError, AttributeError):
+        return None
+    return classify_arrows(cols)
+
+
 def _find_on_page(want: str, mode: str) -> int | None:
     """目前這一頁追蹤列表上 want 的標題中心 y（沒有回 None）；畫面不是主畫面 → _Interrupted。
-    tpl = 標題圖片樣板（約 0.7 秒）；ocr = Windows OCR（3～7 秒），認出目標就存樣板。名稱不符絕不回傳。"""
+    tpl = 標題圖片樣板（約 0.7 秒）；ocr = Windows OCR（3～7 秒），認出目標就存樣板；
+    auto = 先樣板、這頁沒命中**同一頁**就改 OCR（不先把整個列表捲一輪；2026-10-12 樣板剛點完卡片 / 剛領完獎的約 10 秒內會暫時比不中，
+    舊做法樣板整輪捲完才退 OCR，每次白拖 4 下 12～14 秒）。名稱不符絕不回傳。"""
+    global _PAGE_ROWS_N, _HIT_MODE
     if read_screen()['state'] != 'idle':
         raise _Interrupted()
-    if mode == 'tpl':
+    if mode in ('tpl', 'auto'):
         ty = _tm_find(want)
-        return ty if ty is not None and ty <= LIST_Y_MAX else None
+        if ty is not None and ty <= LIST_Y_MAX:
+            _HIT_MODE = 'tpl'
+            return ty
+        if mode == 'tpl':
+            return None
+        log(f'標題樣板這頁沒命中「{want}」→ 同一頁改用 OCR')
     rows = read_list_titles()
     if not rows:                                           # 整個列表讀不到（剛換圖 / 捲動慣性中）→ 等一下再讀一次
         time.sleep(1.0)
         rows = read_list_titles()
     log(f'追蹤列表標題：{[r["texts"][0] for r in rows]}')
-    global _PAGE_ROWS_N
-    _PAGE_ROWS_N = len(rows)
+    global _PAGE_ROWS
+    _PAGE_ROWS, _PAGE_ROWS_N = rows, len(rows)
     for row in rows:
         if row['y'] <= LIST_Y_MAX and any(match_title(want, t) for t in row['texts']):
             _tm_learn(want, row['y'])                      # OCR 認出了 → 存標題樣板，下次不必 OCR
+            _HIT_MODE = 'ocr'
             return row['y']
     return None
 
 
-def no_scroll_room(mode: str) -> bool:
-    """目前頁沒找到目標時：列表是否沒有捲動空間（標題列數 1 張以內、且至少讀到 1 張 = 列表有畫出來）。
-    tpl 模式沒讀過標題，補讀一次 OCR 列數（約 3～7 秒，仍比捲兩輪快）。"""
-    n = _PAGE_ROWS_N
-    if n is None:
-        n = len(read_list_titles())
-    return 1 <= n <= NO_SCROLL_ROWS_MAX
+def no_scroll_room(mode: str, arrows: dict | None = None) -> bool:
+    """目前頁沒找到目標時：列表是否沒有捲動空間 = 標題只有 1 列（雜訊列已在 read_list_titles 濾掉）、那一列在頂格（y ≤ NO_SCROLL_TOP_Y），
+    且看得到箭頭時沒有 ▼。tpl 模式沒讀過標題，補讀一次 OCR（約 3～7 秒，仍比捲兩輪快）。"""
+    global _PAGE_ROWS_N, _PAGE_ROWS
+    if _PAGE_ROWS is None:
+        _PAGE_ROWS = read_list_titles()
+        _PAGE_ROWS_N = len(_PAGE_ROWS)
+    rows = _PAGE_ROWS
+    if not 1 <= len(rows) <= NO_SCROLL_ROWS_MAX:
+        return False
+    if any(r['y'] > NO_SCROLL_TOP_Y for r in rows):
+        return False                                       # 捲到底時的最後一張（上面還有卡，只是標題捲出框外）
+    return not (arrows and arrows.get('down'))
 
 
 def _scan_track(want: str, mode: str, max_scrolls: int) -> tuple:
-    """掃一遍追蹤列表找 want（先看目前頁 → 往上捲到頂 → 往下捲到底）→ (y 或 None, 上捲格數, 下捲格數)；畫面不是主畫面 → _Interrupted"""
+    """掃一遍追蹤列表找 want（先看目前頁 → 往上捲到頂 → 往下捲到底）→ (y 或 None, 上捲格數, 下捲格數)；畫面不是主畫面 → _Interrupted。
+    捲動前先看 ▲ / ▼ 箭頭（list_arrows）：沒有 ▲ 就不往上拖、沒有 ▼ 就不往下拖；拖完箭頭消失 = 已到頂 / 到底，不再多拖一下確認。
+    箭頭讀不到 / 與標題列矛盾（沒箭頭卻不像只有 1 張卡）→ 不信箭頭，照舊拖到像素取樣不變為止。"""
     sig = list_signature()
-    global _PAGE_ROWS_N, LAST_SCAN_NO_SCROLL
-    _PAGE_ROWS_N = None
+    global _PAGE_ROWS_N, _PAGE_ROWS, LAST_SCAN_NO_SCROLL
+    _PAGE_ROWS_N = _PAGE_ROWS = None
     y = _find_on_page(want, mode)
     ups = pages = 0
-    if y is None and no_scroll_room(mode):
+    if y is not None:
+        return y, 0, 0
+    arr = list_arrows()
+    if no_scroll_room(mode, arr):
         LAST_SCAN_NO_SCROLL = True
-        log(f'追蹤列表只有 {_PAGE_ROWS_N} 張卡且沒有「{want}」→ 沒有捲動空間，不捲')
+        log(f'追蹤列表只有 {_PAGE_ROWS_N} 張卡（在頂格）且沒有「{want}」→ 沒有捲動空間，不捲')
         return None, 0, 0
-    if y is None:
+    if arr is not None and not arr['up'] and not arr['down']:
+        log(f'追蹤列表看不到 ▲ / ▼ 但標題列（{_PAGE_ROWS_N} 列）不像只有 1 張卡 → 不信箭頭，照舊拖到盡頭')
+        arr = None
+    trust = arr is not None
+    if not trust or arr['up']:
         while ups < max_scrolls:                       # 往上到頂
             moved, sig = scroll_list(SCROLL_DOWN, f'任務追蹤列表往上捲一格找「{want}」', sig)
             if not moved:
@@ -326,7 +401,11 @@ def _scan_track(want: str, mode: str, max_scrolls: int) -> tuple:
             ups += 1
             if (y := _find_on_page(want, mode)) is not None:
                 break
-    if y is None:
+            if trust and (arr := list_arrows() or arr) and not arr['up']:
+                break                                  # ▲ 消失 = 到頂
+    if y is None and trust:
+        arr = list_arrows() or arr
+    if y is None and (not trust or arr['down']):
         for i in range(max_scrolls * 2):               # 往下到底；前 ups 格是剛看過的頁，不重看
             moved, sig = scroll_list(SCROLL_UP, f'任務追蹤列表往下捲一格找「{want}」', sig)
             if not moved:
@@ -334,7 +413,24 @@ def _scan_track(want: str, mode: str, max_scrolls: int) -> tuple:
             pages += 1
             if i + 1 > ups and (y := _find_on_page(want, mode)) is not None:
                 break
+            if trust and (arr := list_arrows() or arr) and not arr['down']:
+                if i + 1 >= ups:
+                    break                              # ▼ 消失 = 到底（還在走回剛看過的頁時不會發生）
     return y, ups, pages
+
+
+def _reveal_low_card(want: str, y: int) -> tuple[int, int]:
+    """目標卡片的標題在列表下緣（y > LIST_CLICK_Y_MAX，卡片下半截被裁掉、正下方是 ▼）：先把列表往下捲一格讓整張露出，再重找 →
+    回 (要點的 x, y)。捲不動 / 捲完找不到 / 還是太低 → 點標題本身（不點卡片中心，避開 ▼）。畫面變了 → _Interrupted"""
+    moved, _ = scroll_list(SCROLL_UP, f'「{want}」卡片在列表下緣被裁掉 → 先往下捲一格再點', list_signature())
+    if moved:
+        y2 = _find_on_page(want, 'auto' if _tm_has(want) else 'ocr')
+        if y2 is not None and y2 <= LIST_CLICK_Y_MAX:
+            return 205, y2 + CARD_DY
+        if y2 is not None:
+            y = y2
+    log(f'「{want}」捲不上來（y={y}）→ 點標題本身，不點卡片中心（避開 ▼）')
+    return 205, y
 
 
 def close_stray_panel() -> bool:
@@ -353,32 +449,31 @@ def close_stray_panel() -> bool:
 def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | None:
     """掃一遍追蹤列表找標題 = want 的那一格並點它（開始巡路）。名稱不符絕不點。
     回傳：True 找到（click=True 時已點）、False 整個列表掃完沒有、None 途中畫面不再是主畫面（交回主迴圈，不算找不到）。
-    一輪有明確終點：先看目前這頁 → 往上捲到頂（每頁都看）→ 再往下捲到底（已看過的頁不重看）；到頂 / 到底用像素取樣沒變判斷，不來回。
-    辨識：該任務有標題樣板 → 先用樣板比對（0.7 秒 / 頁，錯配率 0）；整輪沒命中再退回 OCR 掃一輪（3～7 秒 / 頁，認出會學新樣板）；沒樣板 → 直接 OCR。"""
+    一輪有明確終點：先看目前這頁 → 往上捲到頂（每頁都看）→ 再往下捲到底（已看過的頁不重看）；到頂 / 到底看 ▲ / ▼ 箭頭（讀不到才用像素取樣沒變判斷），不來回。
+    辨識：該任務有標題樣板 → 每頁先用樣板比對（0.7 秒 / 頁，錯配率 0），沒命中**同一頁**改 OCR（3～7 秒，認出會學新樣板）；沒樣板 → 直接 OCR。
+    （2026-10-12 前是樣板整輪捲完才退 OCR 再捲一輪，一次多拖 4 下 12～14 秒。）
+    點擊：標題太靠下緣（> LIST_CLICK_Y_MAX）的卡先捲上來再點（_reveal_low_card）。"""
     gui('seq', PRIMER)
     ensure_task_tab()
-    modes = ['tpl', 'ocr'] if _tm_has(want) else ['ocr']          # 樣板沒命中（例：選中 / 未選中底色不同，分數 0.68）→ 退回 OCR 再掃一輪並學新樣板（questrun 實測 2026-10-11）
+    mode = 'auto' if _tm_has(want) else 'ocr'
     t0 = time.time()
-    y = None
-    ups = pages = 0
-    global LAST_SCAN_NO_SCROLL
+    global LAST_SCAN_NO_SCROLL, _HIT_MODE
     LAST_SCAN_NO_SCROLL = False
+    _HIT_MODE = mode
     try:
-        for mode in modes:
-            y, ups, pages = _scan_track(want, mode, max_scrolls)
-            if y is not None:
-                break
-            if mode == 'tpl':
-                log(f'標題樣板沒找到「{want}」→ 退回 OCR 再掃一輪')
+        y, ups, pages = _scan_track(want, mode, max_scrolls)
+        cx = 205
+        cy = None if y is None else y + CARD_DY
+        if click and y is not None and y > LIST_CLICK_Y_MAX:
+            cx, cy = _reveal_low_card(want, y)
     except _Interrupted:
         return None
-    log(f'追蹤列表掃描（{mode}）{"找到 y=%d" % y if y is not None else "沒找到"}，上 {ups} 格 / 下 {pages} 格，耗時 {time.time() - t0:.1f}s')
+    log(f'追蹤列表掃描（{_HIT_MODE}）{"找到 y=%d" % y if y is not None else "沒找到"}，上 {ups} 格 / 下 {pages} 格，耗時 {time.time() - t0:.1f}s')
     if y is None:
         return False
     if click:
-        cx, cy = 205, y + CARD_DY
-        gui('seq', f'click {cx} {cy}', note=f'點追蹤「{want}」（{mode}，--task {want}）')
-        event(f'追蹤列表找到「{want}」（{mode}）→ 點 {cx},{cy}')
+        gui('seq', f'click {cx} {cy}', note=f'點追蹤「{want}」（{_HIT_MODE}，--task {want}）')
+        event(f'追蹤列表找到「{want}」（{_HIT_MODE}）→ 點 {cx},{cy}')
     return True
 
 
@@ -1216,6 +1311,7 @@ def _main() -> int:
     ap.add_argument('--npc-map', type=int, default=0, help='--fight --npc X,Y 用：NPC 所在地圖 ID（不給時，有 --task 會用任務表反查該座標的 NPC 地圖）；與目前所在地圖不同 → 退出碼 %d，不點' % EXIT_NPC_MAP)
     ap.add_argument('--step', type=int, default=0, help='--fight 用：明確指定任務第 N 步（Task.step）的 endNpc 當 NPC（等於 --npc auto 但不 OCR 追蹤條目；需要 --task）')
     ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；開始前第一次點 / 按對話框前一定先驗（不符 30）；0 或 1 = 跳過；--solo / --fight --no-click 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
+    ap.add_argument('--team-fresh', action='store_true', help='呼叫端（questrun）剛驗過 5 人隊伍（≤30 秒：team.form 成功 / 上一片 37）→ 「開始前」那次隊伍檢查略過，不開切換面板；領獎後 / 任務戰後 / BOSS 後的檢查照舊（2026-10-12）')
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
     ap.add_argument('--no-click', action='store_true', help='--fight 用：不點 NPC（已手動點過 / 對話已開），從現在起算開打時間窗')
     ap.add_argument('--max-seconds', type=int, default=900, help='最長執行秒數（預設 900）')
@@ -1300,7 +1396,9 @@ def _main() -> int:
     team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else True)     # --solo 本來就是單人跑；--fight --no-click 不點 NPC。預設模式即使 --no-track 也會按對話框 → 一樣要驗隊伍
     last_team_check = 0.0
     team_dirty = False           # 任務 / BOSS 戰剛打完（隊伍可能散）→ 下一次點追蹤 / 黃問號前要驗隊伍；平常的點擊不驗
-    pre_checked = not team_on    # 第一次點任何東西 / 按對話框之前是否已驗過隊伍（不受 TEAM_CHECK_GAP 限制）
+    pre_checked = not team_on or a.team_fresh    # 第一次點任何東西 / 按對話框之前是否已驗過隊伍（不受 TEAM_CHECK_GAP 限制）；--team-fresh = 呼叫端剛驗過
+    if team_on and a.team_fresh:
+        log('開始前隊伍檢查略過（--team-fresh：呼叫端剛驗過 5 人隊伍）')
     stall_rounds = 0             # 對話無進展：每次從非對話進入對話 +1（領獎 / 戰鬥 / Auto Walking / 換地圖 / 換黃問號歸零）
     stall_marker = None          # 最後一次點的黃問號 (x, y)；None = 沒點過（沒點問號就不判無進展）
     stall_map = None             # 上次進對話時的地圖

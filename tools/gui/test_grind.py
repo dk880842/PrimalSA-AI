@@ -14,6 +14,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 import grind  # noqa: E402
+ORIG_LTR = grind.leader_team_read
 import spots  # noqa: E402
 
 ORIG_WBG = grind.wait_banner_gone
@@ -94,6 +95,7 @@ class Game:
         self.screens = []                # read_screen 序列：(n_px, state_dict, enc)
         self.t = 0.0
         self.heal_fail = False
+        self.pre = None                  # leader_team_read 的結果（None = 照舊 char.ensure + team.check 兩步）
 
     def clock(self):
         self.t += 0.3
@@ -107,6 +109,12 @@ def install(g, stat_missing=False):
     U.preflight = lambda src: g.log.append('preflight') or 0
     U.fail = lambda src, rc, msg: g.log.append(f'fail:{rc}:{msg}') or rc
     C.ensure = lambda name: g.log.append('char.ensure') or g.char_rc
+    grind.charstate.write = lambda *a, **k: g.log.append('charstate.write')
+
+    def pre_():
+        g.log.append('leader_team_read')
+        return None if g.pre is None else dict(g.pre, t=g.clock())
+    grind.leader_team_read = pre_
 
     def check_(size=5, leader=None, ocr=True):
         g.log.append('team.check')
@@ -282,6 +290,50 @@ g = install(Game())
 g.screens = [(0, {'state': 'unknown', 'full': False}, True), (0, {'state': 'unknown', 'full': False}, True), idle(), banner(), idle(), banner()]
 rc, j, _ = run('ensure', confirm_secs=10)
 check('unknown ×2 夾 idle → 不算 9', rc == 0)
+
+# 1b) 2026-10-12：當前 + 隊伍一次讀（leader_team_read）→ 不再 char.ensure / team.check
+g = install(Game())
+g.pre = {'current': 'DKBO', 'team_rc': 0, 'desc': '隊伍完整'}
+g.screens = good_screens()
+rc, j, _ = run('ensure')
+check('一次讀：當前 DKBO + 隊伍完整 → 不跑 char.ensure、不跑 team.check，rc 0', rc == 0 and 'char.ensure' not in g.log and 'team.check' not in g.log
+      and g.log.index('leader_team_read') < g.log.index('enc:False') and 'charstate.write' in g.log, str(g.log))
+g = install(Game())
+g.pre = {'current': 'DKBO', 'team_rc': 41, 'desc': '不完整'}
+g.team_rc = [0]
+g.screens = good_screens()
+rc, j, _ = run('ensure')
+check('一次讀：當前 DKBO 但隊伍不完整 → 不跑 char.ensure、不重讀，直接 form → 再 check 確認', rc == 0 and 'char.ensure' not in g.log and g.log.index('team.form') < g.log.index('team.check') and g.log.count('team.check') == 1, str(g.log))
+g = install(Game())
+g.pre = {'current': 'DKBO3', 'team_rc': 0, 'desc': '完整'}
+g.screens = good_screens()
+rc, j, _ = run('ensure')
+check('一次讀：當前不是 DKBO → 照舊 char.ensure + team.check（切人後要重讀）', rc == 0 and 'char.ensure' in g.log and 'team.check' in g.log, str(g.log))
+g = install(Game())
+g.pre = {'current': 'DKBO', 'team_rc': 0, 'desc': '完整'}
+_hg = grind.heal.gui
+grind.heal.gui = lambda *a, **k: (setattr(g, 't', g.t + 20), 'ok')[1]     # 關遇敵後等戰鬥結束花了 20 秒（有打仗）
+g.screens = good_screens()
+rc, j, _ = run('ensure')
+grind.heal.gui = _hg
+check('一次讀後等戰鬥 > TEAM_REUSE_S → 隊伍要重讀（team.check）', rc == 0 and 'char.ensure' not in g.log and 'team.check' in g.log, str(g.log))
+
+# 1c) leader_team_read 本身：watch 已確認 → None（char.ensure 快路徑不開面板）；讀不準 → None；讀到 → current + judge
+_sv = (grind.char.watch_confirms, grind.char.read_analyse, grind.team.judge, grind.clock)
+grind.leader_team_read = ORIG_LTR
+grind.clock = lambda: 1.0
+grind.char.watch_confirms = lambda t: True
+check('leader_team_read：watch 名牌已確認 → None', grind.leader_team_read() is None)
+grind.char.watch_confirms = lambda t: False
+grind.char.read_analyse = lambda t: ({'ok': False}, None)
+check('leader_team_read：面板打不開 → None', grind.leader_team_read() is None)
+grind.char.read_analyse = lambda t: ({'ok': True, 'cards': []}, {'rc': 61, 'current': None})
+check('leader_team_read：名字讀不準（61）→ None', grind.leader_team_read() is None)
+grind.char.read_analyse = lambda t: ({'ok': True, 'cards': ['c']}, {'rc': 0, 'current': 'DKBO'})
+grind.team.judge = lambda cards, size, leader=None: (0, 'ok') if cards == ['c'] and size == 5 and leader == 'DKBO' else (99, 'bad')
+r_ = grind.leader_team_read()
+check('leader_team_read：讀到 → current / team_rc / t', r_ == {'current': 'DKBO', 'team_rc': 0, 'desc': 'ok', 't': 1.0}, str(r_))
+grind.char.watch_confirms, grind.char.read_analyse, grind.team.judge, grind.clock = _sv
 
 # 8) 遇敵鈕確認期間被關 → 54
 g = install(Game())
