@@ -331,8 +331,23 @@ def _gone_sig(p: Panel):
     return None
 
 
+CLOSE_WAIT_MS = 2500             # 點 ✕ 後等面板消失的上限（快速戰鬥掛機中面板可能 1 秒以上才關；正常 0.1 s 內消失就立即返回）
+
+
+def _wait_closed(p: Panel, wait_s: float = CLOSE_WAIT_MS / 1000) -> bool:
+    """每 POLL_S 讀一次特徵，最多 wait_s 秒，面板消失就立即回 True"""
+    end = clock() + wait_s
+    while True:
+        if not is_open(p):
+            return True
+        if clock() >= end:
+            return False
+        sleep(POLL_S)
+
+
 def close_panel(p: Panel, known_open: bool = False) -> bool:
-    """關面板並驗證消失：先點 ✕（waitpix ✕ 消失，約 0.1 s）、仍開再 ESC（各最多 2 次）；只在面板確實開著時才送。
+    """關面板並驗證消失：先點 ✕（waitpix 輪詢 ✕ 消失，最多 CLOSE_WAIT_MS，消失即返回）、逾時才確認仍開著再點第二次、
+    仍開再 ESC（各最多 2 次）；只在面板確實開著時才送（第二次點 ✕ 前一定重讀特徵，避免面板已關時點到地面 / 其他鈕）。
     known_open=True 表示呼叫端剛驗證過面板開著，省掉第一次 is_open"""
     if p.close_fn:
         return bool(p.close_fn())
@@ -342,13 +357,15 @@ def close_panel(p: Panel, known_open: bool = False) -> bool:
             return True
         if p.close_xy:
             if gone:
-                out = gui('seq', f'click {p.close_xy[0]} {p.close_xy[1]}; waitpix 800 {gone[0]} {gone[1]}', note=f'uikit 關 {p.name} 面板')
+                out = gui('seq', f'click {p.close_xy[0]} {p.close_xy[1]}; waitpix {CLOSE_WAIT_MS} {gone[0]} {gone[1]}', note=f'uikit 關 {p.name} 面板')
                 if _seq_ok(out):
                     return True
+                if _wait_closed(p, 0.3):         # waitpix 逾時後最後再看一眼（晚一點點才關）
+                    return True
             else:
-                gui('seq', f'click {p.close_xy[0]} {p.close_xy[1]}; wait 500', note=f'uikit 關 {p.name} 面板')
-            if not is_open(p):
-                return True
+                gui('seq', f'click {p.close_xy[0]} {p.close_xy[1]}', note=f'uikit 關 {p.name} 面板')
+                if _wait_closed(p):
+                    return True
         if p.esc_close:
             gui('seq', 'key {ESC}; wait 500', note=f'uikit ESC 關 {p.name} 面板')
     return not is_open(p)

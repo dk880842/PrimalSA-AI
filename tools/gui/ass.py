@@ -180,12 +180,21 @@ def open_panel(timeout: float = None) -> bool:
         sleep(OPEN_RETRY_GAP)
 
 
+CLOSE_WAIT = 2.5                 # 點 X 後等面板消失的上限（秒）；與 uikit.CLOSE_WAIT_MS 一致
+CLOSE_POLL = 0.15
+
+
 def close_panel() -> bool:
-    """點 X 關面板並驗證面板消失（最多點 3 次；只在面板確實還開著時點）"""
-    for _ in range(3):
+    """點 X 關面板並驗證消失：點完每 0.15 秒讀一次，最多 2.5 秒，消失即返回；逾時且仍開著才再點（最多 2 次，第二次前先確認仍開著）"""
+    for _ in range(2):
         if not panel_open():
             return True
-        gui('seq', f'click {CLOSE_BTN[0]} {CLOSE_BTN[1]}; wait 600', note='ass.py 關外掛面板')
+        gui('seq', f'click {CLOSE_BTN[0]} {CLOSE_BTN[1]}', note='ass.py 關外掛面板')
+        end = clock() + CLOSE_WAIT
+        while clock() < end:
+            sleep(CLOSE_POLL)
+            if not panel_open():
+                return True
     return not panel_open()
 
 

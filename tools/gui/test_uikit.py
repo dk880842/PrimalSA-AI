@@ -258,6 +258,57 @@ check('open_panel_ex 回 (True, 本來沒開)', uikit.open_panel_ex(uikit.SWITCH
 check('開面板 seq 用 waitpix、不再 wait 700', any('waitpix' in q and 'click 763 760' in q for q in g.seqs) and not any('wait 700' in q for q in g.seqs), str(g.seqs))
 g.seqs.clear()
 check('close_panel(known_open) 用 waitpix ✕ 消失、成功', uikit.close_panel(uikit.SWITCH, known_open=True) is True and not g.panel and any('waitpix' in q and '!' in q for q in g.seqs), str(g.seqs))
+# ---- close_panel 等待拉長：面板延遲關閉 ----
+class DelayGame(Game):
+    """點 ✕ 後 delay 秒才關（None = 永遠不關）；waitpix 依假時鐘模擬輪詢，回 ok 行或逾時空字串"""
+
+    def __init__(self, delay, **k):
+        super().__init__(**k)
+        self.delay, self.close_at, self.seqs = delay, None, []
+
+    def _tick(self):
+        if self.close_at is not None and self.t >= self.close_at:
+            self.panel, self.close_at = False, None
+
+    def gui(self, *args, note=''):
+        self._tick()
+        if args[0] == 'seq':
+            self.seqs.append(args[1])
+            out = ''
+            for part in args[1].split(';'):
+                w = part.split()
+                if w and w[0] == 'click':
+                    xy = (int(w[1]), int(w[2]))
+                    self.clicks.append(xy)
+                    if xy == uikit.SWITCH.close_xy and self.panel and self.delay is not None:
+                        self.close_at = self.t + self.delay
+                elif w and w[0] == 'waitpix':
+                    limit = int(w[1]) / 1000
+                    if self.close_at is not None and self.close_at - self.t <= limit:
+                        self.t = self.close_at
+                        self._tick()
+                        out = 'ok 0'
+                    else:
+                        self.t += limit
+                        self._tick()
+            return out
+        return super().gui(*args, note=note)
+
+
+g = install(DelayGame(0.0, hud=True, panel=True))
+t0 = g.t
+check('點完立即消失 → 立即返回、只點 1 次、不耗時', uikit.close_panel(uikit.SWITCH, known_open=True) is True and g.clicks.count(uikit.SWITCH.close_xy) == 1 and g.t - t0 < 0.2, f'{g.clicks} t={g.t}')
+g = install(DelayGame(1.2, hud=True, panel=True))
+check('面板 1.2 秒才關 → 只點 1 次 ✕、成功', uikit.close_panel(uikit.SWITCH, known_open=True) is True and g.clicks.count(uikit.SWITCH.close_xy) == 1 and 1.1 < g.t < 1.5, f'{g.clicks} t={g.t}')
+g = install(DelayGame(None, hud=True, panel=True))
+r = uikit.close_panel(uikit.SWITCH, known_open=True)
+check('面板一直不關 → 點 2 次 ✕ 後失敗', r is False and g.clicks.count(uikit.SWITCH.close_xy) == 2, f'{r} {g.clicks}')
+g = install(DelayGame(2.6, hud=True, panel=True))
+uikit.close_panel(uikit.SWITCH, known_open=True)
+check('逾時邊界：2.6 秒才關 → 逾時後重讀已關（不點第二次 ✕ 到空處）或至多 2 次', g.clicks.count(uikit.SWITCH.close_xy) <= 2 and not g.panel, str(g.clicks))
+g = install(DelayGame(0.0, hud=True, panel=False))
+check('面板本來就沒開 → 不點', uikit.close_panel(uikit.SWITCH) is True and g.clicks == [])
+
 g = install(WaitGame(hud=True, panel=True))
 check('已開著 open_panel_ex → (True, True)、不點', uikit.open_panel_ex(uikit.SWITCH) == (True, True) and g.clicks == [])
 uikit.timing_start()
