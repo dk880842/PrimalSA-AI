@@ -67,15 +67,15 @@ def int_to_rows(v: int) -> list:
     return [''.join('1' if v >> ((y + PAD) * STRIDE + x + PAD) & 1 else '0' for x in range(CW_)) for y in range(CH_)]
 
 
-def iou(a: int, b: int) -> float:
-    """a 平移 ±SHIFT（x、y 各）後與 b 的最大 IoU"""
+def iou(a: int, b: int, stride: int = STRIDE, shift: int = SHIFT) -> float:
+    """a 平移 ±shift（x、y 各）後與 b 的最大 IoU（stride / shift 預設是名字圖的；questdetail 的任務標題圖也共用這個函式）"""
     na, nb = a.bit_count(), b.bit_count()
     if not na or not nb:
         return 0.0
     best = 0.0
-    for dy in range(-SHIFT, SHIFT + 1):
-        for dx in range(-SHIFT, SHIFT + 1):
-            s = dy * STRIDE + dx
+    for dy in range(-shift, shift + 1):
+        for dx in range(-shift, shift + 1):
+            s = dy * stride + dx
             sa = a << s if s >= 0 else a >> -s
             inter = (sa & b).bit_count()
             if inter:
