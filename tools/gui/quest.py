@@ -257,35 +257,48 @@ def _find_on_page(want: str, mode: str) -> int | None:
     return None
 
 
+def _scan_track(want: str, mode: str, max_scrolls: int) -> tuple:
+    """掃一遍追蹤列表找 want（先看目前頁 → 往上捲到頂 → 往下捲到底）→ (y 或 None, 上捲格數, 下捲格數)；畫面不是主畫面 → _Interrupted"""
+    sig = list_signature()
+    y = _find_on_page(want, mode)
+    ups = pages = 0
+    if y is None:
+        while ups < max_scrolls:                       # 往上到頂
+            moved, sig = scroll_list(SCROLL_DOWN, f'任務追蹤列表往上捲一格找「{want}」', sig)
+            if not moved:
+                break
+            ups += 1
+            if (y := _find_on_page(want, mode)) is not None:
+                break
+    if y is None:
+        for i in range(max_scrolls * 2):               # 往下到底；前 ups 格是剛看過的頁，不重看
+            moved, sig = scroll_list(SCROLL_UP, f'任務追蹤列表往下捲一格找「{want}」', sig)
+            if not moved:
+                break
+            pages += 1
+            if i + 1 > ups and (y := _find_on_page(want, mode)) is not None:
+                break
+    return y, ups, pages
+
+
 def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | None:
     """掃一遍追蹤列表找標題 = want 的那一格並點它（開始巡路）。名稱不符絕不點。
     回傳：True 找到（click=True 時已點）、False 整個列表掃完沒有、None 途中畫面不再是主畫面（交回主迴圈，不算找不到）。
     一輪有明確終點：先看目前這頁 → 往上捲到頂（每頁都看）→ 再往下捲到底（已看過的頁不重看）；到頂 / 到底用像素取樣沒變判斷，不來回。
-    辨識：該任務有標題樣板 → 只用樣板比對（0.7 秒 / 頁，錯配率 0，樣板沒命中 = 不在）；沒樣板 → OCR（3～7 秒 / 頁，並學樣板）。"""
+    辨識：該任務有標題樣板 → 先用樣板比對（0.7 秒 / 頁，錯配率 0）；整輪沒命中再退回 OCR 掃一輪（3～7 秒 / 頁，認出會學新樣板）；沒樣板 → 直接 OCR。"""
     gui('seq', PRIMER)
     ensure_task_tab()
-    mode = 'tpl' if _tm_has(want) else 'ocr'
+    modes = ['tpl', 'ocr'] if _tm_has(want) else ['ocr']          # 樣板沒命中（例：選中 / 未選中底色不同，分數 0.68）→ 退回 OCR 再掃一輪並學新樣板（questrun 實測 2026-10-11）
     t0 = time.time()
+    y = None
+    ups = pages = 0
     try:
-        sig = list_signature()
-        y = _find_on_page(want, mode)
-        ups = pages = 0
-        if y is None:
-            while ups < max_scrolls:                       # 往上到頂
-                moved, sig = scroll_list(SCROLL_DOWN, f'任務追蹤列表往上捲一格找「{want}」', sig)
-                if not moved:
-                    break
-                ups += 1
-                if (y := _find_on_page(want, mode)) is not None:
-                    break
-        if y is None:
-            for i in range(max_scrolls * 2):               # 往下到底；前 ups 格是剛看過的頁，不重看
-                moved, sig = scroll_list(SCROLL_UP, f'任務追蹤列表往下捲一格找「{want}」', sig)
-                if not moved:
-                    break
-                pages += 1
-                if i + 1 > ups and (y := _find_on_page(want, mode)) is not None:
-                    break
+        for mode in modes:
+            y, ups, pages = _scan_track(want, mode, max_scrolls)
+            if y is not None:
+                break
+            if mode == 'tpl':
+                log(f'標題樣板沒找到「{want}」→ 退回 OCR 再掃一輪')
     except _Interrupted:
         return None
     log(f'追蹤列表掃描（{mode}）{"找到 y=%d" % y if y is not None else "沒找到"}，上 {ups} 格 / 下 {pages} 格，耗時 {time.time() - t0:.1f}s')

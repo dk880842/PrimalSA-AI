@@ -7,7 +7,7 @@
   uv run --no-project python tools/gui/questdetail.py accept "彌生和日美子(1.82)" [--dry-run]   # 接取一個「待接取」任務（傳送 → NPC 對話 → 接受）
   uv run --no-project python tools/gui/questdetail.py read-image 檔.png              # 離線：讀一張截圖（不碰遊戲）
   uv run --no-project python tools/gui/questdetail.py learn-image 檔.png "標題1,標題2,…" [--head 標題]   # 離線建樣板：依列順序（只算完整可見的列）給標題
-程式用：questdetail.read_list(tab) / status() / accept(title, dry_run=False) / parse(img)（純函式，離線可測）。
+程式用：questdetail.read_list(tab) / status() / task_status(title) → (rc, 狀態) / accept(title, dry_run=False) / parse(img)（純函式，離線可測）。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；questdetail 自己 120～129）：
   120 面板打不開 / 讀圖失敗（沒點任何面板內座標）
@@ -567,6 +567,28 @@ def status(want: list | None = None, dy: int = DEFAULT_DY) -> dict:
 
 
 # ---------------------------------------------------------------- 接取
+def task_status(title: str, dy: int = DEFAULT_DY) -> tuple:
+    """單一任務狀態（questrun 用）：開面板 → 只讀該任務所在分頁 → 關面板 → (rc, 狀態)；
+    狀態 = 已完成 / 進行中 / 待接取，列表裡找不到 = None（rc 仍 0）；rc 非 0 = 面板打不開 / 讀失敗（uikit.preflight 的碼也原樣回）"""
+    src = 'questdetail'
+    name = snap_name(title, 0.9)
+    if not name:
+        return uikit.fail(src, uikit.EXIT_USAGE, f'「{title}」不在任務表（TaskExplan）名稱裡'), None
+    rc = uikit.preflight(src)
+    if rc:
+        return rc, None
+    if not open_detail():
+        return uikit.fail(src, EXIT_NO_PANEL, '任務詳情打不開'), None
+    try:
+        r = read_list(tab_of(name), dy)
+    finally:
+        close_detail()
+    if not r['ok']:
+        return uikit.fail(src, EXIT_NOT_FOUND, f'讀不到列表：{r.get("why")}'), None
+    row = find_row(r['rows'], name)
+    return 0, (row['status'] if row else None)
+
+
 def _read_head(img, tpl: dict) -> tuple:
     """中間頂端選中標題 → (名稱或 None, how)：樣板優先，沒命中才 OCR（命中 snap 才算）"""
     name, _, _ = match_title(head_bitmap(img), 'head', tpl)

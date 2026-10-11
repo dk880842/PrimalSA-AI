@@ -242,5 +242,18 @@ if 'up_3.png' in have:
     rc = qd.accept('恐龍博士(1.82)', presses=2)
     check('對話框一直在 → 最多按 presses=2 次', sum(1 for a in clicks if a[0] == 'seq' and 'click 948 461' in a[1]) == 2, str(rc))
 
+# ---- task_status（questrun 用）：純邏輯，換掉面板開關與列表讀取 ----
+_saved = (qd.open_detail, qd.close_detail, qd.read_list, qd.uikit.preflight)
+qd.open_detail, qd.close_detail, qd.uikit.preflight = (lambda: True), (lambda: True), (lambda src, fast=True: 0)
+qd.read_list = lambda tab, dy=qd.DEFAULT_DY: {'ok': True, 'rows': [{'title': '彌生和日美子(1.82)', 'status': '進行中', 'how': 'tpl'}], 'gaps': 0, 'tab': tab, 'pages': 1}
+check('task_status：找到 → (0, 進行中)', qd.task_status('彌生和日美子(1.82)') == (0, '進行中'))
+check('task_status：列表沒有 → (0, None)', qd.task_status('亞姆的斧頭(1.82)') == (0, None))
+check('task_status：不在任務表 → (1, None)', qd.task_status('不存在的任務')[0] == 1)
+qd.read_list = lambda tab, dy=qd.DEFAULT_DY: {'ok': False, 'why': '截圖失敗', 'rows': [], 'gaps': 0}
+check('task_status：讀失敗 → 121', qd.task_status('彌生和日美子(1.82)')[0] == qd.EXIT_NOT_FOUND)
+qd.open_detail = lambda: False
+check('task_status：面板打不開 → 120', qd.task_status('彌生和日美子(1.82)')[0] == qd.EXIT_NO_PANEL)
+qd.open_detail, qd.close_detail, qd.read_list, qd.uikit.preflight = _saved
+
 print('\n失敗 %d 項' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)
