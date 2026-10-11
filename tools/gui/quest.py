@@ -46,7 +46,12 @@
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
   不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
-退出碼：33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+  預設模式 BOSS 戰收尾（errlog #68，2026-10-11）：非 --solo / --fight 時，任務戰（對話框 / 黃問號後 QUEST_BATTLE_WINDOW 秒內開打；打到一半又開始 Auto Walking 的後續遇敵不算）打完、閒置滿 IDLE_CONFIRM_SECS 後
+           **先驗隊伍（check_team）再停手、不點追蹤 / 黃問號、不接下一步**：滿員 = 退出碼 37、不滿 / 讀不到 = 38（事件 log 寫誰不在隊；重打流程由呼叫端做：char.py switch 被打飛者當單人隊長 → 追蹤自動傳送 → 重打 → 切回 DKBO → team.form）。
+           `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
+  不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
+           實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
+退出碼：37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -85,6 +90,9 @@ EXIT_NO_PROGRESS = 33                # 對話無進展：同一黃問號反覆�
 EXIT_NPC_MAP = 34                    # --fight：自己所在地圖與 NPC 所在地圖不同（--fight 不巡路）→ 沒點 NPC
 EXIT_BOSS_LOST = 35                  # --fight BOSS 戰打完閒置，但地圖與任務步驟都沒變 = 沒打贏（例：#25 龍王守衛 HP 1/551 被團滅）
 EXIT_BOSS_UNKNOWN = 36               # --fight BOSS 戰打完，判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task）→ 不回 0，請人工看畫面
+EXIT_BOSS_DONE = 37                  # 預設模式：任務 BOSS 戰打完（閒置確認），隊伍檢查滿員 → 停手，呼叫端確認戰果再繼續下一步（不自動接下一步 / 轉生；--no-stop-after-boss 可關）
+EXIT_BOSS_TEAM = 38                  # 預設模式：任務 BOSS 戰打完，但隊伍不滿 / 讀不到 → 停手，事件 log 寫誰不在隊；呼叫端做重打流程（char.py switch 單人隊長 → 追蹤傳送 → 重打 → 切回 → team.form）
+EXIT_IRREVERSIBLE = 39               # 對話框文字含不可逆關鍵字（轉生 / 封印 / 刪除 / 丟棄…）或讀不到對話文字 → 沒按、對話框維持開著，存 snap；人 / agent 看圖確認後用 --allow-irreversible 放行
 STALL_MAX = 4                        # 對話無進展幾輪就停
 STALL_MARKER_PX = 10                 # 兩次點的黃問號座標差超過這麼多 px = 不同標記（輪數歸零）
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
@@ -128,6 +136,16 @@ SELECT_NAME_DY = 48                  # 名字中心往上 48 = 那張卡片的�
 SELECT_MIN_N = 30                    # 一排黃字色塊的像素總數至少這麼多才算名字（單字名也 > 40；頭像高光 < 20）
 DIALOG_NEXT = (948, 461)             # NPC 對話框左鈕
 REWARD_OK = (720, 572)               # 「獲得物品」視窗的藍色確認鈕
+# ---- 不可逆對話防護（errlog #68，2026-10-11 精靈王轉生事故）----
+# 實測（tools/.cache/quest-log/094532 / 094534-dialog.png）：精靈王第 1 頁內文「hello welcome to be here!」、左鈕「漆黑洞窟」；
+# 第 2 頁內文「…進行轉生的儀式吧。轉生是把你最強的力量…」、左鈕只寫「完成」。→ 轉生字樣在**內文**不在按鈕，按「完成」就轉生了，
+# 所以防護要讀「內文 + 按鈕」兩塊文字，任一塊含關鍵字就停（只看按鈕擋不住）。
+IRREVERSIBLE_KEYWORDS = ('寵物轉生', '轉生', '转生', '封印', '刪除', '删除', '丟棄', '丢弃')
+DIALOG_BODY_BOX = (805, 285, 565, 115)     # 對話框內文區（淺米色字在棕底上，截圖座標 x,y,w,h；2026-10-11 實測字色 min(R,G,B) >= 170、底色 <= 64）
+DIALOG_BTN_BOX = (815, 428, 540, 68)       # 兩顆米色鈕（深棕字：max(R,G,B) <= 100）
+DIALOG_BODY_LIGHT = 140                    # ocr.ps1 -Light 門檻（亮字）
+DIALOG_BTN_DARK = 140                      # ocr.ps1 -Dark 門檻（深字）
+DIALOG_OCR_TRIES = 2                       # 內文讀不到時最多重讀幾次；仍讀不到 = 無法確認 → 不按（保守）
 # 對話框：棕底 2 點 + 兩顆米色鈕（heal.py 同款）。主畫面沙地很像米色，所以一定要配棕底
 # SIG_DIALOG / SIG_REWARD / SIG_PANEL / SIG_HUD（容差 40）在 screen_sigs.py
 # 完整戰鬥畫面（2026-10-10 實測，下指令 / 播放中兩種都量過）：上方中央棕框標籤（播放中 → 米色字；下指令 → 「N回合」+ 下方「剩餘時間 90」倒數），
@@ -464,6 +482,45 @@ def cleanup_old_shots(days: int = SHOT_KEEP_DAYS, folder: Path = None, now: floa
 def idle_confirmed(streak: int, since: float, now: float) -> bool:
     """連續閒置是否已夠久：>= 2 次且從第一次閒置起 >= IDLE_CONFIRM_SECS 秒（輪詢間隔變短也維持同樣等待時間）"""
     return streak >= 2 and now - since >= IDLE_CONFIRM_SECS
+
+
+def find_irreversible(texts: list[str], keywords=None) -> list[str]:
+    """對話框文字（內文 / 按鈕各行）→ 命中的不可逆關鍵字清單（去空白後子字串比對；沒命中回 []）"""
+    kws = IRREVERSIBLE_KEYWORDS if keywords is None else keywords
+    flat = re.sub(r'\s+', '', ''.join(texts))
+    return [k for k in kws if k in flat]
+
+
+def read_dialog_texts() -> dict:
+    """OCR 目前對話框：內文（亮字，-Light）與兩顆按鈕（深字，-Dark）。回 {'body': [行], 'buttons': [行], 'body_ok': 內文有讀到字}
+    內文每次都有字，所以 body 空 = 讀圖失敗（呼叫端保守不按）。ocr.ps1 只讀不點。"""
+    out = {'body': [], 'buttons': [], 'body_ok': False}
+    bx, by, bw, bh = DIALOG_BODY_BOX
+    for _ in range(DIALOG_OCR_TRIES):
+        r = ps_json('ocr.ps1', bx, by, bw, bh, '-Zooms', '2,3', '-Light', DIALOG_BODY_LIGHT)
+        out['body'] = [ln['text'] for ln in r.get('lines', []) if ln.get('text')]
+        if out['body']:
+            out['body_ok'] = True
+            break
+        time.sleep(0.3)
+    tx, ty, tw, th = DIALOG_BTN_BOX
+    r = ps_json('ocr.ps1', tx, ty, tw, th, '-Zooms', '2,3', '-Dark', DIALOG_BTN_DARK)
+    out['buttons'] = [ln['text'] for ln in r.get('lines', []) if ln.get('text')]
+    return out
+
+
+def check_dialog_irreversible() -> dict:
+    """按對話框前的防護：回 {'blocked': bool, 'reason': 說明, 'hits': [關鍵字], 'body': [...], 'buttons': [...]}
+    命中關鍵字 → blocked；內文讀不到 → blocked（無法確認不是不可逆選項）。"""
+    t = read_dialog_texts()
+    hits = find_irreversible(t['body'] + t['buttons'])
+    if hits:
+        why = f'對話框文字含不可逆關鍵字 {hits}'
+    elif not t['body_ok']:
+        why = '讀不到對話框內文（OCR 失敗），無法確認不是不可逆選項'
+    else:
+        why = ''
+    return dict(t, blocked=bool(why), reason=why, hits=hits)
 
 
 def snap(tag: str) -> str:
@@ -988,6 +1045,8 @@ def _main() -> int:
     ap.add_argument('--no-track', action='store_true', help='不主動點任務追蹤')
     ap.add_argument('--no-refresh', action='store_true', help='戰鬥不按刷新角色（預設：--solo / --fight 只在任務 / BOSS 戰刷新，組隊預設模式每場都刷新）')
     ap.add_argument('--stop-after-rewards', type=int, default=0, help='領到第 N 次獲得物品視窗後停（0 = 不停）')
+    ap.add_argument('--no-stop-after-boss', action='store_true', help='預設模式（非 --solo / --fight）：任務 BOSS 戰（對話 / 黃問號後 %d 秒內開打）打完閒置確認後預設會先驗隊伍再停（退出碼 %d 滿員 / %d 不滿）；加這個旗標 = 不停、照舊一路連跑（呼叫端自己負責驗隊伍與不可逆步驟）' % (QUEST_BATTLE_WINDOW, EXIT_BOSS_DONE, EXIT_BOSS_TEAM))
+    ap.add_argument('--allow-irreversible', action='store_true', help='不檢查對話框是否含不可逆關鍵字（%s）：預設遇到會不按、存 snap、退出碼 %d；人 / agent 看過截圖確認要做才加' % ('、'.join(IRREVERSIBLE_KEYWORDS), EXIT_IRREVERSIBLE))
     a = ap.parse_args()
     a.npc_map_arg = a.npc_map or None
     a.npc_map = None
@@ -1012,6 +1071,7 @@ def _main() -> int:
             if npc_xy is None:
                 return a.resolve_rc
     guard_ko = a.solo or a.fight         # 只有這兩種風格才會被打飛後要停手
+    boss_stop = not (a.solo or a.fight or a.no_stop_after_boss)   # 預設模式：BOSS 戰打完就停（--no-stop-after-boss 關）
     if not a.no_track and not a.task:
         log('沒給 --task：不知道要點哪個任務追蹤（點錯任務是之前的老問題）。請加 --task 任務名，或用 --no-track（只處理對話 / 戰鬥）')
         return 4
@@ -1163,6 +1223,8 @@ def _main() -> int:
             marker_fail = 0
         if st in ('reward', 'battle', 'walking'):
             stall_rounds, stall_marker = 0, None
+        if st == 'walking' and boss_stop:
+            last_action = 0.0            # 預設模式：對話後又開始 Auto Walking = 之後的遇敵是路上小怪，不算 BOSS 戰
         if st != 'dialog' and stall_prev == 'dialog':
             stall_leave_t = time.time()
         if st == 'dialog' and stall_prev != 'dialog':
@@ -1204,6 +1266,14 @@ def _main() -> int:
             event(f'--solo 到達 NPC：對話框已 ESC 關閉，停下交給組隊（退出碼 {EXIT_AT_NPC}）', shot)
             print('到達 NPC（對話框已 ESC 關閉）', flush=True)
             return EXIT_AT_NPC
+        if st == 'dialog' and not a.allow_irreversible:
+            # 不可逆防護（errlog #68）：內文 / 按鈕含「轉生」等關鍵字、或讀不到內文 → 不按，對話框留著，交給人 / agent 看圖
+            g = check_dialog_irreversible()
+            if g['blocked']:
+                shot = snap('irreversible')
+                event(f'不可逆對話防護：{g["reason"]}；內文 {g["body"]}、按鈕 {g["buttons"]} → 沒按任何鈕，對話框維持開著，退出碼 {EXIT_IRREVERSIBLE}（確認要做再加 --allow-irreversible）', shot)
+                print('對話框含不可逆選項（轉生 / 封印 / 刪除 / 丟棄…）或讀不到文字，已停手、沒按', flush=True)
+                return EXIT_IRREVERSIBLE
         if st == 'dialog':
             dialogs += 1
             shot = snap('dialog')
@@ -1297,6 +1367,22 @@ def _main() -> int:
                 event(f'--fight 對話後 {QUEST_BATTLE_WINDOW:.0f} 秒沒開打（這步可能不戰鬥）→ 退出碼 {EXIT_NO_BATTLE}', shot)
                 print('對話後沒開打', flush=True)
                 return EXIT_NO_BATTLE
+        elif st == 'idle' and boss_stop and boss_seen:
+            # 預設模式：任務 BOSS 戰打完。閒置確認前不點追蹤 / 黃問號（否則會直接接下一步，errlog #68）；確認後先驗隊伍再停
+            if idle_ok:
+                if team_on:
+                    ok_, desc = check_team(team_size, 'BOSS 戰後：')
+                    last_team_check = time.time()
+                else:
+                    ok_, desc = True, f'未檢查隊伍（--team-size {team_size}）'
+                shot = snap('boss-done')
+                if ok_:
+                    event(f'預設模式 BOSS 戰結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}）：隊伍檢查 {desc} → 停手，退出碼 {EXIT_BOSS_DONE}（呼叫端確認戰果再下一步；--no-stop-after-boss 可連跑）', shot)
+                    print(f'BOSS 戰結束，隊伍滿員（退出碼 {EXIT_BOSS_DONE}）', flush=True)
+                    return EXIT_BOSS_DONE
+                event(f'預設模式 BOSS 戰結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}）：隊伍{"不滿" if ok_ is False else "檢查失敗"}：{desc} → 停手，退出碼 {EXIT_BOSS_TEAM}（呼叫端重打流程：char.py switch 被打飛者 → 追蹤傳送 → 重打 → 切回 → team.form）', shot)
+                print(f'BOSS 戰結束但隊伍不滿：{desc}（退出碼 {EXIT_BOSS_TEAM}）', flush=True)
+                return EXIT_BOSS_TEAM
         elif a.stop_after_dialog and (dialogs or rewards) and st in ('idle', 'walking'):
             # 這一步已經對話 / 領獎過：從這裡起絕不點追蹤、不點 NPC 頭上黃「?」（否則會把下一步也對完、接著巡路 = 2026-10-10 深紅事故）。
             # 只等閒置 2 次就停；遊戲自己又進入 Auto Walking → 退出碼 24（呼叫端立刻處理，例如 --disband-after 已先解散）

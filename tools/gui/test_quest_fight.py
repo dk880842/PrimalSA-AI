@@ -12,6 +12,7 @@ import tempfile as _tf
 battleguard.LOCK_FILE = Path(_tf.mkdtemp()) / 'battle.lock'      # 測試用鎖檔位置，不碰真正的 tools/.cache/battle.lock
 REAL_READ_SCREEN = quest.read_screen                             # 同上：真的 read_screen（測像素分類）
 REAL_VERIFY = quest.verify_boss_result                           # 舊案例換成「一律 0」的假的（只測戰鬥分類）；A 區塊用真的
+REAL_READ_DLG = quest.read_dialog_texts                          # 真的 read_dialog_texts（用假 ps_json 測）
 REAL_CHECK_TEAM = quest.check_team                               # run() 會把 quest.check_team 換成假的；真函式留著測像素邏輯
 
 IDLE = {'state': 'idle', 'gold': 0, 'full': False, 'cmd': False, 'auto_off': False}
@@ -70,6 +71,13 @@ def fake_team(size, tag=''):
 
 
 POS_FN = lambda: (5510, 50, 17)
+DLG = {'body': ['你要進入裏面嗎？那趕緊通過吧！'], 'buttons': ['完成', '再見'], 'body_ok': True}   # 假的對話框 OCR（絕不呼叫真的 ocr.ps1）
+DLG_READS = []
+
+
+def fake_dialog_texts():
+    DLG_READS.append(1)
+    return dict(DLG)
 
 
 def run(argv, sim, real_verify=False):
@@ -78,6 +86,7 @@ def run(argv, sim, real_verify=False):
     quest.read_screen, quest.gui, quest.read_pos = sim.screen, sim.gui, lambda: POS_FN()
     quest.walk.gui = sim.gui
     quest.check_team = fake_team
+    quest.read_dialog_texts = fake_dialog_texts
     quest.snap = lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
@@ -207,6 +216,7 @@ def run2(argv, sim, team=False, real_verify=False, marker=None, pos=None, track=
     quest.event = lambda m, shot=None: print(f'   [{sim.t - 1000:5.1f}s] {m}')
     quest.layout.current = lambda: '2880x1659'
     quest.check_team = fake_team
+    quest.read_dialog_texts = fake_dialog_texts
     quest.netwatch.guard = lambda *_: {'status': 'ok'}
     quest.find_marker = marker or (lambda: (_ for _ in ()).throw(AssertionError('不該找黃問號')))
     quest.track_task = track or (lambda *a, **k: (_ for _ in ()).throw(AssertionError('不該點追蹤')))
@@ -837,7 +847,7 @@ s = Script(CYCLE * 3 + [WALK, IDLE] + CYCLE * 3 + TAIL)
 rc = run2(['--task', '卡坦的願望', '--max-seconds', '60'], s, marker=MK, track=NOTRACK)
 ok &= check('中間 Auto Walking → 歸零', rc != quest.EXIT_NO_PROGRESS and lclicks(s) == 6, f'rc={rc} 左鈕={lclicks(s)}')
 s = Script(CYCLE * 3 + [FULL_ON, FULL_ON, IDLE, IDLE] + CYCLE * 3 + TAIL)
-rc = run2(['--task', '卡坦的願望', '--max-seconds', '60'], s, marker=MK, track=NOTRACK)
+rc = run2(['--task', '卡坦的願望', '--max-seconds', '60', '--no-stop-after-boss'], s, marker=MK, track=NOTRACK)
 ok &= check('中間戰鬥 → 歸零', rc != quest.EXIT_NO_PROGRESS and lclicks(s) == 6, f'rc={rc} 左鈕={lclicks(s)}')
 maps = iter([(m, 1, 1) for m in range(1, 100) for _ in range(3)])
 s = Script(CYCLE * 7 + TAIL)
@@ -849,6 +859,86 @@ ok &= check('多頁對話（連續 8 頁，中間沒閒置）→ 不誤停，每
 s = Script([DIALOG, IDLE] * 7 + TAIL)
 rc = run2(['--task', '卡坦的願望', '--no-track', '--max-seconds', '40'], s)
 ok &= check('多頁對話頁與頁之間閃過 1 格閒置（沒點問號、閒置 < 2.5 秒）→ 不誤停', rc == 0 and lclicks(s) == 7, f'rc={rc} 左鈕={lclicks(s)}')
+
+
+print('(D) 預設模式：BOSS 戰結束就停（errlog #68）+ 不可逆對話防護')
+BATTLE = dict(FULL_CMD_OFF, cmd=False, auto_off=False)
+BOSS_SEQ = [IDLE, DIALOG, BATTLE, BATTLE, IDLE, IDLE, IDLE, IDLE, IDLE]     # 對話後 1 秒內開打 = 任務戰；之後閒置 2.5 秒確認
+TEAM['ret'] = (True, 'fake 滿 5 人')
+TEAM['calls'].clear()
+TEAM.pop('after', None)
+s = Script(BOSS_SEQ)
+rc = run2(['--no-track', '--max-seconds', '60'], s, team=True)
+ok &= check('任務戰打完 + 滿 5 人 → 37，BOSS 戰後驗過隊伍、沒點追蹤 / 黃問號', rc == quest.EXIT_BOSS_DONE and any(t.startswith('BOSS 戰後') for _, t in TEAM['calls']) and not any('click 722' in c[1] for c in s.clicks), f'rc={rc} {TEAM["calls"]}')
+TEAM['ret'] = (True, 'x')
+TEAM['after'] = (False, '隊長 DKBO、隊員 [DKBO2]、不在隊 [DKBO3, DKBO4, DKBO5]')
+s = Script(BOSS_SEQ)
+rc = run2(['--no-track', '--max-seconds', '60'], s, team=True)
+ok &= check('任務戰打完 + 隊伍不滿 → 38（不是 37、不是 0）', rc == quest.EXIT_BOSS_TEAM, f'rc={rc}')
+TEAM['after'] = (None, '切換面板沒打開')
+s = Script(BOSS_SEQ)
+rc = run2(['--no-track', '--max-seconds', '60'], s, team=True)
+ok &= check('隊伍檢查讀不到 → 38（保守）', rc == quest.EXIT_BOSS_TEAM, f'rc={rc}')
+del TEAM['after']
+s = Script([IDLE, DIALOG, BATTLE, BATTLE, DIALOG, DIALOG] + [IDLE] * 4)
+rc = run2(['--no-track', '--max-seconds', '60', '--no-stop-after-boss', '--team-size', '0'], s)
+ok &= check('--no-stop-after-boss：不停，連跑到下一段對話（共 3 次按左鈕）', rc == 0 and lclicks(s) == 3, f'rc={rc} 左鈕={lclicks(s)}')
+s = Script([IDLE] * 3 + [BATTLE, BATTLE] + [IDLE] * 6)
+rc = run2(['--no-track', '--max-seconds', '60'], s)
+ok &= check('一般遇敵（沒有對話 / 黃問號在前）→ 不停（rc 0 時間到）', rc == 0, f'rc={rc}')
+s = Script([DIALOG, WALK, BATTLE, BATTLE] + [IDLE] * 6)
+rc = run2(['--no-track', '--max-seconds', '60'], s)
+ok &= check('對話後又 Auto Walking、之後遇敵 = 路上小怪 → 不停', rc == 0, f'rc={rc}')
+s = Script([DIALOG, IDLE, IDLE] + [IDLE] * 8)
+# 對話後 20 秒才開打（超過 QUEST_BATTLE_WINDOW）
+s = Script([DIALOG] + [IDLE] * 20 + [BATTLE, BATTLE] + [IDLE] * 6)
+rc = run2(['--no-track', '--max-seconds', '90', '--no-marker'], s)
+ok &= check('對話後超過 15 秒才開打 → 不算 BOSS，不停', rc == 0, f'rc={rc}')
+s = Script(BOSS_SEQ)
+rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
+ok &= check('--team-size 0（不驗隊伍）：BOSS 戰後仍停 37，事件註明未檢查', rc == quest.EXIT_BOSS_DONE, f'rc={rc}')
+s = Script([DIALOG, BATTLE, BATTLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--fight', '--no-click', '--no-track', '--max-seconds', '60', '--team-size', '0'], s, real_verify=False)
+ok &= check('--fight 不受影響（照舊回 verify_boss_result 的 0，不是 37）', rc == 0, f'rc={rc}')
+
+print('--- 不可逆對話防護')
+ok &= check('find_irreversible：關鍵字命中 / 空白容忍 / 無害文字不中', quest.find_irreversible(['進行轉 生的儀式']) == ['轉生'] and quest.find_irreversible(['完成', '再見']) == [] and '封印' in quest.find_irreversible(['使用封印書']) and set(quest.IRREVERSIBLE_KEYWORDS) >= {'轉生', '寵物轉生', '封印', '刪除', '丟棄'})
+RB = {'body': ['你真是厲害，居然打敗了帖拉所伊朵來到我這裏。', '那我就如你所願，來進行轉生的儀式吧。'], 'buttons': ['完成', '再見'], 'body_ok': True}
+for name, texts in (('內文含轉生、按鈕只寫「完成」（精靈王第 2 頁實況）', RB),
+                    ('按鈕含「寵物轉生」', {'body': ['你想做什麼'], 'buttons': ['寵物轉生', '再見'], 'body_ok': True}),
+                    ('內文含「丟棄」', {'body': ['確定要丟棄嗎'], 'buttons': ['完成', '再見'], 'body_ok': True}),
+                    ('內文讀不到（OCR 失敗）→ 保守不按', {'body': [], 'buttons': ['完成', '再見'], 'body_ok': False})):
+    DLG.clear(); DLG.update(texts)
+    s = Script([DIALOG, DIALOG, IDLE, IDLE, IDLE, IDLE])
+    rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
+    ok &= check(f'{name} → 39、沒按左鈕', rc == quest.EXIT_IRREVERSIBLE and lclicks(s) == 0, f'rc={rc} 左鈕={lclicks(s)}')
+DLG.clear(); DLG.update(RB)
+s = Script([DIALOG, DIALOG, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0', '--allow-irreversible'], s)
+ok &= check('--allow-irreversible 放行：照按（兩頁都按、rc 0）', rc == 0 and lclicks(s) == 2, f'rc={rc} 左鈕={lclicks(s)}')
+n0 = len(DLG_READS)
+ok &= check('--allow-irreversible 不做 OCR（read_dialog_texts 沒被呼叫）', len(DLG_READS) == n0)
+DLG.clear(); DLG.update({'body': ['hello welcome to be here!'], 'buttons': ['漆黑洞窟', '再見'], 'body_ok': True})
+s = Script([DIALOG, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
+ok &= check('精靈王第 1 頁（無關鍵字）照按', rc == 0 and lclicks(s) == 1, f'rc={rc} 左鈕={lclicks(s)}')
+DLG.clear(); DLG.update({'body': ['你要進入裏面嗎？那趕緊通過吧！'], 'buttons': ['完成', '再見'], 'body_ok': True})
+
+# read_dialog_texts：用假 ps_json 驗證兩塊區域與參數；內文失敗會重試
+_calls = []
+def _fake_ps(script, *args):
+    _calls.append((script,) + args)
+    return {'ok': True, 'lines': [{'text': '轉生', 'x': 1, 'y': 1}] if '-Light' in args else [{'text': '完成', 'x': 1, 'y': 1}]}
+_keep_ps, _keep_rdt = quest.ps_json, quest.read_dialog_texts
+quest.ps_json, quest.read_dialog_texts = _fake_ps, REAL_READ_DLG
+t = quest.read_dialog_texts()
+ok &= check('read_dialog_texts：內文用 -Light、按鈕用 -Dark，各一次', t == {'body': ['轉生'], 'buttons': ['完成'], 'body_ok': True} and sum('-Light' in c for c in _calls) == 1 and sum('-Dark' in c for c in _calls) == 1, str(_calls))
+_calls.clear()
+quest.ps_json = lambda script, *args: (_calls.append(args) or {'ok': False})
+quest.time.sleep = lambda d: None
+t = quest.read_dialog_texts()
+ok &= check('內文讀不到：重試 DIALOG_OCR_TRIES 次後 body_ok False', not t['body_ok'] and sum('-Light' in c for c in _calls) == quest.DIALOG_OCR_TRIES, str(_calls))
+quest.ps_json, quest.read_dialog_texts = _keep_ps, _keep_rdt
 
 print('(C) --npc-map / 反查 NPC 地圖：不同圖 → 退出碼 34；非戰鬥步警告')
 ok &= check('npc_map_of_xy：碧青洞窟 (57,48) → 30305；不存在座標 → None', quest.npc_map_of_xy('碧青洞窟', (57, 48)) == 30305 and quest.npc_map_of_xy('碧青洞窟', (1, 1)) is None)

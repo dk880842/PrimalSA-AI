@@ -92,7 +92,7 @@ uv run --no-project python tools/gui/errlog.py list
 | 解散隊伍 | **先跑 `team.py disband`**，非 0 再 **`/psa-disband-team` skill**（介面參考 [ui/team.md](ui/team.md)） |
 | 確認誰是「當前」角色 | [ui/team.md](ui/team.md) |
 | 看角色屬性 / 抗性 / 潛力點 | [ui/role.md](ui/role.md) |
-| 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則 OCR 核對追蹤列表任務名再點；`ocr.ps1` / `findmark.ps1`） | [ui/quest.md](ui/quest.md) |
+| 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則 OCR 核對追蹤列表任務名再點；`ocr.ps1` / `findmark.ps1`；**預設模式任務 BOSS 戰打完先驗隊伍再停：退出碼 37 滿員 / 38 不滿，`--no-stop-after-boss` 才連跑；對話框內文 / 按鈕含轉生 / 封印 / 刪除 / 丟棄 → 不按、退出碼 39，確認後 `--allow-irreversible`**，errlog #68） | [ui/quest.md](ui/quest.md) |
 | **單人逃跑解任務**（DKB0 單人跑 NPC、遇怪逃跑 → 組隊對話 / 打；紅暴 2031；`quest.py --solo / --fight`、`psa.py steps`、`heal.py --no-return`） | **`/psa-quest-solo` skill**（介面參考 [ui/quest.md](ui/quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
 | 看 / 改寵物出戰 · 等待（不碰存倉） | **先跑 `pet.py list` / `set-state` / `rest-all`**（介面參考 [ui/pet.md](ui/pet.md)） |
