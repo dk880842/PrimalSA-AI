@@ -105,7 +105,7 @@ def use_one(role: str, want: str) -> int:
         if '使用' not in txt:
             bag.close_popup()
             return bag._fail(bag.EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「使用」', 'bag-use-btn')
-        x = 619 if is_pair_layout() else 732
+        x = 619 if ('更多' in txt or is_pair_layout()) else 732       # 並排版型（使用 619 / 更多 825）：OCR 有「更多」就算；舊的像素判斷漏判 → 點到兩鈕中間 732 沒反應（2026-10-11 龍王的守護根因）
         if not bag._click(x, 648, bag.POPUP, f'bag 使用「{want}」', wait_ms=600):
             return bag._fail(bag.EXIT_PANEL, '彈窗特徵消失，沒點使用', 'bag-use-gone')
         bag._wait(lambda: not bag.popup_open(), 2.0)

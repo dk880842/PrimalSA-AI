@@ -368,6 +368,9 @@ class Run:
         if rc:
             return rc
         rc = T.team_form()                                             # 接取 / 對話前一定先快速組隊
+        if rc:                                                         # 切換面板偶爾讀到 0 張卡片（2026-10-11 rc 42 一閃而過）→ 等 2 秒重試一次
+            T.sleep(2)
+            rc = T.team_form()
         if rc:
             return self.fail(EXIT_HANDOVER, f'接取前 team.form 失敗 rc={rc}')
         # 整個任務只開一次詳情：同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 接取）
@@ -431,7 +434,7 @@ class Run:
                 team_retry = 0
                 continue
             if act == 'team':
-                if team_retry >= 1:
+                if team_retry >= 3:                                    # 對話剛收起時切換面板偶爾打不開（2026-10-11 小豬愛情故事最後一段），多給幾次
                     return self.fail(EXIT_HANDOVER, f'任務 {tid}：隊伍檢查連續失敗（quest.py {rc}）', quest_rc=rc)
                 team_retry += 1
                 rc2 = T.team_form()

@@ -281,6 +281,19 @@ def _scan_track(want: str, mode: str, max_scrolls: int) -> tuple:
     return y, ups, pages
 
 
+def close_stray_panel() -> bool:
+    """畫面停在已知的誤開面板（組隊 / 切換）→ 點它的 ✕ 關掉並回 True；都不是回 False（照舊當不認得 / 疑似驗證視窗）"""
+    try:
+        import uikit
+        for p in (uikit.TEAMPANEL, uikit.SWITCH):
+            if uikit.is_open(p):
+                event(f'誤開了「{p.name}」面板（戰鬥剛結束時刷新鈕點到主畫面按鈕）→ 點 ✕ 關閉')
+                return uikit.close_panel(p, known_open=True)
+    except Exception as e:
+        log(f'close_stray_panel 失敗：{e}')
+    return False
+
+
 def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | None:
     """掃一遍追蹤列表找標題 = want 的那一格並點它（開始巡路）。名稱不符絕不點。
     回傳：True 找到（click=True 時已點）、False 整個列表掃完沒有、None 途中畫面不再是主畫面（交回主迴圈，不算找不到）。
@@ -1483,6 +1496,9 @@ def _main() -> int:
                 unknown_t0 = time.time()
             unknown += 1
             log(f'不認得的畫面 {unknown}/3 {s}')
+            if unknown >= 2 and close_stray_panel():       # 戰鬥剛結束時「刷新角色」的 850,765 會點到主畫面的「組隊」鈕（2026-10-11 小豬愛情故事）→ 已知面板直接關，不算驗證視窗
+                unknown = 0
+                continue
             if unknown >= 3 and time.time() - unknown_t0 >= UNKNOWN_CONFIRM_SECS:
                 shot = snap('UNKNOWN')
                 event('警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）→ 停止自動操作，請使用者處理', shot)

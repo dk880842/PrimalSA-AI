@@ -259,8 +259,8 @@ check('38 → 114、不恢復掛機', rc == questrun.EXIT_TEAM and 'grind_start'
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, [])])
 rc = go(f, [2017])
 check('30 → team.form 後重跑成功', rc == 0 and f.names().count('quest') == 2)
-f = Fake(status={D17: [questrun.DOING]}, quest=[(32, []), (32, [])])
-check('32 連續兩次 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER)
+f = Fake(status={D17: [questrun.DOING]}, quest=[(32, [])] * 4)
+check('32 連續 4 次 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER)
 
 # 8) 3 追蹤沒反應、沒 walk 步驟 → 112
 f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])])
@@ -415,6 +415,18 @@ check('track_task：目前頁就是目標 → 直接點、0 次捲動', quest.tr
 clicks.clear()
 check('track_task：目前頁是別的任務（漆黑洞窟二轉）→ 不點它；沒找到回 False 且不點任何卡片', quest.track_task('漆黑洞窟(二轉)') is False and not any('click 205' in str(c) for c in clicks))
 (quest.gui, quest.ensure_task_tab, quest._tm_has, quest._find_on_page, quest.scroll_list, quest.list_signature, quest.event, quest.log) = _sv
+
+# ================= quest.close_stray_panel：誤開的組隊 / 切換面板自動關、不算驗證視窗 =================
+_so = (uikit.is_open, uikit.close_panel, quest.event, quest.log)
+_closed = []
+uikit.is_open = lambda p: p.name == 'TEAMPANEL'
+uikit.close_panel = lambda p, known_open=False: (_closed.append(p.name), True)[1]
+quest.event = lambda *a, **k: None
+quest.log = lambda *a, **k: None
+check('close_stray_panel：組隊面板開著 → 關它並回 True', quest.close_stray_panel() is True and _closed == ['TEAMPANEL'])
+uikit.is_open = lambda p: False
+check('close_stray_panel：沒有已知面板 → False（照舊當不認得）', quest.close_stray_panel() is False)
+uikit.is_open, uikit.close_panel, quest.event, quest.log = _so
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)
