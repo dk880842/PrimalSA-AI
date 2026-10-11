@@ -1043,5 +1043,108 @@ quest.winenv.run_ps = lambda *a, **k: _ty.SimpleNamespace(returncode=0, stdout='
 ok &= check('ps_json 正常解析', quest.ps_json('ocr.ps1').get('ok') is True)
 quest.winenv.run_ps, quest.log = _real_run_ps, _real_log
 
+
+# ---- 2026-10-11 冗餘修正（馬祖快遞 16:29～16:39）----
+print('(W) 自動走路不計入 --max-seconds：WalkClock 純函式 + 整合')
+wc = quest.WalkClock(10, 0.0)
+for t in range(1, 401):
+    wc.tick('walking', float(t))
+ok &= check('WalkClock：連續巡路 400 秒（cap 900）→ 一直沒到時限、walked 約 399', not wc.expired(400.0) and 398 <= wc.walked <= 400, f'walked={wc.walked}')
+for t in range(401, 411):
+    wc.tick('idle', float(t))
+ok &= check('WalkClock：之後連續閒置 10 秒才到時限', wc.expired(410.5) and not wc.expired(405.0), f'end={wc.end}')
+wc = quest.WalkClock(10, 0.0)
+seq_ = ['walking', 'walking', 'unknown', 'walking', 'unknown', 'unknown', 'walking', 'walking']
+for i, st_ in enumerate(seq_, 1):
+    wc.tick(st_, float(i))
+ok &= check('WalkClock：巡路中途 unknown 1～2 次又回 walking 仍算巡路（時限不縮）', abs(wc.end - (10 + len(seq_) - 1)) < 1e-6, f'end={wc.end}')
+wc = quest.WalkClock(10, 0.0)
+for i, st_ in enumerate(['walking', 'walking', 'unknown', 'unknown', 'unknown', 'unknown'], 1):
+    wc.tick(st_, float(i))
+ok &= check('WalkClock：unknown 連續 3 次以上 = 不再算巡路（第 3 次起耗時限）', wc.end == 10 + 3 and wc.walked == 3, f'end={wc.end} walked={wc.walked}')
+wc = quest.WalkClock(10, 0.0, cap=50)
+for t in range(1, 201):
+    wc.tick('walking', float(t))
+ok &= check('WalkClock：單次巡路超過 cap 就不再延長（防卡死）', wc.expired(200.0) and wc.walked <= 51, f'walked={wc.walked}')
+wc = quest.WalkClock(10, 0.0)
+wc.tick('idle', 5.0)
+wc.tick('walking', 6.0)
+ok &= check('WalkClock：走路前的閒置時間不被補回（只補 walking 期間）', wc.end == 10.0, f'end={wc.end}')
+ok &= check('questrun 與 quest 的 WALK_CAP_S 一致', __import__('questrun').WALK_CAP_S == quest.WALK_CAP_S)
+s = Script([WALK] * 30 + [IDLE] * 40)
+rc = run2(['--no-track', '--max-seconds', '10'], s)
+ok &= check('整合：--max-seconds 10、巡路 30 秒不計 → 約 40 秒才「時間到」（舊行為 10 秒就切）', rc == 0 and 38 <= s.t - 1000 <= 44, f'rc={rc} t={s.t - 1000}')
+s = Script([IDLE] * 40)
+rc = run2(['--no-track', '--max-seconds', '10'], s)
+ok &= check('整合：沒巡路 → 照樣 10 秒到', rc == 0 and 9 <= s.t - 1000 <= 12, f't={s.t - 1000}')
+
+print('(X) 對話 / 領獎結束後一律先點追蹤，卡片不在 / 沒反應才找黃問號')
+
+
+def order_case(screens, track_res, marker_res, argv_extra=()):
+    s_ = Script(screens)
+    mark = lambda: (s_.clicks.append((0, 'MARK')), marker_res)[1]
+    trk = lambda *a, **k: (s_.clicks.append((0, 'TRACK')), track_res)[1]
+    rc_ = run2(['--task', 'x', '--max-seconds', '25'] + list(argv_extra), s_, marker=mark, track=trk)
+    return rc_, [c[1] for c in s_.clicks]
+
+
+rc, seq = order_case([IDLE, IDLE, DIALOG, IDLE, IDLE, IDLE, IDLE, IDLE], True, None)
+i = seq.index('click 948 461')
+ok &= check('對話框按完 → 下一個動作是 TRACK（中間沒有 MARK）', seq[i + 1] == 'TRACK', str(seq))
+ok &= check('開始時（沒對話過）仍是先找黃問號（MARK 在第一個 TRACK 前）', seq.index('MARK') < seq.index('TRACK'), str(seq))
+mk722 = {'x': 722, 'y': 318, 'w': 12, 'h': 14, 'n': 90}
+rc, seq = order_case([IDLE, DIALOG, DIALOG, IDLE, IDLE, IDLE, IDLE, IDLE], False, mk722)
+i = seq.index('click 948 461')
+ok &= check('追蹤欄沒有該任務卡片（False）→ 同一輪接著 MARK 並點黃問號', seq[i + 1] == 'TRACK' and seq[i + 2] == 'MARK' and any(c.startswith('click 1215 18; wait 100; click 722 ') or 'click 722' in c for c in seq[i + 3:]), str(seq))
+rc, seq = order_case([IDLE, DIALOG] + [IDLE] * 40, True, None)
+ok &= check('追蹤點了卻一直沒反應：改找黃問號（MARK）後仍沒反應才退出碼 3（不是第一輪就 3）', rc == 3 and seq.count('TRACK') >= 3 and 'MARK' in seq[seq.index('click 948 461'):], f'rc={rc} {seq}')
+rc, seq = order_case([IDLE, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE], True, None, ['--no-marker'])
+ok &= check('領獎後：照舊先掃追蹤列表（TRACK）', 'TRACK' in seq[seq.index('click 720 572'):][:2], str(seq))
+
+print('(Y) 隊伍檢查：面板開後等卡片內容穩定再判斷；全部不在隊先重讀')
+ALLO = {r: 'other' for r in quest.TEAM_CARDS}
+GOOD = dict(ALLO, DKBO='leader', DKBO2='member', DKBO3='member', DKBO4='member', DKBO5='member')
+_rt, _rs_ = quest.read_team_labels, quest.time.time
+reads = iter([ALLO, ALLO, GOOD, GOOD, GOOD])
+quest.read_team_labels = lambda: next(reads)
+clk = {'t': 0.0}
+quest.time.time, quest.time.sleep = (lambda: clk['t']), (lambda d: clk.__setitem__('t', clk['t'] + d))
+got = quest.read_team_labels_stable()
+ok &= check('剛開面板 5 人都讀成不在隊 → 繼續等，內容載入（GOOD 連 2 次）才回傳', got == GOOD, str(got))
+reads = iter([ALLO] * 20)
+clk['t'] = 0.0
+got = quest.read_team_labels_stable()
+ok &= check('一直全部不在隊 → 最多等 1.5 秒、至少重讀 2 次才回（交給 judge 判失敗）', got == ALLO and 0.5 <= clk['t'] <= 2.1, f't={clk["t"]}')
+ok &= check('全部不在隊 → judge_team 判失敗；穩定後的 GOOD → 通過', not quest.judge_team(ALLO, 5)[0] and quest.judge_team(GOOD, 5)[0])
+quest.read_team_labels = lambda: None
+ok &= check('讀不到像素 → None', quest.read_team_labels_stable() is None)
+quest.read_team_labels = _rt
+quest.time.time, quest.time.sleep = _rs_, (lambda d: None)
+
+print('(Z) 收底部「關閉」列：點一下後輪詢確認，不連點')
+quest.CLOSE_ROW_POLL_GAP = 0.0
+quest.time.sleep = lambda d: None
+for nm, g, want_close in [('動畫慢（第 5 次輪詢才消失、在輪詢上限 6 內）→ 只點 1 下', RowGame(True, lag=5), 1),
+                          ('超過輪詢上限（lag 8）→ 輪詢全程沒收起才點第 2 下', RowGame(True, lag=8), 2)]:
+    quest.gui = g.gui
+    quest.read_screen = lambda: {'state': 'battle'}
+    r = quest.hide_close_row()
+    n = len([c for c in g.clicks if c.startswith('click 510 ')])
+    ok &= check(nm, n == want_close and r is True, f'clicks={n} r={r}')
+class OverGame(RowGame):
+    def gui(self, *args, note=''):
+        out = super().gui(*args, note=note)
+        if args[0] == 'pixel' and self.pending is False and False:
+            pass
+        return out
+g = RowGame(True, eat=9)
+states = iter(['battle'] * 3 + ['idle'] * 99)
+quest.gui = g.gui
+quest.read_screen = lambda: {'state': next(states)}
+r = quest.hide_close_row()
+ok &= check('輪詢途中戰鬥打完（回主畫面）→ 不再點下一下、回 False', r is False and len([c for c in g.clicks if c.startswith('click 510 ')]) <= 1, str(g.clicks))
+quest.read_screen = REAL_READ_SCREEN
+
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

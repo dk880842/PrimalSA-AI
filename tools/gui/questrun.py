@@ -23,6 +23,8 @@
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
 quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀一次詳情：已完成 = 結束、進行中 = 下一片；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 → 114 停手（重打流程 P3，現在照 psa-team-check-after-boss 手動）；
+  （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
+  quest.py 回 0 且 tail 有「時間到」（單純 slice 到期、任務還在追蹤欄）→ 不開詳情，直接下一片（完成由下一片 quest.py「任務完成」或回 5 時才讀詳情確認）；回 0 但沒有「任務完成」也不是「時間到」（模糊）才讀一次詳情
   3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
   33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 114；其他 → 112
 
@@ -67,6 +69,7 @@ ALL_ROLES = rebirth.ALL_ROLES
 DRAGON = rebirth.DRAGON
 DRAGON_REEAT_S = rebirth.DRAGON_REEAT_S
 SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 300, 12, 30, 50
+WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
 DEFAULT_SPOT = '地雷區'
 FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出）
 DONE_TRUST_S = 2 * 3600         # 進度檔記「已完成」且在這段時間內 → 重啟續跑直接跳過（超過視為可能轉生 / 封印書重置過，重新讀一次詳情）
@@ -194,6 +197,21 @@ def classify(rc: int, tail=()) -> str:
             39: 'irrev', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked'}.get(rc, 'other')
 
 
+def walk_secs(tail) -> int:
+    """quest.py 結尾印的「走路不計時 N 秒」→ N（沒有 = 0）"""
+    import re
+    for ln in reversed(list(tail or [])):
+        m = re.search(r'走路不計時\s*(\d+)\s*秒', str(ln))
+        if m:
+            return int(m.group(1))
+    return 0
+
+
+def time_up(tail) -> bool:
+    """quest.py 是因為 slice 時間到而結束（事件行「時間到，結束」）"""
+    return any('時間到' in str(x) for x in (tail or []))
+
+
 def est_total(defs) -> int:
     return sum(d.get('est_min', 0) for d in defs)
 
@@ -220,7 +238,7 @@ def print_plan(defs, opts: dict) -> None:
         if d.get('boss'):
             print('  - 有任務戰 / BOSS 戰：quest.py 預設模式打完回 37（滿 5 人 → 繼續）/ 38（不滿 → 114，重打流程 P3）')
         if opts.get('dragon', True):
-            print(f'  - 每片前：龍王的守護（距上次 > {int(DRAGON_REEAT_S)} 秒才吃；depot_use 公共倉庫取出 → 吃 → 存回 → 關遇敵）')
+            print(f'  - 每片前：龍王的守護（buff 列看不到人形圖示才吃；depot_use 公共倉庫取出 → 吃 → 存回 → 關遇敵）')
         print(f'  - 迴圈：quest.py --task {d["track"]} --max-seconds {opts["slice_s"]}（≤ {opts["max_slices"]} 片、≤ {opts["max_min"]} 分），依退出碼分支')
         print('  - 收尾：quest.py「任務完成」（追蹤欄沒有該任務）→ 進度檔 + notes/quest-log.md（沒有該字樣才開詳情確認）')
     if opts['after'] == 'grind':
@@ -279,14 +297,11 @@ class Run:
         event(f'警告：{msg}')
 
     def ensure_dragon(self, force: bool = False):
-        """隊長吃龍王的守護（公共倉庫取出 → 吃 1 顆 → 剩的存回）；失敗只警告（沒有也能跑，只是會遇敵）；9 分鐘內不重吃"""
+        """隊長吃龍王的守護（公共倉庫取出 → 吃 1 顆 → 剩的存回）；失敗只警告（沒有也能跑，只是會遇敵）；buff 列看到人形圖示就不吃、看不到就吃一顆（不看時間）"""
         if not self.o.get('dragon', True):
             return
-        now = time.time()
         active = self.T.dragon_active()                                # 人形圖示在 = 還有效（不看時間）；2倍智慧果的 EXP 圖示不會誤判
         if not force and active:
-            return
-        if not force and active is None and now - self.st.get('last_eat', 0) < DRAGON_REEAT_S:
             return
         have = bool(self.st.get('dragon_in_bag'))
         rc, d = self.T.dragon(have)
@@ -438,7 +453,11 @@ class Run:
                 rc = self.do_walk(d, step, sd)
                 if rc:
                     return rc
-            rc, tail = T.quest(['--task', track, '--max-seconds', self.o['slice_s']], self.o['slice_s'] + 120)
+            rc, tail = T.quest(['--task', track, '--max-seconds', self.o['slice_s']], self.o['slice_s'] + WALK_CAP_S + 120)
+            walked = walk_secs(tail)
+            if walked:
+                t0 += walked                                           # 自動巡路 = 任務進行中：不計入 --max-min（quest.py 自己的 slice 時限也不計巡路）
+                event(f'任務 {tid} 本片自動巡路 {walked} 秒，不計入時限')
             self.info['quest_rc'] = rc
             ts['last_rc'] = rc
             act = classify(rc, tail)
@@ -483,7 +502,9 @@ class Run:
                     self.save()
                     event(f'任務 {tid}「{d["detail"]}」已完成（quest.py 任務完成；{int(time.time() - t0)} 秒、{k + 1} 片）')
                     return 0
-                rc, s2 = self.status_of(d)                              # 沒有「任務完成」字樣才有疑慮 → 才讀一次詳情
+                if act == 'check' and time_up(tail):                    # quest.py 只是 slice 時間到（任務還在追蹤欄、沒說完成）：不開詳情，直接下一片；
+                    continue                                           # 真的完成會在下一片由 quest.py 回 5（追蹤欄沒有該任務）或「任務完成」→ 那時才讀詳情確認
+                rc, s2 = self.status_of(d)                              # 沒有「任務完成」字樣、也不是單純時間到 → 才有疑慮 → 才讀一次詳情
                 self.opens(ts)
                 if rc:
                     return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 完成確認讀狀態失敗 rc={rc}')

@@ -235,6 +235,7 @@ def is_open(p: Panel) -> bool:
 
 
 POLL_S = 0.1                     # 等面板 / 畫面的輪詢間隔（舊 0.5 s）
+RECLICK_S = 2.5                  # open_panel_ex：點開啟鈕後至少隔這麼久（期間只輪詢確認）才准再點第 2 下，避免短時間連點（2026-10-11 任務詳情 1 秒內點 2 次）
 WAIT_OPEN_MS = 1500
 
 
@@ -277,6 +278,7 @@ def open_panel_ex(p: Panel, timeout: float = 4.0, hud_wait: float = 0.0) -> tupl
     end = t_start + timeout
     hud_deadline = t_start + hud_wait
     clicked = 0
+    last_click_t = 0.0
     was_open = None
     tol = _uniform_tol(p.sig)
     while True:
@@ -289,16 +291,18 @@ def open_panel_ex(p: Panel, timeout: float = 4.0, hud_wait: float = 0.0) -> tupl
             was_open = opened
         if opened:
             return True, was_open
-        if hud and clicked < 3:
+        if hud and clicked < 3 and (clicked == 0 or clock() - last_click_t >= RECLICK_S):
             if tol is not None:
                 out = gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; waitpix {WAIT_OPEN_MS} {screen_sigs.sig_str(p.sig)} {tol}', note=f'uikit 開 {p.name} 面板')
                 clicked += 1
+                last_click_t = clock()
                 LAST_OPEN['clicked'] = clicked
                 if _seq_ok(out) or is_open(p):
                     return True, was_open
             else:
                 gui('seq', f'click {p.open_xy[0]} {p.open_xy[1]}; wait {p.settle_ms}', note=f'uikit 開 {p.name} 面板')
                 clicked += 1
+                last_click_t = clock()
                 LAST_OPEN['clicked'] = clicked
                 if is_open(p):
                     return True, was_open

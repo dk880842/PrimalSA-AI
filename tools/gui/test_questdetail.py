@@ -11,6 +11,7 @@ import questdetail as qd  # noqa: E402
 import uikit  # noqa: E402
 
 CACHE = HERE.parent / '.cache'
+REAL_READ_LIST = qd.read_list          # install() / task_status 測試會換掉 qd.read_list，這裡先存真的
 fails = 0
 
 
@@ -261,6 +262,70 @@ check('task_status：讀失敗 → 121', qd.task_status('彌生和日美子(1.82
 qd.open_detail = lambda: False
 check('task_status：面板打不開 → 120', qd.task_status('彌生和日美子(1.82)')[0] == qd.EXIT_NO_PANEL)
 qd.open_detail, qd.close_detail, qd.read_list, qd.uikit.preflight = _saved
+
+
+# ---- 6. 捲動：一次捲「可見列數 − 1 列」、漏列退回小步（模擬列表，不碰遊戲）----
+check('page_dy：5 列 → 約 147、夾在 [100, 150]', qd.page_dy(5) == 147 and qd.page_dy(1) == qd.DEFAULT_DY and qd.page_dy(9) == qd.MAX_DY, str(qd.page_dy(5)))
+check('page_dy 比舊的 100 大（每頁多 ≥ 1 列）', qd.page_dy(5) * qd.SCROLL_RATIO >= 100 * qd.SCROLL_RATIO + 80 - 1)
+
+
+class World:
+    """模擬任務列表：N 列、列距 80、可視 5 列；drag dy 位移 = dy × ratio（真實比例 ratio，與程式假設的 2.17 可不同）"""
+    def __init__(self, n=23, ratio=2.17):
+        self.n, self.ratio, self.off = n, ratio, 0.0
+        self.names = [f'T{i}' for i in range(n)]
+        self.scrolls = []
+
+    def rows(self):
+        first = int(self.off // 80)
+        out = []
+        for i in range(first, min(self.n, first + 6)):
+            top = 266 + i * 80 - self.off
+            if top >= 262 and top + 80 <= 722 + 20:
+                out.append({'title': self.names[i], 'status': '待接取', 'top': top, 'cy': top, 'bm': 0, 'how': 'tpl', 'score': 1.0})
+        return out[:5]
+
+    def scroll(self, down, dy=qd.DEFAULT_DY):
+        self.scrolls.append((down, dy))
+        self.off = max(0, min((self.n - 5) * 80, self.off + (1 if down else -1) * dy * self.ratio))
+
+
+def run_world(w):
+    qd.scroll = w.scroll
+    qd._stable_shot = lambda max_tries=4: object()
+    qd.parse = lambda img, tpl=None, ocr_fn=None: w.rows()
+    qd._learn_page = lambda *a, **k: None
+    qd.select_tab = lambda tab: True
+    qd.scroll_top = lambda dy=qd.TOP_DY: True
+    qd.load_tpl = lambda path=None: {'row': {}, 'head': {}}
+    return REAL_READ_LIST('支線')
+
+
+_keep = (qd.scroll, qd._stable_shot, qd.parse, qd._learn_page, qd.select_tab, qd.scroll_top, qd.load_tpl, qd.read_list)
+w = World(23, 2.17)
+r = run_world(w)
+names_got = [x['title'] for x in r['rows']]
+check('模擬列表（比例相符）：23 列全讀到、不漏、無 gaps', names_got == w.names and r['gaps'] == 0, f'{len(names_got)} gaps={r["gaps"]}')
+big_pages = r['pages']
+check('大步頁數比舊的 dy=100 少（舊約 23/2.75 = 9 頁）', big_pages <= 7 and all(dy >= 140 for d, dy in w.scrolls if d), f'{big_pages} 頁 {w.scrolls[:3]}')
+check('比例相符時不需要退回小步', r['fallbacks'] == 0)
+w = World(23, 3.2)                                     # 實際位移比假設大 → 大步會漏列，要偵測到並退回小步
+r = run_world(w)
+names_got = [x['title'] for x in r['rows']]
+check('位移比預期大（漏列）→ 偵測沒重疊、退回小步、仍全讀到', names_got == w.names and r['fallbacks'] >= 1, f'{len(names_got)} fb={r["fallbacks"]} gaps={r["gaps"]}')
+check('退回時先往上捲回再小步（有 down=False 與 dy=100 的 down=True）', any(not d for d, _ in w.scrolls) and any(d and dy == qd.DEFAULT_DY for d, dy in w.scrolls))
+# overlaps 純函式
+a = [{'title': 'A', 'bm': 0}, {'title': 'B', 'bm': 0}]
+check('overlaps：上一頁最後一列在新頁 = 有重疊', qd.overlaps(a, [{'title': 'B', 'bm': 0}, {'title': 'C', 'bm': 0}]))
+check('overlaps：只剩第一列重疊（最後一列不見）= 視為漏列', not qd.overlaps(a, [{'title': 'A', 'bm': 0}]))
+check('overlaps：最後一列不在新頁 = 沒重疊', not qd.overlaps(a, [{'title': 'C', 'bm': 0}, {'title': 'D', 'bm': 0}]))
+check('overlaps：空頁不擋', qd.overlaps([], a) and qd.overlaps(a, []))
+qd.scroll, qd._stable_shot, qd.parse, qd._learn_page, qd.select_tab, qd.scroll_top, qd.load_tpl, qd.read_list = _keep
+# 真實截圖頁序（scroll_3 → scroll_4 有共同列、scroll_2 → scroll_3 / up_1 → up_2 沒有）
+if all(f in have for f in ('scroll_2.png', 'scroll_3.png', 'scroll_4.png', 'up_1.png', 'up_2.png')):
+    pg = {f: qd.parse(have[f], tpl_all) for f in ('scroll_2.png', 'scroll_3.png', 'scroll_4.png', 'up_1.png', 'up_2.png')}
+    check('真實截圖：scroll_3 → scroll_4 有重疊（最後一列在新頁）', qd.overlaps(pg['scroll_3.png'], pg['scroll_4.png']))
+    check('真實截圖：up_1 → up_2 沒有重疊 = 會觸發退回小步', not qd.overlaps(pg['up_1.png'], pg['up_2.png']))
 
 print('\n失敗 %d 項' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

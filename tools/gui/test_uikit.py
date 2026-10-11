@@ -157,6 +157,32 @@ g = install(Game(panel=True))
 g.sync()
 uikit.SWITCH.close_xy  # noqa: B018
 check('已開著 open_panel 不再點', uikit.open_panel(uikit.SWITCH) is True and g.clicks == [])
+
+
+class EatFirst(Game):
+    """第一下開啟鈕被吃掉（面板沒開）；記錄每次點擊的虛擬時間"""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.times, self.eat = [], 1
+
+    def gui(self, *args, note=''):
+        if args[0] == 'seq' and 'click' in args[1]:
+            self.times.append(self.t)
+            if self.eat > 0:
+                self.eat -= 1
+                self.clicks.append(uikit.SWITCH.open_xy)
+                return ''
+        return super().gui(*args, note=note)
+
+
+g = install(EatFirst(panel=False, hud=True))
+ok_ = uikit.open_panel(uikit.SWITCH, timeout=4.0)
+check('開面板第 1 下被吃掉：隔 >= RECLICK_S 才點第 2 下（不連點）並開成功', ok_ is True and len(g.times) == 2 and g.times[1] - g.times[0] >= uikit.RECLICK_S, f'times={g.times}')
+g = install(EatFirst(panel=False, hud=True))
+g.eat = 99
+ok_ = uikit.open_panel(uikit.SWITCH, timeout=4.0)
+check('一直點不開：timeout 4 秒內最多 2 下、每下間隔 >= RECLICK_S', ok_ is False and len(g.times) <= 2 and all(b - a >= uikit.RECLICK_S for a, b in zip(g.times, g.times[1:])), f'times={g.times}')
 check('TEAMPANEL 有特徵、✕ 在 1250,77', bool(uikit.TEAMPANEL.sig) and uikit.TEAMPANEL.close_xy == (1250, 77))
 check('切換面板開著時 TEAMPANEL 不會誤判開著', uikit.is_open(uikit.TEAMPANEL) is False)
 try:

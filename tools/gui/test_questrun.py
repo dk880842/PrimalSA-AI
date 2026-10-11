@@ -150,6 +150,7 @@ class Fake:
 
     def quest(self, args, timeout=0):
         self.rec('quest', tuple(str(a) for a in args))
+        self.timeouts = getattr(self, 'timeouts', []) + [timeout]
         return self.quest_q.pop(0) if self.quest_q else (0, [])
 
     def read_pos(self):
@@ -365,14 +366,14 @@ f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(33, [])]
 go(f, [2017, 2015])
 check('第一個失敗 → 第二個不跑', f.names().count('quest') == 1 and D15 not in [c[1] for c in f.calls if c[0] == 'status'])
 
-# 16) 龍王：失敗只警告、續跑（have=True）；9 分鐘內不重吃
+# 16) 龍王：失敗只警告、續跑（have=True）；人形圖示不在就吃
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], dragon_rc=92)
 rc = go(f, [2017])
 check('龍王失敗只警告、任務照跑', rc == 0 and f.names().count('quest') == 2)
 check('龍王取出後失敗 → 下次 have=True', ('dragon', True) in f.calls, str([c for c in f.calls if c[0] == 'dragon']))
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], active=None)
 go(f, [2017])
-check('9 分鐘內第二片不重吃', f.names().count('dragon') == 1)
+check('buff 列沒人形圖示 → 每次都吃（不看時間）', f.names().count('dragon') >= 2)
 f = Fake(status={D17: [questrun.DONE]})
 go(f, [2017], use_dragon=False)
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
@@ -456,6 +457,41 @@ check('close_stray_panel：組隊面板開著 → 關它並回 True', quest.clos
 uikit.is_open = lambda p: False
 check('close_stray_panel：沒有已知面板 → False（照舊當不認得）', quest.close_stray_panel() is False)
 uikit.is_open, uikit.close_panel, quest.event, quest.log = _so
+
+
+# ================= 走路不計時 / 時間到不開詳情（2026-10-11 馬祖快遞冗餘修正）=================
+check('walk_secs：解析「走路不計時 N 秒」（取最後一行）、沒有 = 0', questrun.walk_secs(['x', '走路不計時 123 秒']) == 123 and questrun.walk_secs(['x']) == 0 and questrun.walk_secs(None) == 0)
+check('time_up：事件行含「時間到」', questrun.time_up(['12:00 [..] 時間到，結束（對話 1）']) and not questrun.time_up(['步驟結束']))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, ['時間到，結束（對話 0、獎勵 0、戰鬥 0；巡路中不計時 280 秒）', '走路不計時 280 秒']), (0, ['任務完成：彌生和日美子'])])
+rc = go(f, [2017])
+check('slice「時間到」→ 不開詳情，直接下一片（只有開頭 accept 那一次讀詳情）', rc == 0 and f.names().count('quest') == 2 and f.names().count('status') == 0 and f.names().count('accept') == 1, str(f.names()))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, ['步驟結束（對話 1）'])])
+rc = go(f, [2017])
+check('不是時間到、也沒「任務完成」（模糊）→ 仍讀一次詳情確認', rc == 0 and f.names().count('status') == 1, str(f.names()))
+check('quest 子程序逾時 = slice + WALK_CAP_S + 120（巡路不計時，不能被 slice+120 砍）', f.timeouts and f.timeouts[0] == 300 + questrun.WALK_CAP_S + 120, str(getattr(f, 'timeouts', None)))
+# 巡路時間不計入 --max-min：假時鐘，每次 quest 過 40 秒，max_min=1（60 秒）
+import types as _ty  # noqa: E402
+import time as _t  # noqa: E402
+_clk = {'t': 1000.0}
+_real_time = questrun.time
+questrun.time = _ty.SimpleNamespace(time=lambda: _clk['t'], sleep=lambda s: None, strftime=_t.strftime, localtime=_t.localtime)
+
+
+class ClockFake(Fake):
+    def quest(self, args, timeout=0):
+        _clk['t'] += 40
+        return super().quest(args, timeout)
+
+
+tail_walk = ['時間到，結束', '走路不計時 40 秒']
+f = ClockFake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, tail_walk)] * 3 + [(0, ['任務完成：x'])])
+rc = go(f, [2017], max_min=1)
+check('巡路 40 秒 / 片不計入 --max-min 1：4 片（160 秒）仍不超時', rc == 0 and f.names().count('quest') == 4, f'rc={rc}')
+_clk['t'] = 1000.0
+f = ClockFake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, ['時間到，結束'])] * 4 + [(0, ['任務完成：x'])])
+rc = go(f, [2017], max_min=1)
+check('沒有巡路時間（對照）：每片 40 秒 → 第 3 片起超過 1 分鐘 → 113', rc == questrun.EXIT_SLICES, f'rc={rc}')
+questrun.time = _real_time
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

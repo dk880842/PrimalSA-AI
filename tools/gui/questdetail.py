@@ -25,6 +25,7 @@
   狀態條字色：進行中 = 黃（右邊有箭頭鈕）、待接取 = 白、已完成 = 綠（右邊有綠勾）。
 - 列表可捲動時，上緣有 ▲（y 237～262）、下緣有 ▼（y 710～735）蓋住列，所以只讀「標題中心 ≥ 262 且狀態條完整（≥ 20 px）」的列；
   同一列在不同捲動位置的標題圖相同（以狀態條上緣對齊取圖），所以逐頁讀、依標題去重合併。
+- 捲動（2026-10-11）：預設一次捲「可見列數 − 1 列」（page_dy：5 列 → 4 × 80 / 2.17 ≈ dy 147，上限 MAX_DY 150；舊的固定 dy=100 只捲約 2.75 列），scroll_page 捲後檢查上一頁最後一列標題是否仍在新頁（overlaps）；沒有 = 跳太多（可能漏列）→ 往上捲回、改小步 dy=DEFAULT_DY(100) 重捲，仍沒重疊才照這頁走（merge_pages 記 gaps）。read_list 結果多 'fallbacks'（退回小步次數）。--dy 給了就固定用那個量（仍做重疊檢查）。
 - 標題辨識 = 圖樣板（深色字二值化，IoU，namematch.iou 共用）為主；沒樣板才 OCR（ocr.ps1）→ 對 TaskExplan 表名稱 snap → 自動存樣板。
 - 中間頂端（624,205 附近）是「目前選中任務」標題（淺字），點列後用它驗證點對了；右下 / 中間 624,670 的藍鈕「傳送」只有待接取任務才有，
   進行中任務同一位置是金色「重置任務」（點了會重置任務！）→ accept 只在藍鈕、標題相符才點，且不在 uikit 的一般點擊範圍（forbidden center_btn）。
@@ -80,9 +81,18 @@ BTN = (624, 670)                                         # 傳送 / 重置任務
 BTN_PTS = ((540, 655), (540, 690), (700, 655), (700, 690))
 DRAG_DOWN = (272, 650, 272, 400)                         # 往下捲（內容上移）；x 取這裡的 272，起點 y 650、距離 dy（--dy 調）
 TOP_DY = 300                                              # 往上捲到頂用較大的距離（過頭沒關係）
-DEFAULT_DY = 100                                         # 捲動拖曳距離（實測 dy 120 → 列表移 260 px ≈ 3 列；dy 250 一次跳超過一頁會漏列）
+DEFAULT_DY = 100                                         # 小步捲動拖曳距離（實測 dy 120 → 列表移 260 px ≈ 3 列；dy 250 一次跳超過一頁會漏列）；也是「大步漏列」時退回重捲的小步
+ROW_PITCH = 80                                           # 列距（px）
+SCROLL_RATIO = 2.17                                      # 列表位移 / 拖曳距離（實測 dy 120 → 260 px）
+MAX_DY = 150                                             # 自動大步的上限
 SETTLE_S = 1.5                                           # 拖曳慣性
 MAX_PAGES = 14
+
+
+def page_dy(n_rows: int) -> int:
+    """一次捲「可見列數 − 1 列」的拖曳距離（至少留一列重疊）：5 列 → 4 × 80 / 2.17 ≈ 147；夾在 [DEFAULT_DY, MAX_DY]"""
+    px = max(1, n_rows - 1) * ROW_PITCH
+    return max(DEFAULT_DY, min(MAX_DY, round(px / SCROLL_RATIO)))
 
 DONE, DOING, PENDING, UNKNOWN = '已完成', '進行中', '待接取', '?'
 MAIN_IDS = {1000, 2999, 2004, 2005, 2006, 2007, 2008}     # 主線分頁的任務（其餘在支線）
@@ -498,6 +508,32 @@ def scroll(down: bool, dy: int = DEFAULT_DY) -> None:
     sleep(SETTLE_S)
 
 
+def overlaps(prev: list, cur: list) -> bool:
+    """捲動後有沒有漏列：上一頁最後一列仍在新頁（它在最下面，最後才會被捲出去；仍在 = 中間沒跳過列）。任一頁沒讀到列就當沒問題（交給原本的到底判斷）"""
+    if not prev or not cur:
+        return True
+    return any(same_row(prev[-1], r) for r in cur)
+
+
+def scroll_page(prev_rows: list, tpl: dict, dy: int | None = None) -> tuple:
+    """往下捲一頁並讀 → (img, rows, fell_back)。dy=None：捲「可見列數 − 1 列」的量（page_dy）；捲後上一頁最後一列沒出現在新頁 =
+    跳太多（可能漏列）→ 先往上捲回、改小步（DEFAULT_DY）重捲，仍沒重疊就照這頁回傳（merge_pages 會記 gaps）。截圖失敗 img = None"""
+    big = page_dy(len(prev_rows)) if dy is None else dy
+    scroll(True, big)
+    img = _stable_shot()
+    if img is None:
+        return None, [], False
+    rows = parse(img, tpl, _ocr_title)
+    if big <= DEFAULT_DY or overlaps(prev_rows, rows):
+        return img, rows, False
+    scroll(False, big)                                    # 退回原位再小步重捲
+    scroll(True, DEFAULT_DY)
+    img = _stable_shot()
+    if img is None:
+        return None, [], True
+    return img, parse(img, tpl, _ocr_title), True
+
+
 def scroll_top(dy: int = TOP_DY) -> bool:
     """捲到列表最上（連兩頁狀態條位置 + 狀態相同 = 到頂；最多 MAX_PAGES 次）。截圖失敗回 False"""
     last = None
@@ -513,7 +549,7 @@ def scroll_top(dy: int = TOP_DY) -> bool:
     return True
 
 
-def read_list(tab: str = '支線', dy: int = DEFAULT_DY, learn: bool = True) -> dict:
+def read_list(tab: str = '支線', dy: int | None = None, learn: bool = True) -> dict:
     """面板已開著：切到 tab → 捲到最上 → 逐頁讀到底 → {'ok','rows','gaps','tab','pages'}。
     rows = [{title, status, how}]（依列表順序）；title 為 None = 不認得（樣板與 OCR 都失敗）。gaps > 0 = 相鄰頁沒交集，可能漏列"""
     if not select_tab(tab):
@@ -523,11 +559,17 @@ def read_list(tab: str = '支線', dy: int = DEFAULT_DY, learn: bool = True) -> 
         return {'ok': False, 'why': '截圖失敗', 'rows': [], 'gaps': 0, 'tab': tab, 'pages': 0}
     pages = []
     last = None
+    fallbacks = 0
+    img = _stable_shot()
+    rows = None
     for _ in range(MAX_PAGES):
-        img = _stable_shot()
+        if rows is not None:                                  # 第 2 頁起：一次捲「可見列數 − 1 列」，漏列就退回小步（scroll_page）
+            img, rows, fb = scroll_page(rows, tpl, dy)
+            fallbacks += fb
         if img is None:
             return {'ok': False, 'why': '截圖失敗', 'rows': [], 'gaps': 0, 'tab': tab, 'pages': len(pages)}
-        rows = parse(img, tpl, _ocr_title)
+        if rows is None:
+            rows = parse(img, tpl, _ocr_title)
         if learn:
             _learn_page(img, rows, tpl)
         key = [(r['title'], r['status']) for r in rows]
@@ -535,13 +577,12 @@ def read_list(tab: str = '支線', dy: int = DEFAULT_DY, learn: bool = True) -> 
             break
         last = key
         pages.append(rows)
-        scroll(True, dy)
     merged, gaps = merge_pages(pages)
     return {'ok': bool(merged), 'rows': [{'title': r['title'], 'status': r['status'], 'how': r['how']} for r in merged],
-            'gaps': gaps, 'tab': tab, 'pages': len(pages)}
+            'gaps': gaps, 'tab': tab, 'pages': len(pages), 'fallbacks': fallbacks}
 
 
-def status(want: list | None = None, dy: int = DEFAULT_DY) -> dict:
+def status(want: list | None = None, dy: int | None = None) -> dict:
     """開面板讀主線 + 支線 → {'ok','tasks': {名稱: 狀態或 None（列表裡沒有）}, 'unknown': 不認得的列數, 'gaps'}；結束關面板"""
     src = 'questdetail'
     rc = uikit.preflight(src)
@@ -567,7 +608,7 @@ def status(want: list | None = None, dy: int = DEFAULT_DY) -> dict:
 
 
 # ---------------------------------------------------------------- 接取
-def task_status(title: str, dy: int = DEFAULT_DY) -> tuple:
+def task_status(title: str, dy: int | None = None) -> tuple:
     """單一任務狀態（questrun 用）：開面板 → 只讀該任務所在分頁 → 關面板 → (rc, 狀態)；
     狀態 = 已完成 / 進行中 / 待接取，列表裡找不到 = None（rc 仍 0）；rc 非 0 = 面板打不開 / 讀失敗（uikit.preflight 的碼也原樣回）"""
     src = 'questdetail'
@@ -605,7 +646,7 @@ def _dialog_screen() -> dict:
 LAST: dict = {}                    # accept 的結果：state = 'done' / 'doing'（skip_ok 略過）/ 'accepted'
 
 
-def accept(title: str, dry_run: bool = False, dy: int = DEFAULT_DY, presses: int = 2, skip_ok: bool = False, verify: bool = True) -> int:
+def accept(title: str, dry_run: bool = False, dy: int | None = None, presses: int = 2, skip_ok: bool = False, verify: bool = True) -> int:
     """接取「待接取」任務 title（完整名稱，例 彌生和日美子(1.82)）：找列 → 點 → 驗中間標題 → 驗藍色傳送鈕 → 傳送 → 等 NPC 對話框 →
     驗對話框（內文 / 按鈕可讀、無不可逆字、左鈕是「接受」）→ 按左鈕（最多 presses 次）→ 重開詳情驗證「進行中」。
     任何驗證不過都不往下點；回退出碼（見檔頭）。dry_run 只做到「驗證傳送鈕」為止（不點傳送）。
@@ -631,11 +672,15 @@ def accept(title: str, dry_run: bool = False, dy: int = DEFAULT_DY, presses: int
             return uikit.fail(src, EXIT_NO_PANEL, '截圖失敗')
         row = None
         prev_sig = None
+        img = _stable_shot()
+        rows = None
         for _ in range(MAX_PAGES):
-            img = _stable_shot()
+            if rows is not None:                              # 第 2 頁起一次捲「可見列數 − 1 列」，漏列退回小步
+                img, rows, _fb = scroll_page(rows, tpl, dy)
             if img is None:
                 return uikit.fail(src, EXIT_NO_PANEL, '截圖失敗')
-            rows = parse(img, tpl, _ocr_title)
+            if rows is None:
+                rows = parse(img, tpl, _ocr_title)
             _learn_page(img, rows, tpl)
             row = find_row(rows, name)
             if row:
@@ -644,7 +689,6 @@ def accept(title: str, dry_run: bool = False, dy: int = DEFAULT_DY, presses: int
             if sig == prev_sig:
                 break
             prev_sig = sig
-            scroll(True, dy)
         if not row:
             return uikit.fail(src, EXIT_NOT_FOUND, f'列表裡找不到「{name}」')
         if skip_ok and row['status'] in (DONE, DOING):
@@ -812,11 +856,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('status'); p.add_argument('--json', action='store_true'); p.add_argument('--all', action='store_true')
-    p.add_argument('--dy', type=int, default=DEFAULT_DY)
+    p.add_argument('--dy', type=int, default=None)
     p = sub.add_parser('list'); p.add_argument('--tab', default='支線', choices=['主線', '支線']); p.add_argument('--json', action='store_true')
-    p.add_argument('--dy', type=int, default=DEFAULT_DY)
+    p.add_argument('--dy', type=int, default=None)
     p = sub.add_parser('accept'); p.add_argument('title'); p.add_argument('--dry-run', action='store_true')
-    p.add_argument('--dy', type=int, default=DEFAULT_DY); p.add_argument('--presses', type=int, default=2)
+    p.add_argument('--dy', type=int, default=None); p.add_argument('--presses', type=int, default=2)
     p = sub.add_parser('read-image'); p.add_argument('path')
     p = sub.add_parser('learn-image'); p.add_argument('path'); p.add_argument('titles'); p.add_argument('--head')
     a = ap.parse_args()

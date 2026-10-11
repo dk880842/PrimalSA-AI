@@ -5,6 +5,8 @@
   uv run --no-project python tools/gui/quest.py --task 黃金羚羊之謎   # 一直監測，最長 15 分鐘（--task = 追蹤列表上的任務名，必填）
   uv run --no-project python tools/gui/quest.py --once          # 只看一次、做一個動作就結束（除錯用）
   uv run --no-project python tools/gui/quest.py --max-seconds 600 --stop-after-rewards 2
+  --max-seconds 的計時（2026-10-11）：自動走路（Auto Walking = 任務進行中）不計入；只有連續非 walking 的閒置 / 其他狀態才耗時限（WalkClock；巡路中途短暫 unknown 1～2 次又回 walking 仍算巡路；單次連續巡路超過 WALK_CAP_S=900 秒不再延長，防卡死）。結束時印「走路不計時 N 秒」，questrun 據此扣總時限。
+  對話結束後一律先按追蹤（2026-10-11）：對話框 / 領獎關閉回主畫面後，第一個動作是點追蹤欄該任務卡片（標題相符才點，post_track_try）；卡片不在、或點了約 5 秒（TRACK_RETRY_SECS ×2）沒反應才改找黃色問號（沒反應不再直接退出碼 3；黃問號也沒用，之後照舊 2 次追蹤失敗才退出碼 3）。沒對話過的啟動 / 一般閒置仍是先找黃問號、再追蹤。
   選項：--task 任務名（要點追蹤時，先用 OCR 認出追蹤列表每一格的標題，名稱相符才點；不符就捲動列表再找，找不到退出碼 5，絕不點其他任務。
           沒給 --task 又沒給 --no-track 會直接拒絕執行）、--no-marker（不找 NPC 頭上的黃色問號）、
         --every 1.0（輪詢秒數；2026-10-10 起預設 1 秒，所有「連續 N 次」的規則已改成以秒計，見 IDLE_CONFIRM_SECS 等常數）、--no-track（不主動點任務追蹤，只處理對話 / 戰鬥）、--no-refresh（戰鬥不按刷新角色）、
@@ -25,7 +27,7 @@
   --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
   --step N  --fight 用：明確指定任務第 N 步的 NPC（= --npc auto 但不 OCR 追蹤條目；需 --task）。--npc auto 不給 --step 時，改讀追蹤條目「標題正下方那行說明」
            （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
-  --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過）：只在必要時檢查（2026-10-11）：開始前、--fight 點 NPC 前、領獎後（一步結束要去下一步 / 交任務）點追蹤前、任務 / BOSS 戰打完後的下一次點之前；其他點擊（每次點追蹤 / 黃問號）不檢查。開切換面板（uikit.open_panel / close_panel，輪詢驗證；打不開原地重試 CHECK_TEAM_TRIES=3 次、間隔 1 秒、先確認是主畫面）763,760，
+  --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過；切換面板開啟後等卡片內容穩定再讀：連 2 次讀到相同標籤才算，最多 TEAM_STABLE_MAX_S=1.5 秒，全部「不在隊」時至少重讀才判失敗 = read_team_labels_stable）：只在必要時檢查（2026-10-11）：開始前、--fight 點 NPC 前、領獎後（一步結束要去下一步 / 交任務）點追蹤前、任務 / BOSS 戰打完後的下一次點之前；其他點擊（每次點追蹤 / 黃問號）不檢查。開切換面板（uikit.open_panel / close_panel，輪詢驗證；打不開原地重試 CHECK_TEAM_TRIES=3 次、間隔 1 秒、先確認是主畫面）763,760，
            讀 5 張卡片的隊伍標籤，要「1 隊長 + (N-1) 隊員」（N=5 即 5 人都要在隊）；面板上其他卡片是單人 / 不在隊（例如單人 DKB0）不算錯；隊員不夠 / 隊長不是 1 個 / 讀不到 → 不點、事件 log 寫出誰不在隊、關面板（✕ 1064,208）；--fight 開打前退出碼 30、執行中發現脫隊退出碼 32。
            --solo / --fight --no-click 不檢查。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
   戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
@@ -511,6 +513,40 @@ def idle_confirmed(streak: int, since: float, now: float) -> bool:
     return streak >= 2 and now - since >= IDLE_CONFIRM_SECS
 
 
+WALK_CAP_S = 900.0                   # 單次連續巡路最多不計時這麼久（防卡死：一直 walking 但其實卡住）；questrun 的 WALK_CAP_S 要相同
+WALK_GRACE_READS = 2                 # 巡路中途連續 unknown 最多這麼多次（1～2 次）仍算巡路中
+
+
+WALK: dict = {}                      # 本次執行的 WalkClock（main 結束時印「走路不計時 N 秒」給 questrun 扣總時限）
+
+
+class WalkClock:
+    """slice 計時：自動走路（Auto Walking = 任務進行中）不計入 --max-seconds；只有「連續非 walking 的閒置 / 其他狀態」才耗時限。
+    巡路中途短暫 unknown 1～2 次又回 walking（過場 / 讀圖失敗）也算巡路；單次連續巡路超過 cap 就不再延長（防卡死）。
+    純邏輯（時間由呼叫端傳入），離線可測。walked = 已不計入的秒數（給呼叫端扣總時限）"""
+
+    def __init__(self, max_seconds: float, now: float, cap: float = WALK_CAP_S, grace: int = WALK_GRACE_READS):
+        self.end, self.prev, self.cap, self.grace = now + max_seconds, now, cap, grace
+        self.was_walk, self.gap, self.period_t0, self.walked = False, 0, now, 0.0
+
+    def tick(self, st: str, now: float) -> None:
+        dt, self.prev = now - self.prev, now
+        if st == 'walking':
+            in_walk, self.gap = True, 0
+        else:
+            self.gap += 1
+            in_walk = self.was_walk and st in ('unknown', 'error') and self.gap <= self.grace
+        if in_walk and not self.was_walk:
+            self.period_t0 = now
+        if in_walk and self.was_walk and now - self.period_t0 <= self.cap:
+            self.end += dt
+            self.walked += dt
+        self.was_walk = in_walk
+
+    def expired(self, now: float) -> bool:
+        return now >= self.end
+
+
 def find_irreversible(texts: list[str], keywords=None) -> list[str]:
     """對話框文字（內文 / 按鈕各行）→ 命中的不可逆關鍵字清單（去空白後子字串比對；沒命中回 []）"""
     kws = IRREVERSIBLE_KEYWORDS if keywords is None else keywords
@@ -623,10 +659,13 @@ def hide_close_row(max_clicks: int = len(CLOSE_ROW_CLICKS)) -> bool:
     避免動畫還沒跑完就誤判「還在」而連點 / 放棄）。讀不到像素（None）沿用舊行為視為沒有列。
     回 True = 確認沒有關閉列（可以安全點切換）；False = 收不掉（存 snap 圖 close-row-stuck，呼叫端不點切換）"""
     def gone():
+        """點一下後輪詢（最多約 3 秒）：列消失 = True；仍在 = False（才有資格再點下一下）；中途戰鬥已結束 = 'over'（不再點）"""
         for i in range(CLOSE_ROW_POLL):
             v = close_row_visible()
             if not v:        # False = 沒有列；None = 讀不到像素（維持舊行為視為沒有列，不卡住刷新）
                 return True
+            if i >= 2 and battle_over():                 # 狀態已改變（戰鬥打完回主畫面）：不是「沒反應」，別再點
+                return 'over'
             if i < CLOSE_ROW_POLL - 1:
                 time.sleep(CLOSE_ROW_POLL_GAP)
         return False
@@ -638,7 +677,11 @@ def hide_close_row(max_clicks: int = len(CLOSE_ROW_CLICKS)) -> bool:
             return False
         gui('seq', f'click {x} {y}; wait 900', note='戰鬥底部列：點「關閉」收起頭像列')
         event(f'刷新前底部有「關閉 + 頭像」列 → 點關閉收起（{x},{y}）')
-        if gone():                                 # 每下點完先輪詢驗證（最多 CLOSE_ROW_POLL × GAP 秒）沒收起才點下一下
+        g = gone()                                 # 每下點完先輪詢驗證（約 3 秒）；沒收起才點下一下，同一次不連點
+        if g == 'over':
+            event('收「關閉」列期間戰鬥已結束 → 不再點')
+            return False
+        if g:
             return True
     try:
         shot = snap('close-row-stuck')
@@ -756,6 +799,29 @@ def read_team_labels() -> dict | None:
     return {r: classify_team_label(cols[i * n:(i + 1) * n]) for i, r in enumerate(TEAM_CARDS)}
 
 
+TEAM_STABLE_MAX_S = 1.5              # 切換面板剛開，卡片內容還沒載入（5 人都讀成「不在隊」，2026-10-11 16:31 馬祖快遞）：最多等這麼久讓內容穩定
+TEAM_STABLE_GAP = 0.3
+
+
+def read_team_labels_stable(max_s: float = TEAM_STABLE_MAX_S, gap: float = TEAM_STABLE_GAP) -> dict | None:
+    """面板開啟後等卡片內容穩定再回：連 2 次讀到相同標籤、且不是「全部 other」才算穩（全 other 可能是還在載入，繼續等到 max_s）；
+    到時限仍全 other / 不穩 → 回最後一次讀到的（呼叫端據此判斷；全 other 時已經重讀過至少一次才會判失敗）。讀不到像素回 None"""
+    t_end = time.time() + max_s
+    prev = read_team_labels()
+    while True:
+        if prev is None:
+            return None
+        time.sleep(gap)
+        cur = read_team_labels()
+        if cur is None:
+            return None
+        if cur == prev and any(v != 'other' for v in cur.values()):
+            return cur
+        prev = cur
+        if time.time() >= t_end:
+            return cur
+
+
 def judge_team(labels: dict, size: int) -> tuple[bool, str]:
     """純函式：labels 是否有「1 隊長 + (size-1) 隊員」。回 (符合, 說明；不符時列出誰不在隊)。
     只看隊伍本身：面板上其他卡片是單人 / 不在隊（'other'，例如單人 DKB0 或離線的人）不算錯（--team-size 4 時第 5 人單人沒關係；size=5 時 5 人都要在隊，因為隊員數要 4）"""
@@ -790,7 +856,7 @@ def check_team(size: int, tag: str = '') -> tuple[bool | None, str]:
         if not opened:
             res = (None, '切換面板沒打開')
             continue
-        labels = read_team_labels()
+        labels = read_team_labels_stable()
         if labels is None:
             res = (None, '讀不到隊伍標籤像素')
         else:
@@ -1136,7 +1202,8 @@ def _main() -> int:
     n_old = cleanup_old_shots()
     if n_old:
         event(f'清理 {n_old} 張 {SHOT_KEEP_DAYS} 天前截圖')
-    end = time.time() + a.max_seconds
+    wclock = WalkClock(a.max_seconds, time.time())       # 自動走路中不計時（只有連續非 walking 才耗 --max-seconds）
+    WALK['clock'] = wclock
     marker_fail = 0              # 連續點黃色問號沒反應的次數
     task_miss = 0
     event(f'開始監測（每 {a.every}s，最長 {a.max_seconds}s）')
@@ -1186,7 +1253,27 @@ def _main() -> int:
     stall_marker_new = False     # 離開對話後有點過黃問號（多頁對話中間閒置不計輪）
     stall_prev = ''              # 上一個迴圈的狀態
     boss_pre = {}                # --fight：點 NPC 前的座標 / 步驟（verify_boss_result 比對）
+    post_track = False           # 對話框 / 領獎關閉後回到主畫面：第一個動作先點追蹤欄該任務卡片（標題相符才點）；卡片不在 / 追蹤沒反應才找黃問號
+    post_track_clicked = False   # 剛才那次追蹤是 post_track 發起的（沒反應時改找黃問號，不直接退出碼 3）
     dialog_esc = 0               # 啟動時對話框已開：為了開切換面板先 ESC 關掉的次數
+
+    def post_track_try():
+        """對話框 / 領獎關閉後的第一個動作：點追蹤欄該任務卡片。回 None = 沒做（不是對話後 / 卡片不在 / 畫面變了 → 呼叫端接著找黃問號）、
+        0 = 已點追蹤（等巡路）、其他 = 隊伍檢查失敗的退出碼"""
+        nonlocal post_track, tracked, track_t, post_track_clicked, task_miss, stall_marker, stall_marker_new
+        if not post_track:
+            return None
+        post_track = False
+        if (rc_ := team_gate('點追蹤 / 黃問號前：', EXIT_TEAM_LOST)):
+            return rc_
+        res_ = track_task(a.task)
+        if res_:
+            tracked, track_t, post_track_clicked = True, time.time(), True
+            task_miss = 0
+            stall_marker, stall_marker_new = (-999, -999), True       # 無進展偵測：追蹤開始的對話也算一輪（沒有黃問號座標，用哨兵）
+            return 0
+        log('對話後追蹤欄沒有可點的任務卡片' + ('（畫面變了）' if res_ is None else '') + '，改找黃色問號')
+        return None
 
     def team_gate(tag: str, code: int, force: bool = False) -> int:
         """點 NPC / 追蹤前的隊伍檢查（脫隊偵測的保底做法：聊天日誌「離開了隊伍」讀不可靠，所以每次要點之前確認隊伍還在）。
@@ -1227,6 +1314,7 @@ def _main() -> int:
     while True:
         s = read_screen()
         st = s['state']
+        wclock.tick(st, time.time())
         if st in ('idle', 'walking', 'dialog', 'reward'):
             if in_battle:
                 battleguard.release()          # 戰鬥結束 → 刪鎖檔，ass.py 可以動了
@@ -1342,11 +1430,13 @@ def _main() -> int:
             shot = snap('dialog')
             gui('seq', f'click {DIALOG_NEXT[0]} {DIALOG_NEXT[1]}')
             last_action = time.time()
+            post_track = True
             event(f'對話框 #{dialogs}：按左鈕 {DIALOG_NEXT}', shot)
         elif st == 'reward':
             rewards += 1
             shot = snap('reward')
             gui('seq', f'click {REWARD_OK[0]} {REWARD_OK[1]}')
+            post_track = True
             event(f'獲得物品視窗 #{rewards}：按確認', shot)
             if a.stop_after_rewards and rewards >= a.stop_after_rewards:
                 event(f'已領 {rewards} 次獎勵視窗，停止（--stop-after-rewards）')
@@ -1463,7 +1553,10 @@ def _main() -> int:
             wait_track = tracked and time.time() - track_t < TRACK_RETRY_SECS     # 剛點過追蹤：給遊戲時間開始巡路，不重點、不計失敗
             if tracked and not wait_track:
                 track_fail += 1
-                if track_fail >= 2:
+                if track_fail >= 2 and post_track_clicked and not a.no_marker:
+                    event('對話後先點追蹤、約 5 秒沒反應 → 改找黃色問號（不直接退出碼 3）')
+                    tracked, track_fail, post_track_clicked = False, 0, False
+                elif track_fail >= 2:
                     shot = snap('no-autowalk')
                     event('點了任務追蹤兩次都沒進入巡路 / 對話 / 戰鬥 → 這個任務步驟不能自動巡路或已完成，請改手動（walk.py + 點 NPC）', shot)
                     return 3
@@ -1472,6 +1565,7 @@ def _main() -> int:
             elif rewards > checked_rewards and not a.no_track and a.task:
                 # 領過獎勵後第一次回到主畫面：立刻掃整個追蹤列表。目標任務不在列表 = 任務完成（不空轉）；還在 = 下一步，順便點它
                 checked_rewards = rewards
+                post_track = False
                 time.sleep(1.0)                              # 等獲得物品視窗收掉、列表刷新
                 res = track_task(a.task, click=False)        # 先只掃不點：任務已不在列表（= 完成）就不必驗隊伍（2026-10-11：最後一步領完獎被隊伍檢查擋下，白跑一輪）
                 if res:
@@ -1482,12 +1576,18 @@ def _main() -> int:
                     checked_rewards = rewards - 1            # 被打斷，下次回主畫面再查
                 elif res:
                     tracked, track_t = True, time.time()
+                    post_track_clicked = True
                     task_miss = 0
                 else:
                     shot = snap('task-done')
                     event(f'領過 {rewards} 次獎勵後追蹤列表整個掃完沒有「{a.task}」→ 任務完成（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}）', shot)
                     print(f'任務完成：{a.task}', flush=True)
                     return 0
+            elif not a.no_track and a.task and (pt := post_track_try()) is not None:
+                # 對話框收起 / 領獎後回到主畫面：第一個動作一律先點追蹤欄該任務卡片（post_track_try；標題相符才點，讓遊戲自動巡路到下一步）；
+                # 卡片不在才往下找黃色問號；追蹤沒反應則由上面的 track_fail 改找黃問號
+                if pt:
+                    return pt
             elif not a.no_track:
                 # 檢測方針：1. 場景有黃色問號 → 優先點它；2. 沒有 → 追蹤列表核對任務名再點
                 if not wait_track and (rc := team_gate('點追蹤 / 黃問號前：', EXIT_TEAM_LOST)):
@@ -1545,8 +1645,8 @@ def _main() -> int:
                 return 2
         if a.once:
             return 0
-        if time.time() >= end:
-            event(f'時間到，結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}）')
+        if wclock.expired(time.time()):
+            event(f'時間到，結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}；巡路中不計時 {wclock.walked:.0f} 秒）')
             return 0
         time.sleep(a.every)
 
@@ -1555,7 +1655,11 @@ def main() -> int:
     """包一層：不論怎麼結束（含例外 / Ctrl-C）都刪自己的戰鬥鎖檔"""
     winenv.enable_server()   # 長程序：用常駐 server 讀畫面（WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）
     try:
-        return _main()
+        rc = _main()
+        wc = WALK.get('clock')
+        if wc is not None:
+            print(f'走路不計時 {int(wc.walked)} 秒', flush=True)      # questrun 解析這行：slice / 總時限都不把巡路時間算進去
+        return rc
     finally:
         battleguard.release()
         winenv.shutdown_server()   # 明確關常駐 server（送 quit + 關 stdin），不只靠 atexit
