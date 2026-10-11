@@ -185,5 +185,5 @@
 - 實機發現：追蹤標題樣板可能因選中底色只有 0.68 分而沒命中 → quest.track_task 現在樣板整輪沒找到會退回 OCR 再掃並學新樣板。
 - **2026-10-11 實機結果**：成人儀式 / 彌生和日美子 / 亞姆的斧頭三個任務都由 questrun 跑完，結束 `grind.py start --spot 地雷區` rc 0。成人儀式步 1：點追蹤會傳送進 10204 並自動巡路到差使 → walk handler 只當備援（quest.py 回 3 才用）。
 - **詳情只開一次**：每任務只在接取那次開詳情（同一趟捲動讀狀態：已完成跳過 / 進行中續跑 / 待接取接受，不重開驗證）；完成看 quest.py「任務完成」（領獎後追蹤欄沒有該任務），沒這字樣才讀一次詳情。接取後直接點追蹤欄卡片（`quest.track_task` 先看目前頁、標題相符才點，不符才捲動；樣板整輪沒命中會退回 OCR）。
-- **龍王的守護**：buff 列（頭像下方，約 y 150～195，每格 46 px）可用 `bag.buff_row()` 區分「人形青色剪影」與「EXP 字」（fixtures/buff_row.png 為樣本）；questrun 以人形圖示在不在決定要不要再吃，`depot_use.run(..., reopen=False)` 吃完不開原地遇敵。
+- **龍王的守護**：depot_use.use_one 並排按鈕（使用 619 / 更多 825）改用 OCR 判斷（舊像素判斷漏判，點到兩鈕中間 732 沒反應，2026-10-11 才發現之前都沒吃到）；buff 列（頭像下方，約 y 150～195，每格 46 px）可用 `bag.buff_row()` 區分「人形青色剪影」與「EXP 字」（fixtures/buff_row.png 為樣本）；questrun 以人形圖示在不在決定要不要再吃，`depot_use.run(..., reopen=False)` 吃完不開原地遇敵。
 - 離線測試：test_questrun.py / test_questdefs.py / test_questdetail.py（task_status）。
