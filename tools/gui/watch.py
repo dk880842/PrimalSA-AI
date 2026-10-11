@@ -42,7 +42,6 @@ import charname  # noqa: E402
 import charstate  # noqa: E402
 import digitmatch  # noqa: E402
 import errlog  # noqa: E402
-import layout as layout_mod  # noqa: E402
 import screen_sigs  # noqa: E402
 import watchstate  # noqa: E402
 import winenv  # noqa: E402
@@ -210,11 +209,7 @@ class Watcher:
         self.screen_ts = self.started
         self.cls = {'full': False, 'cmd': False, 'auto_off': False, 'gold': 0, 'panel': None}
         self.annot: list = []
-        self.layout = None               # 實體客戶區 'WxH'
-        self.layout_logical = None       # gui.ps1 info 的 layout=（換算層認定的邏輯版面）；舊輸出沒有
-        self.layout_ok, self.layout_reason = False, ''   # layout.evaluate 的結果（腳本守衛放不放行）
-        self.proportional = False        # 與 2880×1659 同長寬比的縮放視窗（例 1728×995）
-        self.sig_layout = None           # 目前套用的 screen_sigs 覆寫 key（None = 筆電原值）
+        self.layout = None
         self.minimized = False
         self.game_running = False
         self.last_info = -1e9
@@ -381,30 +376,7 @@ class Watcher:
             if not m:
                 return 'error'
             self.layout = f'{m[1]}x{m[2]}'
-            lg = re.search(r'layout=(\d+x\d+)', r.stdout or '')
-            self.layout_logical = lg[1] if lg else None
-            self._sync_layout()
         return k
-
-    def _sync_layout(self) -> None:
-        """依實體版面套 screen_sigs 覆寫表（版面改變時重新套用，points 也重算）並更新守衛判斷。
-        同比例（logical == 2880x1659）且非 2880×1659 才套覆寫；筆電恆等（set_layout(None) = 原值）"""
-        self.proportional = bool(self.layout and self.layout != LAYOUT_OK and self.layout_logical == LAYOUT_OK)
-        self.layout_ok, self.layout_reason = layout_mod.evaluate(self.layout, LAYOUT_OK if self.layout == LAYOUT_OK else self.layout_logical)
-        key = None
-        if self.proportional:
-            w, h = self.layout.split('x')
-            key = screen_sigs.layout_key(int(w), int(h))
-        if key != self.sig_layout or screen_sigs.active_layout() != key:
-            screen_sigs.set_layout(key)
-            self.sig_layout = key
-            self.pts = screen_sigs.points() + screen_sigs.annot_points()
-            self.pts_arg = ' '.join(f'{x},{y}' for x, y in self.pts)
-
-    def _can_read(self) -> bool:
-        """能不能讀畫面像素：2880×1659，或同比例視窗（gui.ps1 換算層 + 覆寫表，唯讀；外接也要能偵測驗證視窗）。
-        腳本守衛放不放行是另一回事（self.layout_ok）"""
-        return self.layout == LAYOUT_OK or self.proportional
 
     def _read_pixels(self):
         """→ (kind, px)：kind = ok / minimized / no_game / error"""
@@ -432,9 +404,9 @@ class Watcher:
         info_due = self.layout is None or self.cur in NOGAME_STATES or self.mono() - self.last_info >= INFO_EVERY
         if info_due:
             kind = self._do_info()
-            if kind == 'ok' and not self._can_read():
+            if kind == 'ok' and self.layout != LAYOUT_OK:
                 kind = 'unsupported'
-        elif not self._can_read():
+        elif self.layout != LAYOUT_OK:
             kind = 'unsupported'
         if kind == 'ok':
             kind, px = self._read_pixels()
@@ -633,7 +605,7 @@ class Watcher:
         """每 OCR_EVERY 秒跑一次 stat.ps1；畫面不是主畫面類（對話 / 面板 / 完整戰鬥 / 沒開遊戲…）就不跑，只標 stale"""
         if not self.ocr_on:
             return
-        ok_screen = kind == 'ok' and self.layout_ok and self.cur in OCR_STATES and not (self.cur == 'battle' and self.cls.get('full'))
+        ok_screen = kind == 'ok' and self.cur in OCR_STATES and not (self.cur == 'battle' and self.cls.get('full'))
         if not ok_screen:
             self.hud_fail = True
             return
@@ -827,18 +799,6 @@ class Watcher:
         return out
 
     # ---- state 組裝 / 寫檔 ----
-    def _label(self) -> str:
-        """HUD 狀態列文字；版面不放行腳本時說清楚是哪個版面、缺什麼（例「外接 1728×995：樣板未就緒」）"""
-        if not self.cur:
-            return '啟動中'
-        lab = screen_sigs.label({'state': self.cur, **self.cls}, self.annot)
-        if self.layout and not self.layout_ok and self.cur not in ('no_game', 'minimized', 'error'):
-            if self.proportional:
-                lab = f'{lab}｜外接 {self.layout.replace("x", "×")}：樣板未就緒（腳本守衛擋下）'
-            elif self.cur == 'unsupported':
-                lab = f'版面不支援（{self.layout.replace("x", "×")}，只量過 2880×1659）'
-        return lab
-
     def build(self) -> dict:
         now = self.clock()
         mono = self.mono()
@@ -853,12 +813,10 @@ class Watcher:
                         'cycle_ms': self.cur_cycle_ms, 'ocr_ms': self.ocr_ms, 'ocr_every': OCR_EVERY, 'errors': self.errors, 'owner': self.owner,
                         'hb_p95_s': round(_p95(self.hb_intervals), 2), 'cpu_pct': self.cpu_pct},
             'game': {'ts': self.screen_ts, 'running': bool(self.game_running), 'minimized': self.minimized,
-                     'layout': self.layout, 'screen_supported': self.layout_ok, 'phys': self.layout,
-                     'logical': self.layout_logical, 'proportional': self.proportional, 'templates': layout_mod.template_layout(self.layout) is not None,
-                     'sig_layout': self.sig_layout, 'layout_reason': self.layout_reason},
+                     'layout': self.layout, 'screen_supported': self.layout == LAYOUT_OK},
             'screen': {'ts': self.screen_ts, 'age_s': round(max(0.0, now - self.screen_ts), 3), 'state': self.cur or 'starting',
                        'prev': self.prev, 'annot': self.annot,
-                       'label': self._label(),
+                       'label': screen_sigs.label({'state': self.cur, **self.cls}, self.annot) if self.cur else '啟動中',
                        'since': self.since, 'transitions': [list(t[:3]) + [t[3] if t[3] is not None else now] for t in self.transitions],
                        'full': self.cls['full'], 'cmd': self.cls['cmd'], 'auto_off': self.cls['auto_off'], 'gold': self.cls['gold'], 'panel': self.cls['panel'],
                        'enc_on': self.enc_on, 'stable_n': self.stable_n, 'src': 'pixel'},

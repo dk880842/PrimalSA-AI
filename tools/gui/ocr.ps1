@@ -1,12 +1,10 @@
-﻿# 通用區域 OCR（背景截圖 PrintWindow + Windows 內建 OCR；不搶焦點）。座標 = 截圖座標（1440×830，= 邏輯客戶區 ×1/2）。
-#   客戶區與 2880×1659 同長寬比（例 1728×995）時，框由 psageom.ps1 換成實體像素直接裁（不先縮成 1440 再放大），輸出尺寸仍是「截圖框寬高 × 放大倍數」（與筆電相同，
-#   所以 -Zoom 的意義不變：文字等效放大倍數自動依實體 / 邏輯比例補償）。PSA_GEOM=off 或其他比例 = 舊行為（框 ×2）。-Image 檔.png：離線讀圖（測試用）。
+﻿# 通用區域 OCR（背景截圖 PrintWindow + Windows 內建 OCR；不搶焦點）。座標 = 截圖座標（客戶區 ×1/2）。
 # 用法：ocr.ps1 X Y W H [-Zoom 3] [-Dark 150]   → 輸出一行 JSON：{"ok":true,"lines":[{"text":"伐木證書","y":310,"x":205},...]}
 #   -Dark N：深色字二值化門檻（max(R,G,B) < N 視為字；0 = 不二值化直接放大）。任務追蹤標題是深棕字 → 預設 150。
 #   -Light N：亮字二值化門檻（min(R,G,B) > N 視為字；白色數字用，例 200；優先於 -Dark）。
 #   -Zooms "2,3,4,5,6"：同一張截圖用多個放大倍數各 OCR 一次，結果合併（Windows OCR 對同一圖換倍數結果差很多，任務追蹤標題用 2～6 倍才讀得全）。
 #   每行的 x / y = 該行文字在截圖座標的中心。
-param([int]$X, [int]$Y, [int]$Wd, [int]$Ht, [int]$Zoom = 3, [int]$Dark = 150, [string]$Zooms = "", [int]$Light = 0, [string]$Image)
+param([int]$X, [int]$Y, [int]$Wd, [int]$Ht, [int]$Zoom = 3, [int]$Dark = 150, [string]$Zooms = "", [int]$Light = 0)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
 Add-Type @"
@@ -54,11 +52,6 @@ public class WO {
 "@ -ReferencedAssemblies System.Drawing
 function Out-Json($o) { $o | ConvertTo-Json -Compress -Depth 4; exit 0 }
 [WO]::SetProcessDPIAware() | Out-Null
-. (Join-Path $PSScriptRoot 'psageom.ps1')
-if ($Image) {
-  $full = Open-PsaImage $Image
-  if (-not $full) { Out-Json @{ ok = $false; error = "讀不到圖：$Image" } }
-} else {
 $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
 if (-not $proc) { Out-Json @{ ok = $false; error = '遊戲沒有在執行' } }
 $h = $proc.MainWindowHandle
@@ -68,8 +61,6 @@ $full = New-Object System.Drawing.Bitmap $r.R, $r.B
 $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
 $ok = [WO]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
 if (-not $ok) { Out-Json @{ ok = $false; error = 'PrintWindow 失敗' } }
-}
-$Gm = Get-PsaGeomAuto $full.Width $full.Height
 $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
 $null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType = WindowsRuntime]
 $null = [Windows.Storage.Streams.InMemoryRandomAccessStream, Windows.Storage.Streams, ContentType = WindowsRuntime]
@@ -79,8 +70,7 @@ function Await($op, [Type]$t) { $task = $asTask.MakeGenericMethod($t).Invoke($nu
 $null = [Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime]
 $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language 'zh-Hant-TW'))
 if (-not $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }
-$pbx = Convert-PsaBox $Gm ($X * 2) ($Y * 2) ($Wd * 2) ($Ht * 2)      # 截圖框 ×2 = 邏輯客戶區框 → 實體像素框（恆等 / 舊行為 = 原樣 ×2）
-$px = $pbx[0]; $py = $pbx[1]; $pw = $pbx[2]; $ph = $pbx[3]
+$px = $X * 2; $py = $Y * 2; $pw = $Wd * 2; $ph = $Ht * 2
 function OcrZoom([int]$z) {
   $crop = New-Object System.Drawing.Bitmap ([int]($Wd * $z)), ([int]($Ht * $z))
   $g = [System.Drawing.Graphics]::FromImage($crop); $g.InterpolationMode = 'HighQualityBicubic'

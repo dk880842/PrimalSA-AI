@@ -252,15 +252,6 @@ NAME_OPTS = [('-Light', 170, '-Zooms', '2,3'), ('-Dark', 0, '-Zooms', '2,3,4')]
 SLOT_OPTS = [('-Light', 170, '-Zooms', '2,3'), ('-Dark', 120, '-Zooms', '2,3')]
 LEVEL_OPTS = [('-Dark', 0, '-Zooms', '2,3,4'), ('-Light', 120, '-Zooms', '2,3')]
 BTN_OPTS = [('-Dark', 140, '-Zooms', '2,3'), ('-Light', 170, '-Zooms', '2,3')]
-# 外接同比例視窗（1728×995，UI ×0.6）：按鈕白字被縮小重取樣後最亮處 min(R,G,B) 只剩約 140～160，筆電的 -Light 170 / 放大 2～3 倍讀成空
-# （2026-10-11 實測：170 / 200 / Dark 全空；-Light 150 放大 3～5 倍、140 放大 3～5 倍都讀到「取出」）→ 外接先試低門檻 + 大倍數，再退回筆電那組
-BTN_OPTS_SCALED = [('-Light', 150, '-Zooms', '3,4,5'), ('-Light', 140, '-Zooms', '3,4'), ('-Light', 120, '-Zooms', '3')]
-
-
-def btn_opts() -> list:
-    """彈窗按鈕列 OCR 參數組：外接縮放視窗（layout.status()['scaled']）在筆電組前面加 BTN_OPTS_SCALED；筆電 / 1920×1017 = BTN_OPTS 原樣"""
-    import layout
-    return BTN_OPTS_SCALED + BTN_OPTS if layout.status().get('scaled') else BTN_OPTS
 
 
 # ---- 面板 ----
@@ -397,17 +388,9 @@ POPUP_SETTLE_S = 1.0
 ICON_TOL, ICON_RATIO, ICON_RATIO_LOOSE = 40, 0.85, 0.45
 
 
-def icon_file() -> Path:
-    """目前版面的道具圖示樣板檔：2880×1659 = fixtures/item_icons.json（原檔）；外接同比例 1728×995 等（layout.TEMPLATE_PHYS）=
-    tools/.cache/item-icons/<實體尺寸>.json（pixel 取實體最近點，顏色與筆電不同；沒有檔 = 沒有樣板 → 走名稱 OCR / 彈窗核對，P3 2026-10-11）"""
-    import layout
-    k = layout.tpl_key()
-    return ICON_FILE if k == layout.DEFAULT else uikit.CACHE / 'item-icons' / f'{k}.json'
-
-
 def load_icons() -> dict:
     try:
-        return json.loads(icon_file().read_text(encoding='utf-8'))
+        return json.loads(ICON_FILE.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {}
 
@@ -500,7 +483,7 @@ def find_items(role: str, names) -> tuple:
 # ---- 彈窗動作 ----
 def click_popup_button(label: str, allow=()) -> tuple:
     """彈窗開著：OCR 按鈕列 → 依文字決定座標 → 點 label。回 (rc, kind)"""
-    txt = _ocr_join(POPUP_BTN_BOX, btn_opts())
+    txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
     b = popup_buttons(txt)
     if label not in b:
         return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，找不到「{label}」鈕（不點）', 'bag-popup-btn'), b.get('kind')
@@ -694,7 +677,7 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
         if not name_match(nm, want):
             close_popup()
             return _fail(EXIT_NAME, f'倉庫彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不取）', 'bag-depot-name')
-        txt = _ocr_join(POPUP_BTN_BOX, btn_opts())
+        txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
         if '取出' not in re.sub(r'\s+', '', txt):
             close_popup()
             return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn')
@@ -738,7 +721,7 @@ def depot_store(role: str, want: str, depot: str = 'public') -> int:
         if not name_match(nm, want):
             close_popup()
             return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
-        txt = _ocr_join(POPUP_BTN_BOX, btn_opts())
+        txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
         if '存入' not in re.sub(r'\s+', '', txt):
             close_popup()
             return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「存入」（不點）', 'bag-store-btn')

@@ -30,19 +30,12 @@ def classify_pixels(px: dict) -> bool:
     """px = {(x,y): (r,g,b)}（至少含 SIG_BATTLE 與 VS_PROBE 的點）→ 是不是戰鬥畫面（完整戰鬥 9 點全中，或 VS 牌綠框）"""
     if all(_close(px[(x, y)], (r, g, b), 25) for x, y, r, g, b in SIG_BATTLE):
         return True
-    return any(p in px and _close(px[p], VS_COLOR, 40) for p in _vs_probes())
-
-
-def _vs_probes() -> list:
-    """VS 牌取樣點：screen_sigs 套了外接版面覆寫（set_layout）時用覆寫的多點，否則（筆電）就是 [VS_PROBE]。延遲 import 避免循環"""
-    import sys
-    ss = sys.modules.get('screen_sigs')
-    return list(getattr(ss, 'VS_PROBES', [VS_PROBE])) if ss else [VS_PROBE]
+    return _close(px[VS_PROBE], VS_COLOR, 40)
 
 
 def screen_in_battle(gui) -> bool | None:
     """gui = walk.gui 之類的函式；一次 pixel 讀完 → True / False；讀不到回 None"""
-    pts = [(x, y) for x, y, *_ in SIG_BATTLE] + _vs_probes()
+    pts = [(x, y) for x, y, *_ in SIG_BATTLE] + [VS_PROBE]
     try:
         out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
         cols = [tuple(int(v) for v in c.split(',')) for c in out]

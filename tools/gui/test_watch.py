@@ -1167,60 +1167,6 @@ watch.LEARN_EVERY = 60.0
 import shutil  # noqa: E402
 shutil.rmtree(dm_tmp, ignore_errors=True)
 
-# ---- P4 接線：同比例外接視窗（1728×995）套覆寫表、守衛判斷、版面切換重套 ----
-import layout as layout_mod  # noqa: E402
-fxp = json.loads((HERE / 'fixtures' / 'phys_1728x995_px.json').read_text(encoding='utf-8'))
-PPTS = [tuple(p) for p in fxp['points']]
-
-
-def phys_out(name):
-    """外接樣本 → gui pixel stdout：依 watch 目前的 pts 順序查表（表外的點給黑）"""
-    h = fxp['samples'][name]
-    tab = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(PPTS)}
-    return lambda: (0, ' '.join('%d,%d,%d' % tab.get(pt, (0, 0, 0)) for pt in w.pts), '')
-
-
-INFO_EXT = 'client=1728x995 origin=(0,31) scale=2 shot=1440x830 layout=2880x1659\n'
-INFO_LAP = 'client=2880x1659 origin=(0,45) scale=2 shot=1440x830 foreground=False\n'
-w, clk, fk = make('ext')
-lap_pts = list(w.pts)
-lap_state = watchstate.read  # 保留引用只為可讀性
-w.cycle()
-check('筆電：state=idle、game.screen_supported、覆寫未套', watchstate.read()['screen']['state'] == 'idle' and watchstate.read()['game']['screen_supported']
-      and screen_sigs.active_layout() is None and not watchstate.read()['game']['proportional'])
-real_tl = layout_mod.template_layout
-layout_mod.template_layout = lambda phys=None: None          # 模擬 P3 之前（樣板未就緒）
-fk.info = (0, INFO_EXT, ''); fk.pixel = phys_out('enc'); w.last_info = -1e9
-w.cycle()
-st = watchstate.read()
-g_ = st['game']
-check('外接：套 1728x995 覆寫、points 重算', screen_sigs.active_layout() == '1728x995' and w.pts != lap_pts and g_['sig_layout'] == '1728x995')
-check('外接：game 欄位 phys / logical / proportional / templates', g_['phys'] == '1728x995' and g_['logical'] == '2880x1659' and g_['proportional'] is True and g_['templates'] is False)
-check('外接：樣板未就緒 → screen_supported False + 理由', g_['screen_supported'] is False and '樣板' in g_['layout_reason'])
-check('外接：仍有送 pixel、state 不是 unsupported（驗證視窗偵測照跑）', st['screen']['state'] not in ('unsupported', 'error') and any(c[1][0] == 'pixel' for c in fk.calls[-3:]))
-check('外接：HUD 標籤說清楚版面與樣板', '外接 1728×995' in st['screen']['label'] and '樣板未就緒' in st['screen']['label'], st['screen']['label'])
-check('外接：遇敵鈕（覆寫點）讀得到 enc_on', st['screen']['enc_on'] is True)
-# 實際 layout（P3 之後 1728x995 在 TEMPLATE_PHYS）→ 放行
-layout_mod.template_layout = real_tl
-w.last_info = -1e9; w.cycle()
-g_ = watchstate.read()['game']
-check('P3 樣板就緒（TEMPLATE_PHYS）：screen_supported True', g_['screen_supported'] is True and g_['layout_reason'] == '' and g_['templates'] is True)
-# 版面切回筆電 → 還原
-fk.info = (0, INFO_LAP, ''); fk.pixel = (0, px_out('idle'), ''); w.last_info = -1e9
-w.cycle()
-check('切回筆電：覆寫還原、points 與原本相同', screen_sigs.active_layout() is None and w.pts == lap_pts and watchstate.read()['game']['sig_layout'] is None)
-check('切回筆電：screen_supported True、state idle', watchstate.read()['game']['screen_supported'] and watchstate.read()['screen']['state'] == 'idle')
-# 1920×1017（舊路徑）仍 unsupported 且不送 pixel
-fk.info = (0, 'client=1920x1017 origin=(0,0) scale=2\n', ''); w.last_info = -1e9; n0 = len(fk.calls)
-w.cycle()
-st = watchstate.read()
-check('1920×1017：仍 unsupported、不送 pixel、標籤精確', st['screen']['state'] == 'unsupported' and all(c[1][0] == 'info' for c in fk.calls[n0:]) and '1920×1017' in st['screen']['label'], st['screen']['label'])
-# 不認得的同比例視窗（沒有覆寫表）：不套覆寫、仍能讀（proportional）但不放行
-fk.info = (0, 'client=1440x829 origin=(0,31) scale=2 layout=2880x1659\n', ''); fk.pixel = (0, px_out('idle'), ''); w.last_info = -1e9
-w.cycle()
-check('同比例但無覆寫表（1440×829）：覆寫不套、不放行', screen_sigs.active_layout() is None and not watchstate.read()['game']['screen_supported'] and watchstate.read()['game']['proportional'])
-screen_sigs.set_layout(None)
-
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

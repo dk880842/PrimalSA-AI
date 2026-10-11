@@ -12,8 +12,6 @@
   uv run --no-project python tools/gui/titlematch.py list               # 現有樣板
 程式用：import titlematch → titlematch.find(want) / titlematch.learn(name, y) / titlematch.has_templates(name)。
 樣板自動累積：quest.py 的 OCR 認出目標任務那一格時呼叫 learn()，下次就不用 OCR。
-版面（P3，2026-10-11）：樣板依實體客戶區分資料夾：2880×1659 = task-titles/*.png（原檔）；外接同比例 1728×995 = task-titles/1728x995/*.png
-（titlematch.ps1 縮放時自己讀 <Dir>/<實體尺寸>/；add 存的是正規化 1440×830 的灰階）。tpl_dir() = 目前版面那一份（layout.tpl_key()）。
 """
 import argparse
 import json
@@ -43,16 +41,8 @@ def base(name: str) -> str:
     return name.split('@')[0]
 
 
-def tpl_dir() -> Path:
-    """目前版面的樣板資料夾：2880×1659 = TPL_DIR；其他（layout.TEMPLATE_PHYS）= TPL_DIR / 實體尺寸"""
-    import layout
-    k = layout.tpl_key()
-    return TPL_DIR if k == layout.DEFAULT else TPL_DIR / k
-
-
 def templates() -> list[Path]:
-    d = tpl_dir()
-    return sorted(p for p in d.glob('*.png') if not p.name.startswith('_')) if d.is_dir() else []
+    return sorted(p for p in TPL_DIR.glob('*.png') if not p.name.startswith('_')) if TPL_DIR.is_dir() else []
 
 
 def has_templates(name: str) -> bool:
@@ -110,12 +100,11 @@ def learn(name: str, y: int, image: Path | str | None = None) -> Path | None:
     n = norm(name)
     if not n:
         return None
-    d = tpl_dir()
-    d.mkdir(parents=True, exist_ok=True)
+    TPL_DIR.mkdir(parents=True, exist_ok=True)
     mine = [p for p in templates() if base(p.stem) == n]
     if len(mine) >= MAX_PER_NAME:
         return None
-    tmp = d / '_new.png'
+    tmp = TPL_DIR / '_new.png'
     args = ['-Mode', 'add', '-Y', int(y), '-Out', winenv.to_windows(tmp)]
     if image:
         args += ['-Image', winenv.to_windows(Path(image).resolve())]
@@ -131,9 +120,9 @@ def learn(name: str, y: int, image: Path | str | None = None) -> Path | None:
             if base(h['name']) == n and abs(h['y'] - y) < ROW_DY:
                 return None
         k = 1
-        while (d / f'{n}@{k}.png').exists():
+        while (TPL_DIR / f'{n}@{k}.png').exists():
             k += 1
-        dst = d / f'{n}@{k}.png'
+        dst = TPL_DIR / f'{n}@{k}.png'
         tmp.replace(dst)
         return dst
     finally:

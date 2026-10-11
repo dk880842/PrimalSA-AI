@@ -213,16 +213,8 @@ def snap_name(text: str, cutoff: float = 0.7) -> str | None:
     return by_norm[m[0]] if m else None
 
 
-def tpl_file() -> Path:
-    """目前版面的樣板檔：2880×1659 = fixtures/questdetail_tpl.json（進 git 的原檔）；外接同比例 1728×995 等（layout.TEMPLATE_PHYS）=
-    tools/.cache/questdetail-tpl/<實體尺寸>.json（截圖是縮成 1440×830 的實體畫面，點陣與筆電不同，不能混進 fixture；P3 2026-10-11）"""
-    import layout
-    k = layout.tpl_key()
-    return TPL_FILE if k == layout.DEFAULT else CACHE / 'questdetail-tpl' / f'{k}.json'
-
-
 def load_tpl(path=None) -> dict:
-    p = Path(path) if path else tpl_file()
+    p = Path(path) if path else TPL_FILE
     try:
         d = json.loads(p.read_text(encoding='utf-8'))
     except (OSError, ValueError):
@@ -231,7 +223,7 @@ def load_tpl(path=None) -> dict:
 
 
 def save_tpl(tpl: dict, path=None) -> None:
-    p = Path(path) if path else tpl_file()
+    p = Path(path) if path else TPL_FILE
     p.parent.mkdir(parents=True, exist_ok=True)
     tmp = p.with_suffix('.tmp')
     tmp.write_text(json.dumps(tpl, ensure_ascii=False, indent=0, sort_keys=True), encoding='utf-8')

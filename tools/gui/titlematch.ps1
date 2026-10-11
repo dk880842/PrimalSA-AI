@@ -7,9 +7,6 @@
 #   titlematch.ps1 -Mode add -Y 310 -Out <新樣板.png> [-Image 檔.png]
 #       → 以標題中心 y（OCR 給的）為準，在 y±11 內取黑字外框存成樣板圖；回 {"ok":true,"w":..,"h":..,"ink":..,"x":..,"y":..}
 #   -Image 省略 = 即時背景截圖；給檔案 = 用該圖測試（1440×830 或 2880×1659 都行，會統一縮成 1/2 解析度）。
-#   客戶區與 2880×1659 同長寬比但不是它（例 1728×995）：先用 psageom.ps1 的 Get-PsaShot 正規化成 1440×830 再比對（座標 / 區域與筆電相同）；
-#   樣板像素依實體尺寸渲染，筆電樣板不能硬比：縮放時 -Mode match 只讀 <樣板資料夾>\<實體尺寸>\（例 task-titles\1728x995\，P3 才會有），
-#   沒有就回 ok=true、hits=[]、notpl=true（無樣板，不誤判）。PSA_GEOM=off = 舊行為。
 # 黑字 = max(R,G,B) < 140（標題深棕字；步驟說明文字較淺不算）。
 param([string]$Mode = 'match', [string]$Dir, [string]$Image, [string]$Out, [int]$Y = 0, [double]$Thr = 0.6)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -92,13 +89,6 @@ if ($Image) {
   $ok = [TM]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
   if (-not $ok) { Out-Json @{ ok = $false; error = 'PrintWindow 失敗' } }
 }
-. (Join-Path $PSScriptRoot 'psageom.ps1')
-$Gm = Get-PsaGeomAuto $full.Width $full.Height
-$physKey = "$($full.Width)x$($full.Height)"
-$scaledPhys = $Gm.Proportional -and -not $Gm.Identity -and -not ($full.Width -eq $Gm.ShotW -and $full.Height -eq $Gm.ShotH)   # 1440×830 測試圖 = 已正規化，仍用原樣板
-if ($scaledPhys) {
-  $nm = Get-PsaShot $full $Gm; $full.Dispose(); $full = $nm      # 實體 → 1440×830（寬 < 2000，Gray 不再縮半）
-}
 $W = [TM]::RW; $H = [TM]::RH
 $gray = [TM]::Gray($full, [TM]::RX, [TM]::RY, $W, $H)
 $full.Dispose()
@@ -124,11 +114,6 @@ if ($Mode -eq 'add') {
 # match
 $ink = [TM]::InkOf($gray); $integ = [TM]::Integral($ink, $W, $H)
 $hits = @()
-$notpl = $false
-if ($scaledPhys) {     # 實體尺寸與筆電不同：樣板放在 <Dir>\WxH\，沒有 = 無樣板
-  $Dir = if ($Dir) { Join-Path $Dir $physKey } else { $Dir }
-  if (-not ($Dir -and (Test-Path -LiteralPath $Dir))) { $notpl = $true }
-}
 if ($Dir -and (Test-Path -LiteralPath $Dir)) {
   foreach ($f in Get-ChildItem -LiteralPath $Dir -Filter *.png) {
     if ($f.Name.StartsWith('_')) { continue }
@@ -142,6 +127,4 @@ if ($Dir -and (Test-Path -LiteralPath $Dir)) {
     }
   }
 }
-$o = [ordered]@{ ok = $true; ms = [int]$sw.ElapsedMilliseconds; hits = $hits }
-if ($notpl) { $o['notpl'] = $true }
-Out-Json $o
+Out-Json ([ordered]@{ ok = $true; ms = [int]$sw.ElapsedMilliseconds; hits = $hits })

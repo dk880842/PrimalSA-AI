@@ -142,21 +142,11 @@ def watch_preflight_ok() -> bool:
     if fl.get('verify_suspect') or fl.get('netwatch_halt') or st.get('alerts'):
         return False
     g = st.get('game') or {}
-    # watch 算好的守衛結果（layout.evaluate）；舊 state 沒有 screen_supported 就退回「實體版面 == 2880x1659」
-    if not g.get('screen_supported', g.get('layout') == LAYOUT) or not g.get('running'):
+    if g.get('layout') != LAYOUT or not g.get('running'):
         return False
     import layout
-    layout.prime(g['layout'], g.get('logical'))                     # 後面 import walk（uikit.gui 第一次呼叫）時不必再問一次版面
+    layout.prime(g['layout'])                     # 後面 import walk（uikit.gui 第一次呼叫）時不必再問一次版面
     return True
-
-
-def sync_sig_layout() -> None:
-    """依目前實體版面套 screen_sigs 的外接覆寫表（PHYS_OVERRIDES；同比例縮放視窗例 1728×995），筆電 / 其他 = 原值（set_layout(None) 不改任何值）。
-    preflight 放行時呼叫；layout 已有快取（watch prime 或 supported() 問過）就不再問遊戲"""
-    import layout
-    phys = layout.current()
-    scaled = bool(phys) and phys != layout.DEFAULT and layout.logical() == layout.DEFAULT
-    screen_sigs.set_layout(phys if scaled else None)
 
 
 def preflight(src: str, fast: bool = True) -> int:
@@ -167,9 +157,8 @@ def preflight(src: str, fast: bool = True) -> int:
     fast_ok = fast and watch_preflight_ok()
     if not fast_ok:
         import layout
-        ok, why = layout.supported()
-        if not ok:
-            print(f'{src}：版面不支援：{why}', file=sys.stderr)
+        if layout.current() != LAYOUT:
+            print(f'{src}：只量過 {LAYOUT}，目前 {layout.current()}', file=sys.stderr)
             return EXIT_LAYOUT
         import netwatch
         netwatch.guard(src)
@@ -177,7 +166,6 @@ def preflight(src: str, fast: bool = True) -> int:
     if lk:
         print(f'{src}：battle.lock 有效（{lk.get("note", "")} pid {lk.get("pid")}），別的腳本在用畫面，不搶', file=sys.stderr)
         return EXIT_IN_BATTLE
-    sync_sig_layout()
     if fast_ok:
         mark('preflight(watch)')
         return EXIT_OK

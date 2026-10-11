@@ -74,7 +74,7 @@ import winenv
 import walk
 from walk import ROOT, gui, log, PRIMER, stat
 from screen_sigs import (SIG_CMD, SIG_AUTO_OFF, SIG_CLOSE_ROW, SIG_SELECT, SIG_DIALOG, SIG_REWARD, SIG_PANEL, SIG_HUD,  # noqa: F401
-                         SIG_BATTLE, vs_on, AW_POINTS, AW_MIN, TOL, close)
+                         SIG_BATTLE, VS_PROBE, VS_COLOR, AW_POINTS, AW_MIN, TOL, close)
 import re
 
 EXIT_AT_NPC = 20                     # --solo：到達 NPC（對話框已 ESC 關閉）
@@ -162,7 +162,7 @@ DIALOG_OCR_TRIES = 2                       # 內文讀不到時最多重讀幾�
 # 完整戰鬥畫面（2026-10-10 實測，下指令 / 播放中兩種都量過）：上方中央棕框標籤（播放中 → 米色字；下指令 → 「N回合」+ 下方「剩餘時間 90」倒數），
 # 標籤文字會變，所以只取「外框」9 點（兩種畫面像素相同）；主畫面 / 對話 / 獲得物品 / 地圖載入在這些點都不同。9 點同時符合（容差 25）才算。
 # 完整戰鬥時 HUD 的 ASS 紅字還在，所以要排在 idle 之前
-# SIG_BATTLE / vs_on（VS_PROBES 多點，外接覆寫） / AW_POINTS / AW_MIN 也在 screen_sigs.py（完整戰鬥特徵來自 battleguard）
+# SIG_BATTLE / VS_PROBE / AW_POINTS / AW_MIN 也在 screen_sigs.py（完整戰鬥特徵來自 battleguard）
 
 # ---- 任務追蹤列表（左側，「任務 / 組隊」分頁下方；一格一個任務，標題 + 步驟說明，可上下捲動）----
 LIST_BOX = (75, 270, 260, 180)       # OCR 區域 x,y,w,h（截圖座標）：標題深棕字
@@ -172,21 +172,8 @@ SCROLL_UP = (200, 420, 200, 300)     # 往上拖 120px ≈ 捲一格（列表往
 SCROLL_DOWN = (200, 300, 200, 420)   # 反向
 
 
-_LAYOUT_SYNCED = False
-
-
-def _sync_layout_once() -> None:
-    """第一次讀畫面前套目前實體版面的 screen_sigs 覆寫（外接 1728×995 的 VS 牌多點等）；筆電恆等"""
-    global _LAYOUT_SYNCED
-    if not _LAYOUT_SYNCED:
-        import uikit
-        uikit.sync_sig_layout()
-        _LAYOUT_SYNCED = True
-
-
 def read_screen() -> dict:
     """一次 gui pixel 讀完所有特徵點 → screen_sigs.classify 判斷狀態（判定邏輯與特徵都在 screen_sigs.py）"""
-    _sync_layout_once()
     pts = screen_sigs.points()
     allp = pts + [p for p in DIALOG_BTN_PROBES if p not in pts]
     out = gui('pixel', ' '.join(f'{x},{y}' for x, y in allp)).split()
@@ -1244,9 +1231,8 @@ def _main() -> int:
     a.npc_map = None
     if a.step and not a.npc:
         a.npc = 'auto'
-    _ok, _why = layout.supported()
-    if not _ok:
-        log('quest.py 版面不支援：%s；先跑 gui.sh max / fit；見 ui/layout-1920x1017.md' % _why)
+    if layout.current() != '2880x1659':
+        log('quest.py 只量過 2880×1659 版面，先跑 gui.sh max；見 ui/layout-1920x1017.md')
         return 4
     if a.solo and a.fight:
         log('--solo（逃跑）與 --fight（打）互斥')

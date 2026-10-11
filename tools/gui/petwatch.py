@@ -268,9 +268,8 @@ def main() -> int:
     ap.add_argument('--mp', type=int, default=20)
     ap.add_argument('--for', dest='duration', type=int, default=0, help='跑幾秒後自己結束（測試用）')
     a = ap.parse_args()
-    _ok, _why = layout.supported()
-    if not _ok:
-        log(f'petwatch 版面不支援：{_why}')
+    if layout.current() not in ('2880x1659',):
+        log(f'petwatch 只量過 2880×1659，目前 {layout.current()}')
         return 2
     if not take_lock():
         log('已有另一支 petwatch 在跑（tools/.cache/petwatch.lock），結束')

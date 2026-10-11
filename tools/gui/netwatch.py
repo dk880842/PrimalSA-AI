@@ -500,9 +500,8 @@ def main() -> int:
     if a.status:
         print('halt:', HALT.read_text(encoding='utf-8').strip() if HALT.exists() else '無', '| 狀態:', _load())
         return 0
-    _ok, _why = layout.supported()
-    if not _ok:
-        log(f'netwatch 版面不支援：{_why}')
+    if layout.current() != '2880x1659':
+        log(f'netwatch 只量過 2880×1659，目前 {layout.current()}')
         return 2
     kw = {'src': 'netwatch', 'team': not a.no_team, 'encounter': not a.no_encounter, 'grind_ensure': not a.no_grind}
     if not a.watch:

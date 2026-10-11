@@ -9,8 +9,6 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 winpath() { if command -v wslpath >/dev/null 2>&1; then wslpath -w "$1"; elif command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 PS="$(winpath "$DIR/gui.ps1")"
 cmd="$1"; shift
-# WSL 預設不把環境變數帶進 powershell.exe：PSA_GEOM=off（座標換算層退回舊行為）要列進 WSLENV
-[ -n "${PSA_GEOM+x}" ] && export WSLENV="${WSLENV:+$WSLENV:}PSA_GEOM"
 if [ "$cmd" = shot ]; then
   out="${1:-shot.png}"
   case "$out" in /*|[A-Za-z]:*|\\*) ;; *) out="$DIR/../.cache/$out" ;; esac   # 相對路徑一律放 tools/.cache/（與 gui.ps1 一致）

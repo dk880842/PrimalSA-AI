@@ -92,30 +92,6 @@ if LAYOUT == '1920x1017':
     PRIMER = f'click {PRIMER_XY[0]} {PRIMER_XY[1]}; wait 100'
     SIG_NPC_DIALOG = '900,205,107,70,44/700,215,107,70,44'   # 對話框棕底（小護士實測；別的 NPC 版面不同時自己給 sig）
 
-# ======== 同比例縮放視窗（外接螢幕 gui.sh fit）的世界畫面常數 ========
-# UI 由 gui.ps1 換算層等比例換算（截圖座標不變），但世界畫面（地圖 / 角色）不跟著 UI 縮：
-# 2026-10-11 外接 1728×995 實機（60049 地雷區，鏡頭高度最左）：每格實體像素 64×46 與筆電 2880×1659 相同
-# （x+2 背景平移 -107,+77、y-3 平移 +160,+115 → 截圖座標每格 53.3×38.3 = 筆電 32×23 × 2/1.2）。
-# ME 由 0.4 / 0.6 格邊界點擊驗證（4 方向 0.4 格不動、0.6 格動 1 格）。UI_RECTS / PRIMER / SIG_NPC_DIALOG 是 UI 座標，沿用。
-# 只放實機量過的尺寸；其他同比例尺寸 world_guard() 仍擋（P0 推論外接世界倍率隨客戶區高度變，未驗證）。
-# still = gui.ps1 waitstill 能不能用：它的取樣格與中央排除框是依 UI 比例縮放，外接時角色 / 隊員（騎寵待機動畫）在截圖座標大 1.67 倍，
-# 跟在後面的隊員落在取樣格內 → 停下後仍約 21% 取樣點在變（實測 2 次 0.22 / 0.21，門檻 6%）→ 永遠 timeout。
-# False = 改用依格數估的固定等待（settle()），點完下一段之前一定等夠。
-WORLD_PHYS = {
-    '1728x995': {'ME': (712, 407), 'TILE_X': (53.333, -38.333), 'TILE_Y': (53.333, 38.333), 'NPC_DY': -48,
-                 'still': False},
-}
-PHYS = layout.current() if LAYOUT == layout.DEFAULT else None
-USE_WAITSTILL = True
-# 點擊點必須在截圖範圍內（safe() 一律檢查）：筆電 / 外接 1440×830、1920×1017 為 960×508。超出畫面的段長會被縮短 / 拆段。
-# 外接每格大 1.67 倍，10 格常超出（實測 -6,+6 算出 y=867 > 830）；筆電斜走 9～10 格也一樣（(+1,-1)×9～10 格 y<0、(-1,+1)×10 格 y>830），
-# 2026-10-12 起筆電 / 1920 也套同一檢查（以前照點，點到畫面外被 clamp 或沒反應）。STEP_COST / plan 因此隨之更新。
-SHOT = (960, 508) if LAYOUT == '1920x1017' else (1440, 830)
-if PHYS in WORLD_PHYS:
-    _w = WORLD_PHYS[PHYS]
-    ME, TILE_X, TILE_Y, NPC_DY, USE_WAITSTILL = _w['ME'], _w['TILE_X'], _w['TILE_Y'], _w['NPC_DY'], _w['still']
-SETTLE_MS = (500, 220)       # 不能用 waitstill 時的固定等待：起步 + 判停 500 ms，每格 220 ms（實測每格 0.15～0.17 s，留餘裕）
-
 
 def log(msg: str, act: bool = True) -> None:
     """印出並寫進操作 log（類別 = 執行的腳本名 walk / heal / quest；act=False 只印）"""
@@ -149,34 +125,6 @@ def last_ok(out: str) -> bool:
     return bool(lines) and lines[-1].split()[0] in ('ok', 'still')
 
 
-def settle(tiles: int) -> str:
-    """點地面之後「等角色走完」的 seq 指令：一般用 waitstill（等鏡頭停）；waitstill 判不準的版面（WORLD_PHYS still=False）
-    改固定等待 SETTLE_MS[0] + 格數 × SETTLE_MS[1]（wait 不設 ifok 狀態，呼叫端不能再用 ifok 串接）"""
-    if USE_WAITSTILL:
-        return f'waitstill {WAITSTILL_MS}'
-    return f'wait {SETTLE_MS[0] + SETTLE_MS[1] * max(1, tiles)}'
-
-
-# 點地面點到隊友 / 路人 → 右上角跳「玩家選單」小窗（beige 底、玩家頭像 + 名字，x 1033～1420、y 160～300；ESC 關）。
-# 2026-10-12 外接 1728×995 實機（醫院點 DKBO4）：5 點全中，對 970 張 1440×830 樣本只有那一張全中（最多的 3 點是設置面板，所以要求全中）。
-# 只驗過 2880×1659 座標系（含外接縮放視窗，UI 錨點同座標）；1920×1017 沒量，不檢查。
-PLAYER_POPUP_SIG = '1230,170,242,216,174/1230,285,244,214,173/1300,230,245,229,195/1040,230,94,69,39/1415,230,100,74,44'
-PLAYER_POPUP_TOL = 25
-
-
-def dismiss_player_popup() -> bool:
-    """畫面上有「玩家選單」小窗就按 ESC 關掉（回傳有沒有關）；沒有就什麼都不做（不按任何鍵，避免誤關別的視窗）"""
-    if LAYOUT == '1920x1017':
-        return False
-    out = gui('seq', f'waitpix 0 {PLAYER_POPUP_SIG} {PLAYER_POPUP_TOL}')
-    if not out.startswith('ok'):
-        return False
-    log('點到隊友 / 玩家，開出玩家選單小窗 → ESC 關掉')
-    gui('key', '{ESC}')
-    time.sleep(0.4)
-    return True
-
-
 def prime() -> None:
     """換地圖後的引子點擊（之後的第一下左鍵才有效）"""
     gui('seq', PRIMER)
@@ -189,9 +137,7 @@ def screen(dx: int, dy: int) -> tuple[int, int]:
 
 
 def safe(sx: int, sy: int) -> bool:
-    """點這個截圖座標在畫面內、不會點到 UI（面板、按鈕）"""
-    if not (0 <= sx < SHOT[0] and 0 <= sy < SHOT[1]):
-        return False
+    """點這個截圖座標不會點到 UI（面板、按鈕）"""
     return not any(x1 <= sx < x2 and y1 <= sy < y2 for x1, y1, x2, y2 in UI_RECTS)
 
 
@@ -342,10 +288,8 @@ def step_to(map_id: int, tx: int, ty: int, exit_map: int | None = None) -> tuple
     """慢速：每段點地面最多 MAX_TILES 格、等鏡頭停、OCR 讀座標再點下一段。
     座標沒變（點到 UI、點到障礙、被擋）就把每段格數減半再點，減到 0 = 卡住。
     exit_map = 這格是出口，走到就換地圖（讀到 exit_map 就回傳）。"""
-    world_guard()
     lim, last = MAX_TILES, None
     for _ in range(25):
-        dismiss_player_popup()           # 上一段點到隊友開出的玩家選單小窗（不關的話後面的點擊會被它吃掉）
         p = wait_pos()
         if p is None:
             raise RuntimeError('讀不到座標（戰鬥中？）')
@@ -363,26 +307,11 @@ def step_to(map_id: int, tx: int, ty: int, exit_map: int | None = None) -> tuple
         last = p
         nx, ny = split((p[1], p[2]), (tx, ty), lim)[0]
         sx, sy = screen(nx - p[1], ny - p[2])
-        gui('seq', f'{PRIMER}; click {sx} {sy}; {settle(max(abs(nx - p[1]), abs(ny - p[2])))}')
+        gui('seq', f'{PRIMER}; click {sx} {sy}; waitstill {WAITSTILL_MS}')
     raise RuntimeError(f'走太久還沒到 {tx},{ty}')
 
 
-# 世界畫面（地圖 / 角色）已量過每格位移的同比例縮放實體尺寸（常數見開頭 WORLD_PHYS）。外接視窗的世界畫面不跟 UI 等比例縮
-# （1728×995 截圖座標每格約筆電 1.67 倍），沒量過的尺寸一律擋下點地面（座標換算層只管 UI）
-WORLD_OK_PHYS: tuple = tuple(WORLD_PHYS)
-
-
-def world_guard() -> None:
-    """同比例縮放視窗（例 1728×995）的世界倍率還沒量 → RuntimeError，不點地面。筆電 2880×1659 / 1920×1017 / PSA_LAYOUT 指定時不擋"""
-    if os.environ.get('PSA_LAYOUT'):
-        return
-    phys = layout.current()
-    if phys and phys != layout.DEFAULT and layout.logical() == layout.DEFAULT and phys not in WORLD_OK_PHYS:
-        raise RuntimeError(f'外接同比例視窗 {phys}：世界畫面倍率與筆電不同（未量），walk 不點地面；請用筆電或先量 TILE 常數加進 walk.WORLD_PHYS（notes/plan-display-scale.md）')
-
-
 def _start(map_id: int, start: tuple[int, int] | None) -> tuple[int, int]:
-    world_guard()
     if start is not None:
         return start
     p = wait_pos(4)
@@ -411,12 +340,11 @@ def walk_path(map_id: int, pts: list[tuple[int, int]], start: tuple[int, int] | 
         sx, sy = screen(p[0] - prev[0], p[1] - prev[1])
         # 第 2 段起加 ifok：上一段 waitstill 沒有 still（nomove = 點擊沒讓角色走）就跳過後面全部，
         # 免得用錯的起點繼續換算越點越偏；最後再 OCR 驗證、退回慢速
-        # 固定等待模式（USE_WAITSTILL=False）沒有 nomove 可判，不加 ifok，照順序點完再驗證
-        k = 'ifok ' if i and USE_WAITSTILL else ''
+        k = 'ifok ' if i else ''
         if i == len(segs) - 1 and end_sig:
             steps.append(f'{k}click {sx} {sy}; {k}waitpix 5000 {end_sig} 25')
         else:
-            steps.append(f'{k}click {sx} {sy}; {k}{settle(max(abs(p[0] - prev[0]), abs(p[1] - prev[1])))}')
+            steps.append(f'{k}click {sx} {sy}; {k}waitstill {WAITSTILL_MS}')
         prev = p
     out = gui('seq', '; '.join(steps))
     goal = segs[-1] if segs else cur
@@ -425,7 +353,6 @@ def walk_path(map_id: int, pts: list[tuple[int, int]], start: tuple[int, int] | 
     p = wait_pos(4, exit_map or map_id, 0.3)
     if p and ((exit_map is not None and p[0] == exit_map) or (exit_map is None and p == (map_id, *goal))):
         return p
-    dismiss_player_popup()
     log(f'快速走路沒到 {goal}（現在 {p}），改慢速逐段走')
     if not p or p[0] != map_id:
         raise RuntimeError(f'不在地圖 {map_id}：{p}')
@@ -488,8 +415,7 @@ def npc_steps(npc: tuple[int, int], at: tuple[int, int], sig: str = SIG_NPC_DIAL
 
 
 def talk_npc(npc: tuple[int, int], at: tuple[int, int], sig: str = SIG_NPC_DIALOG, then: str = '', pre: str = '') -> bool:
-    """點 NPC 並等對話框；pre = 同一個 seq 前面先做的動作。回傳對話框有沒有出現（NPC 位置是世界座標：外接縮放視窗擋下，見 world_guard）"""
-    world_guard()
+    """點 NPC 並等對話框；pre = 同一個 seq 前面先做的動作。回傳對話框有沒有出現"""
     out = gui('seq', (pre + '; ' if pre else '') + npc_steps(npc, at, sig, then))
     return any(l.split()[:1] == ['ok'] for l in out.splitlines())
 

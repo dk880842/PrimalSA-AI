@@ -100,7 +100,7 @@ PrimalSA-AI/
 
 ## 5. 操作遊戲畫面
 操作前先讀 `.claude/skills/psa-game-ui/SKILL.md`（工具用法、操作迴圈、紅區）與同資料夾 `ui/README.md`（功能索引；按鈕座標、各面板內容依功能拆檔）。
-工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|fit|end`（WSL / Git Bash 手打用）；走路 / 補血用 `uv run --no-project python tools/gui/walk.py ...`、`heal.py`（兩邊指令相同）。座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
+工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`（WSL / Git Bash 手打用）；走路 / 補血用 `uv run --no-project python tools/gui/walk.py ...`、`heal.py`（兩邊指令相同）。座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
 
 **即時狀態**：開著 psa-hud 時有 `watch.py` 在背景零輸入監看（只送 pixel / info / digitmatch / stat），`uv run --no-project python tools/gui/watch.py --get` 可讀；它只是參考，點擊前仍要現場讀圖，`idle` 不代表沒有驗證視窗；出現 `verify_suspect` / alerts 就依鐵則 5 停手通知。只有開 psa-hud 的那個 session 管理它，兩個平台同時開 session 時只有一邊有即時狀態。
 
@@ -111,7 +111,6 @@ PrimalSA-AI/
 - **psa-hud mod**：stat.ps1 / watch.py 路徑由 session cwd 推算，不用改程式；session.start 會自動 spawn `tools/gui/watch.py`（即時狀態 → `tools/.cache/state.json`，pane 頂端顯示狀態行；`/psa-hud watch on|off` 開關）。載入方式在使用者層級設定（不放進專案）：Windows 版的 `CLAUDE_CODE_PLUGIN_DIRS` 設成 `C:\games\PrimalSA-AI\tools\mods\psa-hud`（WSL 版是 `/mnt/c/games/PrimalSA-AI/tools/mods/psa-hud`；兩邊各有自己的 settings.json）。
 - 其他：Windows 原生 Python 的 stdout 預設 cp950，walk.py 已自行改成 UTF-8；自己寫 Python 呼叫 gui.ps1 時用 `winenv.run_ps()`。
 - 紅區、背景操作、驗證視窗等規則與 WSL 相同。
-- **外接螢幕**：`bash tools/gui/gui.sh fit`（視窗化成 2880×1659 同比例，1920×1080 螢幕 → 1728×995）+ `gui.ps1` 座標換算層（`psageom.ps1`），1440×830 截圖座標不變；2026-10-11 實機收尾：1728×995 樣板已重學（依 `layout.tpl_key()` 分版面存放，筆電原檔不動）、腳本守衛放行（team / char / ass / pet / questdetail / grind ensure 實跑 rc 0）；**世界畫面比筆電放大約 2 倍、不等比例 → walk / heal 在外接被擋（`walk.world_guard`）**。細節見 psa-game-ui SKILL.md「外接實機收尾」。
 - 實測狀態：WSL 完整驗證；Windows 原生用 Windows 版 Python 驗過 `walk.py --plan`、`gui info / shot / pixel`、`stat.ps1`（Git Bash 環境本身未實測）。
 
 ## 5.1 怎麼查知識庫
