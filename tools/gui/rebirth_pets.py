@@ -78,7 +78,7 @@ FAMILY_NEIGHBORS = {'鯊魚系': (('犀牛', '牛系'), ('飛天蛙', '飛夭蛙
 SPECIES_ORDER = {'鯊魚系': ['克邦凱斯', '加克拉', '加格', '邦恩吉'], '火雞系': ['火雞', '克克洛斯', '霍爾克', '奇寶']}   # 寵物下拉的列順序（第一列 y=421、列距 42、x=1115）；選中的藍底白字 OCR 讀不到時用位置
 FAMILY_OF = {'布拉奇多斯': '雷龍系'}            # 物種 → 外掛捉寵設置的系別（PetData 第 27 組；其他物種用 --family）
 BAIT = '寵物誘餌'
-BOX_CONTENTS = ['寵物誘餌', '離線水晶8H', '2倍智慧果', '安撫之素']      # 1轉新手禮盒內容（quest-log 實測）；存公共
+BOX_CONTENTS = ['寵物誘餌', '離線水晶', '2倍智慧果', '安撫之素']      # 1轉新手禮盒內容（quest-log 實測）；存公共
 CATCH_POLL_S, CATCH_TIMEOUT_S = 30.0, 1200.0
 LAST: dict = {}
 
@@ -173,6 +173,8 @@ def stores_for(slots: list, store_mount: str | None, keep: list | None = None) -
         if s.get('empty'):
             continue
         nm = s.get('name') or (s.get('species') if s.get('unnamed') else None)
+        if not nm and s.get('unnamed') and s.get('mountlike') and (s.get('img_score') or 0) >= 0.9 and store_mount and s.get('img_species') == store_mount:
+            nm = store_mount                                        # 使用者明講要存的騎寵：縮圖認得物種就放行（pet.py 還會再比對）
         if not nm:
             left.append((s['slot'], f'名字讀不出來 / 沒名字且物種未確認：{s.get("raw_name") or "?"}'))
             continue
@@ -741,10 +743,12 @@ class Run:
         rc = T.team_disband()
         if rc:
             return self.stop(EXIT_PRE, f'解散隊伍失敗（team rc {rc}）')
-        rc, sts = T.lock_get_many(ALL_ROLES)                    # 外掛面板只開一次讀 5 人（2026-10-12 批次化）
-        if rc:
-            return self.stop(EXIT_PRE, f'讀外掛鎖定狀態失敗（rc {rc}）')
-        todo = [(r, w, False, None) for r in ALL_ROLES for w in ('騎寵', '戰寵') if (sts.get(r) or {}).get(w)]
+        sts, todo = {}, []
+        if not o.get('keep_lock'):
+            rc, sts = T.lock_get_many(ALL_ROLES)                # 外掛面板只開一次讀 5 人（2026-10-12 批次化）
+            if rc:
+                return self.stop(EXIT_PRE, f'讀外掛鎖定狀態失敗（rc {rc}）')
+            todo = [(r, w, False, None) for r in ALL_ROLES for w in ('騎寵', '戰寵') if (sts.get(r) or {}).get(w)]
         if todo:
             rc, bad = T.lock_set_many(todo)
             if rc:
@@ -817,6 +821,8 @@ class Run:
         if empties < need:
             return self.stop(EXIT_CATCH, f'{ct} 寵物欄空格 {empties} < 還要抓的 {need}（舊寵物沒存完 / 舊騎寵沒給 --store-mount？）')
         before = pets[ct]
+        if o.get('direct_catch'):                                          # 使用者 2026-10-12：外掛「+」已買好 N 個可抓捕數 → 不取誘餌、不試抓，直接抓 N 隻
+            return self._direct_catch(ct, fam, sp, n, before)
         # 先試抓 1 隻
         if not any(s.get('unnamed') and s.get('species') == sp for s in before) and len(have) == 0:
             rc = self._catch_round(ct, fam, sp, 1)
@@ -844,6 +850,43 @@ class Run:
         got = [s for s in pets[ct] if not s.get('empty') and (s.get('species') == sp or s.get('name') == sp)]
         if len(got) != n:
             return self.stop(EXIT_CATCH, f'{ct} 寵物欄物種確認的 {sp} 有 {len(got)} 隻，要 {n}（其他沒名字的：{[s.get("raw_name") for s in pets[ct] if s.get("unnamed") and not s.get("species")]}）')
+        self.done('catch', caught=len(got), growths={ct: [s.get('unnamed') for s in got]})
+        return 0
+
+    def _direct_catch(self, ct, fam, sp, n, before):
+        """直接抓 n 隻（可抓捕數已用外掛「+」買好）：捉寵設置（讀回可抓捕數 = n）→ 勾自動存倉庫 / 自動抓寵 → 等抓完 →
+        多出剛好 n 隻沒名字的寵物，且縮圖比對都認得是 sp（img_species、分數 ≥ 0.9）才登錄物種（成長字串）"""
+        T = self.T
+        rc = T.catch_setup(ct, fam, sp, n)
+        if rc:
+            return self.stop(EXIT_CATCH, f'{ct} 外掛捉寵設置失敗（rc {rc}；可抓捕數沒讀到 {n}？）')
+        rc = T.catch_start(ct, n)
+        if rc:
+            return self.stop(EXIT_CATCH, f'{ct} 勾自動抓寵失敗（rc {rc}）')
+        event(f'{ct} 開始自動抓 {n} 隻 {sp}（直接抓，不試抓）')
+        rc, left = T.catch_wait(ct)
+        if rc:
+            return self.stop(EXIT_CATCH, f'等抓寵失敗（rc {rc}，剩 {left}）')
+        rc, pets = T.pets_list([ct])
+        if rc:
+            return self.stop(EXIT_CATCH, f'抓完讀寵物欄失敗（pet rc {rc}）')
+        fresh = new_unnamed(before, pets[ct])
+        if len(fresh) != n:
+            return self.stop(EXIT_CATCH, f'抓完寵物欄多了 {len(fresh)} 隻沒名字的寵物（要 {n}）', new=[s.get('raw_name') for s in fresh])
+        for s0 in fresh:
+            if s0.get('species'):
+                continue
+            if s0.get('img_species') != sp or (s0.get('img_score') or 0) < 0.9:
+                return self.stop(EXIT_CATCH, f'新寵物第 {s0["slot"]} 格縮圖認不出是 {sp}（{s0.get("img_species")} {s0.get("img_score")}）→ 不登錄', slot=s0['slot'])
+            rc = T.learn_species(ct, s0['slot'], sp, s0['unnamed'])
+            if rc:
+                return self.stop(EXIT_CATCH, f'登錄物種失敗（pet rc {rc}）', pet_rc=rc)
+        rc, pets = T.pets_list([ct])
+        if rc:
+            return self.stop(EXIT_CATCH, f'登錄後讀寵物欄失敗（pet rc {rc}）')
+        got = [s for s in pets[ct] if not s.get('empty') and (s.get('species') == sp or s.get('name') == sp)]
+        if len(got) != n:
+            return self.stop(EXIT_CATCH, f'{ct} 寵物欄物種確認的 {sp} 有 {len(got)} 隻，要 {n}')
         self.done('catch', caught=len(got), growths={ct: [s.get('unnamed') for s in got]})
         return 0
 
@@ -952,7 +995,7 @@ def write_quest_log(o: dict, prog: dict, final: dict) -> None:
 
 
 DEFAULTS = dict(trans=1, mount_species='布拉奇多斯', battle_pet='朵拉比斯', catcher='DKBO2', count=5, family=None, store_mount=None,
-                no_boxes=False)
+                no_boxes=False, keep_lock=False, direct_catch=False)
 
 
 def run(trans=1, from_stage: str = 'preflight', to_stage: str = 'cleanup', dry_run: bool = False, tools=None, **kw) -> int:
@@ -1024,9 +1067,11 @@ def main(argv=None) -> int:
     ap.add_argument('--to', dest='to_stage', default='cleanup', choices=STAGES)
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-boxes', action='store_true')
+    ap.add_argument('--direct-catch', action='store_true', help='catch：可抓捕數已用外掛「+」買好 = count，不取誘餌、不試抓，直接抓')
+    ap.add_argument('--keep-lock', action='store_true', help='preflight 不先取消外掛鎖定騎寵 / 戰寵（使用者 2026-10-12：直接存，遊戲真的擋才解鎖）')
     a = ap.parse_args(argv)
     rc = run(a.trans, a.from_stage, a.to_stage, a.dry_run, None, mount_species=a.mount_species, battle_pet=a.battle_pet, catcher=a.catcher,
-             count=a.count, family=a.family, store_mount=a.store_mount, no_boxes=a.no_boxes)
+             count=a.count, family=a.family, store_mount=a.store_mount, no_boxes=a.no_boxes, keep_lock=a.keep_lock, direct_catch=a.direct_catch)
     print(json.dumps(dict(LAST, rc=rc), ensure_ascii=False, default=str))
     return rc
 

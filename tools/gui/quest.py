@@ -788,6 +788,11 @@ class WalkClock:
 
 WALK_STUCK_S = 40.0                  # Auto Walking 但座標連續這麼久沒變 = 巡路卡住（2026-10-12 吉魯島 121,170 站了 40 分鐘；正常巡路每 1～2 秒就換格，換圖讀取 ≤ 3 秒）
 WALK_POS_EVERY = 5.0                 # 巡路中每隔這麼久讀一次座標（digitmatch 約 0.1 秒）
+def unstick_refresh_due(tries: int) -> bool:
+    """巡路卡住解卡的第 1 次先按「刷新角色」（使用者 2026-10-12：漆黑 1F 戰鬥後角色定在 11,46 動不了，疑似戰鬥後狀態沒同步），之後才點地面 / 重點追蹤"""
+    return tries == 1
+
+
 WALK_UNSTICK_MAX = 3                 # 同一次 quest.py 最多自動解卡這麼多次，再卡 → 退出碼 19（交人；27～29 舊碼不重用）
 EXIT_WALK_STUCK = 19
 
@@ -1788,6 +1793,12 @@ def _main() -> int:
                 event(f'自動巡路又卡住（座標 {wstuck.pos} {secs:.0f} 秒沒變，已自動解卡 {WALK_UNSTICK_MAX} 次）→ 停手，退出碼 {EXIT_WALK_STUCK}', shot)
                 _errlog(f'quest 自動巡路卡住 {wstuck.pos} 解卡 {WALK_UNSTICK_MAX} 次仍卡，退出碼 {EXIT_WALK_STUCK}')
                 return EXIT_WALK_STUCK
+            if unstick_refresh_due(wstuck.tries):
+                event('自動巡路卡住：先按「刷新角色」再解卡')
+                try:
+                    refresh_characters(False)
+                except Exception as e:                    # 刷新失敗不擋後面的點地面 / 重點追蹤
+                    event(f'卡住時刷新角色失敗：{e}')
             xy = walk.unstick_click(*wstuck.pos) if isinstance(wstuck.pos, tuple) else None   # 畫面判斷的（沒有座標）→ 不點地面，直接重點追蹤
             if xy is None and a.task and not a.no_track:
                 track_task(a.task)                         # 沒有通行格資料 / 附近沒有安全格：不點地面，直接重點追蹤卡片

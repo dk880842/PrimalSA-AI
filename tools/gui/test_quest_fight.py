@@ -1221,6 +1221,7 @@ quest.read_screen = REAL_READ_SCREEN
 
 # ---- 自動巡路卡住解卡（2026-10-12 吉魯島 300:121,170 Auto Walking 站 40 分鐘）----
 print('(w) WalkStuck 巡路卡住偵測 / pick_unstick 選地面')
+ok &= check('卡住解卡第 1 次先刷新角色、之後不再', quest.unstick_refresh_due(1) and not quest.unstick_refresh_due(2) and not quest.unstick_refresh_due(3))
 ws = quest.WalkStuck(stuck_s=40, every=5)
 seq = [('walking', (300, 121, 170), t) for t in range(0, 45, 5)]
 hits = [ws.feed(p_, t) for st_, p_, t in seq if ws.due(st_, t)]

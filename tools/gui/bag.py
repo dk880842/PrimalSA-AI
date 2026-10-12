@@ -920,11 +920,11 @@ def equipped_name() -> str | None:
     return nm or None
 
 
-def discard_item(role: str, slot: int, expect: str, forbid=None) -> int:
+def discard_item(role: str, slot: int, expect: str, forbid=None, allow_protected: bool = False) -> int:
     """丟棄背包第 slot 格（假設已選好角色、在背包分頁）。彈窗名稱與提示窗名稱都必須吻合 expect 且不吻合 PROTECT / forbid。
     丟棄鈕只有這裡用 allow=('discard',) 點。成功 = 提示窗關了且該格名稱不再吻合"""
-    bad = list(PROTECT) + list(forbid or [])
-    if protected(expect) or any(name_match(expect, b, 0.8) for b in bad):
+    bad = ([] if allow_protected else list(PROTECT)) + list(forbid or [])
+    if not allow_protected and (protected(expect) or any(name_match(expect, b, 0.8) for b in bad)):
         return _fail(EXIT_GUARD, f'要丟的名稱「{expect}」在保護名單（{bad}）內，拒絕')
     if not open_slot_popup(slot):
         return _fail(EXIT_PANEL, f'第 {slot + 1} 格沒開彈窗（空格？），不丟', 'bag-drop-nopopup')
@@ -954,7 +954,7 @@ def discard_item(role: str, slot: int, expect: str, forbid=None) -> int:
     return 0
 
 
-def drop_item(role: str, want: str, confirm_name: str) -> int:
+def drop_item(role: str, want: str, confirm_name: str, allow_protected: bool = False) -> int:
     """CLI / 外部呼叫：want 與 confirm_name 必須相同才動手（防手誤）"""
     if norm_name(want) != norm_name(confirm_name):
         return _fail(EXIT_GUARD, f'--confirm-name {confirm_name!r} 與名稱 {want!r} 不同，不丟')
@@ -968,7 +968,7 @@ def drop_item(role: str, want: str, confirm_name: str) -> int:
         i = find_item(want)
         if i is None:
             return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
-        return discard_item(role, i, want)
+        return discard_item(role, i, want, allow_protected=allow_protected)
 
 
 def weapons(roles) -> tuple:
@@ -1216,7 +1216,7 @@ def main() -> int:
         p.add_argument('--kind', default='consumable', choices=['consumable', 'equip'])
         p.add_argument('--skip-missing', action='store_true', help='多人（all / 逗號）時沒有該道具的人略過')
         p.add_argument('--all-copies', action='store_true', help='store：同名多格（不疊加）全部存')
-    p = sub.add_parser('drop'); p.add_argument('role'); p.add_argument('name'); p.add_argument('--confirm-name', required=True)
+    p = sub.add_parser('drop'); p.add_argument('role'); p.add_argument('name'); p.add_argument('--confirm-name', required=True); p.add_argument('--allow-protected', action='store_true', help='允許丟保護名單道具（例 背包多拿的精靈王之弓；武器格穿著的不在背包格，不受影響）')
     a = ap.parse_args()
     roles = _roles(a.role)
     if not roles:
@@ -1253,7 +1253,7 @@ def main() -> int:
         return _out(depot_take(r, a.name, a.depot, a.kind), {})
     if a.cmd == 'store':
         return _out(depot_store(r, a.name, a.depot, all_copies=a.all_copies), {})
-    return _out(drop_item(r, a.name, a.confirm_name), {})
+    return _out(drop_item(r, a.name, a.confirm_name, allow_protected=a.allow_protected), {})
 
 
 if __name__ == '__main__':
