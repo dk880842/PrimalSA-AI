@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { ErrEntry, Stat, WatchLine, WatchTone } from '../types'
+import type { ErrEntry, ProgLine, Stat, WatchLine, WatchTone } from '../types'
 
 // 讀 HUD 的腳本：背景截圖 + Windows OCR，印一行 JSON（見 tools/gui/stat.ps1）
 // 遊戲畫面由獨立的鏡像視窗顯示（tools/gui/mirror.sh），pane 只放文字
@@ -334,6 +334,7 @@ const stat = atom({ plugin: 'psa-hud', key: 'stat' } as const, null)
 const acts = atom({ plugin: 'psa-hud', key: 'errs' } as const, [] as ErrEntry[])
 const at = atom({ plugin: 'psa-hud', key: 'at' } as const, 0)
 const hudAtom = atom({ plugin: 'psa-hud', key: 'hud' } as const, null as string | null)
+const prog = atom({ plugin: 'psa-hud', key: 'prog' } as const, [] as ProgLine[])
 const line = atom({ plugin: 'psa-hud', key: 'line' } as const, { main: '（沒有狀態）', hints: [] } as WatchLine)
 
 // 數值排成一行文字
@@ -583,6 +584,50 @@ export function titleFromLog(log: string, names: Map<number, string> = new Map()
   return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) : t
 }
 
+// ───────────────────────── 即時進度區（任務 / 最近事件 / 最後動作 / 警報）─────────────────────────
+// 純函式：假檔內容 → 最多 6 行 {text, tone}；任一來源讀不到（undefined）該行顯示「—」
+const PROG_PERIOD_MS = 3000
+const PROG_W = 56            // 每行最多字數（超過加 …）
+const IDLE_S = 120           // 最後動作超過這麼久沒動 → 標「閒置 N 分」
+export type ProgIn = { quest?: string; actions?: string; state?: WState | null; now: number }
+const cut = (t: string) => (t.length > PROG_W ? `${t.slice(0, PROG_W - 1)}…` : t)
+
+// 事件行去掉日期、截圖路徑、[questrun] 標籤
+export function cleanEvent(l: string): string {
+  return l.replace(/^\d{4}-\d\d-\d\d\s+/, '').replace(/\s*\S*[\\/]\S*\.(?:png|jpe?g|bmp)\b/gi, '').replace(/\[questrun\]\s*/, '').trim()
+}
+
+// actions.log 一行是「HH:MM:SS 描述」（沒有日期）；以今天的 HH:MM:SS 算距今秒數（跨午夜 +86400）
+export function actionAgeS(hms: string, now: number): number | undefined {
+  const m = /^(\d\d):(\d\d):(\d\d)/.exec(hms)
+  if (!m) return undefined
+  const d = new Date(now)
+  const cur = d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds()
+  const then = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+  return (cur - then + 86400) % 86400
+}
+
+export function progressLines(i: ProgIn, names: Map<number, string> = new Map()): ProgLine[] {
+  const out: ProgLine[] = []
+  const t = i.quest === undefined ? undefined : titleFromLog(i.quest, names)
+  out.push({ text: `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
+  const ev = i.quest === undefined ? [] : i.quest.split(/\r?\n/).filter(l => l.trim()).slice(-3).map(cleanEvent)
+  if (ev.length === 0) out.push({ text: '事件：—', tone: 'gray' })
+  for (const e of ev) out.push({ text: cut(` ${e}`), tone: 'gray' })
+  const al = i.actions?.split(/\r?\n/).filter(l => l.trim()).pop()
+  if (!al) out.push({ text: '動作：—', tone: 'gray' })
+  else {
+    const age = actionAgeS(al, i.now)
+    const idle = age !== undefined && age > IDLE_S
+    const tag = age === undefined ? '' : idle ? `（閒置 ${Math.floor(age / 60)} 分）` : `（${age} 秒前）`
+    out.push({ text: cut(`動作 ${al.replace(/\s+/g, ' ').trim()}`.slice(0, PROG_W - tag.length) + tag), tone: idle ? 'yellow' : 'plain' })
+  }
+  const st = i.state
+  const al2 = st?.flags?.verify_suspect ? '疑似答題 / 驗證視窗，請人工處理' : (st?.alerts ?? []).map(a => a.msg || a.line).find(Boolean)
+  if (al2) out.push({ text: cut(`警報：${String(al2)}`), tone: 'red' })
+  return out.slice(0, 6)
+}
+
 // 兩個 hook 共用：回新標題或 undefined（不該改 / 讀檔失敗 / 沒紀錄 / 與現在相同）
 export async function autoTitle($: EngineInterface, cwd: string, cur: string | undefined): Promise<string | undefined> {
   try {
@@ -599,6 +644,27 @@ export async function autoTitle($: EngineInterface, cwd: string, cur: string | u
     return t && t !== cur ? t : undefined
   } catch {
     return undefined
+  }
+}
+
+// 每 3 秒：讀三個檔 → progressLines → 有變才更新 atom（任何錯誤都吞掉）
+let progBusy = false
+let questNameCache: Map<number, string> | undefined
+async function tickProg($: EngineInterface): Promise<void> {
+  if (progBusy || !projCwd) return
+  progBusy = true
+  try {
+    const root = rootFromCwd(projCwd)
+    if (!root) return
+    const rd = async (f: string) => { try { const x = await $.fs.read(`${root}/${f}`); return typeof x === 'string' ? x : undefined } catch { return undefined } }
+    const [quest, actions, stText] = await Promise.all([rd('notes/quest-events.log'), rd('tools/.cache/actions.log'), rd('tools/.cache/state.json')])
+    if (!questNameCache) { const py = await rd('tools/gui/questdefs.py'); if (py) questNameCache = questNames(py) }
+    const lines = progressLines({ quest, actions, state: parseState(stText).state, now: await $.clock.now() }, questNameCache)
+    if (JSON.stringify(await read($, prog)) !== JSON.stringify(lines)) await update($, prog, () => lines)
+  } catch {
+    // 讀檔失敗：保持上一次的畫面
+  } finally {
+    progBusy = false
   }
 }
 
@@ -635,6 +701,8 @@ export const register: Register = on => {
     else sup.status = 'off'
     void tickState($)
     $.clock.every(STATE_PERIOD_MS, () => void tickState($))
+    void tickProg($)
+    $.clock.every(PROG_PERIOD_MS, () => void tickProg($))
     return next(e)
   })
 
@@ -670,6 +738,7 @@ export const register: Register = on => {
     const wl = await read($, line)
     const st = await read($, stat)
     const ht = await read($, hudAtom)
+    const pg = await read($, prog)
     const color = (t: WatchTone) => (t === 'red' ? 'red' : t === 'yellow' ? 'yellow' : undefined)
 
     return (
@@ -677,6 +746,8 @@ export const register: Register = on => {
         <Text wrap="truncate-end" bold>{wl.main}</Text>
         {wl.hints.map(h => <Text wrap="truncate-end" color={color(h.tone)} dimColor={h.tone === 'gray'}>{h.text}</Text>)}
         <Text wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>
+        <Text dimColor>{'─'.repeat(20)}</Text>
+        {pg.map(p => <Text wrap="truncate-end" color={p.tone === 'red' ? 'red' : p.tone === 'yellow' ? 'yellow' : undefined} dimColor={p.tone === 'gray'} bold={p.tone === 'red'}>{p.text}</Text>)}
         <Text dimColor>{'─'.repeat(20)}</Text>
         <Text dimColor>{`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆）`}</Text>
         {lines.length === 0

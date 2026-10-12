@@ -350,3 +350,34 @@ test('autoTitle：輸出標題；已是同標題 / 使用者自取名 / 非本�
   expect(await autoTitle(mk(), '/home/x/other', undefined)).toBeUndefined()
   expect(await autoTitle(mk(true), root, undefined)).toBeUndefined()
 })
+
+// ───────── 即時進度區 ─────────
+import { actionAgeS, cleanEvent, progressLines } from './register'
+
+test('cleanEvent：去日期 / 截圖路徑 / [questrun]', () => {
+  expect(cleanEvent('2026-10-12 11:34:20 自動巡路中 C:\\games\\PrimalSA-AI\\tools\\.cache\\shot1.png')).toBe('11:34:20 自動巡路中')
+  expect(cleanEvent('2026-10-12 11:42:02 [questrun] 結束 rc=9')).toBe('11:42:02 結束 rc=9')
+})
+
+test('actionAgeS：同日 / 跨午夜 / 壞格式', () => {
+  const now = new Date(2026, 9, 12, 11, 42, 30).getTime()
+  expect(actionAgeS('11:42:02 x', now)).toBe(28)
+  expect(actionAgeS('23:59:50 x', new Date(2026, 9, 12, 0, 0, 10).getTime())).toBe(20)
+  expect(actionAgeS('壞', now)).toBeUndefined()
+})
+
+test('progressLines：任務 / 3 行事件 / 動作 / 警報，≤6 行；壞檔顯示 —', () => {
+  const now = new Date(2026, 9, 12, 11, 42, 30).getTime()
+  const quest = '2026-10-12 11:00:00 [questrun] 任務 2000「琉璃洞窟」詳情結果：accepted\n2026-10-12 11:34:06 追蹤沒反應 → 刷新角色重點\n2026-10-12 11:34:20 自動巡路中\n\n2026-10-12 11:34:30 ' + '長'.repeat(80) + '\n'
+  const r = progressLines({ quest, actions: '11:42:20 click 120,80\n', state: null, now }, NAMES)
+  expect(r.map(x => x.text).slice(0, 4)).toEqual(['任務：四大洞窟：琉璃洞窟 進行中', ' 11:34:06 追蹤沒反應 → 刷新角色重點', ' 11:34:20 自動巡路中', r[3]!.text])
+  expect(r[3]!.text.length).toBeLessThanOrEqual(56)
+  expect(r[4]).toEqual({ text: '動作 11:42:20 click 120,80（10 秒前）', tone: 'plain' })
+  expect(r.length).toBe(5)
+  const idle = progressLines({ quest, actions: '11:30:00 click', state: { v: 1, alerts: [{ msg: '驗證' }] } as never, now }, NAMES)
+  expect(idle[4]).toEqual({ text: '動作 11:30:00 click（閒置 12 分）', tone: 'yellow' })
+  expect(idle[5]).toEqual({ text: '警報：驗證', tone: 'red' })
+  const v = progressLines({ state: { v: 1, flags: { verify_suspect: true } } as never, now })
+  expect(v.map(x => x.text)).toEqual(['任務：—', '事件：—', '動作：—', '警報：疑似答題 / 驗證視窗，請人工處理'])
+  expect(v.length).toBeLessThanOrEqual(6)
+})

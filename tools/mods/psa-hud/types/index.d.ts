@@ -23,6 +23,9 @@ export type ErrEntry = { id: number; ts: number; error: string; fix: string | nu
 export type WatchTone = 'red' | 'yellow' | 'gray'
 export type WatchLine = { main: string; hints: { text: string; tone: WatchTone }[] }
 
+// 即時進度區一行（tone：plain 一般 / gray 次要 / yellow 提醒 / red 警報）
+export type ProgLine = { text: string; tone: 'plain' | 'gray' | 'yellow' | 'red' }
+
 declare module 'claude-code' {
   interface PluginState {
     'psa-hud': {
@@ -36,6 +39,8 @@ declare module 'claude-code' {
       hud: string | null
       // 即時狀態行（讀 tools/.cache/state.json 組成；顯示文字變了才更新）
       line: WatchLine
+      // 即時進度區（任務 / 最近事件 / 最後動作 / 警報，最多 6 行）
+      prog: ProgLine[]
     }
   }
 }
