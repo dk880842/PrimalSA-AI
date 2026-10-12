@@ -35,7 +35,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | `rebirth.py [--trans N] [--from 階段] [--dry-run]` | 漆黑洞窟轉生任務（2004～2008）整段：前置檢查 → 進洞 → 兩場 BOSS → 換弓 → 補血 / 忠犬 → 精靈王轉生 → 收尾；退出碼 80～89；**新寫的 bag.py / petdrop.py 實機沒驗證** | [rebirth.md](rebirth.md) |
 | `ass.py get / set / pet`（API：`set_many`） | 外掛面板讀 / 設四項勾選與戰寵動作；`select_role` 內建等遮擋 + 重試（頂部跑馬燈蓋住 DKBO3 → 等它消失）| [ass.md](ass.md) |
 | `netwatch.py`（`guard` 已接進 quest / petwatch / heal --watch） | 斷線重連 / 自動登錄；重登後清 charstate、`team.form`、自動 `grind.ensure` | [network.md](network.md) |
-| 共用模組（不直接跑）：`spots.py`（練級傳送點表，唯一來源，heal 也用）、`uikit.py`（面板規格 / safe_click / preflight / 退出碼）、`charstate.py`（當前角色旁路檔）、`namematch.py`（角色名整名樣板）、`petmatch.py`（寵物名 / 等級樣板）、`digitmatch.py`（HUD 數字樣板） | 判斷畫面、比對名字 / 數字、禁區保護 | 各檔開頭 |
+| 共用模組（不直接跑）：`spots.py`（練級傳送點表，唯一來源，heal 也用）、`uikit.py`（面板規格 / safe_click / preflight / 退出碼）、`charstate.py`（當前角色旁路檔）、`namematch.py`（角色名整名樣板）、`petmatch.py`（寵物名 / 等級樣板）、`petimg_match.py`（縮圖比頭像認物種，未接線）、`digitmatch.py`（HUD 數字樣板） | 判斷畫面、比對名字 / 數字、禁區保護 | 各檔開頭 |
 
 ## 依情境找
 | 想做的事 | 去哪 |
