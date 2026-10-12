@@ -11,8 +11,8 @@
   uv run --no-project python tools/gui/ass.py pet all normal 防禦        # 多人：5 人戰寵 一般動作 = 防禦（也可 DKBO,DKBO3 指定幾人；選項依文字找，可填已學的寵物技能名）
   uv run --no-project python tools/gui/ass.py battle all [--dry-run]       # 解任務前戰鬥設定（QUEST_BATTLE）：5 人自動戰鬥開、DKBO 人物首次動作 風的精靈Lv.5 打勾；
         一次開面板逐人讀、只改不對的、讀回確認（值不對不改，回 13）；不關遇敵、戰鬥中不開（8）。questrun 交接 / bossretry 重打前自動跑（battle_check）
-    多人流程：關原地遇敵 + 等戰鬥結束 → 一次開面板逐人（讀現值 → 不同才改 → 讀回確認；隊長最後）→ grind.py ensure 恢復掛機。
-    旗標：--dry-run 只讀不改（仍會暫停 / 恢復掛機）、--no-resume 改完不恢復掛機、--no-pause 不關遇敵（確定不在戰鬥才用）。只動「一般動作」，首次動作 / 對象都不碰。
+    多人流程（--pause）：關原地遇敵 + 等戰鬥結束 → 一次開面板逐人（讀現值 → 不同才改 → 讀回確認；隊長最後）→ grind.py ensure 恢復掛機。
+    預設不暫停遇敵（快速戰鬥中開外掛面板不用停遇敵，2026-10-12 使用者；戰鬥打斷 rc 6 / 12 自動等 3 秒重試 2 次）。旗標：--pause 強制先關遇敵 + 等戰鬥結束、改完 grind ensure 恢復、--no-resume 搭 --pause 時不恢復、--dry-run 只讀不改。只動「一般動作」，首次動作 / 對象都不碰。
 角色：DKBO / DKBO2 / DKBO3 / DKBO4 / DKBO5（真名字母 O；DKB0… 同義；不分大小寫）。
 項目：原地遇敵(encounter) / 快速戰鬥(fast) / 自動戰鬥(auto) / 夥伴助戰(partner)。
 （2026-10-10 起不再支援外掛「自動逃跑」：使用者要求外掛自動逃跑一律不用、不看那個勾選框；逃跑改由 quest.py 手動按戰鬥畫面逃跑鈕。）
@@ -772,6 +772,21 @@ def ordered_roles(roles) -> list:
     return [r for r in rs if r != 'DKBO'] + [r for r in rs if r == 'DKBO']
 
 
+NOPAUSE_RETRY = 2                # 不暫停遇敵時，面板被戰鬥打斷（6）/ 下拉在戰鬥轉場讀不到（12）→ 重試次數
+
+
+def _retry_nopause(fn, pause: bool):
+    """快速戰鬥中開外掛面板不用先停遇敵（2026-10-12 使用者）：不暫停時遇到戰鬥打斷（rc 6 / 12）就短暫等待重試，
+    已改好的角色現值相同不會重改。pause=True（--pause）不重試。"""
+    r = fn()
+    n = 0
+    while not pause and r[0] in (EXIT_PANEL_LOST, EXIT_NO_OPTION) and n < NOPAUSE_RETRY:
+        n += 1
+        sleep(3.0)
+        r = fn()
+    return r
+
+
 def run_pet_many(roles, value: str, dry_run: bool = False, pause: bool = True, resume: bool = True,
                  no_wait: bool = False) -> tuple:
     """CLI 用完整流程：[pause：preflight → 關原地遇敵 + 等戰鬥結束（不開切換面板）] → set_pet_many → [resume：grind ensure 恢復掛機]。
@@ -793,7 +808,7 @@ def run_pet_many(roles, value: str, dry_run: bool = False, pause: bool = True, r
     if rc:
         sts, msg, info = {}, f'preflight 失敗（{rc}）', {}
     else:
-        rc, sts, msg, info = set_pet_many(plan, no_wait, dry_run)
+        rc, sts, msg, info = _retry_nopause(lambda: set_pet_many(plan, no_wait, dry_run), pause)
     if pause and resume and rc != 9:          # 9 = 疑似驗證視窗：不碰遊戲，交給使用者
         import grind
         grc = grind.run('ensure')
@@ -877,7 +892,7 @@ def _run_pet_get_many(roles, pause: bool, resume: bool, no_wait: bool) -> int:
             return rc
         heal.set_encounter(False)
         heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')
-    rc, sts, msg, _ = get_pet_many(roles, no_wait)
+    rc, sts, msg, _ = _retry_nopause(lambda: get_pet_many(roles, no_wait), pause)
     for r, st in sts.items():
         print(f'{r} 戰寵 首次動作={"勾" if st["first_on"] else "不勾"}/{st["first"]}  一般動作={st["normal"]}')
     if rc:
@@ -902,16 +917,16 @@ def _main_pet_many(a) -> int:
             return EXIT_LAYOUT
         import winenv
         winenv.enable_server()
-        return _run_pet_get_many(roles, not a.no_pause, not a.no_resume, a.no_wait)
+        return _run_pet_get_many(roles, a.pause, not a.no_resume, a.no_wait)
     if len(rest) != 2 or rest[0] != 'normal' or not rest[1]:
-        print('多人 pet 用法：ass.py pet all|DKBO,DKBO2… normal <攻擊|防禦|已學寵物技能名> [--dry-run] [--no-pause] [--no-resume]')
+        print('多人 pet 用法：ass.py pet all|DKBO,DKBO2… normal <攻擊|防禦|已學寵物技能名> [--dry-run] [--pause] [--no-resume]')
         return EXIT_USAGE
     if layout.current() != '2880x1659':
         print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
         return EXIT_LAYOUT
     import winenv
     winenv.enable_server()          # char / grind 的 main 都會開常駐 server；沒開時切換面板讀像素常逾時（rc 60）
-    rc, sts, msg, info = run_pet_many(roles, rest[1], a.dry_run, not a.no_pause, not a.no_resume, a.no_wait)
+    rc, sts, msg, info = run_pet_many(roles, rest[1], a.dry_run, a.pause, not a.no_resume, a.no_wait)
     for r, st in sts.items():
         print(f'{r} 戰寵 一般動作={st["normal"]}{"（改了）" if r in info.get("changed", {}) else ""}')
     if rc:
@@ -925,7 +940,8 @@ def main(argv=None) -> int:
     ap.add_argument('role', help='DKBO / DKBO2~5（DKB0… 同義）')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
     ap.add_argument('--dry-run', action='store_true', help='多人 pet：只讀不改')
-    ap.add_argument('--no-pause', action='store_true', help='多人 pet：不先關原地遇敵 / 不等戰鬥結束（戰鬥中面板打不開，只在確定不在戰鬥時用）')
+    ap.add_argument('--pause', action='store_true', help='多人 pet：先關原地遇敵 + 等戰鬥結束、改完 grind ensure 恢復（預設不暫停：快速戰鬥中開面板不用停遇敵）')
+    ap.add_argument('--no-pause', action='store_true', help='（相容舊旗標；現為預設，無作用）')
     ap.add_argument('--no-resume', action='store_true', help='多人 pet：改完不跑 grind ensure 恢復掛機（遇敵會維持關閉）')
     ap.add_argument('--no-wait', action='store_true', help='戰鬥中不等戰鬥結束，直接退出碼 %d（預設等最多 %d 秒）' % (EXIT_IN_BATTLE, BATTLE_WAIT))
     a = ap.parse_args(argv)

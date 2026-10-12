@@ -764,5 +764,17 @@ check('戰鬥中 no_wait → rc 8、不開面板', rc == ass.EXIT_IN_BATTLE and 
 check('CLI battle 只收 all', ass.main(['battle', 'DKBO']) == 1)
 check('_dedup：OCR 多倍率重複只留一份', [ass._dedup(t) for t in ('攻擊攻擊攻擊', '防禦防禦', '風的精靈Lv.5', '')] == ['攻擊', '防禦', '風的精靈Lv.5', ''])
 
+# 快戰中開面板不暫停遇敵：預設 --pause 關、戰鬥打斷自動重試
+_seq = [(6, {}, 'x', {}), (12, {}, 'x', {}), (0, {'a': 1}, '', {})]
+_sl = ass.sleep
+ass.sleep = lambda s: None
+_it = iter(_seq)
+check('不暫停：rc 6 / 12 重試到成功', ass._retry_nopause(lambda: next(_it), False)[0] == 0)
+_it = iter(_seq)
+check('--pause：不重試', ass._retry_nopause(lambda: next(_it), True)[0] == 6)
+_it = iter([(4, {}, '', {}), (0, {}, '', {})])
+check('不暫停：其他錯誤碼不重試', ass._retry_nopause(lambda: next(_it), False)[0] == 4)
+ass.sleep = _sl
+
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

@@ -170,6 +170,8 @@ uv run --no-project python tools/gui/ass.py pet DKB0 first 攻擊 first off norm
 - 實測（DKB0，地雷區 60049 掛機中）：原值 首次 不勾/攻擊、一般 攻擊 → 設 勾/防禦（shot 確認）→ 改回 不勾/攻擊（get 確認），掛機不受影響。
 
 ### 多人一次改戰寵「一般動作」：`ass.py pet all normal <值>`（2026-10-11）
+**快戰中開外掛面板不用停遇敵（2026-10-12 使用者）**：`pet all get` / `pet ... normal` 預設**不暫停遇敵、不恢復掛機**（`_many` 本來就會等戰鬥空檔；被戰鬥打斷回 6 / 12 時等 3 秒重試 2 次，已改好的角色現值相同不重改）；要舊行為（先關遇敵 + 等 VS 牌消失、改完 grind ensure）加 `--pause`。`--no-pause` 保留為相容旗標（現為預設）。questrun / bossretry 的 `battle_check` 本來就不關遇敵，不用動。實機 2026-10-12 地雷區掛機中：DKBO2～5 一般動作 防禦 → 攻擊（首次動作維持不勾），DKBO3 第一次因下拉 OCR 讀不到回 12，重跑 OK（即新增的重試）。
+（以下流程描述的「關遇敵 / 恢復」指 `--pause` 模式。）
 ```bash
 uv run --no-project python tools/gui/ass.py pet all normal 防禦                 # 5 人（也可 DKBO,DKBO3 指定幾人）
 uv run --no-project python tools/gui/ass.py pet all normal 防禦 --dry-run       # 只讀不改（仍會暫停 / 恢復掛機）
