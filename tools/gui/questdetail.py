@@ -4,6 +4,7 @@
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/questdetail.py status [--json] [--all]       # 開面板讀 主線 + 支線 全部列 → 1.82 清單（含 2999）各任務狀態；--all 連其他任務也列
   uv run --no-project python tools/gui/questdetail.py list [--tab 主線|支線] [--json] # 讀單一分頁全部列
+  uv run --no-project python tools/gui/questdetail.py roles [--roles DKBO,DKBO2] [--json]   # 逐人（char.switch）讀主線 + 支線全部列，最後切回 DKBO；唯讀
   uv run --no-project python tools/gui/questdetail.py accept "彌生和日美子(1.82)" [--dry-run]   # 接取一個「待接取」任務（傳送 → NPC 對話 → 接受）
   uv run --no-project python tools/gui/questdetail.py read-image 檔.png              # 離線：讀一張截圖（不碰遊戲）
   uv run --no-project python tools/gui/questdetail.py learn-image 檔.png "標題1,標題2,…" [--head 標題]   # 離線建樣板：依列順序（只算完整可見的列）給標題
@@ -915,6 +916,61 @@ def _after_transfer(src: str, name: str, presses: int, verify: bool = True) -> i
     return uikit.fail(src, EXIT_NOT_ACCEPTED, f'接受後讀到狀態 {row["status"] if row else "找不到"}，不是進行中')
 
 
+def read_full(dy: int | None = None) -> tuple:
+    """面板開著：讀主線 + 支線全部列 → (rc, {標題或 '?未辨識': 狀態})；呼叫端負責開關面板"""
+    out = {}
+    for tab in ('主線', '支線'):
+        r = read_list(tab, dy)
+        if not r['ok']:
+            return EXIT_NOT_FOUND, out
+        for row in r['rows']:
+            out[row['title'] or '?未辨識'] = row['status']
+    return 0, out
+
+
+def roles_all(roles=None, leader: str = 'DKBO', tools=None, dy: int | None = None) -> tuple:
+    """逐人讀全部任務列（唯讀）→ (rc, {角色: {標題: 狀態} 或 None})；結束切回 leader"""
+    T = tools or _CharTools()
+    roles = list(roles or ALL_ROLES)
+    rc0, cur = T.current()
+    if rc0 in STOP_RC:
+        return rc0, {}
+    if cur in roles:
+        roles.remove(cur)
+        roles.insert(0, cur)
+    out, first = {}, 0
+    for who in roles:
+        if who != cur:
+            rc = T.switch(who)
+            if rc in STOP_RC:
+                return rc, out
+            if rc:
+                out[who] = None
+                first = first or rc
+                continue
+            cur = who
+        rc = uikit.preflight('questdetail')
+        if rc:
+            return rc, out
+        if not open_detail():
+            out[who] = None
+            first = first or EXIT_NO_PANEL
+            continue
+        try:
+            rc, st = read_full(dy)
+        finally:
+            close_detail()
+        if rc:
+            out[who] = None
+            first = first or rc
+        else:
+            out[who] = st
+    if cur != leader:
+        rc = T.ensure(leader)
+        first = first or rc
+    return first, out
+
+
 # ---------------------------------------------------------------- CLI
 def _fmt_status(res: dict, show_all: bool) -> str:
     lines = []
@@ -975,6 +1031,8 @@ def main() -> int:
     p.add_argument('--dy', type=int, default=None)
     p = sub.add_parser('list'); p.add_argument('--tab', default='支線', choices=['主線', '支線']); p.add_argument('--json', action='store_true')
     p.add_argument('--dy', type=int, default=None)
+    p = sub.add_parser('roles'); p.add_argument('--roles', default=','.join(ALL_ROLES)); p.add_argument('--json', action='store_true')
+    p.add_argument('--dy', type=int, default=None)
     p = sub.add_parser('accept'); p.add_argument('title'); p.add_argument('--dry-run', action='store_true')
     p.add_argument('--dy', type=int, default=None); p.add_argument('--presses', type=int, default=2)
     p = sub.add_parser('read-image'); p.add_argument('path')
@@ -988,6 +1046,17 @@ def main() -> int:
         return accept(a.title, a.dry_run, a.dy, a.presses)
     rc = uikit.preflight('questdetail')
     if rc:
+        return rc
+    if a.cmd == 'roles':
+        winenv.enable_server()                          # char / team 的 pixel 讀取要靠常駐 server（不開會讀不到面板像素）
+        rc, res = roles_all([r for r in a.roles.split(',') if r], dy=a.dy)
+        if a.json:
+            print('###JSON', json.dumps(res, ensure_ascii=False))
+        else:
+            for who, st in res.items():
+                print(f'== {who} ==')
+                for n, v in (st or {}).items():
+                    print(f'{v}\t{n}')
         return rc
     if a.cmd == 'status':
         res = status(dy=a.dy)

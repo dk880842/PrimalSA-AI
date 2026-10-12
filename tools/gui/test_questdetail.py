@@ -370,6 +370,16 @@ check('切不到 DKBO4 → 該人 None、其他照讀、rc 61', rc == 61 and res
 F = FakeAll(rd_rc={'DKBO2': 9})
 rc, res = qd.status_all([T4], tools=F)
 check('讀到驗證視窗 9 → 立即停（不再切人、不 ensure）', rc == 9 and ('switch', 'DKBO3') not in F.calls and not any(c[0] == 'ensure' for c in F.calls), str(F.calls))
+
+# ---- roles_all：逐人讀全部列（monkeypatch 面板開關 / 讀列）----
+_o = (qd.open_detail, qd.close_detail, qd.read_full, qd.uikit.preflight)
+qd.open_detail, qd.close_detail, qd.uikit.preflight = (lambda: True), (lambda: True), (lambda src='': 0)
+_who = {}
+qd.read_full = lambda dy=None: (0, {'初入石器': qd.DONE, '英雄島後傳': qd.TODO if hasattr(qd, 'TODO') else '待接取'})
+F = FakeAll(cur='DKBO2')
+rc, res = qd.roles_all(roles=['DKBO', 'DKBO2'], tools=F)
+check('roles_all：當前 DKBO2 先讀、切 DKBO、最後 ensure DKBO', rc == 0 and F.calls == [('read', 'DKBO2')][:0] + [('switch', 'DKBO')] + [] and set(res) == {'DKBO', 'DKBO2'} and res['DKBO']['初入石器'] == qd.DONE, str(F.calls))
+qd.open_detail, qd.close_detail, qd.read_full, qd.uikit.preflight = _o
 rc, res = qd.status_all(['不存在的任務名稱XYZ'], tools=FakeAll())
 check('任務名不在 TaskExplan → 用法錯、不碰', rc == 1 and res == {})
 rows = [{'title': T4, 'status': qd.DOING}, {'title': '黃金羚羊之謎(1.82)', 'status': qd.UNKNOWN}]
