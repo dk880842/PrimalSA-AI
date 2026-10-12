@@ -3,8 +3,10 @@
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/questrun.py plan [任務ID …]            # 不碰遊戲：印交接 / 每任務步驟 / 指令 / 預估 / 退出碼（沒給 ID = questdefs 全部）
-  uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--no-dragon] [--spot 地雷區]
+  uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--dragon] [--spot 地雷區]
         [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--no-boss-retry] [--no-verify-all] [--verify-skipped]
+        [--no-battle-check] [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
+  龍王的守護（2026-10-12 起）預設**不吃**，要吃加 --dragon；--no-dragon 保留相容（= 預設，no-op）
   uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態（當前角色）
   uv run --no-project python tools/gui/questrun.py status --role all|DKBO3,DKBO5 [任務ID …]   # 逐人：每人 char.switch → 開一次詳情讀這些任務 → 最後切回 DKBO（詳情面板沒有頭像列，只能切角色）
   可 import：questrun.run(ids, dry_run=False, after='grind', tools=None, ...) → 退出碼；結果 dict 在 questrun.LAST
@@ -14,13 +16,17 @@
 流程：
   交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 關原地遇敵 + 等戰鬥結束 → team.form 滿 5 人（同一次切換面板讀「當前」，不是 DKBO 才 char.ensure；
                         2026-10-12 起不另跑 char.current，省 1～2 次開關面板）
+                        → （2026-10-12 四寶玉之謎 DKBO 人物首次動作「風的精靈Lv.5」沒勾、BOSS 戰 2 人陣亡）戰鬥設定檢查 ass.battle_check：
+                        一次開外掛面板、左欄頭像逐人（隊長最後）讀 5 人自動戰鬥 + DKBO 人物首次動作（值 風的精靈 + 打勾），只改不對的勾選、讀回確認；
+                        值不對 / 改不動 → 109（不自動改下拉）；放在關遇敵 + 等戰鬥結束之後（戰鬥中不開外掛面板，ass 回 8 → 109）；--no-battle-check 關。
+                        bossretry 重打前也查一次（同一份設定，失敗 147）
   每個任務
     1 preflight    背包空位（defs.bag_slots）、補血檢查 hp_gate：隊長 HUD HP < --hp-min% 或全隊任一人 < --team-hp-min%（預設 60；bag.hps 開背包逐人讀 HP，約 8 秒）
                    → heal（小護士補整隊）後重組隊；quest.py 37（BOSS 戰贏、滿 5 人）後下一片之前也做一次
     2 接取         team.form（距上次組隊 / 驗隊伍 ≤ TEAM_FRESH_S 秒就略過，例：交接剛組完）→ questdetail.accept(skip_ok, verify=False)：**整個任務只開一次詳情**，同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 傳送 → NPC 對話 → 接受，不重開詳情驗證，看對話框收起）；失敗 119
     3 跑步驟       迴圈（每片 ≤ --slice-s 秒，總計 ≤ --max-min 分，片數 ≤ --max-slices）：
-                   龍王的守護（人形圖示不在才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵）
-                   → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
+                   （--dragon 才做）龍王的守護（人形圖示不在才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵）
+                   → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115（defs 有 turnin 且加 --pet-turnin：改跑交寵物，見下）；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
                    → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）；
                      questrun 在 TEAM_FRESH_S 秒內驗過隊伍（接取後 form、quest.py 37 的 BOSS 後檢查、30 / 32 後 form）→ 加 --team-fresh，quest.py 開始前不再開切換面板
                      （領獎後 / 任務戰後的隊伍檢查、37 / 38 照舊）
@@ -28,6 +34,12 @@
                    （questdetail.status_all，每人約 10～40 秒）；有人不是「已完成」→ bossretry --who 落後者（落後者當隊長組 5 人重打 → 切回 DKBO 重組）
                    → 再讀一次那幾個人；仍沒完成 / 讀不到 / 待接取（沒接到）→ 108 停手。--no-verify-all 關；詳情一開就已完成而跳過的任務預設不驗（--verify-skipped 才驗）
     5 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
+  交寵物（--pet-turnin，預設關 = manual 步照舊 115；**未實機**）
+                 defs.turnin（目前只有恐龍博士 2016：步 1 魯尼帖斯 / 步 2 貝魯卡，逐人「選擇」視窗）：pet.py rest-all（任務寵改等待）→ team.disband
+                 → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 讀詳情；失敗 150。
+                 defs.rest_pets（卡坦的願望 2019：隊長交一次 5 人完成，quest.py 預設流程交）：接取後第一片前先 pet.py rest-all。每任務只試一次
+  丟獎勵寵（--drop-reward 名字,… 且 --confirm-drop 同一串，缺一不做；**不可逆、未實機**）全部任務成功後、恢復掛機前：
+                 每個名字 petdrop.drop('all', 名字, max_level=1)（只丟名字完全相同、等級讀得到且 = 1 的；騎寵 / 第 1 格 / 出戰 / 騎乘一律擋）；失敗 151、不恢復掛機
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
 quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀一次詳情：已完成 = 結束、進行中 = 下一片；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
@@ -37,6 +49,7 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀�
   19 自動巡路卡住解卡 3 次仍卡 → 112；33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 同 38 走 bossretry；其他 → 112
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 20～107、120～129；questrun 自己 108、110～119）：
+  109 戰鬥設定檢查失敗（ass.battle_check：人物首次動作的值不對 13 / 勾選改不動 4 / 面板問題 2～7 / 戰鬥中 8；info.battle）
   108 逐人驗證：有人任務沒完成，bossretry 補人後仍沒完成 / 補人失敗 / 讀不到某人的詳情 / 某人是待接取（info.laggards、info.verify）
   110 preflight 失敗（任務不認得 / 讀不到狀態 / 背包空位不足 / 當前角色不是 DKBO）
   111 交接 / 組隊失敗（follow 停不掉、關遇敵、team.form、補血）
@@ -48,6 +61,8 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀�
   117 對話無進展（quest.py 33）
   118 完整戰鬥自動戰鬥卡住（quest.py 25）
   119 接取失敗（info.accept_rc 是 questdetail 的 120～128）
+  150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～125 / 切回 DKBO / 重組；info.turnin）
+  151 丟獎勵寵失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；info.drop）
 """
 import argparse
 import json
@@ -72,6 +87,9 @@ PROGRESS = rebirth.logpaths.p(uikit.CACHE / 'questrun.json')
 (EXIT_PREFLIGHT, EXIT_HANDOVER, EXIT_STEP, EXIT_SLICES, EXIT_TEAM, EXIT_MANUAL,
  EXIT_IRREV, EXIT_STALL, EXIT_BATTLE, EXIT_ACCEPT) = range(110, 120)
 EXIT_LAGGARD = 108                                                   # 逐人驗證後仍有人沒完成（grep 過 108 沒被其他工具用）
+EXIT_BATTLESET = 109                                                 # 戰鬥設定檢查失敗（rebirth_pets 也有 109，但兩者不互相呼叫）
+EXIT_TURNIN, EXIT_DROP = 150, 151                                    # 交寵物 / 丟獎勵寵失敗（150～151 grep 過沒被用）
+DROP_MAX_LEVEL = 1                                                   # --drop-reward 只丟這個等級以下（剛拿到的獎勵寵是 1 級）
 
 LEADER = rebirth.LEADER
 ALL_ROLES = rebirth.ALL_ROLES
@@ -208,11 +226,37 @@ class Tools(rebirth.Tools):
         import grind
         return grind.run('start', spot)
 
-    def boss_retry(self, track, who=None):
-        """BOSS 戰後不滿 5 人 / 逐人驗證有人沒完成（who = 落後者名單）：落後者當隊長組 5 人重打 → 切回 DKBO 重組（bossretry.py）→ (rc, 結果 dict)"""
+    def boss_retry(self, track, who=None, check=True):
+        """BOSS 戰後不滿 5 人 / 逐人驗證有人沒完成（who = 落後者名單）：落後者當隊長組 5 人重打 → 切回 DKBO 重組（bossretry.py）→ (rc, 結果 dict)。
+        check = 重打前查戰鬥設定（ass.battle_check；questrun --no-battle-check 時 False）"""
         import bossretry
-        rc = bossretry.run(track, who=who)
+        rc = bossretry.run(track, who=who, battle_check=check)
         return rc, dict(bossretry.LAST)
+
+    def battle_check(self):
+        """解任務的戰鬥設定（ass.QUEST_BATTLE）：一次開外掛面板逐人讀、只改不對的 → (rc, {角色: 狀態}, 訊息, info)"""
+        import ass
+        return ass.battle_check()
+
+    def pet_rest_all(self):
+        """5 人任務寵改「等待」（騎寵不動）→ 退出碼"""
+        import pet
+        return pet.rest_all('all')
+
+    def team_disband(self):
+        import team
+        return team.disband()
+
+    def pet_turnin(self, kind, roles, steps):
+        """逐人交寵物（pet_turnin.run；會 char.ensure 每個人，不切回 DKBO）→ (rc, {角色: 結果})"""
+        import pet_turnin
+        return pet_turnin.run(list(roles), tuple(steps), switch=True)
+
+    def pet_drop(self, name, max_level):
+        """5 人丟名字 = name 且等級 ≤ max_level 的寵物（petdrop.drop）→ (rc, petdrop.LAST)"""
+        import petdrop
+        rc = petdrop.drop('all', name, name, max_level=max_level)
+        return rc, dict(petdrop.LAST)
 
     def status_all(self, detail, roles):
         """逐人讀任務詳情（char.switch + 每人開一次詳情，最後切回 DKBO）→ (rc, {角色: {標題: 狀態} 或 None})"""
@@ -297,6 +341,8 @@ def print_plan(defs, opts: dict) -> None:
     print(f'選項：{opts}')
     print('[交接]')
     for ln in ('follow 還在跑就 grind.py follow --stop（已停用，只防呆）', '關原地遇敵 + 等戰鬥結束',
+               ('戰鬥設定檢查 ass.battle_check（一次開外掛面板逐人：5 人自動戰鬥開、DKBO 人物首次動作 風的精靈 打勾；只改不對的勾選、讀回確認；失敗 109）'
+                if opts.get('battle_check', True) else '戰鬥設定檢查：--no-battle-check 不做'),
                'team.form 滿 5 人（同一次切換面板讀「當前登錄」，不是 DKBO 才 char.ensure）'):
         print('  - ' + ln)
     for d in defs:
@@ -309,19 +355,31 @@ def print_plan(defs, opts: dict) -> None:
             if sd['kind'] == 'walk':
                 print(f'  - 步 {st}：kind=walk（備援）：先讓遊戲自動巡路，quest.py 回 3 才走到 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]}'
                       f'（{sd.get("npc", "")}；walk.py 中斷外層重試）')
+            elif d.get('turnin') and opts.get('pet_turnin'):
+                print(f'  - 步 {st}：kind={sd["kind"]} → --pet-turnin：pet.py rest-all → team.disband → pet_turnin {d["turnin"]["kind"]} 5 人逐人交'
+                      f'（pet_turnin 步 {list(d["turnin"]["steps"].get(st, ()))}）→ char.ensure DKBO → team.form；失敗 150')
             else:
-                print(f'  - 步 {st}：kind={sd["kind"]} → 停下交人（115）')
+                print(f'  - 步 {st}：kind={sd["kind"]} → 停下交人（115）' + ('（加 --pet-turnin 可自動交，未實機）' if d.get('turnin') else ''))
+        if d.get('rest_pets'):
+            print('  - 交寵物前：' + ('--pet-turnin：接取後第一片前 pet.py rest-all（任務寵改等待）' if opts.get('pet_turnin') else
+                                      '任務寵要先改等待（手動 pet.py rest-all，或加 --pet-turnin 自動）'))
+        if d.get('reward_pets'):
+            print(f'  - 獎勵寵：{"、".join(d["reward_pets"])}（要丟用 --drop-reward / --confirm-drop，只丟 1 級）')
         if d.get('boss'):
             print(f'  - 有任務戰 / BOSS 戰：quest.py 預設模式打完回 37（滿 5 人 → 繼續）/ 38（不滿 → bossretry.py 落後者當隊長 5 人重打 + 重組，每任務最多 {BOSS_RETRY_MAX} 次；失敗 114）')
-        if opts.get('dragon', True):
+        if opts.get('dragon', False):
             print(f'  - 每片前：龍王的守護（buff 列看不到人形圖示才吃；depot_use 公共倉庫取出 → 吃 → 存回 → 關遇敵）')
         print(f'  - 迴圈：quest.py --task {d["track"]} --max-seconds {opts["slice_s"]}（≤ {opts["max_slices"]} 片、≤ {opts["max_min"]} 分），依退出碼分支')
         print('  - 收尾：quest.py「任務完成」（追蹤欄沒有該任務）→ 進度檔 + notes/quest-log.md（沒有該字樣才開詳情確認）')
+    if not opts.get('dragon', False):
+        print('[龍王的守護] 預設不吃（要吃加 --dragon）')
+    if opts.get('drop_reward'):
+        print(f'[丟獎勵寵] 全部成功後：{"、".join(opts["drop_reward"])} 各 petdrop.drop all（名字完全相同、等級 ≤ {DROP_MAX_LEVEL}、非騎寵 / 第 1 格 / 出戰；失敗 151）')
     if opts['after'] == 'grind':
         print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -370,7 +428,7 @@ class Run:
 
     def ensure_dragon(self, force: bool = False):
         """隊長吃龍王的守護（公共倉庫取出 → 吃 1 顆 → 剩的存回）；失敗只警告（沒有也能跑，只是會遇敵）；buff 列看到人形圖示就不吃、看不到就吃一顆（不看時間）"""
-        if not self.o.get('dragon', True):
+        if not self.o.get('dragon', False):
             return
         active = self.T.dragon_active()                                # 人形圖示在 = 還有效（不看時間）；2倍智慧果的 EXP 圖示不會誤判
         if not force and active:
@@ -411,12 +469,82 @@ class Run:
             T.encounter_off_wait()
         except RuntimeError as e:
             return self.fail(EXIT_HANDOVER, f'關原地遇敵失敗：{e}')
+        rc = self.battle_gate('交接')                                   # 戰鬥已結束（上一步等過）才開外掛面板
+        if rc:
+            return rc
         # 當前角色 = DKBO 由 team.form 同一次讀切換面板時確認（不是才 char.ensure，team._finish）；不再另跑 char.current（2026-10-12：多開關 1～2 次面板）
         rc = self.form('交接')
         if rc:
             if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
                 return rc                                               # 驗證視窗 / 斷線透傳
             return self.fail(EXIT_HANDOVER, f'team.form 沒成功 rc={rc}（要滿 5 人）', team_rc=rc)
+        return 0
+
+    def battle_gate(self, where: str) -> int:
+        """戰鬥設定檢查（ass.battle_check：5 人自動戰鬥、DKBO 人物首次動作 風的精靈 打勾）；只改不對的勾選。
+        --no-battle-check → 0。值讀不準只警告；9 / 10 透傳；其他非 0 → 109"""
+        if not self.o.get('battle_check', True):
+            return 0
+        rc, sts, msg, info = self.T.battle_check()
+        self.info['battle'] = {'rc': rc, 'changed': (info or {}).get('changed'), 'msg': msg}
+        for r, st in (sts or {}).items():
+            if 'first_unsure' in (st or {}):
+                self.warn(f'{where}：{r} 人物首次動作讀到「{st["first_unsure"]}」，認不出是不是風的精靈（勾選照查；請找時間開外掛看一眼）')
+        if (info or {}).get('changed'):
+            event(f'{where}：戰鬥設定不對已修正並讀回確認 {info["changed"]}')
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.fail(EXIT_BATTLESET, f'{where}：戰鬥設定檢查失敗 ass rc={rc}（{(info or {}).get("role") or "?"}）：{msg}', battle_rc=rc)
+        event(f'{where}：戰鬥設定 5 人 OK')
+        return 0
+
+    def br_kw(self) -> dict:
+        """呼叫 bossretry 的額外參數（--no-battle-check 才傳 check=False；預設不傳，讓 bossretry 重打前自己查）"""
+        return {} if self.o.get('battle_check', True) else {'check': False}
+
+    def do_turnin(self, d, step) -> int:
+        """--pet-turnin：交寵物步驟（defs.turnin）。rest-all → 解散 → pet_turnin 5 人逐人 → char.ensure DKBO → team.form。失敗 150"""
+        T, tid, tdef = self.T, d['id'], d['turnin']
+        steps = tdef['steps'].get(step) or tdef['steps'].get(min(tdef['steps']))
+        event(f'任務 {tid} 步 {step}：--pet-turnin → rest-all → 解散 → pet_turnin {tdef["kind"]} 5 人（pet_turnin 步 {list(steps)}）')
+        rc = T.pet_rest_all()
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.fail(EXIT_TURNIN, f'任務 {tid}：交寵物前 pet.py rest-all 失敗 rc={rc}', turnin={'stage': 'rest_all', 'rc': rc})
+        rc = T.team_disband()
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.fail(EXIT_TURNIN, f'任務 {tid}：交寵物前解散隊伍失敗 rc={rc}', turnin={'stage': 'disband', 'rc': rc})
+        self.team_ok_at = 0.0
+        rc, res = T.pet_turnin(tdef['kind'], ALL_ROLES, steps)
+        self.info['turnin'] = {'stage': 'turnin', 'rc': rc, 'roles': res}
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        crc = T.char_ensure(LEADER)                                    # 失敗也先切回 DKBO（pet_turnin 不切回）
+        if rc:
+            return self.fail(EXIT_TURNIN, f'任務 {tid}：pet_turnin rc={rc}（{res}）；切回 {LEADER} rc={crc}', turnin=self.info['turnin'])
+        if crc:
+            return self.fail(EXIT_TURNIN, f'任務 {tid}：交完切回 {LEADER} 失敗 rc={crc}', turnin=self.info['turnin'])
+        rc = self.form('交寵物後')
+        if rc:
+            return self.fail(EXIT_TURNIN, f'任務 {tid}：交完重組 team.form 失敗 rc={rc}', turnin=self.info['turnin'])
+        event(f'任務 {tid}：5 人交寵物完成 {res}')
+        return 0
+
+    def drop_rewards(self) -> int:
+        """--drop-reward：全部任務成功後丟指定獎勵寵（petdrop.drop all，只丟等級 ≤ DROP_MAX_LEVEL）。失敗 151"""
+        for name in self.o.get('drop_reward') or []:
+            event(f'丟獎勵寵：{name}（5 人，只丟名字完全相同且 ≤{DROP_MAX_LEVEL} 級）')
+            rc, info = self.T.pet_drop(name, DROP_MAX_LEVEL)
+            self.info.setdefault('drop', {})[name] = {'rc': rc, **(info or {})}
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            if rc:
+                return self.fail(EXIT_DROP, f'丟「{name}」失敗 petdrop rc={rc}（73 = 防護擋下：等級不是 1 / 讀不出 / 像騎寵 / 出戰…）', drop=self.info['drop'])
+            event(f'丟「{name}」：丟了 {(info or {}).get("dropped", [])}，本來就沒有 {(info or {}).get("already", [])}')
         return 0
 
     # -- 任務 --
@@ -539,10 +667,18 @@ class Run:
             if rc:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
+        if self.o.get('pet_turnin') and d.get('rest_pets'):            # 卡坦的願望：隊長一次交，交前任務寵都要等待（10-10 一隻出戰 → 按完成 21 次不前進）
+            rc = T.pet_rest_all()
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            if rc:
+                return self.fail(EXIT_TURNIN, f'任務 {tid}：交寵物前 pet.py rest-all 失敗 rc={rc}', turnin={'stage': 'rest_all', 'rc': rc})
+            event(f'任務 {tid}：--pet-turnin → 5 人任務寵已改等待（rest-all）')
         team_retry = 0
         rewarps = 0
         relogins = 0
         boss_retries = 0
+        turnin_tried = False
         for k in range(self.o['max_slices']):
             if time.time() - t0 > self.o['max_min'] * 60:
                 return self.fail(EXIT_SLICES, f'任務 {tid} 超過 {self.o["max_min"]} 分鐘仍未完成')
@@ -550,6 +686,21 @@ class Run:
             self.ensure_dragon()
             from_pending = self.pending is not None
             step, kind, sd = self.special_step(d)
+            if kind == 'manual' and d.get('turnin') and self.o.get('pet_turnin') and not turnin_tried:
+                turnin_tried = True                                    # 每任務只試一次：交完還停在 manual = 有人沒交到 → 下一圈 115
+                rc = self.do_turnin(d, step)
+                if rc:
+                    return rc
+                rc, s2 = self.status_of(d)
+                self.opens(ts)
+                if rc:
+                    return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 交寵物後讀狀態失敗 rc={rc}')
+                if s2 == DONE:
+                    ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
+                    self.save()
+                    event(f'任務 {tid}「{d["detail"]}」交寵物後已完成')
+                    return self.verify_all(d, ts)
+                continue
             if kind == 'manual':
                 return self.fail(EXIT_MANUAL, f'任務 {tid} 步 {step} kind=manual：停下交人', step=step)
             if kind == 'walk' and from_pending:                         # 自動巡路優先：quest.py 回 3（追蹤沒反應）才用 walk 備援（2026-10-11 實測點追蹤會傳送 + 巡路）
@@ -589,7 +740,7 @@ class Run:
                     return self.fail(EXIT_TEAM, f'任務 {tid}：{what}；bossretry 已用 {boss_retries} 次，停手交人', quest_rc=rc)
                 boss_retries += 1
                 event(f'任務 {tid}：{what} → bossretry 第 {boss_retries}/{BOSS_RETRY_MAX} 次')
-                brc, binfo = T.boss_retry(track)
+                brc, binfo = T.boss_retry(track, **self.br_kw())
                 self.info.setdefault('boss_retry', []).append(binfo)
                 if brc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
                     return brc
@@ -704,7 +855,7 @@ class Run:
                 why = '補人後仍沒完成' if attempt else '--no-boss-retry'
                 return self.fail(EXIT_LAGGARD, f'任務 {tid}：{lag} 仍是進行中（{why}），停手交人', laggards=lag)
             event(f'任務 {tid}：{lag} 沒完成 → bossretry --who（落後者當隊長組 5 人重打 → 切回 DKBO 重組）')
-            brc, binfo = T.boss_retry(d['track'], who=lag)
+            brc, binfo = T.boss_retry(d['track'], who=lag, **self.br_kw())
             self.info.setdefault('boss_retry', []).append(binfo)
             if brc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
                 return brc
@@ -731,10 +882,28 @@ class Run:
             pass
 
 
-def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_dragon: bool = True, spot: str = DEFAULT_SPOT,
+def parse_names(text) -> list:
+    """'左迪洛斯,巴朵蘭恩' / 'a、b' / list → 去空白、去重的名字清單（保留順序）"""
+    if not text:
+        return []
+    items = text if isinstance(text, (list, tuple)) else str(text).replace('、', ',').replace('，', ',').split(',')
+    return list(dict.fromkeys(x.strip() for x in items if x and x.strip()))
+
+
+def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_dragon: bool = False, spot: str = DEFAULT_SPOT,
         max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True,
-        team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False) -> int:
+        team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False,
+        battle_check: bool = True, pet_turnin: bool = False, drop_reward=None, confirm_drop=None) -> int:
+    """use_dragon 預設 False（2026-10-12 起不吃龍王的守護）。drop_reward 要和 confirm_drop 名單完全相同才會丟（不可逆）"""
     LAST.clear()
+    drops, confirms = parse_names(drop_reward), parse_names(confirm_drop)
+    if drops and sorted(drops) != sorted(confirms):
+        print(f'questrun：--drop-reward {drops} 要配同樣的 --confirm-drop（現在是 {confirms}）；不可逆動作，名單不一致就不跑', file=sys.stderr)
+        return uikit.EXIT_USAGE
+    bad_drop = [n for n in drops if n in uikit.MOUNTS or uikit.is_mount_like(n)]
+    if bad_drop:
+        print(f'questrun：--drop-reward 不能是騎寵 {bad_drop}', file=sys.stderr)
+        return uikit.EXIT_USAGE
     defs, bad = questdefs.resolve(ids)
     if bad:
         print(f'questrun：不認得的任務 ID {bad}（questdefs 有：{questdefs.DEFAULT_ORDER}）', file=sys.stderr)
@@ -743,7 +912,8 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         print('questrun：--after 要 grind 或 none', file=sys.stderr)
         return uikit.EXIT_USAGE
     opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress,
-                team_hp_min=team_hp_min, boss_retry=boss_retry, verify_all=verify_all, verify_skipped=verify_skipped)
+                team_hp_min=team_hp_min, boss_retry=boss_retry, verify_all=verify_all, verify_skipped=verify_skipped,
+                battle_check=battle_check, pet_turnin=pet_turnin, drop_reward=drops)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -765,6 +935,8 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
                 break
             r.write_log(d, t0)
             done.append(d['id'])
+    if not rc and drops:
+        rc = r.drop_rewards()
     if not rc and after == 'grind':
         event(f'全部完成 → 恢復掛機：grind.py start --spot {spot}')
         rc = T.grind_start(spot)
@@ -824,20 +996,24 @@ def main() -> int:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
+    def common(p):
+        p.add_argument('ids', nargs='*')
+        p.add_argument('--after', default='grind', choices=['grind', 'none'])
+        p.add_argument('--dragon', action='store_true', help='每片前吃龍王的守護（2026-10-12 起預設不吃）')
+        p.add_argument('--no-dragon', action='store_true', help='相容舊指令：= 預設（不吃），no-op')
+        p.add_argument('--spot', default=DEFAULT_SPOT)
+        p.add_argument('--no-battle-check', action='store_true', help='交接 / bossretry 重打前不查外掛戰鬥設定（5 人自動戰鬥、DKBO 人物首次動作）')
+        p.add_argument('--pet-turnin', action='store_true', help='交寵物步驟自動做（恐龍博士 pet_turnin 逐人交、卡坦交前 rest-all；未實機）；預設 manual 步停 115')
+        p.add_argument('--drop-reward', default='', help='全部成功後丟這些獎勵寵（逗號分隔；只丟 1 級；要配 --confirm-drop 同一串）')
+        p.add_argument('--confirm-drop', default='', help='--drop-reward 的確認（名單要完全相同）')
     p = sub.add_parser('plan')
-    p.add_argument('ids', nargs='*')
-    p.add_argument('--after', default='grind', choices=['grind', 'none'])
-    p.add_argument('--no-dragon', action='store_true')
-    p.add_argument('--spot', default=DEFAULT_SPOT)
+    common(p)
     p = sub.add_parser('status')
     p.add_argument('ids', nargs='*')
     p.add_argument('--role', default='', help='逐人讀：all 或 DKBO3,DKBO5（每人 char.switch 一次，最後切回 DKBO）')
     p = sub.add_parser('run')
-    p.add_argument('ids', nargs='*')
+    common(p)
     p.add_argument('--dry-run', action='store_true')
-    p.add_argument('--after', default='grind', choices=['grind', 'none'])
-    p.add_argument('--no-dragon', action='store_true')
-    p.add_argument('--spot', default=DEFAULT_SPOT)
     p.add_argument('--max-slices', type=int, default=MAX_SLICES)
     p.add_argument('--slice-s', type=int, default=SLICE_S)
     p.add_argument('--max-min', type=int, default=MAX_MIN)
@@ -854,8 +1030,12 @@ def main() -> int:
     kw = dict(max_slices=getattr(a, 'max_slices', MAX_SLICES), slice_s=getattr(a, 'slice_s', SLICE_S),
               max_min=getattr(a, 'max_min', MAX_MIN), hp_min=getattr(a, 'hp_min', HP_MIN),
               team_hp_min=getattr(a, 'team_hp_min', TEAM_HP_MIN), boss_retry=not getattr(a, 'no_boss_retry', False),
-              verify_all=not getattr(a, 'no_verify_all', False), verify_skipped=getattr(a, 'verify_skipped', False))
-    rc = run(a.ids, dry, a.after, use_dragon=not a.no_dragon, spot=a.spot, trust_progress=not getattr(a, 'no_trust_progress', False), **kw)
+              verify_all=not getattr(a, 'no_verify_all', False), verify_skipped=getattr(a, 'verify_skipped', False),
+              battle_check=not a.no_battle_check, pet_turnin=a.pet_turnin, drop_reward=a.drop_reward, confirm_drop=a.confirm_drop)
+    if a.dragon and a.no_dragon:
+        print('questrun：--dragon 和 --no-dragon 不能同時給', file=sys.stderr)
+        return uikit.EXIT_USAGE
+    rc = run(a.ids, dry, a.after, use_dragon=a.dragon, spot=a.spot, trust_progress=not getattr(a, 'no_trust_progress', False), **kw)
     if not dry:
         print(json.dumps(LAST, ensure_ascii=False, default=str))
     return rc

@@ -204,9 +204,40 @@ class Fake:
         self.rec('grind_start', spot)
         return self.grind_rc
 
-    def boss_retry(self, track, who=None):
+    def boss_retry(self, track, who=None, **kw):
         self.rec(*(('boss_retry', track) if who is None else ('boss_retry', track, tuple(who))))
+        self.boss_kw = getattr(self, 'boss_kw', []) + [kw]
         return self.boss_q.pop(0) if len(self.boss_q) > 1 else self.boss_q[0]
+
+    # 戰鬥設定檢查：battle_q 每次取一個 (rc, sts, msg, info)，最後一個重複；沒給 = 全對
+    def battle_check(self):
+        self.rec('battle_check')
+        q = getattr(self, 'battle_q', None)
+        if not q:
+            return 0, {r: {'自動戰鬥': True} for r in questrun.ALL_ROLES}, '', {'changed': {}, 'role': None, 'secs': {}}
+        return q.pop(0) if len(q) > 1 else q[0]
+
+    rest_rc = 0
+    disband_rc = 0
+
+    def pet_rest_all(self):
+        self.rec('rest_all')
+        return self.rest_rc
+
+    def team_disband(self):
+        self.rec('disband')
+        return self.disband_rc
+
+    def pet_turnin(self, kind, roles, steps):
+        self.rec('pet_turnin', kind, tuple(roles), tuple(steps))
+        q = getattr(self, 'turnin_q', None)
+        r = (q.pop(0) if len(q) > 1 else q[0]) if q else (0, {x: {'step1': True, 'step2': True} for x in roles})
+        return r
+
+    def pet_drop(self, name, max_level):
+        self.rec('pet_drop', name, max_level)
+        q = getattr(self, 'drop_q', None)
+        return (q.pop(0) if len(q) > 1 else q[0]) if q else (0, {'dropped': [[x, 3] for x in questrun.ALL_ROLES]})
 
     def status_all(self, detail, roles):
         """all_q：每次取一個 {角色: 狀態 | None(讀不到)}（最後一個重複）；沒給 = 全員已完成"""
@@ -270,7 +301,8 @@ check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', 
 check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
 check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh')) in f.calls, str(f.calls))
 check('交接不再另讀當前角色（team.form 同一次面板確認）', 'current' not in n and 'char_ensure' not in n)
-check('龍王的守護跑第一片前吃（have=False）', ('dragon', False) in f.calls and n.index('dragon') < n.index('quest'))
+check('預設不吃龍王的守護（2026-10-12 起要 --dragon）', 'dragon' not in n, str(n))
+check('交接：關遇敵 → 戰鬥設定檢查 → team.form（battle_check 只 1 次）', n.count('battle_check') == 1 and n.index('enc_off') < n.index('battle_check') < n.index('team_form'), str(n))
 check('進度檔記完成；quest-log 追加一筆', '"done"' in questrun.PROGRESS.read_text(encoding='utf-8') and '彌生和日美子' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
 check('LAST', questrun.LAST.get('ok') and questrun.LAST.get('done') == [2017])
 
@@ -504,11 +536,14 @@ f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], screen=
 go(f, [2999])
 check('畫面停在對話窗 → 先 ESC 再交接', f.names().index('esc') < f.names().index('enc_off') and f.names().count('quest') == 1)
 
+f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2017], use_dragon=True)
+check('--dragon：龍王的守護跑第一片前吃（have=False）', ('dragon', False) in f.calls and f.names().index('dragon') < f.names().index('quest'))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=True)
-go(f, [2017])
+go(f, [2017], use_dragon=True)
 check('人形圖示在 → 不吃', 'dragon' not in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=None)
-go(f, [2017])
+go(f, [2017], use_dragon=True)
 check('圖示讀不到 → 退回計時（第一次會吃）', f.names().count('dragon') == 1)
 
 # 14) --after none：不恢復；grind 失敗 → 回 grind 碼
@@ -527,11 +562,11 @@ check('第一個失敗 → 第二個不跑', f.names().count('quest') == 1 and D
 
 # 16) 龍王：失敗只警告、續跑（have=True）；人形圖示不在就吃
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], dragon_rc=92)
-rc = go(f, [2017])
+rc = go(f, [2017], use_dragon=True)
 check('龍王失敗只警告、任務照跑', rc == 0 and f.names().count('quest') == 2)
 check('龍王取出後失敗 → 下次 have=True', ('dragon', True) in f.calls, str([c for c in f.calls if c[0] == 'dragon']))
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], active=None)
-go(f, [2017])
+go(f, [2017], use_dragon=True)
 check('buff 列沒人形圖示 → 每次都吃（不看時間）', f.names().count('dragon') >= 2)
 f = Fake(status={D17: [questrun.DONE]})
 go(f, [2017], use_dragon=False)
@@ -549,9 +584,137 @@ check('quest-log 摘要寫本任務 0 顆（不是累計 6）', '本任務吃 0 
 reset()
 questrun.save_progress({'tasks': {}, 'dragon_used': 6})
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=False)
-quiet(questrun.run, [2017], tools=f, after='none')
+quiet(questrun.run, [2017], tools=f, after='none', use_dragon=True)
 check('吃 1 顆：dragon_used 1、累計 7', questrun.LAST['dragon_used'] == 1 and questrun.LAST['dragon_used_total'] == 7, str(questrun.LAST))
 check('quest-log 摘要寫本任務 1 顆', '本任務吃 1 顆' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
+
+# ================= 戰鬥設定檢查（A3，2026-10-12 四寶玉之謎 DKBO 人物首次動作沒勾）=================
+f = Fake(status={D17: [questrun.DONE]})
+f.battle_q = [(0, {'DKBO': {'自動戰鬥': True, '人物首次勾選': True}}, '', {'changed': {'DKBO': ['人物首次勾選']}, 'role': None})]
+rc = go(f, [2017])
+check('battle_check 有修正 → 照跑、事件記修正', rc == 0 and '已修正' in questrun.EVENT_LOG.read_text(encoding='utf-8'), str(rc))
+f = Fake(status={D17: [questrun.DOING]})
+f.battle_q = [(13, {'DKBO': {'人物首次動作': '攻擊'}}, 'DKBO 人物首次動作是「攻擊」', {'changed': {}, 'role': 'DKBO'})]
+rc = go(f, [2017])
+check('battle_check 值不對（ass 13）→ 109、不組隊不接任務、不恢復掛機', rc == questrun.EXIT_BATTLESET and 'team_form' not in f.names() and 'accept' not in f.names()
+      and 'grind_start' not in f.names() and questrun.LAST['info'].get('battle_rc') == 13, str(f.names()))
+f = Fake(status={D17: [questrun.DOING]})
+f.battle_q = [(8, {}, '戰鬥中', {'changed': {}, 'role': None})]
+check('battle_check 戰鬥中（ass 8）→ 109', go(f, [2017]) == questrun.EXIT_BATTLESET)
+f = Fake(status={D17: [questrun.DOING]})
+f.battle_q = [(9, {}, '', {'changed': {}, 'role': None})]
+check('battle_check 9（驗證視窗）→ 透傳 9', go(f, [2017]) == 9)
+f = Fake(status={D17: [questrun.DONE]})
+f.battle_q = [(0, {'DKBO': {'自動戰鬥': True, 'first_unsure': '凰的精'}}, '', {'changed': {}, 'role': None})]
+rc = go(f, [2017])
+check('人物首次動作值讀不準 → 只警告、照跑', rc == 0 and any('認不出' in w for w in questrun.LAST['warnings']), str(questrun.LAST['warnings']))
+f = Fake(status={D17: [questrun.DONE]})
+rc = go(f, [2017], battle_check=False)
+check('--no-battle-check → 不查', rc == 0 and 'battle_check' not in f.names())
+# bossretry 帶 check：預設不傳（bossretry 自己查）；--no-battle-check 傳 check=False
+f = Fake(status={'琉璃洞窟': [questrun.DOING, questrun.DONE]}, quest=[(38, []), (0, [])], boss=[(0, {})])
+go(f, [2000])
+check('預設：bossretry 不帶 check（= 重打前查）', f.boss_kw == [{}], str(getattr(f, 'boss_kw', None)))
+f = Fake(status={'琉璃洞窟': [questrun.DOING, questrun.DONE]}, quest=[(38, []), (0, [])], boss=[(0, {})])
+go(f, [2000], battle_check=False)
+check('--no-battle-check：bossretry check=False', f.boss_kw == [{'check': False}], str(getattr(f, 'boss_kw', None)))
+
+# ================= 龍王預設不吃（A5）/ plan 輸出 =================
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    questrun.run([2017], dry_run=True)
+txt = buf.getvalue()
+check('plan：預設不吃龍王、列戰鬥設定檢查', '預設不吃（要吃加 --dragon）' in txt and '每片前：龍王' not in txt and 'ass.battle_check' in txt, txt[-400:])
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    questrun.run([2017], dry_run=True, use_dragon=True, battle_check=False)
+txt = buf.getvalue()
+check('plan --dragon --no-battle-check', '每片前：龍王' in txt and '--no-battle-check 不做' in txt)
+import argparse as _ap  # noqa: E402
+_seen = {}
+_orig_run = questrun.run
+questrun.run = lambda *a, **k: (_seen.update(a=a, k=k), 0)[1]
+try:
+    for argv, want in ((['plan', '2017'], False), (['plan', '2017', '--no-dragon'], False), (['plan', '2017', '--dragon'], True)):
+        sys.argv = ['questrun.py'] + argv
+        quiet(questrun.main)
+        check(f'CLI {argv[2:] or "預設"} → use_dragon={want}', _seen['k'].get('use_dragon') is want, str(_seen))
+    sys.argv = ['questrun.py', 'plan', '2017', '--dragon', '--no-dragon']
+    check('CLI --dragon + --no-dragon → 1', quiet(questrun.main) == uikit.EXIT_USAGE)
+    sys.argv = ['questrun.py', 'run', '2016', '--pet-turnin', '--no-battle-check', '--drop-reward', '布克布克', '--confirm-drop', '布克布克', '--dry-run']
+    quiet(questrun.main)
+    check('CLI 新旗標傳到 run()', _seen['k'].get('pet_turnin') is True and _seen['k'].get('battle_check') is False
+          and _seen['k'].get('drop_reward') == '布克布克' and _seen['k'].get('confirm_drop') == '布克布克', str(_seen['k']))
+finally:
+    questrun.run = _orig_run
+
+# ================= 交寵物（C）=================
+D16, D19 = '恐龍博士(1.82)', '卡坦的願望(1.82)'
+f = Fake(status={D16: [questrun.PENDING, questrun.DONE]}, steps=[1])
+rc = go(f, [2016], after='none')
+check('2016 預設（沒 --pet-turnin）→ 115、不交', rc == questrun.EXIT_MANUAL and 'pet_turnin' not in f.names() and 'rest_all' not in f.names(), str(f.names()))
+f = Fake(status={D16: [questrun.PENDING, questrun.DONE]}, steps=[1])
+rc = go(f, [2016], after='none', pet_turnin=True)
+n = f.names()
+check('2016 --pet-turnin：rest-all → 解散 → pet_turnin 5 人 → DKBO → 重組 → 讀詳情已完成', rc == 0
+      and n.index('rest_all') < n.index('disband') < n.index('pet_turnin') < n.index('char_ensure') < len(n) - 1 - n[::-1].index('team_form')
+      and ('pet_turnin', 'dino', tuple(questrun.ALL_ROLES), (1, 2)) in f.calls and ('char_ensure', 'DKBO') in f.calls, str(f.calls))
+check('  交完逐人驗證（status_all）', 'status_all' in n)
+f = Fake(status={D16: [questrun.DOING, questrun.DONE]}, steps=[2])
+go(f, [2016], after='none', pet_turnin=True)
+check('2016 步 2 → pet_turnin 只交步 2', ('pet_turnin', 'dino', tuple(questrun.ALL_ROLES), (2,)) in f.calls)
+f = Fake(status={D16: [questrun.DOING]}, steps=[None])
+go(f, [2016], after='none', pet_turnin=True)
+check('2016 步號讀不到（全 manual → 步 0）→ 交步 1、2', ('pet_turnin', 'dino', tuple(questrun.ALL_ROLES), (1, 2)) in f.calls)
+f = Fake(status={D16: [questrun.DOING]}, steps=[1, 1])
+f.turnin_q = [(123, {'DKBO3': {'step1': False}})]
+rc = go(f, [2016], after='none', pet_turnin=True)
+check('pet_turnin 失敗 123 → 150，仍先切回 DKBO', rc == questrun.EXIT_TURNIN and ('char_ensure', 'DKBO') in f.calls and 'grind_start' not in f.names(), str(f.calls))
+f = Fake(status={D16: [questrun.DOING]}, steps=[1])
+f.rest_rc = 74
+rc = go(f, [2016], after='none', pet_turnin=True)
+check('rest-all 失敗 → 150、不解散不交', rc == questrun.EXIT_TURNIN and 'disband' not in f.names() and 'pet_turnin' not in f.names())
+f = Fake(status={D16: [questrun.DOING]}, steps=[1])
+f.disband_rc = 46
+check('解散失敗 → 150、不交', go(f, [2016], after='none', pet_turnin=True) == questrun.EXIT_TURNIN and 'pet_turnin' not in f.names())
+f = Fake(status={D16: [questrun.DOING, questrun.DOING]}, steps=[1, 1])
+rc = go(f, [2016], after='none', pet_turnin=True)
+check('交完詳情仍進行中、步驟還是 manual → 只試一次就 115', rc == questrun.EXIT_MANUAL and f.names().count('pet_turnin') == 1, str(f.names()))
+f = Fake(status={D19: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2019], after='none', pet_turnin=True)
+n = f.names()
+check('2019 --pet-turnin：接取後第一片前 rest-all（不解散、quest.py 隊長交）', 'rest_all' in n and n.index('accept') < n.index('rest_all') < n.index('quest') and 'disband' not in n, str(n))
+f = Fake(status={D19: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2019], after='none')
+check('2019 預設 → 不 rest-all', 'rest_all' not in f.names())
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    questrun.run([2016, 2019], dry_run=True, pet_turnin=True)
+txt = buf.getvalue()
+check('plan --pet-turnin：2016 列 pet_turnin、2019 列 rest-all、獎勵寵', 'pet_turnin dino' in txt and '接取後第一片前 pet.py rest-all' in txt and '布克布克' in txt, txt[:300])
+
+# ================= 丟獎勵寵（C）=================
+f = Fake(status={D17: [questrun.DONE]})
+check('--drop-reward 沒配 --confirm-drop → 1、不碰遊戲', go(f, [2017], drop_reward='左迪洛斯') == uikit.EXIT_USAGE and not f.calls)
+check('--confirm-drop 名單不同 → 1', go(Fake(status={D17: [questrun.DONE]}), [2017], drop_reward='左迪洛斯,巴朵蘭恩', confirm_drop='左迪洛斯') == uikit.EXIT_USAGE)
+check('--drop-reward 是騎寵 → 1', go(Fake(status={D17: [questrun.DONE]}), [2017], drop_reward='瑪斯貝卡', confirm_drop='瑪斯貝卡') == uikit.EXIT_USAGE)
+check('parse_names：逗號 / 頓號 / 去重', questrun.parse_names('左迪洛斯、巴朵蘭恩, 左迪洛斯') == ['左迪洛斯', '巴朵蘭恩'])
+f = Fake(status={D17: [questrun.DONE]})
+rc = go(f, [2017], drop_reward='左迪洛斯,巴朵蘭恩', confirm_drop='巴朵蘭恩、左迪洛斯')
+n = f.names()
+check('全部成功 → 依序丟（max_level 1）→ 再恢復掛機', rc == 0 and [c for c in f.calls if c[0] == 'pet_drop'] == [('pet_drop', '左迪洛斯', 1), ('pet_drop', '巴朵蘭恩', 1)]
+      and n.index('pet_drop') < n.index('grind_start'), str(f.calls))
+f = Fake(status={D17: [questrun.DONE]})
+f.drop_q = [(73, {})]
+rc = go(f, [2017], drop_reward='左迪洛斯,巴朵蘭恩', confirm_drop='左迪洛斯,巴朵蘭恩')
+check('丟失敗 73 → 151、後面的不丟、不恢復掛機', rc == questrun.EXIT_DROP and f.names().count('pet_drop') == 1 and 'grind_start' not in f.names())
+f = Fake(status={D17: [questrun.DOING]}, quest=[(33, [])])
+go(f, [2017], drop_reward='左迪洛斯', confirm_drop='左迪洛斯')
+check('任務失敗 → 不丟', 'pet_drop' not in f.names())
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    questrun.run([3003], dry_run=True, drop_reward='左迪洛斯', confirm_drop='左迪洛斯')
+check('plan 列丟獎勵寵', '[丟獎勵寵]' in buf.getvalue() and '左迪洛斯' in buf.getvalue())
 
 # ================= 2999：walk handler =================
 S1 = questdefs.get(2999)['steps'][1]

@@ -15,6 +15,9 @@
   est_min     預估分鐘（quest-log 0 轉 123 級 5 人隊實跑）
   live        P2 實機驗證過：True；只有資料沒實跑：False
   note        坑 / 提醒
+  turnin      （選填）交寵物步驟：dict(kind=pet_turnin 的種類, steps={任務步號: (pet_turnin 步…)})；questrun --pet-turnin 時 manual 步改跑 pet_turnin 5 人逐人交
+  rest_pets   （選填）True = 交寵物前任務寵要先「等待」：questrun --pet-turnin 時接取後第一片前 pet.py rest-all
+  reward_pets （選填）任務獎勵寵物名（只給 plan 顯示；要丟由使用者下 --drop-reward / --confirm-drop，questrun 只丟 1 級）
 """
 from pathlib import Path
 
@@ -68,15 +71,16 @@ Q182 = [
          steps={}, bag_slots=0, boss=False, est_min=3, live=True,
          note='純巡路 + 對話（卡坦 / 霍爾特 / 盜賊基地最底層夢德族長，10-10 實測約 3 分）'),
     dict(id=3003, detail='猜謎三兄弟(1.82)', track='猜謎三兄弟', accept_npc='受理A 811:30,20', steps_total=3,
-         steps={1: dict(kind='manual')}, bag_slots=1, boss=False, est_min=50, live=False,
+         steps={1: dict(kind='manual')}, bag_slots=1, boss=False, est_min=50, live=False, reward_pets=['左迪洛斯'],
          note='步 1 爬塔（811→810 共 11 層，810 屬 noTaskNavigate 不能自動巡路）+ 金布伊 Lv77 要人 / 手動：每層點守衛 →「猜謎答題」→ 4 張寵物圖選一（玩家觸發的任務答題，准許查 quests/answers.md 作答；若不是此畫面一律當驗證停手）。'
               '接取：詳情 →「接藍暴任務」→「接受」要按 2 次，questdetail.accept 預設 presses=2 已支援；questrun 接取後進步 1 即停 115。'
               '步 2、3 預設：金布伊練到 77（約 9 分）後 `questrun run 3003` 續跑，點追蹤直接巡到 810 伊那多，不用重爬塔；交接前 5 人戰寵換金布伊；獎勵左迪洛斯（丟）'),
     dict(id=2016, detail='恐龍博士(1.82)', track='恐龍博士', accept_npc='恐龍博士哈魯 11006:11,11', steps_total=2,
          steps={1: dict(kind='manual'), 2: dict(kind='manual')}, bag_slots=0, boss=False, est_min=45, live=False,
-         note='交寵物類（Task type=7，要抓魯尼帖斯 Lv18+ ×5 / 貝魯卡 Lv30+ ×5，見 psa-pet-quest skill）：questrun 只負責接取，之後步 1、2 都停 115 交人；交時解散逐人交，跳「選擇寵物」視窗要看名字點卡片（quest.py 不處理）；交前寵物改「等待」；獎勵布克布克（丟）'),
+         turnin=dict(kind='dino', steps={0: (1, 2), 1: (1, 2), 2: (2,)}), rest_pets=True, reward_pets=['布克布克'],
+         note='交寵物類（Task type=7，要抓魯尼帖斯 Lv18+ ×5 / 貝魯卡 Lv30+ ×5，見 psa-pet-quest skill）：questrun 預設只負責接取，之後步 1、2 都停 115 交人（加 --pet-turnin：rest-all → 解散 → pet_turnin dino 5 人逐人交 → DKBO 重組，未實機）；交時解散逐人交，跳「選擇寵物」視窗要看名字點卡片（quest.py 不處理）；交前寵物改「等待」；獎勵布克布克（丟）'),
     dict(id=2019, detail='卡坦的願望(1.82)', track='卡坦的願望', accept_npc='卡坦 100:230,180', steps_total=2,
-         steps={}, bag_slots=0, boss=False, est_min=80, live=False,
+         steps={}, bag_slots=0, boss=False, est_min=80, live=False, rest_pets=True, reward_pets=['修寶', '朵拉比斯'],
          note='交寵物（4 色鯊魚 / 4 色雞各 ≥25 級）；**交前先 `pet.py rest-all`**（10-10 一隻在出戰 → 按完成 21 次不前進）；隊長交一次 5 人完成；步 1 獎勵修寶（丟）、步 2 朵拉比斯（存個人倉庫）；寵物準備是手動流程'),
 ]
 

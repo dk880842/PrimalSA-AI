@@ -8,15 +8,17 @@ notes/quest-log.md 10-10 兩段：第一次輸、5 人 HP 1 原地；第二次 5
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/bossretry.py plan --track 琉璃洞窟                 # 不碰遊戲：印流程與退出碼
-  uv run --no-project python tools/gui/bossretry.py run --track 琉璃洞窟 [--max-tries 2] [--max-slices 6] [--slice-s 300] [--hp-min 60] [--dry-run]
+  uv run --no-project python tools/gui/bossretry.py run --track 琉璃洞窟 [--max-tries 2] [--max-slices 6] [--slice-s 300] [--hp-min 60] [--no-battle-check] [--dry-run]
   uv run --no-project python tools/gui/bossretry.py run --track 四寶玉之謎 --who DKBO3,DKBO5 [--ref-step done|N]   # 指定落後者（隊伍滿的也照跑）：
         逐人驗證發現有人任務沒完成時用（questrun 每任務完成後 verify_all 自動呼叫）；--ref-step 預設 done = 其他人已完成，落後者要打到任務完成
   uv run --no-project python tools/gui/bossretry.py status                                 # 唯讀：開切換面板，印隊長 / 不在隊的人
-  可 import：bossretry.run(track, tools=None, who=None, ref_step=None, ...) → 退出碼；結果 dict 在 bossretry.LAST
+  可 import：bossretry.run(track, tools=None, who=None, ref_step=None, battle_check=True, ...) → 退出碼；結果 dict 在 bossretry.LAST
   --dry-run = 同 plan（完全不碰遊戲）。重跑 = 續跑：每次都從現場狀態（隊伍卡片、各人任務步號）重新判斷，不靠進度檔。
 
 流程：
   1 確認     team.check(5) = 0 → 其實沒缺人（38 可能只是讀不到）→ 回 0、不動
+  1b 戰鬥設定（2026-10-12 四寶玉之謎打火雞輸的根因 = DKBO 人物首次動作「風的精靈Lv.5」沒勾）：重打前 ass.battle_check
+             （一次開外掛面板逐人：5 人自動戰鬥開、DKBO 人物首次動作 風的精靈 打勾；只改不對的勾選、讀回確認；戰鬥中不開面板）；失敗 147；--no-battle-check 關
   2 找人     切換面板卡片：label 不是隊長 / 隊員的 = 掉隊者（名字讀不出 → 140）；隊長 = 參考者 ref（沒有隊長 = 全滅 / 全員單人 → 140）
   3 參考步號 當前切到 ref（通常就是 DKBO）→ quest.read_step_no(追蹤標題)；讀不到重讀 1 次，仍 None → 142（無法判斷誰落後，不盲打）
              → ref 解散舊隊伍（之後 team.form 要全員單人；解散要「當前 = 隊長」，所以趁 ref 是當前時解）
@@ -40,6 +42,7 @@ notes/quest-log.md 10-10 兩段：第一次輸、5 人 HP 1 原地；第二次 5
   143 補血失敗
   144 重打失敗：輸到 --max-tries / 片數用完 / 步號比隊長還前面（不合理）/ quest.py 非預期退出碼
   145 組隊 / 解散失敗：舊隊解散、以掉隊者為隊長組隊、最後 DKBO 重組或 team.check 不滿 5 人
+  147 戰鬥設定檢查失敗（ass.battle_check 非 0：人物首次動作的值不對 13 / 勾選改不動 4 / 面板 2～7 / 戰鬥中 8；info.battle）
   146 quest.py 回需要人看的碼（39 不可逆對話、33 / 29 對話無進展、25 自動戰鬥卡住、19 巡路卡住、3 追蹤沒反應且 --fight 也點不到、5 找不到任務但隊長沒完成）
 安全：只用 char / team / quest / heal / bag 現有的驗證流程，不加任何新的點擊座標；不做不可逆動作；驗證視窗（9）/ 斷線（10）立即透傳。
 
@@ -61,7 +64,7 @@ sys.path.insert(0, str(HERE))
 import uikit  # noqa: E402
 
 SRC = 'bossretry'
-(EXIT_TEAM_READ, EXIT_SWITCH, EXIT_STEP, EXIT_HEAL, EXIT_REFIGHT, EXIT_REGROUP, EXIT_QUEST_MANUAL) = range(140, 147)
+(EXIT_TEAM_READ, EXIT_SWITCH, EXIT_STEP, EXIT_HEAL, EXIT_REFIGHT, EXIT_REGROUP, EXIT_QUEST_MANUAL, EXIT_BATTLESET) = range(140, 148)
 LEADER = 'DKBO'
 TEAM_SIZE = 5
 HP_MIN = 60                      # 全隊任一人 HP 低於這個 % → 補血（同 questrun.TEAM_HP_MIN）
@@ -129,25 +132,32 @@ def classify_quest(rc: int, fight: bool = False) -> str:
     return 'other'
 
 
+def battle_line(o: dict) -> str:
+    return ('1b 戰鬥設定 ass.battle_check（5 人自動戰鬥、DKBO 人物首次動作 風的精靈 打勾；只改不對的勾選；失敗 147）'
+            if o.get('battle_check', True) else '1b 戰鬥設定：--no-battle-check 不查')
+
+
 def plan_text(track: str, o: dict) -> list:
     if o.get('who'):
         return [
             f'--who 模式：落後者 {o["who"]}、參考步號 {o.get("ref_step") or GONE}（GONE = 其他人已完成）；不看 team.check',
+            battle_line(o),
             '1 切換面板讀卡片：有隊長 → 切到隊長解散（全員單人才能以落後者為隊長快速組隊）',
             f'2 每個落後者：char.switch → 讀「{track}」步號；落後 → team.form 以他為隊長組滿 5 人 → 全隊 HP < {o["hp_min"]}% 補血 → '
             f'quest.py --task {track} --team-size 5 全隊打（≤ {o["max_slices"]} 片、輸 ≤ {o["max_tries"]} 次）直到步號 = 參考 → 解散這隊',
             f'3 char.ensure {LEADER} → team.form → team.check(5)',
-            '退出碼同下：140～146；9 驗證視窗；10 斷線',
+            '退出碼同下：140～147；9 驗證視窗；10 斷線',
         ]
     return [
         '1 team.check(5)：0 = 沒缺人 → 結束（不動）',
+        battle_line(o),
         '2 切換面板讀卡片：隊長 = 參考者、不在隊的 = 掉隊者（名字讀不出 / 沒隊長 → 140）',
         f'3 參考者（不是當前就 char.switch）讀「{track}」步號（讀不到 → 142）→ 參考者解散舊隊伍',
         f'4 每個掉隊者：char.switch → 讀步號；落後 → team.form 以他為隊長組滿 5 人 → 全隊 HP < {o["hp_min"]}% 補血 → '
         f'quest.py --task {track} --team-size 5（追蹤沒反應改 --fight --npc auto）全隊打（≤ {o["max_slices"]} 片、輸 ≤ {o["max_tries"]} 次）'
         '直到步號 = 參考者 → 解散這隊',
         f'5 char.ensure {LEADER} → team.form → team.check(5)',
-        '退出碼：0 滿 5 人；140 隊伍讀不到 / 沒隊長；141 切角色；142 步號讀不到；143 補血；144 重打失敗；145 組隊 / 解散失敗；146 quest.py 要人看；9 驗證視窗；10 斷線',
+        '退出碼：0 滿 5 人；140 隊伍讀不到 / 沒隊長；141 切角色；142 步號讀不到；143 補血；144 重打失敗；145 組隊 / 解散失敗；146 quest.py 要人看；147 戰鬥設定；9 驗證視窗；10 斷線',
     ]
 
 
@@ -197,6 +207,18 @@ class Run:
 
     def passthru(self, rc: int, code: int, msg: str) -> int:
         return rc if rc in PASS else self.fail(code, msg)
+
+    def battle_gate(self) -> int:
+        """重打前戰鬥設定檢查（ass.battle_check，同 questrun 交接）；--no-battle-check → 0。9 / 10 透傳，其他非 0 → 147"""
+        if not self.o.get('battle_check', True):
+            return 0
+        rc, sts, msg, info = self.T.battle_check()
+        self.info['battle'] = {'rc': rc, 'changed': (info or {}).get('changed'), 'msg': msg}
+        if (info or {}).get('changed'):
+            self.event(f'戰鬥設定不對已修正並讀回確認 {info["changed"]}')
+        if rc:
+            return self.passthru(rc, EXIT_BATTLESET, f'戰鬥設定檢查失敗 ass rc={rc}（{(info or {}).get("role") or "?"}）：{msg}')
+        return 0
 
     def switch(self, who: str) -> int:
         rc, cur = self.T.current()
@@ -397,6 +419,9 @@ class Run:
             return self.fail(EXIT_TEAM_READ, f'不滿 5 人但找不出掉隊者（名單 {miss}）')
         self.team_leader = ref
         self.event(f'隊長 {ref}、掉隊 {miss}')
+        rc = self.battle_gate()                                  # 外掛面板不用切角色（左欄頭像）；解散 / 重打前先查
+        if rc:
+            return rc
         rc = self.switch(ref)
         if rc:
             return self.passthru(rc, EXIT_SWITCH, f'切到隊長 {ref} 失敗 rc={rc}')
@@ -413,6 +438,9 @@ class Run:
         """--who：呼叫端已知誰落後（逐人讀任務詳情）。隊伍可能是滿的 → 有隊長就先由他解散，之後同一般流程"""
         who, ref_step = list(self.o['who']), self.o.get('ref_step') or GONE
         self.info.update(missing=who, ref_step=ref_step, mode='who')
+        rc = self.battle_gate()
+        if rc:
+            return rc
         cards, err = self.T.team_cards()
         if cards is None:
             return self.fail(EXIT_TEAM_READ, f'讀不到隊伍狀態：{err}')
@@ -466,12 +494,12 @@ class Run:
 
 
 def run(track: str, tools=None, dry_run: bool = False, max_tries: int = MAX_TRIES, max_slices: int = MAX_SLICES,
-        slice_s: int = SLICE_S, hp_min: int = HP_MIN, who=None, ref_step=None) -> int:
+        slice_s: int = SLICE_S, hp_min: int = HP_MIN, who=None, ref_step=None, battle_check: bool = True) -> int:
     """who = 指定落後者名單（--who 模式，不看 team.check）；ref_step = 參考步號（None / 'done' = GONE 已完成）"""
     LAST.clear()
     if ref_step in (None, 'done', 'DONE'):
         ref_step = GONE
-    o = dict(max_tries=max_tries, max_slices=max_slices, slice_s=slice_s, hp_min=hp_min, who=list(who or []), ref_step=ref_step)
+    o = dict(max_tries=max_tries, max_slices=max_slices, slice_s=slice_s, hp_min=hp_min, who=list(who or []), ref_step=ref_step, battle_check=battle_check)
     if not track:
         print('bossretry：要 --track 任務追蹤標題', file=sys.stderr)
         return uikit.EXIT_USAGE
@@ -518,6 +546,7 @@ def main(argv=None) -> int:
         p.add_argument('--slice-s', type=int, default=SLICE_S)
         p.add_argument('--hp-min', type=int, default=HP_MIN)
         p.add_argument('--dry-run', action='store_true')
+        p.add_argument('--no-battle-check', action='store_true', help='重打前不查外掛戰鬥設定（5 人自動戰鬥、DKBO 人物首次動作）')
         p.add_argument('--who', default='', help='指定落後者（逗號分隔，例 DKBO3,DKBO5）：隊伍滿的也照跑')
         p.add_argument('--ref-step', default='done', help='--who 的參考步號：done（其他人已完成，預設）或步號數字')
     sub.add_parser('status')
@@ -535,7 +564,7 @@ def main(argv=None) -> int:
             return uikit.EXIT_USAGE
         who.append(charstate.display(hit))
     ref = int(a.ref_step) if str(a.ref_step).isdigit() else a.ref_step
-    kw = dict(max_tries=a.max_tries, max_slices=a.max_slices, slice_s=a.slice_s, hp_min=a.hp_min, who=who, ref_step=ref)
+    kw = dict(max_tries=a.max_tries, max_slices=a.max_slices, slice_s=a.slice_s, hp_min=a.hp_min, who=who, ref_step=ref, battle_check=not a.no_battle_check)
     if a.cmd == 'plan' or a.dry_run:
         return run(a.track, dry_run=True, **kw)
     import winenv

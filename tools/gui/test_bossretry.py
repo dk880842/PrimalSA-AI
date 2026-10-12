@@ -126,6 +126,12 @@ class Fake:
     def snap(self, tag):
         self.rec('snap', tag)
 
+    battle_rc = 0
+
+    def battle_check(self):
+        self.rec('battle_check')
+        return self.battle_rc, {}, '假：戰鬥設定' if self.battle_rc else '', {'changed': {}, 'role': 'DKBO' if self.battle_rc else None}
+
 
 def go(T, **kw):
     return quiet(br.run, '琉璃洞窟', tools=T, **kw)
@@ -293,6 +299,30 @@ out = io.StringIO()
 with contextlib.redirect_stdout(out):
     rc = br.main(['plan', '--track', '琉璃洞窟'])
 check('plan 印流程、rc 0', rc == 0 and 'team.check' in out.getvalue() and '--team-size 5' in out.getvalue())
+
+# ---- 戰鬥設定檢查（重打前；2026-10-12 DKBO 人物首次動作沒勾 → 打火雞輸）----
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37], team_hp=[LOW])
+rc = go(T)
+n = T.names()
+check('一般模式：team.check 不滿 → 戰鬥設定檢查（1 次）→ 才解散 / 重打', rc == 0 and n.count('battle_check') == 1 and n.index('check') < n.index('battle_check') < n.index('disband'), T.calls)
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37])
+T.battle_rc = 13
+rc = go(T)
+check('戰鬥設定失敗 → 147、不解散不打', rc == br.EXIT_BATTLESET and 'disband' not in T.names() and 'quest' not in T.names(), T.calls)
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37])
+T.battle_rc = 9
+check('戰鬥設定 9 → 透傳 9', go(T) == 9)
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37], team_hp=[LOW])
+rc = go(T, battle_check=False)
+check('battle_check=False → 不查', rc == 0 and 'battle_check' not in T.names())
+T = Fake(check_rcs=(0,))
+go(T)
+check('其實沒缺人 → 不查戰鬥設定', 'battle_check' not in T.names())
+T = Fake(steps={'DKBO3': [3, 'GONE']}, quest=[37], cards_=cards(leader='DKBO', members=('DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'), solo=()))
+T.battle_rc = 4
+check('--who 模式：開頭就查，失敗 147', go(T, who=['DKBO3']) == br.EXIT_BATTLESET and T.names()[0] == 'battle_check' and 'disband' not in T.names(), T.calls)
+check('plan 列戰鬥設定', any('battle_check' in ln for ln in br.plan_text('琉璃洞窟', {'hp_min': 60, 'max_slices': 6, 'max_tries': 2}))
+      and any('不查' in ln for ln in br.plan_text('琉璃洞窟', {'hp_min': 60, 'max_slices': 6, 'max_tries': 2, 'battle_check': False, 'who': ['DKBO3']})))
 
 print('全部通過' if not fails else f'{fails} 項失敗')
 sys.exit(1 if fails else 0)

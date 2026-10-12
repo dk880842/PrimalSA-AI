@@ -222,7 +222,12 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
 
 ## questrun.py：1.82 任務驅動器（P2，2026-10-11；計畫 notes/plan-182-script.md）
 入口 `uv run --no-project python tools/gui/questrun.py plan|run|status [任務ID …]`；資料表 `questdefs.py`（2999 / 2017 / 2015 live，2027 / 2018 / 2011 只有資料）；特殊步驟 `questhandlers.py`（walk：成人儀式步 1 走到 10204:188,13）。退出碼 110～119（見 questrun.py 檔頭）。
-- 流程：交接（關遇敵、DKBO、組隊）→ 每任務 task_status（已完成跳過 / 待接取接取 / 進行中續跑）→ 龍王的守護（depot_use，9 分鐘重吃）→ quest.py 迴圈依退出碼分支 → 詳情確認已完成 → 全部成功才 `grind.py start --spot 地雷區`；失敗不恢復。
+- 流程：交接（關遇敵 → **戰鬥設定檢查** → DKBO、組隊）→ 每任務 task_status（已完成跳過 / 待接取接取 / 進行中續跑）→（`--dragon` 才）龍王的守護 → quest.py 迴圈依退出碼分支 → 詳情確認已完成 →（`--drop-reward` 才）丟獎勵寵 → 全部成功才 `grind.py start --spot 地雷區`；失敗不恢復。
+- **2026-10-12 預設變更 / 新旗標**（離線測試通過，**實機未驗證**）：
+  - **龍王的守護預設不吃**：要吃加 `--dragon`；`--no-dragon` 保留相容（= 預設，no-op；兩個一起給 → 1）。
+  - **戰鬥設定檢查**（四寶玉之謎 DKBO 人物首次動作「風的精靈Lv.5」勾選不見 → 打火雞輸、2 人陣亡）：交接時關遇敵、等戰鬥結束後跑 `ass.battle_check`（= `ass.py battle all`，見 ui/ass.md）：一次開外掛面板、左欄頭像逐人（隊長最後）讀 5 人「自動戰鬥」+ DKBO「人物首次動作」值與勾選；只改不對的**勾選**、讀回確認；值確定不是風的精靈（讀到攻擊 / 防禦 / 逃跑 / 滋潤）→ 不改下拉、**109** 停手；值讀不準（OCR 認不出）只警告。快速戰鬥 / 原地遇敵不管。bossretry 重打前也查一次（失敗 147）。`--no-battle-check` 兩邊都關。
+  - **交寵物 `--pet-turnin`**（預設關，manual 步照舊 115）：恐龍博士 2016 的 manual 步 → `pet.py rest-all` → `team.disband` → `pet_turnin.run` 5 人逐人（步 1 / 步號讀不到 = 交步 1、2；步 2 = 只交步 2）→ `char.ensure DKBO` → `team.form` → 讀詳情；每任務只試一次，失敗 **150**（仍先切回 DKBO）。卡坦的願望 2019（`rest_pets`）：接取後第一片前 `pet.py rest-all`，交仍由 quest.py 隊長一次交。資料在 questdefs `turnin` / `rest_pets`。
+  - **丟獎勵寵 `--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩`**（不可逆；兩串名單要相同、不能是騎寵，否則 1、不碰遊戲）：全部任務成功後、恢復掛機前，每個名字 `petdrop.drop('all', 名字, max_level=1)`——只丟名字完全相同、**等級讀得到且 = 1** 的（練過的同名寵、等級讀不出 → 73 擋下；同名 1 級 + 高級各一隻只丟 1 級那隻；兩隻都 1 級 → 79 不猜），騎寵 / 第 1 格 / 出戰 / 騎乘照舊擋，提示窗驗名。失敗 **151**、後面的名字不丟、不恢復掛機。plan 會列各任務的 `reward_pets`（只顯示，不自動丟）。
 - 實機發現：追蹤標題樣板可能因選中底色只有 0.68 分而沒命中 → quest.track_task 樣板沒命中會退回 OCR 並學新樣板（2026-10-12 起改成同一頁就退，不先捲一整輪）。
 - **2026-10-11 實機結果**：成人儀式 / 彌生和日美子 / 亞姆的斧頭三個任務都由 questrun 跑完，結束 `grind.py start --spot 地雷區` rc 0。成人儀式步 1：點追蹤會傳送進 10204 並自動巡路到差使 → walk handler 只當備援（quest.py 回 3 才用）。
 - **詳情只開一次**：每任務只在接取那次開詳情（同一趟捲動讀狀態：已完成跳過 / 進行中續跑 / 待接取接受，不重開驗證）；完成看 quest.py「任務完成」（領獎後追蹤欄沒有該任務），沒這字樣才讀一次詳情。接取後直接點追蹤欄卡片（`quest.track_task` 先看目前頁、標題相符才點，不符才捲動；樣板這頁沒命中同一頁改 OCR）。
@@ -231,7 +236,7 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
 - **2026-10-11 冗餘修正二（馬祖快遞 16:29～16:39：點追蹤後 walking 4 分鐘被 slice 300 秒切斷 → 重開詳情捲 11 次 44 秒）**（離線測試通過，**實機未驗證**）：
   ①自動走路不計時：quest.py `WalkClock`——Auto Walking（`walking`，中途短暫 unknown 1～2 次又回 walking 也算）不耗 `--max-seconds`，只有連續非 walking 才計；單次連續巡路上限 `WALK_CAP_S` = 900 秒防卡死；結束印「走路不計時 N 秒」，questrun 把 N 加回 t0（不計入 `--max-min`）、子程序逾時改 slice + 900 + 120。②對話 / 領獎結束後第一個動作是點追蹤欄任務卡片（`post_track_try`，標題相符才點）；卡片不在或點了約 5 秒沒反應才改找黃問號（再失敗才 exit 3）；開機 / 一般閒置仍是先找黃問號。③questdetail 一次捲「可見列數 − 1 列」（`page_dy` 5 列 ≈ dy 147，舊 100），捲後上一頁最後一列沒出現在新頁（`overlaps`）就往上捲回、改 dy 100 小步重捲；結果 `fallbacks`。④隊伍檢查開面板後 `read_team_labels_stable`：連 2 次相同且非全「不在隊」才採用，最多 1.5 秒（16:31 5 人全讀成不在隊 → slice 30）。⑤收底部「關閉」列點一下後輪詢約 3 秒（途中戰鬥已結束 → 不再點）；`uikit.open_panel_ex` 點開啟鈕後至少隔 `RECLICK_S` = 2.5 秒才准再點第 2 下（原本 1 秒內連點）。⑥questrun：quest.py 回 0 且 tail 有「時間到」→ 不開詳情，直接下一片；完成由下一片的「任務完成」或回 5 才讀詳情。
   **實機要確認**：WALK 計時是否真能涵蓋整段巡路（`walking` 判斷靠畫面中央「Auto Walking」字樣）、`page_dy` 在實機不漏列（看 questdetail `fallbacks`）、對話後先追蹤是否比先找黃問號順。
-- questdefs 另有 `QCAVE`（四大洞窟 2000 / 2003 / 2001 / 2002，標題無 (1.82) 後綴）：不進 `DEFAULT_ORDER`（空 ids = 只跑 1.82），指定 ID 才用，如 `questrun run 2000 2003 2001 2002 --max-min 45`；`questdefs.ALL` = 兩表合併。2028 / 2025 / 2010 / 2014 / 2012 預設步驟；3003 步 1、2016 步 1、2 為 kind=manual（questrun 接取後停 115；接取 presses=2 已涵蓋「接藍暴任務」→「接受」）；2019 預設，交前 `pet.py rest-all`。
+- questdefs 另有 `QCAVE`（四大洞窟 2000 / 2003 / 2001 / 2002，標題無 (1.82) 後綴）：不進 `DEFAULT_ORDER`（空 ids = 只跑 1.82），指定 ID 才用，如 `questrun run 2000 2003 2001 2002 --max-min 45`；`questdefs.ALL` = 兩表合併。2028 / 2025 / 2010 / 2014 / 2012 預設步驟；3003 步 1、2016 步 1、2 為 kind=manual（questrun 接取後停 115；接取 presses=2 已涵蓋「接藍暴任務」→「接受」）；2019 預設，交前 `pet.py rest-all`（`--pet-turnin` 自動做）。
 - 離線測試：test_questrun.py / test_questdefs.py / test_questdetail.py（task_status）。
 
 - **追蹤欄無捲動空間 = 一輪判完成（2026-10-11 龍的巢穴；2026-10-12 補「頂格」條件與雜訊濾除，見上「無捲動空間判斷」）**：`track_task` 目前頁沒有目標且標題列 ≤ 1 張（`NO_SCROLL_ROWS_MAX`）在頂格、沒有 ▼ → 不捲，`LAST_SCAN_NO_SCROLL` 立旗，quest.py 直接印「任務完成」退出 0（原本上下各捲一輪約 1 分多）。
@@ -251,7 +256,7 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
 照 memory psa-team-check-after-boss（2026-10-12 使用者更正）：照 0 轉龍王任務（英雄島前傳 2031 步 6）的做法——**落後的人當隊長、組滿 5 人、按追蹤回 BOSS 處全隊一起打**，不是掉隊者單人去打。errlog #222 / #226 / #238（四寶玉之謎 38 手動處理）。
 ```
 uv run --no-project python tools/gui/bossretry.py plan --track 琉璃洞窟        # 不碰遊戲：印流程
-uv run --no-project python tools/gui/bossretry.py run --track 琉璃洞窟 [--max-tries 2] [--max-slices 6] [--slice-s 300] [--hp-min 60]
+uv run --no-project python tools/gui/bossretry.py run --track 琉璃洞窟 [--max-tries 2] [--max-slices 6] [--slice-s 300] [--hp-min 60] [--no-battle-check]
 uv run --no-project python tools/gui/bossretry.py run --track 四寶玉之謎 --who DKBO3,DKBO5 [--ref-step done|N]   # 指定落後者（隊伍滿的也照跑；逐人驗證用）
 uv run --no-project python tools/gui/bossretry.py status                         # 唯讀：隊長 / 不在隊的人
 uv run --no-project python tools/gui/test_bossretry.py                           # 離線測試（假 Tools）
@@ -260,7 +265,8 @@ uv run --no-project python tools/gui/test_bossretry.py                          
 - **輸 / 隊伍散**：BOSS 戰後步號沒前進、被打飛（21）、`--fight` 35 = 輸一次 → 全隊補血檢查 → 再打（≤ `--max-tries`）；38 / 30 / 32 / 21 後 `team.check` 不滿 → 由掉隊者解散重組（≤ 3 次）。
 - **多人掉隊**：逐一以每個落後者為隊長重複（已完成該步的人陪打）。
 - **不盲打**：步號讀不到（隊長或掉隊者）→ 142；掉隊者步號超前 → 144；quest.py 39 / 33 / 29 / 25 / 19 / 31 / 22 / 23 / 34 / 36、或 3 之後 `--fight` 仍 3 → 146；9 / 10 立即透傳且不再點；其他失敗先解散臨時隊伍、`char.ensure DKBO` 再回碼。
-- 退出碼 140～149：140 隊伍讀不到 / 沒隊長 / 名字讀不出、141 切角色、142 步號讀不到、143 補血、144 重打失敗、145 組隊 / 解散失敗、146 quest.py 要人看。
+- 退出碼 140～149：140 隊伍讀不到 / 沒隊長 / 名字讀不出、141 切角色、142 步號讀不到、143 補血、144 重打失敗、145 組隊 / 解散失敗、146 quest.py 要人看、147 戰鬥設定檢查失敗。
+- **重打前查戰鬥設定**（2026-10-12）：一般模式在 team.check 確定缺人之後、`--who` 模式一開始，跑 `ass.battle_check`（同 questrun 交接）；只改不對的勾選，值不對 / 改不動 → 147；`--no-battle-check` 關（questrun `--no-battle-check` 會一起傳下來）。
 - **questrun 逐人驗證（2026-10-12，`verify_all`）**：根因 = questrun 只看隊長的追蹤列表 / 詳情就判任務完成，被打飛的隊員進度落後沒被發現（四寶玉之謎 DKBO3 / DKBO5 一直是進行中）。現在每個任務由隊長判完成後，其他 4 人逐一 `questdetail.status_all` 讀詳情（每人約 10～40 秒）；有人是進行中 → `bossretry --who 落後者`（落後者當隊長 5 人重打 → 切回 DKBO 重組）→ 只重讀那幾個人；仍沒完成 / bossretry 失敗 / 某人讀不到 / 某人是待接取（沒接到，bossretry 幫不上）→ **108** 停手（`info.laggards`、`info.verify`）。`--no-verify-all` 關；詳情一開就已完成而跳過的任務預設不驗（`--verify-skipped` 才驗，驗過記 `all_done` 不重驗）。9 / 10 透傳。唯讀查：`questrun.py status --role all [任務ID …]`。
 - **questrun 接線**：quest.py 38 / 21 → `Tools.boss_retry(track)` = `bossretry.run(track)`；每任務最多 `BOSS_RETRY_MAX` = 3 次；0 → `team_ok_at` = 現在 → `hp_gate` → 下一片（`--team-fresh`）；9 / 10 透傳；其他 → 114（`info.boss_retry_rc`）；`--no-boss-retry` 關（直接 114）。
 - **`--who` 模式**：不看 team.check / 掉隊卡片，落後者 = 名單、參考步號預設 GONE（其他人已完成）；有隊伍先由現任隊長解散，之後同上。questrun 每任務完成後的逐人驗證（`verify_all`）就是用這個。

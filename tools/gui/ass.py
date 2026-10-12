@@ -9,6 +9,8 @@
   uv run --no-project python tools/gui/ass.py pet DKBO first 防禦          # 首次動作 = 防禦 並勾選
   uv run --no-project python tools/gui/ass.py pet DKBO first off normal 攻擊   # 首次動作取消勾選（值不動）、一般動作 = 攻擊
   uv run --no-project python tools/gui/ass.py pet all normal 防禦        # 多人：5 人戰寵 一般動作 = 防禦（也可 DKBO,DKBO3 指定幾人；選項依文字找，可填已學的寵物技能名）
+  uv run --no-project python tools/gui/ass.py battle all [--dry-run]       # 解任務前戰鬥設定（QUEST_BATTLE）：5 人自動戰鬥開、DKBO 人物首次動作 風的精靈Lv.5 打勾；
+        一次開面板逐人讀、只改不對的、讀回確認（值不對不改，回 13）；不關遇敵、戰鬥中不開（8）。questrun 交接 / bossretry 重打前自動跑（battle_check）
     多人流程：關原地遇敵 + 等戰鬥結束 → 一次開面板逐人（讀現值 → 不同才改 → 讀回確認；隊長最後）→ grind.py ensure 恢復掛機。
     旗標：--dry-run 只讀不改（仍會暫停 / 恢復掛機）、--no-resume 改完不恢復掛機、--no-pause 不關遇敵（確定不在戰鬥才用）。只動「一般動作」，首次動作 / 對象都不碰。
 角色：DKBO / DKBO2 / DKBO3 / DKBO4 / DKBO5（真名字母 O；DKB0… 同義；不分大小寫）。
@@ -18,7 +20,7 @@
 安全：每次點面板內座標前都先 pixel 驗證面板還開著（面板沒開時點這些座標會穿透到地面讓角色走掉）；
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
 退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色 / 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
-        12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
+        12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 13 battle：人物首次動作的值確定不對（不自動改）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
 戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
   是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
@@ -639,6 +641,109 @@ def set_pet_many(plan: dict, no_wait: bool = False, dry_run: bool = False) -> tu
     return _many(plan, lambda role: _visit_pet_normal(plan[role]['normal'], dry_run)(role), no_wait)
 
 
+# ---- 解任務前的戰鬥設定檢查（2026-10-12 四寶玉之謎：DKBO 人物首次動作「風的精靈Lv.5」勾選不見了 → 打火雞輸、2 人陣亡）----
+# 人物動作列在「戰寵動作」上方 150 px（ui/ass.md：人物首次 勾 656,313 / 下拉 1137,313；戰寵首次 656,463 / 1137,463）。
+ROLE_FIRST_CHK = (656, 313)                  # 人物 首次動作 勾選框
+ROLE_FIRST_FIELD = (805, 295, 280, 40)       # 人物 首次動作 欄位文字 OCR 區（= PET_FIELD['first'] 上移 150；**未實機量**）
+ROLE_KNOWN = ('攻擊', '防禦', '逃跑', '滋潤')  # 讀到這些字 = 確定不是想要的精靈技能（其他文字 / 讀不到 = 不確定，只警告）
+EXIT_WRONG_ACTION = 13                       # 人物首次動作的值確定不對（下拉選項依裝備而變，不自動改）
+# 解任務的戰鬥設定（questrun 交接 / bossretry 重打前查）：5 人自動戰鬥開；DKBO 人物首次動作 = 風的精靈Lv.5 且打勾。
+# 快速戰鬥 / 原地遇敵不在這裡管（解任務時系統自動關快速戰鬥；遇敵由主畫面鈕關）。隊長放最後（面板結束選在隊長）。
+QUEST_BATTLE = {
+    'DKBO2': {'自動戰鬥': True}, 'DKBO3': {'自動戰鬥': True}, 'DKBO4': {'自動戰鬥': True}, 'DKBO5': {'自動戰鬥': True},
+    'DKBO': {'自動戰鬥': True, 'first': '風的精靈', 'first_on': True},
+}
+
+
+def read_role_first(ocr: bool = True) -> dict | None:
+    """面板開著、角色已選好：人物首次動作 → {'first_on': 勾?, 'first': 欄位文字（去空白；ocr=False 時 None）}；像素讀不到回 None"""
+    cols = _px([ROLE_FIRST_CHK])
+    if not cols:
+        return None
+    return {'first_on': cols[0] != UNCHECKED, 'first': _ocr(ROLE_FIRST_FIELD, '-Zooms', '2,3,4').replace(' ', '') if ocr else None}
+
+
+def first_value_verdict(text: str | None, want: str) -> str:
+    """純函式：人物首次動作欄位 OCR 文字 vs 想要的值 → 'ok' / 'wrong'（確定是別的選項）/ 'unsure'（讀不到 / 認不得）"""
+    t = (text or '').replace(' ', '')
+    if want and want in t:
+        return 'ok'
+    if any(k in t for k in ROLE_KNOWN):
+        return 'wrong'
+    return 'unsure'
+
+
+def _visit_battle(want: dict, dry_run: bool = False):
+    """battle_check 的逐人動作：讀左欄勾選（只改 want 裡的項目）+（有 first / first_on 才）讀人物首次動作，勾選不對就點、讀回確認。
+    首次動作的「值」不對不改（下拉選項依裝備而變），回 EXIT_WRONG_ACTION；讀不準只記 st['first_unsure']。
+    回 (退出碼, 狀態 dict, 訊息, 改了哪些)；dry_run 只讀、不點，不對的列在 st['wrong']"""
+    checks = {k: v for k, v in want.items() if k in ITEMS}
+
+    def visit(role):
+        st = read_checks()
+        if st is None:
+            return EXIT_PANEL_LOST, None, f'{role} 讀不到勾選框像素', []
+        st = dict(st)
+        bad = [i for i, w in checks.items() if st.get(i) != w]
+        todo = []
+        if bad and not dry_run:
+            rc, st2, msg = _apply_changes(role, st, checks)
+            st = dict(st2 or st)
+            todo = list(bad)
+            if rc:
+                return rc, st, msg, todo
+        wrong = list(bad) if dry_run else []
+        fv, fon = want.get('first'), want.get('first_on')
+        if fv is None and fon is None:
+            if wrong:
+                st['wrong'] = wrong
+            return EXIT_OK, st, '', todo
+        if not pet_on_top():
+            return EXIT_NOT_TOP, st, f'{role}：右半面板不在頂端（讀不到「戰寵動作」標題）；不讀 / 不點人物首次動作', todo
+        rf = read_role_first(ocr=fv is not None)
+        if rf is None:
+            return EXIT_PANEL_LOST, st, f'{role} 讀不到人物首次動作勾選框', todo
+        st['人物首次動作'], st['人物首次勾選'] = rf['first'], rf['first_on']
+        if fv is not None:
+            verdict = first_value_verdict(rf['first'], fv)
+            if verdict == 'wrong':
+                st['wrong'] = wrong + ['人物首次動作']
+                return EXIT_WRONG_ACTION, st, f'{role} 人物首次動作是「{rf["first"]}」不是「{fv}」；下拉選項依裝備而變，不自動改，請人看（ui/ass.md）', todo
+            if verdict == 'unsure':
+                st['first_unsure'] = rf['first'] or ''
+        if fon is not None and rf['first_on'] != fon:
+            if dry_run:
+                wrong.append('人物首次勾選')
+            else:
+                if not panel_open() or selected_role() != role or not pet_on_top():
+                    return EXIT_PANEL_LOST, st, f'{role}：點人物首次動作勾選前面板已不在 / 角色不對 / 被捲動 → 不點', todo
+                gui('seq', f'click {ROLE_FIRST_CHK[0]} {ROLE_FIRST_CHK[1]}; wait 300', note=f'ass.py {role} 人物首次動作勾選 → {"勾" if fon else "不勾"}')
+                todo.append('人物首次勾選')
+                for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
+                    sleep(w)
+                    if not panel_open():
+                        return EXIT_PANEL_LOST, st, f'{role}：點人物首次動作勾選後面板消失', todo
+                    now = read_role_first(ocr=False)
+                    if now and now['first_on'] == fon:
+                        st['人物首次勾選'] = fon
+                        log(f'ass：{role} 人物首次動作勾選 → {"勾" if fon else "不勾"}（已確認）')
+                        break
+                else:
+                    return EXIT_CONFIRM, st, f'{role}：人物首次動作勾選點了沒變（不補點）', todo
+        if wrong:
+            st['wrong'] = wrong
+        return EXIT_OK, st, '', todo
+    return visit
+
+
+def battle_check(plan: dict | None = None, no_wait: bool = False, dry_run: bool = False) -> tuple:
+    """解任務前的戰鬥設定檢查：一次開外掛面板、左欄頭像逐人（隊長最後）讀 → 只改不對的 → 讀回確認 → 關面板。
+    plan 預設 QUEST_BATTLE（{角色: {'自動戰鬥': bool, 'first': 值, 'first_on': bool}}）。戰鬥中不開面板（等到結束，逾時 / no_wait 回 8）。
+    回值同 set_many：(rc, {角色: 狀態}, 訊息, info)；info['changed'] = {角色: [改過的項目]}。rc 13 = 首次動作的值確定不對（不改）"""
+    plan = plan or QUEST_BATTLE
+    return _many(plan, lambda role: _visit_battle(plan[role], dry_run)(role), no_wait)
+
+
 def ordered_roles(roles) -> list:
     """隊長 DKBO 放最後（面板結束選在隊長），其他照 ROLES 順序"""
     rs = [r for r in ROLES if r in set(roles)]
@@ -712,6 +817,33 @@ def _main_pet(role: str, rest: list, no_wait: bool = False) -> int:
     return rc
 
 
+def fmt_battle(st: dict) -> str:
+    s = f'自動戰鬥={"開" if st.get("自動戰鬥") else "關"}'
+    if '人物首次勾選' in st:
+        s += f'  人物首次動作={"勾" if st["人物首次勾選"] else "不勾"}/{st.get("人物首次動作") or "?"}'
+    if st.get('wrong'):
+        s += f'  不對：{"、".join(st["wrong"])}'
+    return s
+
+
+def _main_battle(a) -> int:
+    if a.role.lower() != 'all':
+        print('battle 用法：ass.py battle all [--dry-run] [--no-wait]（固定檢查 QUEST_BATTLE 的 5 人）')
+        return EXIT_USAGE
+    if layout.current() != '2880x1659':
+        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+        return EXIT_LAYOUT
+    import winenv
+    winenv.enable_server()
+    rc, sts, msg, info = battle_check(None, a.no_wait, a.dry_run)
+    for r, st in sts.items():
+        ch = info.get('changed', {}).get(r)
+        print(f'{r}：{fmt_battle(st)}' + (f'（改了 {"、".join(ch)}）' if ch else ''))
+    if rc:
+        print(f'失敗（退出碼 {rc}）：{msg}')
+    return rc
+
+
 def _main_pet_many(a) -> int:
     roles = list(ROLES) if a.role.lower() == 'all' else [norm_role(r) for r in a.role.split(',')]
     if not all(roles) or len(set(roles)) != len(roles):
@@ -736,7 +868,7 @@ def _main_pet_many(a) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='外掛 ASS 左欄戰鬥設定讀 / 設')
-    ap.add_argument('cmd', choices=['get', 'set', 'pet'])
+    ap.add_argument('cmd', choices=['get', 'set', 'pet', 'battle'])
     ap.add_argument('role', help='DKBO / DKBO2~5（DKB0… 同義）')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
     ap.add_argument('--dry-run', action='store_true', help='多人 pet：只讀不改')
@@ -744,6 +876,8 @@ def main(argv=None) -> int:
     ap.add_argument('--no-resume', action='store_true', help='多人 pet：改完不跑 grind ensure 恢復掛機（遇敵會維持關閉）')
     ap.add_argument('--no-wait', action='store_true', help='戰鬥中不等戰鬥結束，直接退出碼 %d（預設等最多 %d 秒）' % (EXIT_IN_BATTLE, BATTLE_WAIT))
     a = ap.parse_args(argv)
+    if a.cmd == 'battle':
+        return _main_battle(a)
     if a.cmd == 'pet' and (a.role.lower() == 'all' or ',' in a.role):
         return _main_pet_many(a)
     role = norm_role(a.role)

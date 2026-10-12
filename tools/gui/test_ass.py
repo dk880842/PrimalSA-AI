@@ -687,5 +687,81 @@ rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '防禦'}})
 check('戰鬥中等到結束才開面板並改 → rc 0', rc == 0 and g.pets['DKBO2']['normal'] == '防禦' and g.t > 6.0, f'{rc} {msg} t={g.t}')
 check('CLI 參數錯（多人只支援 normal）→ 1', ass.main(['pet', 'all', 'first', '防禦']) == 1 and ass.main(['pet', 'DKBO,DKBO', 'normal', '防禦']) == 1)
 
+print('(26) battle_check：解任務前戰鬥設定（5 人自動戰鬥、DKBO 人物首次動作 風的精靈 打勾）')
+
+
+class RGame(Game):
+    """每人各自的人物首次動作（勾選 + 值）"""
+
+    def __init__(self, first=None, first_on=None, rstuck=False, **k):
+        super().__init__(**k)
+        self.rfirst = {r: (first or {}).get(r, '攻擊') for r in ass.ROLES}
+        self.rfirst_on = {r: (first_on or {}).get(r, False) for r in ass.ROLES}
+        self.rstuck = rstuck
+
+    def color(self, x, y):
+        if (x, y) == ass.ROLE_FIRST_CHK:
+            return (30, 30, 30) if self.panel and self.rfirst_on[self.role] else (255, 255, 255)
+        return super().color(x, y)
+
+    def click(self, x, y):
+        if self.panel and (x, y) == ass.ROLE_FIRST_CHK:
+            self.clicks.append((x, y))
+            if not self.rstuck:
+                self.rfirst_on[self.role] = not self.rfirst_on[self.role]
+            return
+        super().click(x, y)
+
+    def ocr(self, box, *opts):
+        if box == ass.ROLE_FIRST_FIELD:
+            return self.rfirst[self.role]
+        return _ocr_impl(self, box, *opts)
+
+
+ALL_AUTO = {i: (i == '自動戰鬥') for i in ass.ITEMS}
+g = RGame(checks=ALL_AUTO, first={'DKBO': '風的精靈Lv.5'}, first_on={'DKBO': True})
+setup(g)
+rc, sts, msg, info = ass.battle_check()
+check('全對 → rc 0、零勾選點擊、面板關、隊長最後', rc == 0 and not info['changed'] and ass.ROLE_FIRST_CHK not in g.clicks
+      and not any(c in ass.ITEMS.values() for c in g.clicks) and not g.panel and list(sts)[-1] == 'DKBO', f'{rc} {msg} {info}')
+check('  DKBO 讀到人物首次動作值 / 勾選；其他人不讀', sts['DKBO']['人物首次動作'] == '風的精靈Lv.5' and sts['DKBO']['人物首次勾選'] is True
+      and '人物首次動作' not in sts['DKBO2'])
+g = RGame(checks=ALL_AUTO, first={'DKBO': '風的精靈Lv.5'}, first_on={'DKBO': False})
+g.checks['DKBO3']['自動戰鬥'] = False
+setup(g)
+rc, sts, msg, info = ass.battle_check()
+check('10-12 事故：DKBO 首次動作沒勾 + DKBO3 自動戰鬥關 → 都改好、讀回確認、rc 0',
+      rc == 0 and g.rfirst_on['DKBO'] and g.checks['DKBO3']['自動戰鬥'] and info['changed'] == {'DKBO3': ['自動戰鬥'], 'DKBO': ['人物首次勾選']}, f'{rc} {msg} {info}')
+check('  只點 1 次人物首次勾選、別人的首次動作沒動', g.clicks.count(ass.ROLE_FIRST_CHK) == 1 and not any(g.rfirst_on[r] for r in ass.ROLES if r != 'DKBO'))
+g = RGame(checks=ALL_AUTO, first={'DKBO': '風的精靈Lv.5'}, first_on={'DKBO': False})
+setup(g)
+rc, sts, msg, info = ass.battle_check(dry_run=True)
+check('dry_run：只讀不點、列出不對的項目', rc == 0 and ass.ROLE_FIRST_CHK not in g.clicks and not g.rfirst_on['DKBO'] and sts['DKBO']['wrong'] == ['人物首次勾選'], str(sts['DKBO']))
+g = RGame(checks=ALL_AUTO, first={'DKBO': '攻擊'}, first_on={'DKBO': False})
+setup(g)
+rc, sts, msg, info = ass.battle_check()
+check('值確定不對（攻擊）→ rc 13、不點勾選、不開下拉', rc == ass.EXIT_WRONG_ACTION and ass.ROLE_FIRST_CHK not in g.clicks
+      and not any(c[0] == 1137 for c in g.clicks) and info['role'] == 'DKBO' and not g.panel, f'{rc} {msg}')
+g = RGame(checks=ALL_AUTO, first={'DKBO': ''}, first_on={'DKBO': True})
+setup(g)
+rc, sts, msg, info = ass.battle_check()
+check('值讀不到（OCR 空）→ rc 0、記 first_unsure（只警告）', rc == 0 and sts['DKBO'].get('first_unsure') == '', str(sts['DKBO']))
+g = RGame(checks=ALL_AUTO, first={'DKBO': '風的精靈Lv.5'}, first_on={'DKBO': False}, rstuck=True)
+setup(g)
+rc, sts, msg, info = ass.battle_check()
+check('勾選點了沒變 → rc 4、不補點', rc == ass.EXIT_CONFIRM and g.clicks.count(ass.ROLE_FIRST_CHK) == 1, f'{rc} {msg}')
+g = RGame(checks=ALL_AUTO, first={'DKBO': '風的精靈Lv.5'}, first_on={'DKBO': False})
+g.scrolled = True
+setup(g)
+rc, sts, msg, info = ass.battle_check()
+check('右半面板被捲走 → rc 7、不點人物首次勾選', rc == ass.EXIT_NOT_TOP and ass.ROLE_FIRST_CHK not in g.clicks, f'{rc}')
+check('first_value_verdict 純函式', [ass.first_value_verdict(t, '風的精靈') for t in ('風的精靈Lv.5', '風的精靈LV5', '防禦', '滋潤的精靈Lv.3', '', None, '凰的精')]
+      == ['ok', 'ok', 'wrong', 'wrong', 'unsure', 'unsure', 'unsure'])
+g = BGame(battle_until=30.0)
+setup(g)
+rc, sts, msg, info = ass.battle_check(no_wait=True)
+check('戰鬥中 no_wait → rc 8、不開面板', rc == ass.EXIT_IN_BATTLE and not g.panel and not g.clicks)
+check('CLI battle 只收 all', ass.main(['battle', 'DKBO']) == 1)
+
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

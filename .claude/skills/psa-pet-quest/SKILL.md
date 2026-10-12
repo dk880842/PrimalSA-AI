@@ -63,10 +63,12 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 `uv run --no-project python tools/gui/pet_turnin.py dino DKBO DKBO2 DKBO3 DKBO4 DKBO5`（隊伍先解散；DKBO 是當前角色就帶 `--no-switch`；每人步 1、2 約 30 秒）：
 `char.ensure` → 點追蹤「恐龍博士」→ 對話框左鈕 →「選擇」視窗 OCR 卡片名字、**依名字**點卡（卡片變黃底才按確定 706,614）→ 視窗消失。退出碼 120～125（檔頭）。
 選擇視窗：標題「選擇」（-Dark 0 才讀得到）、卡片名字區 570,305 300×245（-Dark 150，兩個放大倍數會重複，y 差 ≤15 併成一張）、卡 y 約 341 / 446 / 544（第 3 張被截半，要捲）、點卡 x=700、y=名字行 +10。
-接取：`questrun run 2016 --after none` 會接取並在步 1 停 115（2026-10-12 前步號讀不到會落到 quest.py 對話空轉 117，已修：全 manual 任務步號讀不到也當 manual）；questrun 預設每片前吃龍王的守護（接取時吃了 1 顆），不想吃要加 `--no-dragon`。
+接取：`questrun run 2016 --after none` 會接取並在步 1 停 115（2026-10-12 前步號讀不到會落到 quest.py 對話空轉 117，已修：全 manual 任務步號讀不到也當 manual）；questrun 2026-10-12 起預設**不吃**龍王的守護（要吃加 `--dragon`；`--no-dragon` 仍可用、= 預設）。
+**自動交（`--pet-turnin`，離線測試過、未實機）**：`questrun run 2016 --after none --pet-turnin` → 步 1 / 2（manual）改成 `pet.py rest-all` → `team.disband` → `pet_turnin dino` 5 人逐人 → `char.ensure DKBO` → `team.form` → 讀詳情；失敗 150。第一次用建議先照上面手動跑 `pet_turnin.py` 驗過。
 
 ### 5. 獎勵處理
 - **布克布克（恐龍）、修寶（卡坦步 1）可丟**：`uv run --no-project python tools/gui/petdrop.py all 布克布克 --confirm-name 布克布克`（2026-10-12 實機驗證 5 人；先 `--dry-run`）。手動：寵物面板選該格 → 垃圾桶 708,565 → 提示窗「確定要丟棄【名字】嗎?」**確認名稱** → 確定 615,557。**只限這兩種**，其他寵物一律不丟。
+  **跟任務一起丟**：`questrun run 2016 --drop-reward 布克布克 --confirm-drop 布克布克`（全部任務成功後、恢復掛機前；只丟名字相同且 **1 級**的——練過的同名寵、等級讀不出都擋 73；失敗 151 不恢復掛機）；單獨用 `petdrop.py all 布克布克 --confirm-name 布克布克 --max-level 1`。
   提示窗名字在黃字括號裡：OCR 要 `-Dark 120` 才讀得到（`-Dark 0` 只讀到「回收站保存48小時!」）；`bag.name_match` 會把【…】內容刪掉不能用 → `petdrop.confirm_names_ok`。
 - **朵拉比斯（卡坦步 2，另有綁定鑽石 5）**：存個人倉庫。
 
@@ -167,5 +169,5 @@ uv run --no-project python tools/gui/rebirth_pets.py --from catch               
 - 抓寵：`pet_catch.py --assign "DKBO2:鯊魚系:克邦凱斯,DKBO3:鯊魚系:加克拉,DKBO4:鯊魚系:加格,DKBO5:鯊魚系:邦恩吉" --count 5 [--stages bait,setup,wait]`（取誘餌拆 5 → 外掛捉寵設置 → 輪詢；DKBO 不抓，抓前關遇敵 + 解散）。抓寵設定 OCR 框 / 下拉捲動細節見 rebirth_pets.py 註解（系別清單會記住捲動位置、拖曳慣性大：先回頂再 50px 小步；鯊魚系 OCR 常讀不到改用鄰居定位）。約 2 分鐘抓完（5 隻 = 4 進寵物欄 + 1 自動進個人倉庫）。
 - 分配：catcher 先 `learn-species`（縮圖），`store-many --pets 名,名,名 --depot public --pick last` 存 3 隻，再 `take --depot personal --index N` 取倉庫那隻 + `store-many` 存 1 隻；其他人 `take-many` 取。倉庫卡沒縮圖只靠成長字串：不同物種可能同字串 → 撞字串的卡要用縮圖（取出後 list 看 ≈物種）判斷；**不准盲給 `--index`**（2026-10-12 #294 取到左迪洛斯）：沒名字的卡用目標 `#成長字串`（`--expect-growth` / plan `DKBO4:#34/7/4/8`），同名多隻等級不同（朵拉比斯 Lv126 / Lv1）用 `朵拉比斯@126`：先 OCR 卡片下緣綠字等級挑對的那張，讀不出來且候選 ≥ 2 → 72 不取；只有 1 張候選才取、取完回寵物分頁驗等級。
 - 練：`pet_catch.py --autoswap on|off`（外掛一般設置「自動轉換戰寵」）；**開遇敵練寵前 `pet_catch.py --verify-battle`**（逐人確認有出戰寵，否則 105）；5 人約 5 分鐘全部 ≥30。出戰中的寵物 rest-all 讀不到名字 → `set-state 角色 物種 等待 --slot N` 或手動點休息。
-- 交：`questrun run 2019 --no-dragon --after none`：**步 1 交完會自動接著對步 2 的卡坦按完成，沒有雞時 quest.py 在「對話 ↔ 選擇對象面板」循環（現已 SELECT_LOOP_MAX=6 次停手 rc 29 → questrun 117）**；步 1 後 5 人各得修寶（`petdrop.py all 修寶 --confirm-name 修寶`）、寵物欄空出後才抓雞。
+- 交：`questrun run 2019 --after none [--pet-turnin]`（`--pet-turnin` = 接取後先自動 `pet.py rest-all`；龍王 10-12 起預設不吃）：**步 1 交完會自動接著對步 2 的卡坦按完成，沒有雞時 quest.py 在「對話 ↔ 選擇對象面板」循環（現已 SELECT_LOOP_MAX=6 次停手 rc 29 → questrun 117）**；步 1 後 5 人各得修寶（`petdrop.py all 修寶 --confirm-name 修寶`）、寵物欄空出後才抓雞。
 - 獎勵朵拉比斯（Lv1）存個人倉庫，取回 Lv126 那隻出戰（`take --pet 朵拉比斯 --expect-level 126` 或 take-many plan `朵拉比斯@126`）；外掛鎖定重勾一行 `pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯]`（外掛面板只開一次；寵物欄裡戰寵同名 2 隻會先擋 107，先把多的存倉）。

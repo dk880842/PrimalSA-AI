@@ -717,6 +717,20 @@ check('petdrop：同名兩隻沒給 --slot → 79', quiet(petdrop.drop_role, 'DK
 fp = FakePets([dict(s) for s in PETS])
 check('petdrop：--dry-run 零點擊', quiet(petdrop.drop_role, 'DKBO', '烏力斯坦', {}, None, True) == 0 and fp.clicks == [])
 check('petdrop.drop：confirm-name 不同 → 1', quiet(petdrop.drop, 'DKBO', '烏力斯坦', '別的') == 1)
+# --max-level（questrun --drop-reward 固定 1：剛拿到的獎勵寵 1 級，練過的同名寵不丟）
+check('guard_target max_level：1 級可丟、12 級擋、等級讀不出擋、不給 = 不看等級',
+      petdrop.guard_target({'slot': 3, 'name': '左迪洛斯', 'state': '等待', 'level': 1}, '左迪洛斯', 1) is None
+      and '12 > 1' in (petdrop.guard_target({'slot': 3, 'name': '左迪洛斯', 'state': '等待', 'level': 12}, '左迪洛斯', 1) or '')
+      and '讀不出' in (petdrop.guard_target({'slot': 3, 'name': '左迪洛斯', 'state': '等待', 'level': None}, '左迪洛斯', 1) or '')
+      and petdrop.guard_target({'slot': 3, 'name': '左迪洛斯', 'state': '等待', 'level': 50}, '左迪洛斯') is None)
+LV = [{'slot': 1, 'name': '瑪斯貝卡', 'state': '騎乘', 'level': 127}, {'slot': 2, 'name': '迪基格斯', 'state': '出戰', 'level': 129}]
+fp = FakePets(LV + [{'slot': 3, 'name': '烏力斯坦', 'state': '等待', 'level': 30}])
+check('petdrop max_level=1：30 級 → 73 零點擊', quiet(petdrop.drop_role, 'DKBO', '烏力斯坦', {}, None, False, 1) == 73 and fp.clicks == [])
+fp = FakePets(LV + [{'slot': 3, 'name': '烏力斯坦', 'state': '等待', 'level': 30}, {'slot': 4, 'name': '烏力斯坦', 'state': '等待', 'level': 1}])
+rc = quiet(petdrop.drop_role, 'DKBO', '烏力斯坦', {}, None, False, 1)
+check('petdrop max_level=1：同名 30 級 + 1 級 → 只丟第 4 格 1 級', rc == 0 and fp.slots[3].get('empty') and not fp.slots[2].get('empty'), str(fp.slots))
+fp = FakePets(LV + [{'slot': 3, 'name': '烏力斯坦', 'state': '等待', 'level': 1}, {'slot': 4, 'name': '烏力斯坦', 'state': '等待', 'level': 1}])
+check('petdrop max_level=1：兩隻都 1 級 → 79 不猜', quiet(petdrop.drop_role, 'DKBO', '烏力斯坦', {}, None, False, 1) == 79 and fp.clicks == [])
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)
