@@ -990,6 +990,7 @@ ok &= check('--fight 不受影響（照舊回 verify_boss_result 的 0，不是 
 
 print('--- 不可逆對話防護')
 ok &= check('find_irreversible：關鍵字命中 / 空白容忍 / 無害文字不中', quest.find_irreversible(['進行轉 生的儀式']) == ['轉生'] and quest.find_irreversible(['完成', '再見']) == [] and '封印' in quest.find_irreversible(['使用封印書']) and set(quest.IRREVERSIBLE_KEYWORDS) >= {'轉生', '寵物轉生', '封印', '刪除', '丟棄'})
+ok &= check('find_irreversible：挑戰機暴(轉生任務) 放行（含全形括號 / 空白），其他轉生字樣照擋', quest.find_irreversible(['hello welcome to be here!', '挑戰機暴(轉生任務)', '再見']) == [] and quest.find_irreversible(['挑戰機暴（轉生 任務)']) == [] and quest.find_irreversible(['挑战机暴转生任务']) == [] and quest.find_irreversible(['進行轉生的儀式', '挑戰機暴(轉生任務)']) == ['轉生'])
 RB = {'body': ['你真是厲害，居然打敗了帖拉所伊朵來到我這裏。', '那我就如你所願，來進行轉生的儀式吧。'], 'buttons': ['完成', '再見'], 'body_ok': True}
 for name, texts in (('內文含轉生、按鈕只寫「完成」（精靈王第 2 頁實況）', RB),
                     ('按鈕含「寵物轉生」', {'body': ['你想做什麼'], 'buttons': ['寵物轉生', '再見'], 'body_ok': True}),

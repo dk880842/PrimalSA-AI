@@ -57,7 +57,7 @@
   預設模式 BOSS 戰收尾（errlog #68，2026-10-11）：非 --solo / --fight 時，任務戰（對話框 / 黃問號後 QUEST_BATTLE_WINDOW 秒內開打；打到一半又開始 Auto Walking 的後續遇敵不算）打完、閒置滿 IDLE_CONFIRM_SECS 後
            **先驗隊伍（check_team）再停手、不點追蹤 / 黃問號、不接下一步**：滿員 = 退出碼 37、不滿 / 讀不到 = 38（事件 log 寫誰不在隊；重打流程由呼叫端做：char.py switch 被打飛者當單人隊長 → 追蹤自動傳送 → 重打 → 切回 DKBO → team.form）。
            `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
-  不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
+  不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
 退出碼：37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
@@ -153,6 +153,10 @@ REWARD_OK = (720, 572)               # 「獲得物品」視窗的藍色確認�
 # 第 2 頁內文「…進行轉生的儀式吧。轉生是把你最強的力量…」、左鈕只寫「完成」。→ 轉生字樣在**內文**不在按鈕，按「完成」就轉生了，
 # 所以防護要讀「內文 + 按鈕」兩塊文字，任一塊含關鍵字就停（只看按鈕擋不住）。
 IRREVERSIBLE_KEYWORDS = ('寵物轉生', '轉生', '转生', '封印', '刪除', '删除', '丟棄', '丢弃')
+# 放行片語（使用者 2026-10-12 定：「挑戰機暴不算轉生」）：比對前先從文字移除，只是開打 BOSS 的選項。
+# 實測 2026-10-12 22:07 帖拉所伊朵(機暴) 對話：內文「hello welcome to be here!」、左鈕「挑戰機暴(轉生任務)」、右鈕「再見」。
+# 去空白後 regex 移除（OCR 括號全形 / 半形混用、括號漏讀、簡繁都收）；移除後其他地方仍有關鍵字照樣擋。
+IRREVERSIBLE_ALLOW = (r'挑[戰战][機机]暴[(（]?[轉转]生任[務务][)）]?',)
 DIALOG_BODY_BOX = (805, 285, 565, 115)     # 對話框內文區（淺米色字在棕底上，截圖座標 x,y,w,h；2026-10-11 實測字色 min(R,G,B) >= 170、底色 <= 64）
 DIALOG_BTN_BOX = (815, 428, 540, 68)       # 兩顆米色鈕（深棕字：max(R,G,B) <= 100）
 DIALOG_BODY_LIGHT = 140                    # ocr.ps1 -Light 門檻（亮字）
@@ -877,9 +881,11 @@ def read_world_sig() -> list | None:
 
 
 def find_irreversible(texts: list[str], keywords=None) -> list[str]:
-    """對話框文字（內文 / 按鈕各行）→ 命中的不可逆關鍵字清單（去空白後子字串比對；沒命中回 []）"""
+    """對話框文字（內文 / 按鈕各行）→ 命中的不可逆關鍵字清單（去空白後子字串比對，先移除 IRREVERSIBLE_ALLOW 放行片語；沒命中回 []）"""
     kws = IRREVERSIBLE_KEYWORDS if keywords is None else keywords
     flat = re.sub(r'\s+', '', ''.join(texts))
+    for a in IRREVERSIBLE_ALLOW:
+        flat = re.sub(a, '', flat)
     return [k for k in kws if k in flat]
 
 
