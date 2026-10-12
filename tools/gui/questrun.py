@@ -204,7 +204,7 @@ def save_progress(d: dict) -> None:
 # ---------------------------------------------------------------- 純函式
 def classify(rc: int, tail=()) -> str:
     """quest.py 退出碼 → 動作字串（測試直接餵）：done? / boss / stuck3 / gone / team / stall / battle / irrev / verify / halt / knocked / other"""
-    return {0: 'check', 37: 'boss', 38: 'boss_team', 3: 'no_track', 5: 'gone', 30: 'team', 32: 'team', 33: 'stall', 25: 'battle',
+    return {0: 'check', 37: 'boss', 38: 'boss_team', 3: 'no_track', 5: 'gone', 30: 'team', 32: 'team', 33: 'stall', 29: 'stall', 25: 'battle',
             39: 'irrev', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked'}.get(rc, 'other')
 
 

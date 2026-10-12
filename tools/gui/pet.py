@@ -283,6 +283,9 @@ def ocr_pet_name() -> tuple:
             return ex.pop(), raw, True
         if len(ex - {None}) > 1:
             return None, raw, False
+    exact_names = [e for e in (_exact(t) for t in raw) if e]            # 倉庫分頁名字框 OCR 常噪：至少 2 行「精確命中 Monster 表」且是同一個名字才採用（2026-10-12 #258 朵拉比斯）
+    if exact_names and len(set(exact_names)) == 1 and len(exact_names) >= 2:
+        return exact_names[0], raw, False
     snapped = [uikit.snap_pet(t) for t in raw]
     good = [s for s in snapped if s]
     if good and len(set(good)) == 1 and len(good) >= 2 and len(good) == len(snapped):
@@ -1215,7 +1218,7 @@ def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, in
 
 
 def take(role_arg: str, depot: str = 'personal', index: int | None = None, expect: str | None = None,
-         pause: bool = False, learn: bool = True, pet_name: str | None = None) -> int:
+         pause: bool = False, learn: bool = True, pet_name: str | None = None, expect_growth: str | None = None, expect_level: int | None = None) -> int:
     """倉庫第 index 格（1 起算）→ 寵物欄。名字框會顯示選中倉庫卡的名字：有 --expect 時先驗名字（不符不點）、取出後再驗新寵物名字（不符 76，不自動存回）。
     pet_name（--pet）：不給格號，現場逐張選卡讀名字找第一張吻合的（沒名字的卡比成長字串 → 登錄檔物種）；找不到 72、不點取出"""
     t0 = time.time()
@@ -1233,7 +1236,9 @@ def take(role_arg: str, depot: str = 'personal', index: int | None = None, expec
         if not want:
             rc = uikit_fail(EXIT_NAME, f'--expect {expect!r} 對不到 Monster 表，拒絕')
             return _out(rc, info, t0, '寵物名對不上')
-    info.update(index=index, expect=want)
+    info.update(index=index, expect=want, expect_growth=expect_growth)
+    info['_eg'] = expect_growth
+    info['_el'] = expect_level
     ctx = load_ctx(learn)
     with Session(pause, need_calm=True) as s:
         if s.rc:
@@ -1286,6 +1291,9 @@ def _take_body(role: str, depot: str, idx, want, ctx: dict, info: dict) -> int:
     info['depot_name'] = nm
     if want and nm and not card_is(idn, want, species_reg(ctx)):
         return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {want}；沒取出（請人確認 --index）')
+    eg = info.get('_eg')                                      # --expect-growth：沒名字的卡必須成長字串吻合（2026-10-12 盲取 --index 取到左迪洛斯：格子遞補後同一格是別隻）
+    if eg and idn['growth'] != eg:
+        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，成長字串不是 {eg}；沒取出（格子可能遞補了，重讀倉庫再給 --index）')
     ok, why = btn_ready('take')
     if not ok:
         uikit.snap('pet-take-btn')
@@ -1315,6 +1323,12 @@ def _take_body(role: str, depot: str, idx, want, ctx: dict, info: dict) -> int:
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格，物種 {sp}），不是預期的 {want}！停手交人處理，不自動存回')
     elif want and nm2 != want:
         return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {want}！停手交人處理，不自動存回')
+    el = info.get('_el')                                      # --expect-level：同名多隻（朵拉比斯 Lv126 / Lv1）取出後驗等級，不符停手交人（不自動存回）
+    if el is not None:
+        lv = read_slot(new_slot - 1, ctx).get('level')
+        info['level'] = lv
+        if lv != el:
+            return bad(EXIT_VERIFY, f'取出來的第 {new_slot} 格等級是 {lv}，不是預期的 {el}！停手交人處理（存回再取另一隻），不自動存回')
     uikit.mark('take verified')
     print(f'pet：{role} 倉庫第 {idx + 1} 格 → 寵物欄第 {new_slot} 格：{nm2 or nm or "?"}（取出的寵物預設「等待」）')
     return 0
@@ -1454,6 +1468,11 @@ def learn_species_cmd(role_arg: str, slot_no: int, species_text: str, confirm_gr
         if rc:
             return _out(rc, info, t0)
         cur = read_slot(slot_no - 1, ctx)
+        for _ in range(2):                                      # OCR 偶爾讀不出成長字串（名字 / 字串都 None）：重讀最多 2 次（#279 #280 #282）
+            if cur.get('unnamed') or cur.get('name'):
+                break
+            uikit.sleep(0.6)
+            cur = read_slot(slot_no - 1, ctx)
         info['read'] = {k: cur.get(k) for k in ('name', 'unnamed', 'species', 'state')}
         if not cur.get('unnamed'):
             rc = uikit_fail(EXIT_NAME, f'第 {slot_no} 格不是「沒名字」的寵物（名字 {cur.get("name")}），不登錄')
@@ -1529,6 +1548,8 @@ def main() -> int:
     p.add_argument('--index', type=int, default=None, help='倉庫格 1～20（列優先，每列 5 格）')
     p.add_argument('--pet', default=None, help='不給格號：現場逐張找這個名字（沒名字的卡靠成長字串登錄檔）')
     p.add_argument('--expect', default=None, help='預期的寵物名（取出前 / 後都驗，不符不自動存回）')
+    p.add_argument('--expect-level', type=int, default=None, help='取出後驗新寵物等級（同名多隻、等級不同時用；不符 76 停手）')
+    p.add_argument('--expect-growth', default=None, help='沒名字的卡：預期的成長字串（取出前驗，不符不取）；盲給 --index 取沒名字寵物時一律要加')
     a = ap.parse_args()
     if a.timing:
         uikit.timing_start()
@@ -1543,7 +1564,7 @@ def main() -> int:
     if a.cmd == 'store':
         return store(a.role, a.pet, a.depot, a.slot, a.allow_slot1, a.pause_encounter, learn, a.allow_mount_store)
     if a.cmd == 'take':
-        return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn, a.pet)
+        return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn, a.pet, a.expect_growth, a.expect_level)
     csv = lambda t: [x.strip() for x in (t or '').split(',') if x.strip()]    # noqa: E731
     if a.cmd == 'store-many':
         return store_many(a.role, csv(a.pets), a.depot, a.allow_slot1, csv(a.allow_mount_store), a.skip_missing, a.pause_encounter, learn, a.pick)

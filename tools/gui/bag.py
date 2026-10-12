@@ -795,8 +795,8 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
     return 0
 
 
-def depot_store(role: str, want: str, depot: str = 'public') -> int:
-    """背包 want 存入倉庫（彈窗「存入」鈕；整疊）。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存"""
+def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = False) -> int:
+    """背包 want 存入倉庫（彈窗「存入」鈕；整疊）。keep_ok = 背包另有同名道具（拆分後的新疊）時不驗「消失」。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存"""
     LAST.clear()
     if protected(want):
         return _fail(EXIT_GUARD, f'「{want}」在保護名單，不存倉')
@@ -832,6 +832,8 @@ def depot_store(role: str, want: str, depot: str = 'public') -> int:
         rc = goto_page('bag')
         if rc:
             return rc
+        if keep_ok:
+            return 0
         if not _wait(lambda: find_item(want) is None, 4.0):      # 同上：背包頁更新有延遲，輪詢到消失
             return _fail(EXIT_VERIFY, f'存入後背包仍找到「{want}」', 'bag-store-verify')
     return 0

@@ -56,7 +56,7 @@
            `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
-退出碼：37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -91,6 +91,7 @@ EXIT_DISBAND_FAIL = 26               # --disband-after：解散沒做成（分�
 EXIT_TEAM_MISMATCH = 30              # --fight / 預設模式點 NPC 前：切換面板的隊伍標籤不是「1 隊長 + (N-1) 隊員」（有人脫隊 / 單人）→ 沒點 NPC
 EXIT_STEP_UNKNOWN = 31               # --npc auto：讀不到追蹤條目的目前步驟文字，或對不到任務表的步驟（不退回第一個戰鬥步）
 EXIT_TEAM_LOST = 32                  # 預設模式 / --fight 執行中：點追蹤 / 點 NPC 前的隊伍檢查發現有人脫隊（停下，不繼續點）
+EXIT_SELECT_LOOP = 29                # 「對話 → 選擇對象面板 → 對話」循環 SELECT_LOOP_MAX 次沒領獎 / 戰鬥 / 巡路（2026-10-12 卡坦步 2 沒雞還按完成：54 次；停手人工看對話 / 任務條件）
 EXIT_NO_PROGRESS = 33                # 對話無進展：同一黃問號反覆「點 → 對話 → 閒置」STALL_MAX 輪沒領獎 / 戰鬥 / 巡路 / 換圖（卡坦事故）→ 停手
 EXIT_NPC_MAP = 34                    # --fight：自己所在地圖與 NPC 所在地圖不同（--fight 不巡路）→ 沒點 NPC
 EXIT_BOSS_LOST = 35                  # --fight BOSS 戰打完閒置，但地圖與任務步驟都沒變 = 沒打贏（例：#25 龍王守衛 HP 1/551 被團滅）
@@ -112,6 +113,7 @@ SHOT_EXTS = ('.png', '.jpg', '.jpeg')
 DEFAULT_EVERY = 1.0                  # --every 預設（一般 / --solo / --fight 都是；舊值 2.5 / 1.5）
 IDLE_CONFIRM_SECS = 2.5              # 連續閒置至少這麼久（且連續 >= 2 次）才算「這步結束 / 戰鬥打完」（舊：2 次 × 2.5 秒）
 UNKNOWN_CONFIRM_SECS = 5.0           # 連續 3 次不認得 + 至少這麼久才停手（舊：3 次 × 2.5 秒 ≈ 5 秒；鐵則 5 的 3 次規則仍在，只是多一道時間條件）
+SELECT_LOOP_MAX = 6                 # 選擇對象面板在「沒領獎 / 戰鬥 / 巡路」期間累計點幾次就停（退出碼 29）
 SELECT_MAX_TRIES = 4                # 「選擇對象」面板連續出現幾輪還沒消失就不再點（交給不認得規則）
 TRACK_RETRY_SECS = 2.5               # 點了任務追蹤後，等這麼久沒反應才算 1 次失敗（重點一次；連續 2 次失敗退出碼 3，約 5 秒）
 
@@ -1491,6 +1493,7 @@ def _main() -> int:
     npc_click_t = 0.0            # --fight：點 NPC 的時間
     warned_quick = False
     auto_presses = 0             # 組隊預設模式：本場戰鬥按自動戰鬥鈕的次數
+    select_loops = 0             # 選擇對象面板累計次數（領獎 / 戰鬥 / 巡路歸零；對話夾在中間不歸零）
     select_tries = 0             # 連續幾輪看到「選擇對象」面板（點了還在就別一直點）
     last_refresh_t = 0.0         # 本場戰鬥最後一次按刷新角色的時間（REFRESH_GAP）
     if guard_ko:
@@ -1595,6 +1598,13 @@ def _main() -> int:
             select_tries = 0
         else:
             select_tries += 1
+            if select_tries == 1:
+                select_loops += 1
+                if select_loops > SELECT_LOOP_MAX:
+                    shot = snap('select-loop')
+                    event(f'對話 → 選擇對象面板 循環 {select_loops - 1} 次沒領獎 / 沒戰鬥 / 沒巡路 → 停手，退出碼 {EXIT_SELECT_LOOP}（人工看對話內容 / 任務條件，例：寵物沒湊齊）', shot)
+                    print('對話 / 選擇面板循環無進展，已停手', flush=True)
+                    return EXIT_SELECT_LOOP
             if select_tries <= SELECT_MAX_TRIES and handle_select_panel():
                 last_action = time.time()                      # 點了 NPC = 任務互動（戰鬥時間窗從這裡起算）
                 if npc_click_t:
@@ -1630,6 +1640,7 @@ def _main() -> int:
             marker_fail = 0
         if st in ('reward', 'battle', 'walking'):
             stall_rounds, stall_marker = 0, None
+            select_loops = 0
         if st == 'walking' and boss_stop:
             last_action = 0.0            # 預設模式：對話後又開始 Auto Walking = 之後的遇敵是路上小怪，不算 BOSS 戰
         if st != 'dialog' and stall_prev == 'dialog':

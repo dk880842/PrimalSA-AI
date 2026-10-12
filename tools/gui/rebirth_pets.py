@@ -74,6 +74,8 @@ EXIT_PRE, EXIT_BOX, EXIT_STORE, EXIT_CATCH, EXIT_DIST, EXIT_RIDE, EXIT_BATTLE, E
 STAGES = ['preflight', 'boxes', 'store', 'catch', 'distribute', 'ride', 'battle', 'lock', 'cleanup']
 LEADER = 'DKBO'
 ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+FAMILY_NEIGHBORS = {'鯊魚系': (('犀牛', '牛系'), ('飛天蛙', '飛夭蛙', '蛙系'))}          # 外掛系別清單的上下鄰居（2026-10-12 實機）
+SPECIES_ORDER = {'鯊魚系': ['克邦凱斯', '加克拉', '加格', '邦恩吉'], '火雞系': ['火雞', '克克洛斯', '霍爾克', '奇寶']}   # 寵物下拉的列順序（第一列 y=421、列距 42、x=1115）；選中的藍底白字 OCR 讀不到時用位置
 FAMILY_OF = {'布拉奇多斯': '雷龍系'}            # 物種 → 外掛捉寵設置的系別（PetData 第 27 組；其他物種用 --family）
 BAIT = '寵物誘餌'
 BOX_CONTENTS = ['寵物誘餌', '離線水晶8H', '2倍智慧果', '安撫之素']      # 1轉新手禮盒內容（quest-log 實測）；存公共
@@ -87,8 +89,8 @@ CATCH_XY = {'auto': (656, 315), 'store': (820, 315), 'family_dd': (921, 377), 'p
 # 下面全是「待實機量」的 OCR 框（x, y, w, h）：讀字用，錯了只會讀不到 → 停手，不會亂點
 OCR_TAB_GENERAL = (640, 295, 520, 110)          # 一般設置：含 鎖定騎寵 / 鎖定戰寵 兩列
 OCR_TAB_CATCH = (640, 296, 700, 40)             # 捉寵設置：自動抓寵 / 自動存倉庫 / 可抓捕數 那一列
-OCR_FAMILY_FIELD = (780, 360, 270, 34)
-OCR_PET_FIELD = (1090, 360, 250, 34)
+OCR_FAMILY_FIELD = (640, 360, 230, 34)           # 2026-10-12 實機量：欄位 x 637～868（舊框 780 起切掉字）
+OCR_PET_FIELD = (1000, 360, 230, 34)              # 欄位 x 1000～1230
 CATCH_LIST_FAMILY = (700, 400, 300, 300)        # 系別下拉清單（8 項可見，要拖曳捲）
 CATCH_LIST_PET = (1040, 400, 320, 300)          # 寵物下拉清單
 LOCK_FIELD_W, LOCK_LIST_W, LOCK_LIST_H = 330, 330, 260   # 鎖定下拉：欄位 / 清單寬高（欄位 x 從 940 起，欄位 y ± 17；清單從欄位下方 +22 起）
@@ -128,7 +130,7 @@ def pick_row(lines: list, ident: tuple) -> tuple:
             ok = parse_growth_line(t) == val
         else:
             ok = uikit.snap_pet(t) == val
-        if ok:
+        if ok and not any(abs(y - h[2]) <= 15 for h in hits):          # 多個放大倍數會重複回同一列：y 差 ≤ 15 併成一個（2026-10-12）
             hits.append((t, x, y))
     if len(hits) == 1:
         return hits[0], ''
@@ -353,13 +355,20 @@ class Tools:
     def bait_take(self, role, keep):
         """公共倉庫取誘餌（整疊）→ 拆分出 keep 個 → 其餘（原疊，排在前面）存回公共，背包只剩 keep 個。**拆分流程只有手動實測過**"""
         import bag
-        rc = bag.depot_take(role, BAIT, 'public')
+        rc, found = bag.find_items(role, [BAIT])                 # 上次中斷時整疊可能已在背包（2026-10-12）→ 不重取
         if rc:
             return rc
+        if found.get(BAIT) is None:
+            rc = bag.depot_take(role, BAIT, 'public')
+            if rc:
+                return rc
+        self.split_noop = False
         rc = self._split(role, BAIT, keep)
         if rc:
             return rc
-        return bag.depot_store(role, BAIT, 'public')            # find_item 取第一格 = 原疊（新疊在隔壁格，排後面）
+        if self.split_noop:
+            return 0
+        return bag.depot_store(role, BAIT, 'public', keep_ok=True)   # find_item 取第一格 = 原疊（新疊在隔壁格，排後面）；拆分後背包仍有新疊，不驗消失（2026-10-12 實機）
 
     def _split(self, role, name, n):
         """背包第一格 name → 拆分鈕 → 數量鍵盤輸入 n → 確定；之後隔壁格要有 name。座標：notes/plan-dino-katan.md（手動實測）"""
@@ -386,12 +395,16 @@ class Tools:
                 return uikit.fail(SRC, bag.EXIT_NAME, f'拆分：彈窗按鈕列 OCR {txt!r} 沒有「拆分」（疊數只有 1？）')
             if not bag._click(628, 648, bag.POPUP, f'rebirth_pets 拆分 {name}', wait_ms=700):
                 return uikit.fail(SRC, bag.EXIT_PANEL, '拆分：彈窗特徵消失，沒點拆分')
-            dlg = ' '.join(t for t, _, _ in ocr_lines((500, 300, 430, 330), '-Zooms', '2,3'))
-            if not any(k in dlg for k in ('數量', '拆分', '輸入')):
+            dlg = ' '.join(t for t, _, _ in ocr_lines((480, 170, 480, 420), '-Zooms', '2,3'))
+            if not any(k in dlg for k in ('數量', '拆分', '輸入', '確定')):      # 2026-10-12 實機：視窗標題「數量輸入」在 y≈190，舊框 y 300 起只讀到道具名
                 uikit.snap('rebirth-split-dialog')
                 return uikit.fail(SRC, bag.EXIT_NAME, f'拆分：數量輸入視窗 OCR {dlg!r}（待實機量）不是預期，停手')
-            if not uikit.is_open(bag.BAGANY):
-                return uikit.fail(SRC, bag.EXIT_PANEL, '拆分：背包面板消失')
+            mq = re.search(r'\d{1,3}', ' '.join(t for t, _, _ in ocr_lines((670, 430, 170, 45), '-Zooms', '2,3')))
+            qty = int(mq.group()) if mq else None
+            if qty == n:                                          # 整疊剛好 = 要的數量：拆分會失敗（#284「拆分失敗！」）→ 取消，呼叫端不必存回
+                uikit.gui('seq', 'click 828 545; wait 600', note='rebirth_pets 拆分：整疊就是要的數量，取消')
+                self.split_noop = True
+                return 0
             keys = {'1': (491, 334), '2': (615, 334), '3': (742, 334), '4': (491, 454), '5': (615, 454), '6': (740, 454),
                     '7': (491, 574), '8': (615, 574), '9': (740, 574), '0': (863, 334)}
             uikit.gui('seq', 'click 755 451; wait 500', note='rebirth_pets 拆分數量欄')
@@ -503,9 +516,28 @@ class Tools:
         rc = self._ass_open(role, 'catch')
         if rc:
             return rc
+        rc = self._catch_setup_pick(role, family, species, count)
+        if rc:                                                   # 失敗時關面板：下拉清單開著的狀態會讓下次點下拉變成「關」
+            import ass
+            ass.close_panel()
+        return rc
+
+    def _field_is(self, box, name):
+        txt = ' '.join(t for t, _, _ in ocr_lines(box, '-Zooms', '2,3,4'))
+        return bool(txt) and (name in txt or (name[0] in txt and sum(c in txt for c in name) >= len(name) - 1))
+
+    def _catch_setup_pick(self, role, family, species, count):
+        fam_ok = self._field_is(OCR_FAMILY_FIELD, family)         # 欄位已經是目標（上次設過 / 預設）就不再開下拉（下拉開關狀態難判斷）
+        pet_ok = fam_ok and self._field_is(OCR_PET_FIELD, species)
+        if fam_ok and pet_ok:
+            n = parse_count(''.join(t for t, _, _ in ocr_lines(OCR_TAB_CATCH, '-Zooms', '2,3,4')))
+            if n != count:
+                uikit.snap('rebirth-catch-count')
+                return uikit.fail(SRC, 4, f'可抓捕數讀到 {n}，要 {count}（背包誘餌數不對？不勾自動抓寵）')
+            return 0
         if not self._pick_dropdown(CATCH_XY['family_dd'], CATCH_LIST_FAMILY, OCR_FAMILY_FIELD, ('name', family), scroll=True, snap_tag='family', plain=family):
             return uikit.fail(SRC, 4, f'捉寵系別選不到 {family}')
-        if not self._pick_dropdown(CATCH_XY['pet_dd'], CATCH_LIST_PET, OCR_PET_FIELD, ('name', species), scroll=False, snap_tag='species'):
+        if not self._pick_dropdown(CATCH_XY['pet_dd'], CATCH_LIST_PET, OCR_PET_FIELD, ('name', species), scroll=False, snap_tag='species', fam_species=SPECIES_ORDER.get(family)):
             return uikit.fail(SRC, 4, f'捉寵物種選不到 {species}')
         n = parse_count(''.join(t for t, _, _ in ocr_lines(OCR_TAB_CATCH, '-Zooms', '2,3,4')))
         if n != count:
@@ -513,26 +545,45 @@ class Tools:
             return uikit.fail(SRC, 4, f'可抓捕數讀到 {n}，要 {count}（背包誘餌數不對？不勾自動抓寵）')
         return 0
 
-    def _pick_dropdown(self, dd, list_box, field_box, ident, scroll, snap_tag, plain=None):
+    def _pick_dropdown(self, dd, list_box, field_box, ident, scroll, snap_tag, plain=None, fam_species=None):
         import ass
         uikit.gui('seq', f'click {dd[0]} {dd[1]}; wait 500', note=f'rebirth_pets 捉寵下拉 {snap_tag}')
-        for k in range(5):
+        if scroll:                                              # 清單會記住上次捲動位置：先往上拖 4 次回到頂，再小步往下找（2026-10-12 實機）
+            for _ in range(4):
+                uikit.gui('drag', '750', '480', '750', '650', note='rebirth_pets 捉寵清單回頂')
+            uikit.sleep(1.0)
+        for k in range(14):
             lines = ocr_lines(list_box, '-Zooms', '2,3,4')
             if plain:                                                   # 系別名不在 Monster 表 → 直接比文字
-                hits = [(t, x, y) for t, x, y in lines if plain in t]
+                hits = []
+                for t, x, y in lines:                                   # 多個放大倍數會重複回同一列：y 差 ≤ 15 併成一個（2026-10-12 實機：重複 → 誤判 0 命中）
+                    if plain in t and not any(abs(y - h[2]) <= 15 for h in hits):
+                        hits.append((t, x, y))
                 hit = hits[0] if len(hits) == 1 else None
             else:
                 hit, _ = pick_row(lines, ident)
+            if not hit and plain in FAMILY_NEIGHBORS:                # OCR 讀不到這列（鯊魚系常讀不出）：上下鄰居都讀到、間距約 2 列 → 取中間
+                prv, nxt = FAMILY_NEIGHBORS[plain]
+                ys = {k: [(x, y) for t, x, y in lines if any(n in t for n in alts)] for k, alts in (('p', prv), ('n', nxt))}
+                for (x1, y1) in ys['p']:
+                    for (_, y2) in ys['n']:
+                        if 70 <= y2 - y1 <= 100 and hit is None:
+                            hit = (plain, x1, (y1 + y2) // 2)
+            if not hit and not scroll and ident[0] == 'name' and fam_species and ident[1] in fam_species:
+                hit = (ident[1], 1115, 421 + 42 * fam_species.index(ident[1]))      # 位置備援：只在 OCR 沒讀到時；點完照樣讀欄位驗證
             if hit:
                 if not ass.panel_open():
                     return False
                 uikit.gui('seq', f'click {hit[1]} {hit[2]}; wait 500', note=f'rebirth_pets 捉寵 選 {hit[0]}')
                 fld = ' '.join(t for t, _, _ in ocr_lines(field_box, '-Zooms', '2,3,4'))
-                return (plain in fld) if plain else (uikit.snap_pet(fld) == ident[1] or ident[1] in fld)
-            if not scroll or k == 4:
+                if plain:                                                    # OCR 常漏字（鯊魚系 → 鯊系）：首字在、至少吻合 len-1 個字
+                    return plain[0] in fld and sum(c in fld for c in plain) >= len(plain) - 1
+                return uikit.snap_pet(fld) == ident[1] or ident[1] in fld
+            if not scroll or k == 13:
                 break
-            (x0, y0), (x1, y1) = CATCH_XY['scroll']
-            uikit.gui('drag', f'{x0} {y0} {x1} {y1}')
+            (x0, y0), (x1, y1) = (750, 650), (750, 600)     # 50px ≈ 2 列；大拖會慣性亂跳過目標列
+            uikit.gui('drag', str(x0), str(y0), str(x1), str(y1), note='rebirth_pets 捉寵清單捲動')
+            uikit.sleep(1.0)                                        # 清單有慣性滑動：等停下來再讀（不等會點到差一列的項目，2026-10-12 實機點成飛天蛙系）   # gui 參數要分開（一整串會被當成單一參數 → 不捲）
         uikit.snap(f'rebirth-catch-{snap_tag}')
         return False
 
@@ -560,7 +611,7 @@ class Tools:
             left = parse_count(''.join(t for t, _, _ in ocr_lines(OCR_TAB_CATCH, '-Zooms', '2,3,4')))
             auto = self._checked(CATCH_XY['auto'])
             ass.close_panel()
-            if left == 0 and auto is False:
+            if auto is False and left in (0, None):                       # 可抓捕數 OCR 常讀不到；遊戲抓完自己取消勾選（2026-10-12 實機）
                 return 0, 0
             if uikit.clock() >= end:
                 return uikit.fail(SRC, EXIT_CATCH, f'抓寵 {timeout:.0f} 秒內沒抓完（可抓捕數 {left}、自動抓寵 {auto}）'), left

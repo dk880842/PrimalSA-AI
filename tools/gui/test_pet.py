@@ -526,6 +526,14 @@ rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '朵拉比斯')
 check('take：倉庫第 1 格是摩娜西普、--expect 朵拉比斯 → 72、取出鈕 0 次、不存回', rc == 72 and depot_free(g) == 0 and g.depot['DKBO']['personal'][0] is not None, f'rc={rc}')
 fresh_tpl()
 g = new()
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None, False, True, None, '1/1/1/1')
+check('take --expect-growth 不符（格子遞補後盲取別隻）→ 72、取出鈕 0 次（2026-10-12 左迪洛斯事故）', rc == 72 and depot_free(g) == 0 and g.depot['DKBO']['personal'][0] is not None, f'rc={rc}')
+fresh_tpl()
+g = new()
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '摩娜西普', False, True, None, None, 99)
+check('take --expect-level 不符 → 76（取出後驗等級，不自動存回；朵拉比斯 Lv126 / Lv1 事故）', rc == 76 and last_json(out).get('level') != 99, f'rc={rc}')
+fresh_tpl()
+g = new()
 rc, out, err = run(pet.take, 'DKBO', 'personal', 5, None)
 check('take 空格 → 72、取出鈕 0 次', rc == 72 and depot_free(g) == 0, f'rc={rc}')
 fresh_tpl()
@@ -674,7 +682,7 @@ check('接著 store --allow-mount-store：rc 0、不跳確認視窗（等待）�
 
 # ---------------- 沒名字的新寵物 / 存倉驗證 / store-many / take-many（2026-10-11）----------------
 check('parse_growth：實測 OCR 3 行（2 行相同 + 殘行）→ 49/9/8/2', petmatch.parse_growth(['49/9/8/2', '49/9/8/2', '49/8']) == '49/9/8/2')
-check('parse_growth：只有 1 行完整 / 兩個不同字串各 1 行 / 空 → None（不猜）', petmatch.parse_growth(['49/9/8/2', '49/8']) is None
+check('parse_growth：只有 1 行完整且無殘行 / 兩個不同字串各 1 行 / 空 → None（不猜）；1 完整 + 1 子序列殘行 → 採用（2026-10-12 放寬，#258）', petmatch.parse_growth(['49/9/8/2', '49/8']) == '49/9/8/2' and petmatch.parse_growth(['49/9/8/2']) is None
       and petmatch.parse_growth(['49/9/8/2', '48/9/7/1']) is None and petmatch.parse_growth([]) is None and petmatch.parse_growth(['迪基格斯'] * 3) is None)
 check('parse_growth：空白 / 前導 0 正規化', petmatch.parse_growth([' 47 / 10/7/1', '47/10/7/01']) == '47/10/7/1')
 cols_a = [(100 + i, 80, 60) for i in range(16)]
@@ -686,6 +694,26 @@ check('identify_species：同縮圖 → 物種；不同縮圖 → None；沒縮�
       petmatch.identify_species(cols_a, '45/10/8/1', reg0) == '布拉奇多斯' and petmatch.identify_species(cols_b, '45/10/8/1', reg0) is None
       and petmatch.identify_species(None, '49/9/8/2', reg0) == '布拉奇多斯' and petmatch.identify_species(None, '1/1/1/1', reg0) is None
       and petmatch.identify_species(cols_a, '49/9/8/2', {'thumb': reg0['thumb'], 'growth': {'49/9/8/2': '朵拉比斯'}}) is None)
+_regc = {'thumb': {'甲': [cols_a]}, 'growth': {'1/1/1/1': '甲'}}
+check('learn_species：成長字串撞到別的物種 → 刪掉該字串（只靠縮圖），之後新物種縮圖仍可辨識（2026-10-12 實機）',
+      petmatch.learn_species(_regc, '乙', cols_b, '1/1/1/1') and '1/1/1/1' not in _regc['growth'] and petmatch.identify_species(cols_b, '1/1/1/1', _regc) == '乙')
+class _PW:
+    def __init__(self, seq):
+        self.seq = list(seq)
+
+    def ocr(self, box, *o):
+        return self.seq.pop(0) if self.seq else []
+
+
+_orig_pw = pet._petwatch
+pet._petwatch = lambda: _PW([['朵拉斯', '朵拉比斯'], ['朵拉比斯', '朵拉斯'], ['剁立斯']])
+_nm = pet.ocr_pet_name()
+check('ocr_pet_name：噪聲中有 ≥2 行精確同名 → 採用（不精確、不學）（#258）', _nm[0] == '朵拉比斯' and _nm[2] is False)
+pet._petwatch = lambda: _PW([['朵拉斯', '剁立斯']])
+check('ocr_pet_name：只噪聲 → None', pet.ocr_pet_name()[0] is None)
+pet._petwatch = _orig_pw
+check('parse_growth：1 行完整 + ≥2 行掉字殘行（子序列）→ 採用；殘行對不上 → None（#258）',
+      petmatch.parse_growth(['34/8/3/8', '34/8/8', '34/8/8']) == '34/8/3/8' and petmatch.parse_growth(['34/8/3/8', '35/1/1']) is None and petmatch.parse_growth(['33/7/4/8', '33/4/8']) == '33/7/4/8' and petmatch.parse_growth(['33/7/4/8']) is None and petmatch.parse_growth(['34/8/3/8', '99/9/9', '99/9']) is None)
 check('learn_species：縮圖已屬別的物種 → 拒絕（標籤可疑）', not petmatch.learn_species(reg0, '朵拉比斯', cols_a, '1/2/3/4') and '朵拉比斯' not in reg0['thumb'])
 check('card_order：新增格先、其餘照序、空格不列', pet.card_order([True, False, True, True, False], 3) == [3, 0, 2] and pet.card_order([False, True], None) == [1])
 

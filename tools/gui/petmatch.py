@@ -248,6 +248,16 @@ def parse_growth(lines) -> str | None:
     if not full:
         return None
     top = full.most_common()
+    if len(top) == 1 and top[0][1] == 1:                       # 只有 1 行完整：其餘殘行（掉字）至少 1 行且都是它的子序列才採用（2026-10-12 #258 倉庫分頁 '34/8/3/8' + 2 行 '34/8/8'）
+        whole = top[0][0]
+        rest = [re.sub(r'\s+', '', str(t)) for t in lines if str(t).strip() and not GROWTH_RE.match(str(t))]
+
+        def subseq(a, b):
+            it = iter(b)
+            return all(ch in it for ch in a)
+        if len(rest) >= 1 and all(subseq(r, whole) for r in rest):
+            return whole
+        return None
     if top[0][1] < 2 or (len(top) > 1 and top[1][1] >= top[0][1]):
         return None
     return top[0][0]
@@ -317,7 +327,8 @@ def learn_species(reg: dict, species: str, cols, growth: str | None = None, max_
     if growth:
         g = reg.setdefault('growth', {})
         if g.get(growth) not in (None, species):
-            return changed
+            del g[growth]                                  # 成長字串撞到別的物種（不同物種可能剛好同字串，2026-10-12 實機 48/9/5/3）→ 這個字串不可靠，刪掉只靠縮圖
+            return True
         if g.get(growth) != species:
             g[growth] = species
             changed = True

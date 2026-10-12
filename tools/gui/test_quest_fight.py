@@ -902,6 +902,7 @@ ok &= check('--npc X,Y + --task：點前補讀步驟 5、打完仍 5、同圖 �
 
 
 print('(B) 對話無進展：卡坦事故（同一黃問號 722,318 循環）')
+ok &= check('SELECT_LOOP_MAX / EXIT_SELECT_LOOP = 29（對話 ↔ 選擇面板循環保護）', quest.SELECT_LOOP_MAX == 6 and quest.EXIT_SELECT_LOOP == 29)
 ok &= check('stalled 純函式：輪數 >= STALL_MAX 且同標記才停', quest.STALL_MAX == 4 and not quest.stalled(3, True) and quest.stalled(4, True) and not quest.stalled(10, False))
 MK = lambda: {'x': 722, 'y': 318, 'w': 12, 'h': 14, 'n': 90}
 CYCLE = [IDLE, DIALOG, DIALOG]        # 主迴圈 idle → 點黃問號 → 反應迴圈看到對話 → 主迴圈對話（按左鈕）→ 下一輪 idle

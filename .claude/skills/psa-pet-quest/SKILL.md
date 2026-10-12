@@ -162,3 +162,10 @@ uv run --no-project python tools/gui/rebirth_pets.py --from catch               
 重勾鎖定時下拉只有「騎寵（成長字串）+ 朵拉比斯」兩項，**順序每人不同**（DKBO3 朵拉比斯在上），選前一定截圖看；選錯會把騎寵鎖成戰寵。取消鎖定戰寵後再勾，下拉內容會被重設（有人變成騎寵字串），要重選。重勾後逐人讀兩個欄位 OCR（鎖定騎寵框 880,295；戰寵框 880,358，`-Dark 0`；切完角色等 2 秒再讀，剛切完會讀到上一人）。
 ## 剛抓的寵物沒名字
 抓到的魯尼帖斯 / 貝魯卡在寵物欄顯示成長字串；`pet.py learn-species <角色> <格> <物種> --confirm-growth <字串>` 登錄後 `take-many / store --slot` 可用名字找（抓寵 5 隻 + 公共倉庫分配 2026-10-12 驗證）。個人倉庫取出的寵物也要重新 learn（取出後第 3~5 格是字串）。
+
+## 卡坦的願望 S6 實測流程與工具（2026-10-12）
+- 抓寵：`pet_catch.py --assign "DKBO2:鯊魚系:克邦凱斯,DKBO3:鯊魚系:加克拉,DKBO4:鯊魚系:加格,DKBO5:鯊魚系:邦恩吉" --count 5 [--stages bait,setup,wait]`（取誘餌拆 5 → 外掛捉寵設置 → 輪詢；DKBO 不抓，抓前關遇敵 + 解散）。抓寵設定 OCR 框 / 下拉捲動細節見 rebirth_pets.py 註解（系別清單會記住捲動位置、拖曳慣性大：先回頂再 50px 小步；鯊魚系 OCR 常讀不到改用鄰居定位）。約 2 分鐘抓完（5 隻 = 4 進寵物欄 + 1 自動進個人倉庫）。
+- 分配：catcher 先 `learn-species`（縮圖），`store-many --pets 名,名,名 --depot public --pick last` 存 3 隻，再 `take --depot personal --index N` 取倉庫那隻 + `store-many` 存 1 隻；其他人 `take-many` 取。倉庫卡沒縮圖只靠成長字串：不同物種可能同字串 → 撞字串的卡要用縮圖（取出後 list 看 ≈物種）判斷；盲給 `--index` 取沒名字的卡一律加 `--expect-growth`，同名多隻等級不同（朵拉比斯 Lv126 / Lv1）加 `--expect-level`。
+- 練：`pet_catch.py --autoswap on|off`（外掛一般設置「自動轉換戰寵」）；**開遇敵練寵前 `pet_catch.py --verify-battle`**（逐人確認有出戰寵，否則 105）；5 人約 5 分鐘全部 ≥30。出戰中的寵物 rest-all 讀不到名字 → `set-state 角色 物種 等待 --slot N` 或手動點休息。
+- 交：`questrun run 2019 --no-dragon --after none`：**步 1 交完會自動接著對步 2 的卡坦按完成，沒有雞時 quest.py 在「對話 ↔ 選擇對象面板」循環（現已 SELECT_LOOP_MAX=6 次停手 rc 29 → questrun 117）**；步 1 後 5 人各得修寶（`petdrop.py all 修寶 --confirm-name 修寶`）、寵物欄空出後才抓雞。
+- 獎勵朵拉比斯（Lv1）存個人倉庫，取回 Lv126 那隻出戰（`take --expect 朵拉比斯 --expect-level 126`；先在倉庫面板看哪格是 126）；外掛鎖定戰寵用 `rebirth_pets.Tools.lock_set(角色, '戰寵', True, ('name','朵拉比斯'))`。
