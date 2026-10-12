@@ -427,9 +427,10 @@ def thumb_color(p):
 
 
 def install(g):
-    """把假 gui / ocr 裝進 uikit / petwatch / heal；回 g"""
+    """把假 gui / ocr 裝進 uikit / petwatch / heal；回 g。假面板沒畫頭像 → 關掉縮圖認物種（pet.IMG_ON；接線測試自己開）"""
     import heal
     import petwatch
+    pet.IMG_ON = False
     uikit.gui = g.gui
     uikit.sleep = lambda s: None
     t = [0.0]

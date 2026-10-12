@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""寵物縮圖 ↔ 知識庫頭像的像素比對（認物種；只用標準函式庫）。2026-10-12 離線設計 + 驗證，**尚未接線到 pet.py、未實機**。
+"""寵物縮圖 ↔ 知識庫頭像的像素比對（認物種；只用標準函式庫）。2026-10-12 離線設計 + 驗證；同日接線到 pet.py（img_ident：名字 / 登錄檔都認不出時的備援），實機唯讀 list 驗證寵物格。
 
 為什麼：沒名字的新寵物（名字框顯示成長字串 49/9/8/2）認物種要靠 learn-species 先登錄，而且成長字串會撞
 （48/9/5/3 兩個物種相同）。寵物面板每格縮圖、倉庫卡縮圖畫的就是 Monster.imageId 的頭像 Sprite
@@ -25,7 +25,7 @@
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/petimg_match.py shot <截圖.png> [--names 火雞,奇寶,...] [--family] [--json]   # 離線：截圖裡每個非空格 / 倉庫卡
-  uv run --no-project python tools/gui/petimg_match.py live slot 3 [--names ...]                         # 唯讀：經 uikit.px 讀現場（未實機驗證）
+  uv run --no-project python tools/gui/petimg_match.py live slot 3 [--names ...]                         # 唯讀：經 uikit.px 讀現場（寵物格 4537 點約 0.2 s）
 程式介面：
   match(get, kind, cx, cy, names=None) → {'species', 'imageId', 'score', 'second', 'second_species', 'ok', 'tie', 'ranked'}；
     get(x, y) → (r,g,b)（截圖座標）；ok=False 時 species=None（不猜）。
@@ -350,7 +350,7 @@ def cells_of(kind: str) -> list:
 
 
 def read_cell(kind: str, cx: int, cy: int):
-    """現場讀一格（唯讀，經 uikit.px 一次讀完；約 7000 點）→ dict 可直接餵 match；讀不到 None。**未實機驗證**"""
+    """現場讀一格（唯讀，經 uikit.px 一次讀完；寵物格 4537 點，常駐 server 約 0.2 s，2026-10-12 實機）→ dict 可直接餵 match；讀不到 None"""
     import uikit
     pts = cell_points(kind, cx, cy)
     cols = uikit.px(pts)

@@ -105,7 +105,7 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 250 200; wait 400
 NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清單（寵物名 + 綠字「0轉N級」）、卡 y 約 341 / 446 / 544（第 3 張被截半，清單可往下 drag 700,520→700,400）、確定 706,614、右上 ✕ 970,213。順序每人不同，**依名字點卡**，卡片變黃底（探點 900,y）才按確定。腳本：`pet_turnin.py dino <角色…>`，說明見 psa-pet-quest。
 丟寵提示窗「確定要丟棄【名字】嗎?」+「回收站保存48小時!」：確定 615,557 / 取消 813,557；名字行是黃字，OCR 要 `-Dark 120`（petdrop.confirm_names_ok）。
 
-## 縮圖認物種 `petimg_match.py`（2026-10-12 離線設計 + 驗證；**尚未接線到 pet.py、未實機**）
+## 縮圖認物種 `petimg_match.py`（2026-10-12 離線設計 + 驗證；同日接線到 pet.py 並實機唯讀 list 驗證，見下方「pet.py 接線」）
 用知識庫頭像（`tools/extract/pet_images.py` 匯出的 `tools/.cache/pet-images/head/<名>_<monsterId>_<imageId>.png`，Sprite = Monster.imageId）直接比寵物格 / 倉庫卡縮圖認物種，不靠名字、不用先 learn-species、不怕成長字串撞號（實測 33/8/3/8 同時出現在 火雞 / 奇寶 / 克克洛斯 三種的倉庫卡上）。
 - **版面**（217 張寵物面板截圖量的，截圖座標）：寵物格縮圖 = 頭像約 **1.05 倍**、中心在格心 (+6,+2) 附近；倉庫卡**有縮圖**（同一張頭像放大到約 **1.26 倍**、中心 (+5,+1)，只露出臉的中段），上方白字名字 / 成長字串、下方綠字「0轉N級」。頭像 PNG 被裁過透明邊（高多半 80、寬 66～80），裁切偏移沒匯出 → 每個候選在 ±8 / ±4 px 內找最佳位置。選中倉庫卡時中間是 3D 模型（不是頭像，沒拿來比）。
 - **比對法**：頭像縮成截圖格點樣板（只取 alpha ≥ 250）→ 位移搜尋（粗步 2 再 ±1 細找）→ 分數 = 樣板不透明點中與畫面三通道平均差 ≤ 40 的比例。寵物格遮掉左上狀態標與右下等級；倉庫卡只丟字本身的像素（白 / 綠 / 深色描邊），字縫照比（火雞系黃冠 / 紅冠在名字那一條）。同 imageId 多筆 Monster（火雞 190～193…）合併；「2D」版頭像算同物種。判定：分數 ≥ 門檻（寵物格 0.70、倉庫卡 0.55）且與第二名（不同物種）差 ≥ 0.08；分差不夠 → 第二關「兩樣板明顯不同的點投票」（贏家 ≥ 70%）；仍不夠 → **None，不猜**。候選多於 8 個時先粗比對篩 8 個。
@@ -118,10 +118,14 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
   | 全部 Monster（1082 個 imageId） | 342 / 346 | 0 | 4 | 約 1.4 s / 2.0 s（4 程序並跑時量的）|
   None 的 4 格：3 張倉庫卡 奇寶 對 克克洛斯 分不開（冠毛被成長字串蓋住大半）、1 張倉庫卡瑪斯貝卡分數 0.573 跟 金格薩貝魯 差 0.08 以內。第一次跑全部 Monster / family 模式要解碼 1000+ 張頭像（約 10 s），之後讀 `tools/.cache/petimg-coarse-<kind>.bin`。
 - **限制**：門檻 / 第二關參數是用同一批截圖調的（沒有獨立測試集）；只量過 2880×1659；樣本裡同一隻寵物在不同截圖重複出現，實際「不同個體」少很多；倉庫卡上 克克洛斯 / 奇寶 這種只差冠毛顏色的換色版仍會偶爾 None；**候選只給一個物種時兄弟換色版也會過門檻**（克克洛斯 對 [奇寶] 單獨比 0.76）→ 一定要帶 `--family` 或整系。`gui pixel` 是取全解析度的單點（截圖檔是縮小平均過的），現場分數可能略不同，**未實機驗證**。
-- **用法**：`uv run --no-project python tools/gui/petimg_match.py shot <截圖.png> --names 火雞,奇寶 --family`（離線）；`... live slot 3 --names 布拉奇多斯 --family`（唯讀，經 `uikit.px` 一次讀整格約 7000～8300 點；未實機）。測試 `test_petimg_match.py`（沒匯出頭像就略過）。
-- **接線建議（等 play agent 跑完再接，這次沒動 pet.py）**：
-  1. `pet.list`：名字 None（成長字串）那格 → `petimg_match.match(petimg_match.read_cell('slot', 250, SLOT_Y[i]), 'slot', 250, SLOT_Y[i], petimg_match.family(候選))` 給 `species`；與 species.json 登錄檔矛盾 → species None（照舊不認）。候選 = 呼叫端任務物種（pet_turnin / pet_catch 都知道要哪一種）+ uikit.MOUNTS。
-  2. `learn-species`：先跑 match；結果 = 指定物種 → 可免 `--confirm-growth`（像素當第二重確認）；結果是別的物種 → 拒絕；None → 照舊要 `--confirm-growth`。
-  3. `take --pet 物種`：倉庫卡不用逐張點選讀名字框，先一次讀 20 張卡的縮圖（`cells_of('card')` + `is_empty`）比出物種，只點吻合的那張；點了之後名字框 / 成長字串照舊驗。
-  4. `store`：存入前比「選中格縮圖物種 == 要存的物種」，不符 → 75 零點擊；騎寵判斷（MOUNTS）也可多一道「縮圖是瑪斯貝卡 / 布拉奇多斯」→ 73。
-  5. 一律 fail-safe：match 回 None 就退回現有流程（名字樣板 / 成長字串登錄檔），不能因為像素比對沒結果就放行不可逆動作。
+- **用法**：`uv run --no-project python tools/gui/petimg_match.py shot <截圖.png> --names 火雞,奇寶 --family`（離線）；`... live slot 3 --names 布拉奇多斯 --family`（唯讀，經 `uikit.px` 一次讀整格：寵物格 4537 點）。測試 `test_petimg_match.py`（沒匯出頭像就略過）。
+- **pet.py 接線（2026-10-12，`pet.img_ident` / `img_match` / `img_target`）**：
+  - **何時比**：`read_slot`（list / set-state / store / rest-all 讀格都經過它）名字樣板、OCR、物種登錄檔（species.json）**全部認不出**（name None 且 species None）才比；認得的格零額外讀點。`--no-img` 關閉；`fake_pet.install` 也關（假面板沒畫頭像）。
+  - **候選**：第 1 輪 = 騎寵（uikit.MOUNTS）+ `pet.IMG_EXTRA`（朵拉比斯 / 迪基格斯 / 金布伊）+ 名字樣板學過的 + species.json 裡的物種；過門檻 → 第 2 輪加第一名的**同系別**再比一次（防兄弟換色版頂替），以第 2 輪為準；第 1 輪連門檻都沒過 → 放寬到全部 Monster（每格多約 1.3 s）。都不 ok → None，不猜。
+  - **輸出欄位**：`img_species`（ok 才有值）、`img_score`、`img_best`、`img_second`、`img_stage`（known / family / all）、`img_ms`；有 img 物種時 `species_src: 'img'`（登錄檔認出的是 `'reg'`）。list 表格顯示 `?(49/9/8/2)≈布拉奇多斯(圖0.97)`。
+  - **安全取捨**：img 結果**不寫進 `species`**（`species` 是 store / set-state / find_slot / rebirth_pets 的身分依據）→ 名字讀不出、只有 img 的格**照舊不能被物種名找到、store 照舊 73 拒絕**（拒絕訊息附「縮圖像 X，只供參考」），也不會用 img 結果去學成長字串登錄檔。只會「更嚴」：img 認成騎寵（MOUNTS）→ `mountlike = True`（set-state / rest-all / store 多擋一道）；img 認成非騎寵不會解除任何騎寵判斷（狀態 = 騎乘照擋）。
+  - **take（可逆）**：`take --pet 名` / take-many 找卡與取前核對時，卡片名字框認不出（沒名字或讀不出、成長字串登錄檔不知道）且縮圖認出的物種 == 目標名字 → 算吻合（`info.img` 記比對結果）；取出後新格名字 / 登錄檔也認不出時，再用寵物格縮圖驗一次，不符照舊 76。目標指定成長字串 / 只給等級、卡片有名字、字串已登錄成別的物種 → 不用 img（照原規則）。
+  - **實機（2026-10-12 掛機中唯讀 `list --role all --json --timing`，rc 0、48.4 s）**：5 人格 1 騎寵 126 級（名字 / 成長字串讀不出，4 人 raw_name None、DKBO3 `?(48/9/7/1)`）全部認成 **布拉奇多斯 0.974**（第二名 巴朵蘭恩 0.501，family 階段）；DKBO 格 2 出戰 128 級名字樣板沒比中 → **朵拉比斯 0.901**（第二 帖拉格恩 0.654）。DKBO2～5 格 2 名字樣板認得朵拉比斯 → 沒呼叫 img。
+  - **耗時**：一格 `read_cell` = 1 次 `uikit.px` 4537 點（常駐 server 約 0.2 s）+ 比對 0.4～0.85 s（family 階段；全部 Monster 約 1.3 s）→ 實機 `img_ms` 591～1071 ms / 格；只有認不出的格才付這個成本。
+  - 測試：`test_pet_img.py`（bn_0.png 截圖餵 uikit.px：img 填出物種 / 不進 species / 騎寵更嚴 / 存倉照拒 / 放寬全 Monster / 同系別第二輪 / None 不猜 / 名字或登錄檔認得不比 / IMG_ON 關零讀點 / take img_target 各條件）。
+  - 還沒做（原建議 2～4）：learn-species 用 img 免 `--confirm-growth`、take 一次讀 20 張卡縮圖不逐張點、store 前比縮圖物種。

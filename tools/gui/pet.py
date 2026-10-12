@@ -14,7 +14,7 @@
   uv run --no-project python tools/gui/pet.py set-state-many --role all 朵拉比斯 出戰 [--allow-mount]   # 多人同一隻寵物改狀態（面板只開一次）
   批次（2026-10-12）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 左欄頭像換角色連續做 → 關一次。目標字串 = 名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級
   uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
-  共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--timing
+  共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、--timing
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
 
 做法（P-I5 實測 2026-10-11，數據見 notes/plan-scriptify.md）：
@@ -26,6 +26,8 @@
   - 狀態：下方三顆鈕（出戰 / 騎乘 / 休息）亮的（棕底）就是目前狀態。
   - 騎寵（uikit.MOUNTS = 瑪斯貝卡 / 布拉奇多斯）：名字「像」騎寵（is_mount_like，鬆）或狀態 = 騎乘 → set-state / rest-all 不動（73），要動需 --allow-mount。
 
+縮圖認物種（2026-10-12 接線 petimg_match）：read_slot 名字樣板 / OCR / 登錄檔都認不出時，比寵物格縮圖與知識庫頭像 → img_species / img_score /
+  species_src='img'（只當顯示與「更嚴」騎寵判斷，不寫進 species，store / set-state 身分不放寬）；take 找卡 / 取前 / 取後驗名在名字框認不出時可用（img_target）。--no-img 關。
 沒名字的新寵物（#87 / #92，2026-10-11；離線驗證，實機待驗）：剛抓到的寵物名字框顯示「成長字串」a/b/c/d（實測 49/9/8/2、49/9/7/2、48/9/7/1、47/10/7/1、45/10/8/1），
   名字樣板與 Monster 表 OCR 都認不出。list 會給 name=None、unnamed='49/9/8/2'、raw_name='?(49/9/8/2)'（OCR ≥ 2 行完整相同才採用，否則不當字串）。
   物種（species）靠「縮圖簽名 + 成長字串登錄檔」多重確認（tools/.cache/pet-tpl/species.json，學出來的）：學法 = learn-species（呼叫端要有可信標籤，
@@ -364,6 +366,66 @@ def ident_species(i: int, growth: str | None, ctx: dict) -> str | None:
     return petmatch.identify_species(cols, growth, species_reg(ctx))
 
 
+# ---- 縮圖 ↔ 知識庫頭像（petimg_match，2026-10-12 接線）：名字 / 成長字串登錄檔都認不出時的物種備援 ----
+# 結果只放 img_species / img_score / species_src='img'，**不寫進 species**：species 是 store / set-state / take / rebirth_pets 的身分依據，
+# img 只當顯示與「更嚴」的騎寵判斷（img 認成騎寵 → mountlike），不放寬任何不可逆動作的驗名。
+IMG_ON = True                                  # --no-img 關；fake_pet.install 也關（假面板沒畫頭像）
+IMG_EXTRA = ['朵拉比斯', '迪基格斯', '金布伊']    # 一定放進候選的常用物種（另加騎寵、名字樣板、物種登錄檔裡的）
+
+
+def img_candidates(ctx: dict) -> list:
+    """第一輪候選：騎寵 + IMG_EXTRA + 名字樣板學過的 + 物種登錄檔裡的（只留有頭像的）；ctx 快取"""
+    if 'img_names' not in ctx:
+        import petimg_match
+        reg = species_reg(ctx)
+        names = list(uikit.MOUNTS) + IMG_EXTRA + list((ctx.get('tpl') or {}).get('name') or {}) \
+            + list(reg.get('thumb') or {}) + list((reg.get('growth') or {}).values())
+        have = {n for ns in petimg_match.index().values() for n in ns}
+        ctx['img_names'] = [n for n in dict.fromkeys(names) if n in have]
+    return ctx['img_names']
+
+
+def img_match(cells, kind: str, cx: int, cy: int, ctx: dict) -> dict:
+    """已讀好的一格像素 → {'img_species'（ok 才有值，否則 None）, 'img_score', 'img_best', 'img_second', 'img_stage'}。
+    第 1 輪已知物種；過門檻 → 第 2 輪加上第一名的同系別（換色版）再比一次，以第 2 輪為準（避免只有兄弟在候選時誤認）；
+    第 1 輪連門檻都沒過（真物種不在已知清單）→ 放寬到全部 Monster（每格多約 1.3 s）。都不 ok → None，不猜"""
+    import petimg_match as M
+    known = img_candidates(ctx)
+    r, stage = M.match(cells, kind, cx, cy, known), 'known'
+    if r['score'] >= M.MIN_SCORE[kind]:
+        fam = list(dict.fromkeys(known + M.family([r['best_species']])))
+        if len(fam) > len(known):
+            r, stage = M.match(cells, kind, cx, cy, fam), 'family'
+    else:
+        r, stage = M.match(cells, kind, cx, cy, None), 'all'
+    return {'img_species': r['species'] if r['ok'] else None, 'img_score': r['score'], 'img_best': r['best_species'],
+            'img_second': [r['second_species'], r['second']], 'img_stage': stage}
+
+
+def img_ident(kind: str, idx: int, ctx: dict) -> dict | None:
+    """現場讀寵物欄第 idx 格（kind='slot'）/ 倉庫第 idx 張卡（'card'）縮圖認物種（唯讀；一次 uikit.px 約 7000 點）。
+    IMG_ON 關、沒有頭像匯出（tools/.cache/pet-images）、讀不到像素 → None"""
+    if not IMG_ON or ctx.get('no_img'):
+        return None
+    try:
+        import petimg_match as M
+        M.index()
+    except (OSError, ImportError) as e:
+        if not ctx.get('img_warned'):
+            log(f'縮圖認物種停用（{e}；先跑 tools/extract/pet_images.py）')
+            ctx['img_warned'] = True
+        return None
+    _, cx, cy = M.cells_of(kind)[idx]
+    t = time.time()
+    cells = M.read_cell(kind, cx, cy)
+    if cells is None:
+        return None
+    r = img_match(cells, kind, cx, cy, ctx)
+    r['img_ms'] = int((time.time() - t) * 1000)
+    uikit.mark(f'img {kind} {idx + 1}')
+    return r
+
+
 def slot_ident(sl: dict):
     """格子的有效身分名：有名字用名字；沒名字但物種已確認 → 物種；否則 None"""
     return sl.get('name') or (sl.get('species') if sl.get('unnamed') else None)
@@ -414,8 +476,17 @@ def read_slot(i: int, ctx: dict) -> dict:
                 again, _ = petmatch.grab([petmatch.BOX_LVL + ('lvl',)])
                 if again and again[0] == lvl_rows and petmatch.learn_level(lvl_rows, v, tpl):
                     ctx['dirty'] = True
+    if d.get('species'):
+        d['species_src'] = 'reg'
+    if not d['name'] and not d.get('species'):              # 名字樣板 / OCR / 物種登錄檔都認不出 → 縮圖比知識庫頭像（只當補充，見 img_ident）
+        im = img_ident('slot', i, ctx)
+        if im:
+            d.update(im)
+            if im['img_species']:
+                d['species_src'] = 'img'
     ocr_texts = ([d['name']] if d['name'] else []) + d.get('ocr', [])
-    d['mountlike'] = any(uikit.is_mount_like(t) for t in ocr_texts) or d.get('species') in uikit.MOUNTS
+    d['mountlike'] = any(uikit.is_mount_like(t) for t in ocr_texts) or d.get('species') in uikit.MOUNTS \
+        or d.get('img_species') in uikit.MOUNTS                # img 認成騎寵只會更嚴（多擋），不會放行
     return d
 
 
@@ -549,7 +620,8 @@ def role_list(arg: str) -> list | None:
 def fmt_slot(s: dict) -> str:
     if s.get('empty'):
         return f'  {s["slot"]}  （空）'
-    nm = s.get('name') or (s.get('raw_name', '?') + (f'≈{s["species"]}' if s.get('species') else ''))
+    nm = s.get('name') or (s.get('raw_name', '?') + (f'≈{s["species"]}' if s.get('species') else
+                                                      f'≈{s["img_species"]}(圖{s["img_score"]:.2f})' if s.get('img_species') else ''))
     lv = s.get('level')
     return f'  {s["slot"]}  {nm:<8} {s.get("state") or "?":<3} Lv{lv if lv is not None else "?"}'
 
@@ -991,14 +1063,19 @@ def read_ident(ctx: dict, retries: int = BANNER_RETRIES, wait: float = BANNER_WA
     return ident
 
 
+def _img_hint(sl: dict) -> str:
+    """拒絕訊息附註：縮圖比頭像的結果只供人參考（不當存倉依據）"""
+    return f'（縮圖比對像 {sl["img_species"]} {sl.get("img_score")}，只供參考、不當存倉依據）' if sl.get('img_species') else ''
+
+
 def guard_store(sl: dict, allow_slot1: bool, allow_mount_store: str | None = None) -> str | None:
     """存倉硬性禁止：回拒絕原因（None = 可以）。騎寵絕不存；唯一例外 allow_mount_store = 該寵物的「正式名」且 sl 名字完全相同（不接受像）、
     狀態須已是等待（騎乘 / 出戰都擋，先 set-state 等待）；其餘規則（名字 / 狀態讀不出、第 1 格要 --allow-slot1）照舊"""
     nm = slot_ident(sl)
     if not nm:
         if sl.get('unnamed'):
-            return f'{sl.get("raw_name")} 沒名字且物種未確認（縮圖 / 成長字串登錄檔對不上；可能是騎寵），拒絕存倉；先 learn-species'
-        return '名字讀不出來（不猜，拒絕存倉）'
+            return f'{sl.get("raw_name")} 沒名字且物種未確認（縮圖 / 成長字串登錄檔對不上；可能是騎寵），拒絕存倉；先 learn-species' + _img_hint(sl)
+        return '名字讀不出來（不猜，拒絕存倉）' + _img_hint(sl)
     if sl.get('state') == '騎乘':
         return f'{nm} 正在騎乘中（騎寵），絕不存倉'
     if allow_mount_store and nm == allow_mount_store:                          # 名字完全相同才放行，且必須已是「等待」
@@ -1247,6 +1324,19 @@ def card_is(idn: dict, want: str | None, reg: dict) -> bool:
     return bool(g) and (reg.get('growth') or {}).get(g) == want
 
 
+def img_target(kind: str, idx: int, idn: dict, t: dict, ctx: dict, info: dict | None = None) -> bool:
+    """take 的補充驗名：名字框認不出目標時（沒名字 / 名字讀不出、成長字串登錄檔不知道），縮圖認出的物種 == 目標名字 → True。
+    只用在 take（可逆：取出後還會再驗）；目標有指定成長字串、或卡片有名字 / 登錄檔已知成長字串時一律 False（照原規則）"""
+    if not t.get('name') or t.get('growth') or idn.get('name'):
+        return False
+    if idn.get('growth') and (species_reg(ctx).get('growth') or {}).get(idn['growth']):
+        return False
+    im = img_ident(kind, idx, ctx)
+    if info is not None and im:
+        info.setdefault('img', []).append({'kind': kind, 'index': idx + 1, 'species': im['img_species'], 'score': im['img_score']})
+    return bool(im) and im['img_species'] == t['name']
+
+
 def card_order(filled: list, first: int | None) -> list:
     """逐張驗證的順序：first（新增 / 優先的那格）先，其餘已用格照序（純函式）"""
     idxs = [k for k, f in enumerate(filled) if f]
@@ -1400,8 +1490,10 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
         idn = read_ident(ctx, 4, 1.0)
         cache[k] = {'name': idn['name'], 'growth': idn['growth']}
         seen[k + 1] = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
-        if not target_ok(idn, t, reg) or not (idn['name'] or idn['growth']):
-            continue
+        if not (target_ok(idn, t, reg) and (idn['name'] or idn['growth'])):
+            if not img_target('card', k, idn, t, ctx, info):          # 名字框認不出 → 縮圖比頭像（取出後還會再驗）
+                continue
+            seen[k + 1] = f'{seen[k + 1] or "?"}≈{t["name"]}(圖)'
         if t.get('level') is None:
             info['cards'] = seen
             return k, ''
@@ -1464,9 +1556,12 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
     cache[idx] = {'name': idn['name'], 'growth': idn['growth']}
     nm = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
     info['depot_name'] = nm
-    if not nm:
+    img_ok = not (nm and target_ok(idn, t, reg)) and img_target('card', idx, idn, t, ctx, info)
+    if img_ok:
+        info['img_pre'] = True
+    if not nm and not img_ok:
         return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格名字框讀不出來；沒取出')
-    if not target_ok(idn, t, reg):
+    if not target_ok(idn, t, reg) and not img_ok:
         return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {fmt_target(t)}；沒取出（格子可能遞補了，重讀倉庫或改用 --pet 找）')
     if t.get('level') is not None and info.get('pre_level') is None and not info.get('level_unverified'):
         lv = card_level_now(idx)
@@ -1500,11 +1595,11 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
         info['species'] = sp
         if sp and petmatch.learn_species(reg, sp, None, idn2['growth']):
             ctx['rdirty'] = True
-        if want and sp != want and not (sp is None and card_is(idn2, want, reg)):
+        if want and sp != want and not (sp is None and (card_is(idn2, want, reg) or img_target('slot', new_slot - 1, idn2, t, ctx, info))):
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格，物種 {sp}），不是預期的 {want}！停手交人處理，不自動存回')
         if t.get('growth') and idn2['growth'] != t['growth']:
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），成長字串不是 {t["growth"]}！停手交人處理，不自動存回')
-    elif (want and nm2 != want) or t.get('growth'):
+    elif (want and nm2 != want and not (nm2 is None and img_target('slot', new_slot - 1, idn2, t, ctx, info))) or t.get('growth'):
         return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {fmt_target(t)}！停手交人處理，不自動存回')
     el = t.get('level')
     if el is not None and info.get('pre_level') != el:        # 取前卡片等級沒讀到：切回寵物分頁讀新寵物等級（倉庫分頁中間沒有等級欄）
@@ -1754,6 +1849,7 @@ def main() -> int:
     cp.add_argument('--pause-encounter', action='store_true', help='先關原地遇敵、等戰鬥結束，做完開回')
     cp.add_argument('--no-learn', action='store_true', help='不學 / 不存名字與等級樣板')
     cp.add_argument('--timing', action='store_true', help='最後一行 JSON 多一個 t 欄位：各階段毫秒')
+    cp.add_argument('--no-img', action='store_true', help='不用縮圖比知識庫頭像認物種（名字認不出時的備援，petimg_match）')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('list', help='唯讀：每格 名字 / 狀態 / 等級', parents=[cp])
     p.add_argument('--role', default='all')
@@ -1815,6 +1911,9 @@ def main() -> int:
         uikit.gui('pixel', '1,1')
         uikit.mark('server-start')
     learn = not a.no_learn
+    if a.no_img:
+        global IMG_ON
+        IMG_ON = False
     if a.cmd == 'list':
         return list_roles(a.role, a.json, a.pause_encounter, learn)
     if a.cmd == 'set-state':
