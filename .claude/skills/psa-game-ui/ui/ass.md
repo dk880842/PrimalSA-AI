@@ -175,6 +175,7 @@ uv run --no-project python tools/gui/ass.py pet all normal 防禦               
 uv run --no-project python tools/gui/ass.py pet all normal 防禦 --dry-run       # 只讀不改（仍會暫停 / 恢復掛機）
 uv run --no-project python tools/gui/ass.py pet all normal 防禦 --no-resume     # 改完不恢復掛機（遇敵維持關）
 ```
+- **唯讀多人讀取（2026-10-12）**：`ass.py pet all get`（或 `DKBO,DKBO3 get`）一次開面板逐人印 戰寵 首次動作（勾 / 值）與 一般動作（值），不改任何勾選；同樣先關遇敵等戰鬥結束、讀完 grind ensure 恢復（`--no-pause` / `--no-resume`）。API `ass.get_pet_many(roles)`。實機 5 人約 15 s（含暫停恢復約 35 s）；欄位值是 OCR 原文，不限攻擊 / 防禦。
 - 流程：preflight → 關原地遇敵 + 等 VS 牌消失（掛機中戰鬥一場接一場，戰鬥中外掛面板打不開）→ 一次開面板逐人（讀現值 → 不同才改 → OCR 讀回確認；隊長最後；DKBO3 跑馬燈處理沿用）→ `grind.py ensure` 恢復掛機（`--no-pause` 不關遇敵、不恢復）。只動「一般動作」，首次動作 / 勾選 / 對象不碰。
 - 選項依 **OCR 文字**找（欄位 y+22 起、高 330 的清單，`find_option`），不寫死列序，可填寵物已學技能名；找不到唯一選項 → 退出碼 **12**、不點、停在該角色（下拉隨關面板收起）。退出碼其餘同上；preflight 9 / 10（疑似驗證視窗 / 斷線）直接停、不恢復掛機。
 - **不確認當前角色**（不開切換面板；每次 char.ensure 都開關一次切換面板，掛機中戰鬥時還會讀不到而重試）：當前角色依規定維持 DKBO，恢復掛機的 grind ensure 開頭會驗一次。曾因先 char.ensure 再關遇敵，在快速戰鬥中重試造成切換面板反覆開關（已改）。

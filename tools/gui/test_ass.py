@@ -762,6 +762,7 @@ setup(g)
 rc, sts, msg, info = ass.battle_check(no_wait=True)
 check('戰鬥中 no_wait → rc 8、不開面板', rc == ass.EXIT_IN_BATTLE and not g.panel and not g.clicks)
 check('CLI battle 只收 all', ass.main(['battle', 'DKBO']) == 1)
+check('_dedup：OCR 多倍率重複只留一份', [ass._dedup(t) for t in ('攻擊攻擊攻擊', '防禦防禦', '風的精靈Lv.5', '')] == ['攻擊', '防禦', '風的精靈Lv.5', ''])
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

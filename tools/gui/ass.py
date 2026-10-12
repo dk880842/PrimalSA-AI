@@ -634,6 +634,28 @@ def _visit_pet_normal(want: str, dry_run: bool):
     return visit
 
 
+def _dedup(t: str) -> str:
+    """OCR 多倍率串接（-Zooms 2,3,4）會重複 2～3 次：整段等分重複就只留一份"""
+    for n in (4, 3, 2):
+        if t and len(t) % n == 0 and t[:len(t) // n] * n == t:
+            return t[:len(t) // n]
+    return t
+
+
+def _visit_pet_get(role):
+    """多人唯讀：戰寵 首次動作（勾選 + 欄位文字）/ 一般動作（欄位文字）。回 (退出碼, dict, 訊息, [])"""
+    if not pet_on_top():
+        return EXIT_NOT_TOP, None, f'{role}：右半面板不在頂端（讀不到「戰寵動作」標題）；不點', []
+    cols = _px([PET_FIRST_CHK])
+    on = None if not cols else cols[0] != UNCHECKED
+    return EXIT_OK, {'first_on': on, 'first': _dedup(read_pet_text('first')) or '?', 'normal': _dedup(read_pet_text('normal')) or '?'}, '', []
+
+
+def get_pet_many(roles, no_wait: bool = False) -> tuple:
+    """一次開面板逐人唯讀戰寵 首次 / 一般動作（不點任何勾選 / 下拉）。回 (rc, {角色: dict}, 訊息, info)"""
+    return _many({r: None for r in ordered_roles(roles)}, _visit_pet_get, no_wait)
+
+
 def set_pet_many(plan: dict, no_wait: bool = False, dry_run: bool = False) -> tuple:
     """一次開面板逐人改「戰寵 一般動作」：plan = {角色: {'normal': 值}}；現值不同才改、改完讀回確認。
     只動這一項（首次動作 / 勾選 / 對象都不碰）。dry_run 只讀。回值同 set_many：(rc, {角色: {'normal': 值}}, 訊息, info)。
@@ -844,12 +866,43 @@ def _main_battle(a) -> int:
     return rc
 
 
+def _run_pet_get_many(roles, pause: bool, resume: bool, no_wait: bool) -> int:
+    import uikit
+    rc, sts, msg = EXIT_OK, {}, ''
+    if pause:
+        import heal
+        rc = uikit.preflight('ass')
+        if rc:
+            print(f'preflight 失敗（{rc}）；沒動任何東西')
+            return rc
+        heal.set_encounter(False)
+        heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')
+    rc, sts, msg, _ = get_pet_many(roles, no_wait)
+    for r, st in sts.items():
+        print(f'{r} 戰寵 首次動作={"勾" if st["first_on"] else "不勾"}/{st["first"]}  一般動作={st["normal"]}')
+    if rc:
+        print(f'失敗（退出碼 {rc}）：{msg}')
+    if pause and resume and rc != 9:
+        import grind
+        grc = grind.run('ensure')
+        print(f'恢復掛機 grind ensure 退出碼 {grc}')
+        rc = rc or grc
+    return rc
+
+
 def _main_pet_many(a) -> int:
     roles = list(ROLES) if a.role.lower() == 'all' else [norm_role(r) for r in a.role.split(',')]
     if not all(roles) or len(set(roles)) != len(roles):
         print(f'角色要是 all 或逗號分隔的 {" / ".join(ROLES)}（不可重複）')
         return EXIT_USAGE
     rest = [OPT_ALIASES.get(x.lower(), x) for x in a.rest]
+    if rest == ['get']:             # 唯讀：不動任何勾選；同樣先暫停遇敵、讀完恢復掛機
+        if layout.current() != '2880x1659':
+            print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+            return EXIT_LAYOUT
+        import winenv
+        winenv.enable_server()
+        return _run_pet_get_many(roles, not a.no_pause, not a.no_resume, a.no_wait)
     if len(rest) != 2 or rest[0] != 'normal' or not rest[1]:
         print('多人 pet 用法：ass.py pet all|DKBO,DKBO2… normal <攻擊|防禦|已學寵物技能名> [--dry-run] [--no-pause] [--no-resume]')
         return EXIT_USAGE
