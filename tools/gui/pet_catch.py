@@ -116,6 +116,17 @@ def relock(roles: list, battle_pet: str = '朵拉比斯', mount_species: str = '
     return 0
 
 
+def unlock(roles: list, which=('戰寵',), tools=None) -> int:
+    """外掛「鎖定戰寵 / 鎖定騎寵」取消勾選（換練功寵前；先確認是勾著才點，_toggle 已處理）。外掛面板只開一次逐人。→ 0 / 退出碼"""
+    T = tools or rp.Tools()
+    rc, bad = T.lock_set_many([(r, w, False, None) for r in roles for w in which])
+    if rc:
+        print(f'pet_catch：{bad} 取消鎖定失敗 rc {rc}')
+    else:
+        print(f'pet_catch：{"、".join(which)} 已取消鎖定：{roles}')
+    return rc
+
+
 EXIT_NO_BATTLE_PET = 105          # 有人沒有「出戰」的非騎寵（練寵會沒經驗）
 
 
@@ -161,6 +172,7 @@ def main(argv=None) -> int:
     ap.add_argument('--autoswap', choices=['on', 'off'], help='改做：5 人外掛「自動轉換戰寵」勾 / 取消（不抓寵）')
     ap.add_argument('--verify-battle', action='store_true', help='改做：逐人讀回出戰寵（開遇敵練寵前；沒有出戰寵退出碼 105）')
     ap.add_argument('--lock', default=None, metavar='騎寵,戰寵', help='改做：外掛鎖定重勾（騎寵 / 戰寵 / 兩者；下拉讀字選、讀回）')
+    ap.add_argument('--unlock', default=None, metavar='騎寵,戰寵', help='改做：外掛取消鎖定（換練功寵前）')
     ap.add_argument('--battle-pet', default='朵拉比斯')
     ap.add_argument('--mount-species', default='布拉奇多斯')
     ap.add_argument('--roles', default='DKBO,DKBO2,DKBO3,DKBO4,DKBO5')
@@ -173,6 +185,10 @@ def main(argv=None) -> int:
         import winenv
         winenv.enable_server()
         return verify_battle(a.roles.split(','))
+    if a.unlock:
+        import winenv
+        winenv.enable_server()
+        return unlock(a.roles.split(','), tuple(w for w in ('騎寵', '戰寵') if w in a.unlock))
     if a.lock:
         import winenv
         winenv.enable_server()

@@ -255,8 +255,13 @@ def battle_free(timeout_ms: int = 20000) -> bool:
 
 
 # ---------------- 狀態 / 互斥 ----------------
+STATE_MAX_AGE_S = 3 * 3600
+
+
 def load_state() -> dict:
     try:
+        if time.time() - STATE.stat().st_mtime > STATE_MAX_AGE_S:      # 昨天的「已完成」不能擋今天的練功寵監測（2026-10-12 實機：舊 done 讓 petwatch 0 秒結束）
+            return {'done': [], 'levels': {}}
         st = json.loads(STATE.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         return {'done': [], 'levels': {}}

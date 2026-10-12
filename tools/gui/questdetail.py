@@ -30,6 +30,7 @@
 - 中間頂端（624,205 附近）是「目前選中任務」標題（淺字），點列後用它驗證點對了；右下 / 中間 624,670 的藍鈕「傳送」只有待接取任務才有，
   進行中任務同一位置是金色「重置任務」（點了會重置任務！）→ accept 只在藍鈕、標題相符才點，且不在 uikit 的一般點擊範圍（forbidden center_btn）。
 """
+import re
 import argparse
 import difflib
 import hashlib
@@ -878,7 +879,10 @@ def _after_transfer(src: str, name: str, presses: int, verify: bool = True) -> i
     for i in range(presses):
         g = quest.check_dialog_irreversible()
         btns = ''.join(g.get('buttons', []))
-        if g['blocked'] or '接受' not in btns:
+        # 猜謎三兄弟（受理A）第一個對話框左鈕是「接藍暴任務」（2026-10-12 實機），按下後才是「接受」→ 左鈕 = 接…任務 也放行
+        _first = (g.get('buttons') or [''])[0]
+        _accept_like = '接受' in btns or bool(re.fullmatch(r'接[\u4e00-\u9fff]{1,4}任務', _first.strip()))
+        if g['blocked'] or not _accept_like:
             shot = uikit.snap('questdetail-dialog')
             why = g['reason'] or f'左鈕不是「接受」（讀到 {g.get("buttons")}）'
             return uikit.fail(src, EXIT_DIALOG_GUARD, f'對話框防護：{why}；內文 {g.get("body")} → 沒按任何鈕 [{shot}]')
