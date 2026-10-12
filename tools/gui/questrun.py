@@ -4,7 +4,7 @@
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/questrun.py plan [任務ID …]            # 不碰遊戲：印交接 / 每任務步驟 / 指令 / 預估 / 退出碼（沒給 ID = questdefs 全部）
   uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--no-dragon] [--spot 地雷區]
-        [--max-slices 12] [--slice-s 300] [--max-min 30] [--hp-min 50] [--team-hp-min 60]
+        [--max-slices 12] [--slice-s 300] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--no-boss-retry]
   uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態
   可 import：questrun.run(ids, dry_run=False, after='grind', tools=None, ...) → 退出碼；結果 dict 在 questrun.LAST
 
@@ -26,18 +26,18 @@
     4 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
-quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀一次詳情：已完成 = 結束、進行中 = 下一片；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 → 114 停手（重打流程 P3，現在照 psa-team-check-after-boss 手動）；
+quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀一次詳情：已完成 = 結束、進行中 = 下一片；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
   （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
   quest.py 回 0 且 tail 有「時間到」（單純 slice 到期、任務還在追蹤欄）→ 不開詳情，直接下一片（完成由下一片 quest.py「任務完成」或回 5 時才讀詳情確認）；回 0 但沒有「任務完成」也不是「時間到」（模糊）才讀一次詳情
   3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
-  19 自動巡路卡住解卡 3 次仍卡 → 112；33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 114；其他 → 112
+  19 自動巡路卡住解卡 3 次仍卡 → 112；33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 同 38 走 bossretry；其他 → 112
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 20～107、120～129；questrun 自己 110～119）：
   110 preflight 失敗（任務不認得 / 讀不到狀態 / 背包空位不足 / 當前角色不是 DKBO）
   111 交接 / 組隊失敗（follow 停不掉、關遇敵、team.form、補血）
   112 步驟卡住（追蹤沒反應又沒 walk 步驟、walk 走不到、找不到任務但狀態不是已完成、quest.py 非預期退出碼）
   113 片數 / 時間上限到了任務還沒完成
-  114 BOSS 後隊伍不滿 / 被打飛（P3 才有自動重打）
+  114 BOSS 後隊伍不滿 / 被打飛，bossretry 失敗或次數用完 / --no-boss-retry（info.boss_retry_rc = bossretry 的 140～146）
   115 kind=manual 的步驟（停下交人）
   116 quest.py 回 39（不可逆對話，沒按）
   117 對話無進展（quest.py 33）
@@ -72,6 +72,7 @@ ALL_ROLES = rebirth.ALL_ROLES
 DRAGON = rebirth.DRAGON
 DRAGON_REEAT_S = rebirth.DRAGON_REEAT_S
 SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 300, 12, 30, 50
+BOSS_RETRY_MAX = 3              # 每個任務 38 / 21 時最多呼叫幾次 bossretry（四大洞窟每個 2～5 場 BOSS）
 TEAM_HP_MIN = 60                # 全隊任一人 HP < 這個 % → 補血（2026-10-12 四寶玉之謎：只看隊長 HP，隊員約 50% 連打 BOSS 被打死踢隊 4 次 38）；0 = 不讀全隊
 WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
 DEFAULT_SPOT = '地雷區'
@@ -173,6 +174,12 @@ class Tools(rebirth.Tools):
         import grind
         return grind.run('start', spot)
 
+    def boss_retry(self, track):
+        """BOSS 戰後不滿 5 人：落後者當隊長組 5 人重打 → 切回 DKBO 重組（bossretry.py）→ (rc, 結果 dict)"""
+        import bossretry
+        rc = bossretry.run(track)
+        return rc, dict(bossretry.LAST)
+
 
 # ---------------------------------------------------------------- 紀錄
 def event(msg: str) -> None:
@@ -247,7 +254,7 @@ def print_plan(defs, opts: dict) -> None:
             else:
                 print(f'  - 步 {st}：kind={sd["kind"]} → 停下交人（115）')
         if d.get('boss'):
-            print('  - 有任務戰 / BOSS 戰：quest.py 預設模式打完回 37（滿 5 人 → 繼續）/ 38（不滿 → 114，重打流程 P3）')
+            print(f'  - 有任務戰 / BOSS 戰：quest.py 預設模式打完回 37（滿 5 人 → 繼續）/ 38（不滿 → bossretry.py 落後者當隊長 5 人重打 + 重組，每任務最多 {BOSS_RETRY_MAX} 次；失敗 114）')
         if opts.get('dragon', True):
             print(f'  - 每片前：龍王的守護（buff 列看不到人形圖示才吃；depot_use 公共倉庫取出 → 吃 → 存回 → 關遇敵）')
         print(f'  - 迴圈：quest.py --task {d["track"]} --max-seconds {opts["slice_s"]}（≤ {opts["max_slices"]} 片、≤ {opts["max_min"]} 分），依退出碼分支')
@@ -256,7 +263,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後隊伍不滿 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -268,6 +275,8 @@ class Run:
         self.info: dict = {}
         self.warnings: list = []
         self.pending = None
+        self.run_dragons = 0                                           # 本次 run 吃的龍王的守護（LAST.dragon_used；進度檔累計另放 dragon_used_total）
+        self.task_dragons = 0                                          # 目前任務吃的（quest-log 摘要用）
         self.team_ok_at = 0.0                                          # 最近一次確認 5 人隊伍完整的時間（form 成功 / quest.py 37）；0 = 不新鮮
 
     # -- 共用 --
@@ -333,8 +342,9 @@ class Run:
             return
         self.st['dragon_in_bag'] = False
         self.st['last_eat'] = time.time()
-        self.st['dragon_used'] = self.st.get('dragon_used', 0) + 1
-        self.run_dragons = getattr(self, 'run_dragons', 0) + 1
+        self.st['dragon_used'] = self.st.get('dragon_used', 0) + 1      # 進度檔累計（跨 run）
+        self.run_dragons += 1                                           # 本次 run
+        self.task_dragons += 1                                          # 本任務
         event(f'已吃龍王的守護（本次第 {self.run_dragons} 顆，累計 {self.st["dragon_used"]} 顆；剩的已存回公共倉庫）')
         self.save()
 
@@ -484,6 +494,7 @@ class Run:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
         team_retry = 0
+        boss_retries = 0
         for k in range(self.o['max_slices']):
             if time.time() - t0 > self.o['max_min'] * 60:
                 return self.fail(EXIT_SLICES, f'任務 {tid} 超過 {self.o["max_min"]} 分鐘仍未完成')
@@ -522,10 +533,25 @@ class Run:
                 return self.fail(EXIT_STALL, f'任務 {tid}：對話無進展（quest.py 33）', quest_rc=rc)
             if act == 'battle':
                 return self.fail(EXIT_BATTLE, f'任務 {tid}：完整戰鬥自動戰鬥卡住（quest.py 25）', quest_rc=rc)
-            if act == 'knocked':
-                return self.fail(EXIT_TEAM, f'任務 {tid}：被打飛回村（quest.py 21），重打流程 P3', quest_rc=rc)
-            if act == 'boss_team':
-                return self.fail(EXIT_TEAM, f'任務 {tid}：BOSS 戰後隊伍不滿 5 人（quest.py 38）；重打流程 P3，現在請依 psa-team-check-after-boss 手動處理', quest_rc=rc)
+            if act in ('knocked', 'boss_team'):                         # 38 BOSS 後不滿 5 人 / 21 被打飛 → bossretry 自動補人（psa-team-check-after-boss）
+                what = '被打飛回村（quest.py 21）' if act == 'knocked' else 'BOSS 戰後隊伍不滿 5 人（quest.py 38）'
+                if not self.o.get('boss_retry', True):
+                    return self.fail(EXIT_TEAM, f'任務 {tid}：{what}；--no-boss-retry，請依 psa-team-check-after-boss 手動處理', quest_rc=rc)
+                if boss_retries >= BOSS_RETRY_MAX:
+                    return self.fail(EXIT_TEAM, f'任務 {tid}：{what}；bossretry 已用 {boss_retries} 次，停手交人', quest_rc=rc)
+                boss_retries += 1
+                event(f'任務 {tid}：{what} → bossretry 第 {boss_retries}/{BOSS_RETRY_MAX} 次')
+                brc, binfo = T.boss_retry(track)
+                self.info.setdefault('boss_retry', []).append(binfo)
+                if brc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                    return brc
+                if brc:
+                    return self.fail(EXIT_TEAM, f'任務 {tid}：{what}；bossretry 退出碼 {brc}：{(binfo or {}).get("msg", "")}', quest_rc=rc, boss_retry_rc=brc)
+                self.team_ok_at = time.time()                          # bossretry 最後 team.check 滿 5 人
+                rc = self.hp_gate(f'任務 {tid} 補人後')
+                if rc:
+                    return rc
+                continue
             if act == 'boss':
                 event(f'任務 {tid}：BOSS 戰贏且滿 5 人，下一片')
                 team_retry = 0
@@ -580,7 +606,7 @@ class Run:
             return
         lines = [f'\n## {d["id"]} {d["detail"]} — questrun.py 自動跑完（{time.strftime("%Y-%m-%d %H:%M")}）',
                  f'- 任務詳情開啟 {ts.get("detail_opens")} 次；耗時 {int(time.time() - t0)} 秒（{ts.get("started")}～{ts.get("ended")}），quest.py {ts.get("slices")} 片，最後退出碼 {ts.get("last_rc")}；'
-                 f'龍王的守護累計吃 {self.st.get("dragon_used", 0)} 顆（剩的都存回公共倉庫）',
+                 f'龍王的守護本任務吃 {self.task_dragons} 顆（本次 run 共 {self.run_dragons} 顆；剩的都存回公共倉庫）',
                  '- 手動介入：0 次（若有，人工在這裡補記）']
         if self.warnings:
             lines.append('- 警告：' + '；'.join(self.warnings))
@@ -593,7 +619,7 @@ class Run:
 
 def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_dragon: bool = True, spot: str = DEFAULT_SPOT,
         max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True,
-        team_hp_min: int = TEAM_HP_MIN) -> int:
+        team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True) -> int:
     LAST.clear()
     defs, bad = questdefs.resolve(ids)
     if bad:
@@ -603,7 +629,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         print('questrun：--after 要 grind 或 none', file=sys.stderr)
         return uikit.EXIT_USAGE
     opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress,
-                team_hp_min=team_hp_min)
+                team_hp_min=team_hp_min, boss_retry=boss_retry)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -616,6 +642,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         for d in defs:
             t0 = time.time()
             r.info = {}
+            r.task_dragons = 0
             try:
                 rc = r.run_task(d)
             except SystemExit:
@@ -629,7 +656,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         rc = T.grind_start(spot)
         if rc:
             r.fail(rc, f'恢復掛機失敗 grind rc={rc}')
-    LAST.update(ok=rc == 0, rc=rc, done=done, info=r.info, warnings=r.warnings, dragon_used=r.st.get('dragon_used', 0))
+    LAST.update(ok=rc == 0, rc=rc, done=done, info=r.info, warnings=r.warnings, dragon_used=r.run_dragons, dragon_used_total=r.st.get('dragon_used', 0))
     event(f'結束 rc={rc}，完成 {done}' + ('；失敗退出，不恢復掛機' if rc else ''))
     r.save()
     return rc
@@ -675,6 +702,7 @@ def main() -> int:
     p.add_argument('--max-min', type=int, default=MAX_MIN)
     p.add_argument('--hp-min', type=int, default=HP_MIN)
     p.add_argument('--team-hp-min', type=int, default=TEAM_HP_MIN, help='全隊任一人 HP 低於這個 %% 就補血（任務開始前 / BOSS 戰後；0 = 不讀全隊，只看隊長）')
+    p.add_argument('--no-boss-retry', action='store_true', help='BOSS 戰後不滿 5 人（38 / 21）不自動補人，直接 114 停手')
     p.add_argument('--no-trust-progress', action='store_true', help='不信進度檔的「已完成」（預設 2 小時內的完成記錄直接跳過）')
     a = ap.parse_args()
     if a.cmd == 'status':
@@ -682,7 +710,7 @@ def main() -> int:
     dry = a.cmd == 'plan' or a.dry_run
     kw = dict(max_slices=getattr(a, 'max_slices', MAX_SLICES), slice_s=getattr(a, 'slice_s', SLICE_S),
               max_min=getattr(a, 'max_min', MAX_MIN), hp_min=getattr(a, 'hp_min', HP_MIN),
-              team_hp_min=getattr(a, 'team_hp_min', TEAM_HP_MIN))
+              team_hp_min=getattr(a, 'team_hp_min', TEAM_HP_MIN), boss_retry=not getattr(a, 'no_boss_retry', False))
     rc = run(a.ids, dry, a.after, use_dragon=not a.no_dragon, spot=a.spot, trust_progress=not getattr(a, 'no_trust_progress', False), **kw)
     if not dry:
         print(json.dumps(LAST, ensure_ascii=False, default=str))

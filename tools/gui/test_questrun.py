@@ -65,6 +65,7 @@ class Fake:
         self.pre_rc = kw.get('pre_rc', 0)
         self.screen = kw.get('screen', 'idle')
         self.active = kw.get('active', False)
+        self.boss_q = list(kw.get('boss', [(144, {'msg': '假：重打失敗'})]))   # 每次 boss_retry 取一個 (rc, info)，最後一個重複
 
     def rec(self, *a):
         self.calls.append(a)
@@ -184,6 +185,10 @@ class Fake:
         self.rec('grind_start', spot)
         return self.grind_rc
 
+    def boss_retry(self, track):
+        self.rec('boss_retry', track)
+        return self.boss_q.pop(0) if len(self.boss_q) > 1 else self.boss_q[0]
+
 
 D17 = '彌生和日美子(1.82)'
 D15 = '亞姆的斧頭(1.82)'
@@ -280,10 +285,29 @@ f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(37, []), (0, [])
 rc = go(f, [2017])
 check('37 → 下一片', rc == 0 and f.names().count('quest') == 2)
 
-# 6) 38 → 114，不恢復掛機
+# 6) 38 → bossretry：失敗 → 114、不恢復掛機
 f = Fake(status={D17: [questrun.DOING]}, quest=[(38, [])])
 rc = go(f, [2017])
-check('38 → 114、不恢復掛機', rc == questrun.EXIT_TEAM and 'grind_start' not in f.names())
+check('38 → bossretry 失敗 → 114、不恢復掛機', rc == questrun.EXIT_TEAM and f.names().count('boss_retry') == 1 and 'grind_start' not in f.names()
+      and questrun.LAST['info'].get('boss_retry_rc') == 144, str(questrun.LAST.get('info')))
+# 6b) 38 → bossretry 成功 → 補血檢查 → 下一片（--team-fresh）→ 完成
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(38, []), (0, [])], boss=[(0, {'done': {'DKBO5': 'caught_up'}})])
+rc = go(f, [2017])
+qs = [c for c in f.calls if c[0] == 'quest']
+check('38 → bossretry 0 → 下一片續跑、完成', rc == 0 and f.names().count('boss_retry') == 1 and len(qs) == 2 and '--team-fresh' in qs[1][1], str(f.calls))
+check('bossretry 帶追蹤標題、結果記進 info', ('boss_retry', questdefs.get(2017)['track']) in f.calls)
+# 6c) 21 被打飛也走 bossretry
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(21, []), (0, [])], boss=[(0, {})])
+check('21 → bossretry 0 → 續跑完成', go(f, [2017]) == 0 and f.names().count('boss_retry') == 1)
+# 6d) 每任務最多 BOSS_RETRY_MAX 次
+f = Fake(status={D17: [questrun.DOING]}, quest=[(38, [])] * 6, boss=[(0, {})])
+rc = go(f, [2017])
+check(f'38 連續 → bossretry {questrun.BOSS_RETRY_MAX} 次後 114', rc == questrun.EXIT_TEAM and f.names().count('boss_retry') == questrun.BOSS_RETRY_MAX, str(f.names().count('boss_retry')))
+# 6e) --no-boss-retry → 直接 114；bossretry 9 透傳
+f = Fake(status={D17: [questrun.DOING]}, quest=[(38, [])], boss=[(0, {})])
+check('--no-boss-retry → 114、沒呼叫 bossretry', go(f, [2017], boss_retry=False) == questrun.EXIT_TEAM and 'boss_retry' not in f.names())
+f = Fake(status={D17: [questrun.DOING]}, quest=[(38, [])], boss=[(9, {})])
+check('bossretry 9 → 9 透傳', go(f, [2017]) == uikit.EXIT_UNKNOWN_SCREEN)
 
 # 7) 30 隊伍不符：team.form 一次再跑；連續兩次 → 111
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, [])])
@@ -427,6 +451,20 @@ go(f, [2017], use_dragon=False)
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
 go(f, [2017], use_dragon=False)
 check('--no-dragon 不吃', 'dragon' not in f.names())
+# 16b) dragon_used = 本次 run 吃的（進度檔累計另放 dragon_used_total；舊版 --no-dragon 仍顯示 6）
+reset()
+questrun.save_progress({'tasks': {}, 'dragon_used': 6})
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
+quiet(questrun.run, [2017], tools=f, after='none', use_dragon=False)
+check('--no-dragon：dragon_used 0、累計 6', questrun.LAST['dragon_used'] == 0 and questrun.LAST['dragon_used_total'] == 6, str(questrun.LAST))
+log = questrun.QUEST_LOG.read_text(encoding='utf-8')
+check('quest-log 摘要寫本任務 0 顆（不是累計 6）', '本任務吃 0 顆' in log and '累計吃 6' not in log, log[-200:])
+reset()
+questrun.save_progress({'tasks': {}, 'dragon_used': 6})
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=False)
+quiet(questrun.run, [2017], tools=f, after='none')
+check('吃 1 顆：dragon_used 1、累計 7', questrun.LAST['dragon_used'] == 1 and questrun.LAST['dragon_used_total'] == 7, str(questrun.LAST))
+check('quest-log 摘要寫本任務 1 顆', '本任務吃 1 顆' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
 
 # ================= 2999：walk handler =================
 S1 = questdefs.get(2999)['steps'][1]
