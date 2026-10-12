@@ -159,7 +159,7 @@ for name, sig, tol in (('login', S.NET_LOGIN, 25), ('enc_on', S.ENC_ON, 50)):
 check('enc_on：主畫面看不到紅龍 = False；戰鬥等其他畫面 = None', S.enc_on({(x, y): (0, 0, 0) for x, y, *_ in S.ENC_ON}, {'state': 'walking'}) is False
       and S.enc_on({(x, y): (0, 0, 0) for x, y, *_ in S.ENC_ON}, {'state': 'battle'}) is None)
 check('label：登入 / 選角（classify=unknown）顯示認得的畫面名', S.label({'state': 'unknown'}, ['login']) == '登入畫面' and S.label({'state': 'unknown'}, ['charsel']) == '選角畫面')
-check('label：idle + 提示視窗', S.label({'state': 'idle'}, ['notice_dialog']) == '主畫面（未偵測到已知視窗）（提示視窗）')
+check('label：idle + 提示視窗', S.label({'state': 'idle'}, ['notice_dialog']) == '主畫面（提示視窗）')
 check('label：任何 annotate 組合都不出現「安全」「無驗證」', all(not any(w in S.label({'state': st}, an) for w in ('安全', '無驗證')) for st in ('idle', 'unknown', 'dialog') for an in ([], ['login'], ['notice_dialog'])))
 
 # ---- 5. 面板辨識（2026-10-11）：樣本 fixture + 邊界 + 主畫面多組 + 載入 / 黑畫面 ----

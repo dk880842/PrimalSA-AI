@@ -475,7 +475,7 @@ check('--stop 沒有常駐 watch → 0，並寫 psa-hud.json watch=false', watch
 # label 不准出現「安全」「無驗證」
 labels = [screen_sigs.label({'state': s}) for s in ('idle', 'walking', 'dialog', 'reward', 'select', 'panel', 'unknown', 'no_game', 'minimized', 'error', 'unsupported')]
 labels += [screen_sigs.label({'state': 'battle', 'full': f, 'cmd': c}) for f in (0, 1) for c in (0, 1)] + [screen_sigs.label({'state': 'idle'}, ['popup'])]
-check('label：沒有任何「安全」「無驗證」字樣；idle = 未偵測到已知視窗', not any('安全' in l or '無驗證' in l for l in labels) and labels[0] == '主畫面（未偵測到已知視窗）', str(labels))
+check('label：沒有任何「安全」「無驗證」字樣；idle = 主畫面', not any('安全' in l or '無驗證' in l for l in labels) and labels[0] == '主畫面', str(labels))
 
 # ---------------------------------------------------------------- 7. 真實訊號：SIGTERM 在阻塞呼叫中結束、清理鎖與 state（只在 POSIX 跑）
 if sys.platform != 'win32' and hasattr(signal, 'SIGTERM'):

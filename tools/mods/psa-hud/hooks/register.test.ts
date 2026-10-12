@@ -78,14 +78,14 @@ test('logPathFromCwd：WSL / Windows / Git Bash 都接到 tools/.cache/errlog.js
 
 
 // ───────────── 即時狀態監看（第 4 階段）─────────────
-const ST = (o: Record<string, unknown> = {}) => ({ v: 1, seq: 5, phase: 'running', watcher: { token: 'aa', running: true, interval: 0.5 }, screen: { label: '主畫面（未偵測到已知視窗）', age_s: 0.1 }, ...o })
+const ST = (o: Record<string, unknown> = {}) => ({ v: 1, seq: 5, phase: 'running', watcher: { token: 'aa', running: true, interval: 0.5 }, screen: { label: '主畫面', age_s: 0.1 }, ...o })
 const VIN = (o: Partial<ViewIn> = {}): ViewIn => ({ state: ST() as never, badVersion: null, status: 'running', lastCode: null, now: 1000, seenAt: 1000, hasFile: true, ...o })
 
 test('狀態行：label 原樣顯示，N 秒前只在 > 3 s 才出現（age_s + 本地經過時間）', () => {
-  expect(viewModel(VIN()).main).toBe('主畫面（未偵測到已知視窗）')
-  expect(viewModel(VIN({ now: 1000 + 2800 })).main).toBe('主畫面（未偵測到已知視窗）')            // 0.1 + 2.8 < 3
-  expect(viewModel(VIN({ now: 1000 + 3000 })).main).toBe('主畫面（未偵測到已知視窗） ｜ 3 秒前')     // 0.1 + 3.0 > 3
-  expect(viewModel(VIN({ now: 1000 + 12000 })).main).toBe('主畫面（未偵測到已知視窗） ｜ 12 秒前')
+  expect(viewModel(VIN()).main).toBe('主畫面')
+  expect(viewModel(VIN({ now: 1000 + 2800 })).main).toBe('主畫面')            // 0.1 + 2.8 < 3
+  expect(viewModel(VIN({ now: 1000 + 3000 })).main).toBe('主畫面 ｜ 3 秒前')     // 0.1 + 3.0 > 3
+  expect(viewModel(VIN({ now: 1000 + 12000 })).main).toBe('主畫面 ｜ 12 秒前')
   expect(viewModel(VIN({ state: ST({ screen: { label: '戰鬥中（完整・下指令）', age_s: 5 } }) as never })).main).toBe('戰鬥中（完整・下指令） ｜ 5 秒前')
   for (const l of [viewModel(VIN()).main, viewModel(VIN({ state: null })).main]) expect(l.includes('安全')).toBe(false)
 })
@@ -289,7 +289,7 @@ test('watchAlive：(token, seq) 10 s 內有變才算活著；watcher.running=fal
 // ── 第 5 階段：警示顯示 ──
 test('警示：提示視窗 = 黃字；verify_suspect / alerts = 紅字（verify_suspect 與 alerts 各一行，最多 2 筆 alerts）；標籤不出現「安全」', () => {
   const h = (o: Record<string, unknown>) => viewModel(VIN({ state: ST(o) as never })).hints
-  expect(h({ screen: { label: '主畫面（未偵測到已知視窗）（提示視窗）', age_s: 0, annot: ['notice_dialog'] } })).toEqual([{ text: '畫面上有提示視窗，請看一眼', tone: 'yellow' }])
+  expect(h({ screen: { label: '主畫面（提示視窗）', age_s: 0, annot: ['notice_dialog'] } })).toEqual([{ text: '畫面上有提示視窗，請看一眼', tone: 'yellow' }])
   expect(h({ screen: { label: '登入畫面', age_s: 0, annot: ['login'] } })).toEqual([])      // 登入 / 選角只改標籤，不是警示
   const a = h({ flags: { verify_suspect: true }, alerts: [{ kind: 'unknown_long', msg: '不認得的畫面超過 10 秒（可能是驗證視窗，請人工確認）' }, { kind: 'verify', line: 'L2' }, { kind: 'verify', line: 'L3' }] })
   expect(a.map(x => x.tone)).toEqual(['red', 'red', 'red'])

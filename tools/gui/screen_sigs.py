@@ -364,7 +364,7 @@ def enc_on(px: dict, base: dict):
     return None
 
 
-_LABELS = {'idle': '主畫面（未偵測到已知視窗）', 'walking': '自動跑路中', 'dialog': '對話框', 'reward': '獲得物品視窗',
+_LABELS = {'idle': '主畫面', 'walking': '自動跑路中', 'dialog': '對話框', 'reward': '獲得物品視窗',
            'select': '選擇對象面板', 'panel': '切換角色面板', 'unknown': '不認得的畫面',
            'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
 
@@ -374,7 +374,7 @@ _ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charse
 
 def label(d: dict, annot=None) -> str:
     """給人看的狀態文字（watch 寫進 state.json 的 screen.label）。
-    idle 一律是「未偵測到已知視窗」：特徵只認得有限幾種視窗，所以任何標籤都不准出現「安全」「無驗證」之類的保證（單元測試檢查）"""
+    idle 標「主畫面」（只代表沒認出已知視窗，不等於沒有驗證視窗）：特徵只認得有限幾種視窗，所以任何標籤都不准出現「安全」「無驗證」之類的保證（單元測試檢查）"""
     st = d.get('state')
     annot = list(annot or [])
     if st == 'unknown':                     # 登入 / 選角畫面沒有 HUD → classify 是 unknown，但那是認得的畫面
