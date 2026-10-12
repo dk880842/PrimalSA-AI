@@ -778,16 +778,21 @@ s = Script([SELECT])
 rc = run2(['--no-track', '--max-seconds', '60'], s)
 ok &= check(f'最多點 {quest.SELECT_MAX_TRIES} 次，exit 2', rc == 2 and len([c for c in s.clicks if c[1].startswith('click 117')]) == quest.SELECT_MAX_TRIES, f'rc={rc} n={len(s.clicks)}')
 
-print('(s) 底部「關閉」列 + 5 頭像：刷新前先點左側關閉 510,745')
+print('(s) 刷新角色單次嘗試（2026-10-13 改：不阻塞；底部「關閉」列只點一下、看切換鈕露出才點、看 waitpix 結果）')
 ROW_BTN = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_CLOSE_ROW}
+SW_FULL = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_SWITCH_FULL}
+SW_MAIN = {(x, y): (r, g, b) for x, y, r, g, b, *_ in quest.SIG_SWITCH_MAIN}
 
 
 class RowGame:
-    """假遊戲：底部關閉列可見 / 不可見；點關閉 510,745 隱藏（eat = 前幾下被吃掉）"""
+    """假遊戲（底部列 + 切換面板）：visible = 「關閉 + 頭像」列蓋著；點關閉 510,* 收起（eat = 前幾下被吃掉、stuck = 永遠收不掉、
+    lag = 點中後還要再被讀幾次像素才消失）；列收起後切換鈕圖示露出（switch=False = 轉場 / 已回主畫面，圖示不在）；
+    seq 點切換回 waitpix 結果（panel=True → ok、False → timeout），layout = 'full'（850,765）/ 'main'（763,760）"""
 
-    def __init__(self, visible=True, eat=0, stuck=False, lag=0):
+    def __init__(self, visible=True, eat=0, stuck=False, lag=0, switch=True, panel=True, layout='full'):
         self.visible, self.eat, self.stuck, self.clicks = visible, eat, stuck, []
-        self.lag, self.pending = lag, False      # lag = 點中後還要再被讀幾次像素才消失（模擬收起動畫 > 600ms）
+        self.lag, self.pending = lag, False
+        self.switch, self.panel, self.layout = switch, panel, layout
 
     def gui(self, *args, note=''):
         if args[0] == 'seq':
@@ -800,12 +805,17 @@ class RowGame:
                         self.pending = True
                     else:
                         self.visible = False
+                return ''
+            if 'waitpix' in args[1]:
+                x, y = args[1].split(';')[0].split()[1:3]
+                return f'click {x},{y}\n' + ('ok 120\nclick 910,578' if self.panel else 'timeout 1500\nskip click')
             return ''
         if args[0] == 'pixel':
             if self.pending:
                 self.lag -= 1
                 if self.lag <= 0:
                     self.visible, self.pending = False, False
+            sw = SW_FULL if self.layout == 'full' else SW_MAIN
             out = []
             for p in args[1].split():
                 xy = tuple(int(v) for v in p.split(','))
@@ -813,35 +823,57 @@ class RowGame:
                     out.append(ROW_BTN[xy] if self.visible else (30, 120, 60))
                 elif xy in quest.CLOSE_ROW_DARK:
                     out.append((50, 46, 37) if self.visible else (200, 200, 200))
+                elif xy in sw and self.switch and not self.visible:
+                    out.append(sw[xy])
                 else:
                     out.append((0, 0, 0))
             return ' '.join('%d,%d,%d' % c for c in out)
         return ''
 
 
-quest.CLOSE_ROW_POLL_GAP = 0.0
-for nm, g, want_close, want_switch in [('有列 → 點關閉後才按切換', RowGame(True), 1, True), ('第一下被吃掉 → 點第 2 下', RowGame(True, eat=1), 2, True),
-                                       ('沒有列 → 不點關閉直接切換', RowGame(False), 0, True), ('關不掉 → 不點切換（會點到頭像）', RowGame(True, stuck=True), len(quest.CLOSE_ROW_CLICKS), False),
-                                       ('動畫慢（點中後 3 次輪詢才消失）→ 只點 1 下就等到', RowGame(True, lag=3), 1, True),
-                                       ('前 3 下被吃掉 → 第 4 下收起', RowGame(True, eat=3), 4, True)]:
+def n_close(g):
+    return len([c for c in g.clicks if c.startswith('click 510 ')])
+
+
+def n_switch(g, xy='850 765'):
+    return len([c for c in g.clicks if c.startswith(f'click {xy}')])
+
+
+for nm, g, want_close, want_switch, want in [
+        ('有列、點一下就收 → 關閉 1 下後按切換，回 ok', RowGame(True), 1, 1, 'ok'),
+        ('有列、點了沒收（被吃掉）→ 只點 1 下就回 row（不阻塞、不點切換）', RowGame(True, eat=1), 1, 0, 'row'),
+        ('有列、收不掉 → 1 下、不點切換（會點到頭像）', RowGame(True, stuck=True), 1, 0, 'row'),
+        ('收起動畫慢（點後讀 1 次才消失）→ 1 下後照按切換', RowGame(True, lag=1), 1, 1, 'ok'),
+        ('沒有列、切換露出 → 不點關閉直接切換', RowGame(False), 0, 1, 'ok'),
+        ('沒有列、切換鈕沒露出（轉場 / 已回主畫面 850,765 是組隊）→ 什麼都不點', RowGame(False, switch=False), 0, 0, 'notready'),
+        ('切換後面板沒出現（waitpix timeout）→ 回 nopanel', RowGame(False, panel=False), 0, 1, 'nopanel'),
+        ('有列 + 收起後切換鈕也不在（戰鬥剛結束）→ 不點切換', RowGame(True, switch=False), 1, 0, 'notready')]:
     quest.gui = g.gui
     r = quest.refresh_characters(True)
-    cl = [i for i, c in enumerate(g.clicks) if c.startswith('click 510 ')]
-    sw = [i for i, c in enumerate(g.clicks) if c.startswith('click 850 765')]
-    ok &= check(nm, len(cl) == want_close and bool(sw) == want_switch and r == want_switch and (not sw or not cl or cl[-1] < sw[0]), f'{g.clicks}')
-_rs = quest.read_screen
-for stt in ('idle', 'dialog', 'reward'):
-    g = RowGame(True)
-    quest.gui, quest.read_screen = g.gui, (lambda stt=stt: dict(IDLE, state=stt))
-    r = quest.refresh_characters(True)
-    ok &= check(f'關閉列還在但戰鬥已結束（畫面 {stt}）→ 不點關閉、不點切換 850,765、回 False', r is False and not g.clicks, str(g.clicks))
-quest.read_screen = _rs
-g = RowGame(False)
+    ok &= check(nm, (n_close(g), n_switch(g), r) == (want_close, want_switch, want), f'{r} {g.clicks}')
+g = RowGame(True, stuck=True)
 quest.gui = g.gui
-quest.refresh_characters(False)
-ok &= check('快速戰鬥（主畫面）刷新用 763,760', any(c.startswith('click 763 760') for c in g.clicks) and not any(c.startswith('click 850 765') for c in g.clicks))
+quest.refresh_characters(True, attempt=2)
+ok &= check('第 3 次嘗試點關閉鈕的第 3 個點 510,725（輪流換點）', g.clicks == ['click 510 725; wait %d' % quest.CLOSE_ROW_SETTLE_MS], str(g.clicks))
+g = RowGame(False, layout='main')
+quest.gui = g.gui
+r = quest.refresh_characters(False)
+ok &= check('快速戰鬥（主畫面）刷新用 763,760、看主畫面版切換鈕', r == 'ok' and n_switch(g, '763 760') == 1 and not n_switch(g), str(g.clicks))
+g = RowGame(False, layout='main')
+quest.gui = g.gui
+r = quest.refresh_characters(True)
+ok &= check('完整戰鬥已結束回主畫面（850 版切換鈕不在，主畫面版在）→ 不點 850,765', r == 'notready' and not g.clicks, str(g.clicks))
+quest.gui = lambda *a, **k: 'click 850,765' if a[0] == 'seq' else 'x'
+ok &= check('像素讀不到 → 照舊直接按（seq 沒有 waitpix 結果 → unverified，算按到）', quest.refresh_characters(True) == 'unverified' and 'unverified' in quest.REFRESH_DONE)
 quest.gui = RowGame(True).gui
 ok &= check('close_row_visible：有列 True / 讀不到 None', quest.close_row_visible() is True and (setattr(quest, 'gui', lambda *a, **k: 'x') or quest.close_row_visible() is None))
+for out, want in [('click 850,765\nok 230\nclick 910,578', 'ok'), ('click 850,765\ntimeout 1500\nskip click', 'timeout'), ('pwfail', 'pwfail'), ('', None), ('click 850,765', None)]:
+    ok &= check(f'waitpix_result {out!r} → {want}', quest.waitpix_result(out) == want)
+_bpx = {p: (0, 0, 0) for p in [(x, y) for x, y, *_ in quest.SIG_CLOSE_ROW] + quest.CLOSE_ROW_DARK + list(SW_FULL) + list(SW_MAIN)}
+ok &= check('bottom_state：全黑 = other', quest.bottom_state(_bpx, True) == 'other' and quest.bottom_state(_bpx, False) == 'other')
+ok &= check('bottom_state：850 版切換鈕 = switch（完整戰鬥）；主畫面版不算', quest.bottom_state(_bpx | SW_FULL, True) == 'switch' and quest.bottom_state(_bpx | SW_FULL, False) == 'other')
+ok &= check('bottom_state：列在（切換鈕也像）= row 優先', quest.bottom_state(_bpx | SW_FULL | ROW_BTN | {p: (40, 40, 40) for p in quest.CLOSE_ROW_DARK}, True) == 'row')
+ok &= check('bottom_state：關閉鈕在但右側頭像條不暗 = 不是 row', quest.bottom_state(_bpx | ROW_BTN | {p: (200, 200, 200) for p in quest.CLOSE_ROW_DARK}, True) == 'other')
 
 print('(t) 刷新角色規則（should_refresh 純函式 + 整合）')
 A = argparse.Namespace
@@ -1177,29 +1209,87 @@ ok &= check('讀不到像素 → None', quest.read_team_labels_stable() is None)
 quest.read_team_labels = _rt
 quest.time.time, quest.time.sleep = _rs_, (lambda d: None)
 
-print('(Z) 收底部「關閉」列：點一下後輪詢確認，不連點')
-quest.CLOSE_ROW_POLL_GAP = 0.0
-quest.time.sleep = lambda d: None
-for nm, g, want_close in [('動畫慢（第 5 次輪詢才消失、在輪詢上限 6 內）→ 只點 1 下', RowGame(True, lag=5), 1),
-                          ('超過輪詢上限（lag 8）→ 輪詢全程沒收起才點第 2 下', RowGame(True, lag=8), 2)]:
-    quest.gui = g.gui
-    quest.read_screen = lambda: {'state': 'battle'}
-    r = quest.hide_close_row()
-    n = len([c for c in g.clicks if c.startswith('click 510 ')])
-    ok &= check(nm, n == want_close and r is True, f'clicks={n} r={r}')
-class OverGame(RowGame):
+print('(t4) 時序（假時鐘）：進完整戰鬥後 ≤ 3 秒內確實刷新；失敗 1 秒後重試，不等 REFRESH_GAP；關閉列一次只點一下')
+FULL_ON2 = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': False, 'auto_off': False}
+
+
+class Timed(RowGame):
+    """假時鐘完整戰鬥：bs～be 秒是戰鬥。early = 開戰 early 秒內按切換 → 面板不開、還把「關閉 + 頭像」列叫出來（2026-10-13 actions.log 實況）；
+    row_until = 列到第幾秒自己消失（None = 只能點關閉收，eat 下被吃掉）；panel_fail = 前幾次切換面板不開"""
+
+    def __init__(self, bs=2.0, be=30.0, early=1.0, row=False, eat=0, stuck=False, row_until=None, panel_fail=0):
+        super().__init__(visible=row, eat=eat, stuck=stuck)
+        self.t, self.bs, self.be, self.early, self.row_until, self.panel_fail = 1000.0, bs, be, early, row_until, panel_fail
+        self.log = []
+
+    def time(self):
+        return self.t
+
+    def sleep(self, d):
+        self.t += d
+
+    def rel(self):
+        return self.t - 1000
+
+    def screen(self):
+        return dict(FULL_ON2) if self.bs <= self.rel() < self.be else dict(IDLE)
+
     def gui(self, *args, note=''):
-        out = super().gui(*args, note=note)
-        if args[0] == 'pixel' and self.pending is False and False:
-            pass
-        return out
-g = RowGame(True, eat=9)
-states = iter(['battle'] * 3 + ['idle'] * 99)
-quest.gui = g.gui
-quest.read_screen = lambda: {'state': next(states)}
-r = quest.hide_close_row()
-ok &= check('輪詢途中戰鬥打完（回主畫面）→ 不再點下一下、回 False', r is False and len([c for c in g.clicks if c.startswith('click 510 ')]) <= 1, str(g.clicks))
-quest.read_screen = REAL_READ_SCREEN
+        if self.row_until is not None and self.rel() >= self.row_until:
+            self.visible = False
+        if args[0] == 'seq' and 'waitpix' in args[1]:
+            self.clicks.append(args[1])
+            self.log.append((round(self.rel(), 2), 'switch'))
+            if self.rel() - self.bs < self.early:
+                self.visible = True                      # 太早按：沒開面板，叫出關閉列
+                self.sleep(1.5)
+                return 'click 850,765\ntimeout 1500\nskip click'
+            if self.panel_fail > 0:
+                self.panel_fail -= 1
+                self.sleep(1.5)
+                return 'click 850,765\ntimeout 1500\nskip click'
+            self.sleep(0.7)
+            self.log.append((round(self.rel(), 2), 'refreshed'))
+            return 'click 850,765\nok 200\nclick 910,578'
+        if args[0] == 'seq' and args[1].startswith('click 510 '):
+            self.log.append((round(self.rel(), 2), 'close'))
+            self.sleep(0.5)
+        return super().gui(*args, note=note)
+
+
+def first_refresh(g):
+    return next((t for t, k in g.log if k == 'refreshed'), None)
+
+
+g = Timed()
+rc = run2(['--no-track', '--max-seconds', '12'], g)
+fr = first_refresh(g)
+ok &= check('一般情況：開戰後 ≤ 3 秒刷新成功、之前沒有失敗的切換（不在開戰瞬間亂按叫出關閉列）',
+            fr is not None and fr - g.bs <= 3.0 and [k for _, k in g.log][:2] == ['switch', 'refreshed'], f'{g.log}')
+g = Timed(early=99.0, panel_fail=0)
+g.early = 0.0
+g.panel_fail = 2
+rc = run2(['--no-track', '--max-seconds', '14'], g)
+sw = [t for t, k in g.log if k == 'switch']
+ok &= check('面板前 2 次沒開 → 約 1～2.5 秒後重試（不等 8 秒），第 3 次成功仍在開戰 ≤ 8 秒內',
+            len(sw) >= 3 and all(0.9 <= b - a <= 3.2 for a, b in zip(sw, sw[1:3])) and first_refresh(g) is not None and first_refresh(g) - g.bs <= 8.0, f'{g.log}')
+g = Timed(row=True, eat=2)
+rc = run2(['--no-track', '--max-seconds', '14'], g)
+cl = [t for t, k in g.log if k == 'close']
+ok &= check('開戰就有關閉列、前 2 下被吃 → 每輪只點 1 下，第 3 下收起後立刻刷新（開戰 ≤ 6 秒；舊版 4 下 × 4.5 秒 ≈ 18 秒）',
+            len(cl) == 3 and first_refresh(g) is not None and first_refresh(g) - g.bs <= 6.0 and first_refresh(g) - cl[-1] < 1.5, f'{g.log}')
+g = Timed(row=True, stuck=True, row_until=10.0)
+rc = run2(['--no-track', '--max-seconds', '16'], g)
+ok &= check('關閉列點不掉、第 10 秒自己消失 → 消失後 ≤ 2 秒內刷新（舊版要等收列 4 下 + REFRESH_GAP）',
+            first_refresh(g) is not None and 10.0 <= first_refresh(g) <= 12.0, f'{g.log}')
+g = Timed(bs=2.0, be=12.0)
+rc = run2(['--no-track', '--max-seconds', '14'], g)
+rf = [t for t, k in g.log if k == 'refreshed']
+ok &= check('成功後同一場仍照 REFRESH_GAP（10 秒戰鬥成功刷新 1～2 次，不是每秒）', 1 <= len(rf) <= 2 and (len(rf) < 2 or rf[1] - rf[0] >= quest.REFRESH_GAP), f'{rf}')
+print('(t5) should_refresh 開戰延遲：完整戰鬥未滿 REFRESH_FIRST_DELAY 不按、快速戰鬥不等')
+_a = A(solo=False, fight=False, no_refresh=False)
+ok &= check('完整戰鬥開戰 0.5 秒不按、1.5 秒按', not quest.should_refresh(_a, False, True, False, 99, 0.5) and quest.should_refresh(_a, False, True, False, 99, quest.REFRESH_FIRST_DELAY))
+ok &= check('快速戰鬥開戰 0 秒就按', quest.should_refresh(_a, False, False, False, 99, 0.0))
 
 print('(盜賊) 「戰鬥 / 再見」兩鈕對話框後備判斷（強盜的洞穴；classify 判 idle 時用按鈕字旁像素 + 按鈕 OCR）')
 BEIGE = {p: quest.DIALOG_BTN_BEIGE for p in quest.DIALOG_BTN_PROBES}

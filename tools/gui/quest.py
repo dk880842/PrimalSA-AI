@@ -35,8 +35,8 @@
            --solo / --fight --no-click 不檢查。--team-fresh（questrun 用：它在 30 秒內剛驗過隊伍）→ 只略過「開始前」那一次。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
   戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
   組隊預設模式（非 --solo / --fight）：**每一場戰鬥**（完整戰鬥或快速戰鬥、不分任務 / 路上）都刷新角色；完整戰鬥自動戰鬥鈕是關的 → 先按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
-  刷新角色規則：--solo / --fight 只有任務 / BOSS 戰（點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）刷新，路上小怪直接逃、不刷新；預設模式每場都刷新（--no-refresh 全關）。同一場最多每 REFRESH_GAP 秒刷新一次。
-           刷新前底部若出現「關閉」直式鈕 + 5 個角色頭像列（上方綠字「如果遇到下指令出錯等問題，可使用下方[切換]按鈕切換至其他角色」）→ 先點左側「關閉」510,745 隱藏（每下等 0.9 秒再輪詢驗證最多 3 秒，收起後才繼續；沒收起才點下一下，最多 4 下：745 / 745 / 725 / 765，都在關閉鈕範圍內；收不掉存 snap close-row-stuck，errlog #61；按刷新前、每下點「關閉」前都先確認仍是戰鬥畫面，主迴圈剛讀過仍是戰鬥才進來，收列耗時 > 1 秒後與每下點「關閉」前再確認；已回主畫面 / 對話 / 領獎就不按，避免 850,765 點到主畫面「組隊」鈕），再按切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ 刷新角色 910,578。
+  刷新角色規則：--solo / --fight 只有任務 / BOSS 戰（點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）刷新，路上小怪直接逃、不刷新；預設模式每場都刷新（--no-refresh 全關）。「刷新成功」後同一場最多每 REFRESH_GAP=8 秒再按一次；沒成功 REFRESH_RETRY=1 秒後就重試（主迴圈睡到到期為止，不多等一整輪）。
+           2026-10-13 改（使用者：進戰鬥十幾秒才刷新）：完整戰鬥偵測到後等 REFRESH_FIRST_DELAY=1.5 秒才按第一次（actions.log 實證：一偵測到就按切換 850,765，5 場面板都沒開、接著底部冒出「關閉 + 頭像」列，舊版再花 4 下 × 約 4.5 秒收列）；快速戰鬥不等。refresh_characters 每次只做一次嘗試、不阻塞：讀底部列（bottom_bar）→ 「關閉 + 頭像」列（綠字「如果遇到下指令出錯等問題…」）蓋著就只點一下左側「關閉」（輪流 510,745 / 745 / 725 / 765）、等 0.5 秒再讀，還在 → 回 row；切換鈕圖示（screen_sigs.SIG_SWITCH_FULL 850,765 / SIG_SWITCH_MAIN 763,760）沒露出 → 不點（回 notready；完整戰鬥剛結束時主畫面 850,765 是「組隊」，圖示不同所以不會點到）；露出才按切換 → waitpix 等面板 → 刷新角色 910,578，**看 waitpix 結果**：面板沒開回 nopanel（舊版不看結果，沒按到也記「按刷新角色」）。同一場連續 REFRESH_STUCK_SNAP=10 次沒成功存一張 close-row-stuck / refresh-fail 圖 + errlog。
   選擇對象面板（點 NPC 後右側跳出的米色面板：頭像卡片 + 名字，NPC 是黃 / 金字、隊友白字）：偵測到就依黃字位置點 NPC 那張卡片（不寫死第一格），再等對話框；--fight 點 NPC 後與對話步（--stop-after-dialog 點 NPC / 黃問號）都處理。
   模擬測試：uv run --no-project python tools/gui/test_quest_fight.py
   事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）；啟動時自動刪 tools/.cache/quest-log/ 內超過 3 天的圖檔（cleanup_old_shots）。
@@ -47,7 +47,7 @@
            2026-10-10 / 10-12 紅暴步 8 按一次沒關、--stop-after-rewards 隨即結束 → 都要手動補點，所以領獎一定要驗證關閉才算數
   閒聊對話 只有一顆「再見」鈕的對話框（SIG_BYE 9 點 + OCR 按鈕整串 =「再見」）→ ESC 關閉、回原流程（每次執行最多 BYE_MAX=3 次，之後照不認得）。
            2026-10-12 紅暴步 1：領獎後又跳選擇對象面板、點到同 NPC 的閒聊，舊版連 3 次不認得 → 退出碼 2 誤警報
-  戰鬥     角色頭上綠色 VS 牌（快速戰鬥沒有戰鬥畫面）→ 切換 763,760 → 刷新角色 910,578（按完面板自己關）
+  戰鬥     完整戰鬥畫面（上方棕框標籤）或頭上綠色 VS 牌（快速戰鬥）→ 切換（完整 850,765 / 快速 763,760）→ 刷新角色 910,578（按完面板自己關；規則見上「刷新角色規則」）
   巡路中   畫面中央金黃色「Auto Walking」字樣
   主畫面   外掛鈕紅字 ASS（沒對話框 / 巡路 / 戰鬥時）→ 檢測方針（使用者指定）：
            1. 場景裡有黃色「?」「!」任務標記 → 優先點它（findmark.ps1 找黃色色塊，點標記下方的 NPC）
@@ -80,7 +80,7 @@ import winenv
 import walk
 from walk import ROOT, gui, log, PRIMER, stat
 from screen_sigs import (SIG_CMD, SIG_AUTO_OFF, SIG_CLOSE_ROW, SIG_SELECT, SIG_DIALOG, SIG_REWARD, SIG_PANEL, SIG_HUD,  # noqa: F401
-                         SIG_BATTLE, VS_PROBE, VS_COLOR, AW_POINTS, AW_MIN, TOL, close)
+                         SIG_SWITCH_FULL, SIG_SWITCH_MAIN, SIG_BATTLE, VS_PROBE, VS_COLOR, AW_POINTS, AW_MIN, TOL, close)
 import re
 
 EXIT_REWARD_STUCK = 18               # 「獲得物品」按確認 REWARD_CLICK_MAX 次、每次等 REWARD_GONE_S 秒視窗都還在（沒亂點別的，存 *-reward-stuck.png）
@@ -125,7 +125,10 @@ TRACK_RETRY_SECS = 2.5               # 點了任務追蹤後，等這麼久沒�
 TRACKER = (205, 325)                 # 左側任務追蹤第一條：點了自動尋路到任務 NPC
 SWITCH_BTN = (763, 760)              # 主畫面「切換」（快速戰鬥 = 主畫面）
 SWITCH_FULL = (850, 765)             # 完整戰鬥畫面的「切換」（戰鬥時最右「遇敵」鈕消失，按鈕列右移；2026-10-10 實測）
-REFRESH_GAP = 8.0                    # 同一場戰鬥最多每幾秒按一次刷新角色（第 1 次在戰鬥開始後馬上按）
+REFRESH_GAP = 8.0                    # 同一場戰鬥「刷新成功」後最多每幾秒再按一次
+REFRESH_FIRST_DELAY = 1.5            # 偵測到戰鬥後至少等幾秒才按第一次（2026-10-13 actions.log：一偵測到就按切換 850,765 共 5 場 5 場面板都沒開，隨後底部出現「關閉 + 頭像」列；開戰約 2 秒後按的成功）
+REFRESH_RETRY = 1.0                  # 刷新沒成功（面板沒開 / 關閉列還在 / 切換鈕沒露出）幾秒後重試（舊版要等 REFRESH_GAP 8 秒）
+REFRESH_STUCK_SNAP = 10              # 同一場連續幾次沒成功就存一張 close-row-stuck / refresh-fail 圖（只存一次）
 REFRESH_BTN = (910, 578)             # 切換角色面板「刷新角色」（綠色，最右；按完面板自己關）
 QUEST_BATTLE_WINDOW = 15.0           # 最後一次「按對話框 / 點 NPC / 點問號」後幾秒內開始的戰鬥 = 任務戰鬥（才按刷新角色）
 ESCAPE_BTN = (1283, 168)             # 完整戰鬥下指令畫面右上角指令框的「逃跑」（跑步小人，第 2 排最右；2026-10-10 實測，點了出現 Escape! 泡泡）
@@ -974,33 +977,52 @@ def plan_battle_action(s: dict, boss: bool, since_click: float, party: bool = Fa
     return None
 
 
-def should_refresh(a, boss_now: bool, full: bool, auto_off: bool, since_refresh: float) -> bool:
+def should_refresh(a, boss_now: bool, full: bool, auto_off: bool, since_refresh: float, since_start: float | None = None) -> bool:
     """這一輪戰鬥要不要按刷新角色（純函式）：--no-refresh 不按；--solo / --fight（手動逃跑）只有任務 / BOSS 戰（boss_now）才按，路上小怪不按；
-    組隊預設模式每一場都按。完整戰鬥自動戰鬥還是關的（正要先按自動戰鬥）時先不刷新；同一場最多每 REFRESH_GAP 秒一次"""
+    組隊預設模式每一場都按。完整戰鬥自動戰鬥還是關的（正要先按自動戰鬥）時先不刷新；完整戰鬥偵測到未滿 REFRESH_FIRST_DELAY 秒（since_start）先不按
+    （快速戰鬥一場只有 1～3 秒、按的是主畫面切換 763,760，不等）；
+    同一場距上次（成功；失敗時主迴圈把時間往前調成 REFRESH_RETRY 後到期）滿 REFRESH_GAP 秒才再按"""
     if a.no_refresh or ((a.solo or a.fight) and not boss_now):
         return False
     if full and auto_off:
+        return False
+    if full and since_start is not None and since_start < REFRESH_FIRST_DELAY:
         return False
     return since_refresh >= REFRESH_GAP
 
 
 def close_row_visible() -> bool | None:
     """底部「關閉 + 5 頭像」列是否出現（關閉鈕 4 點灰米色 + 右側頭像條 2 點深色）；讀不到回 None"""
-    pts = [(x, y) for x, y, *_ in SIG_CLOSE_ROW] + CLOSE_ROW_DARK
+    b = bottom_bar(True)
+    return None if b is None else b == 'row'
+
+
+def bottom_state(px: dict, full: bool) -> str:
+    """純函式：底部列的取樣色 → 'row'（「關閉 + 頭像」列蓋住切換鈕）/ 'switch'（切換鈕圖示露出，可以點）/ 'other'（都不是：轉場、
+    被別的視窗蓋住、完整戰鬥已結束回主畫面〔850,765 是「組隊」〕）。full = 完整戰鬥版面（切換在 850,765），否則主畫面版（763,760）"""
+    if all(close(px[(x, y)], (r, g, b), t) for x, y, r, g, b, t in SIG_CLOSE_ROW) and all(max(px[p]) < 95 for p in CLOSE_ROW_DARK):
+        return 'row'
+    sig = SIG_SWITCH_FULL if full else SIG_SWITCH_MAIN
+    return 'switch' if all(close(px[(x, y)], (r, g, b), t) for x, y, r, g, b, t in sig) else 'other'
+
+
+def bottom_bar(full: bool) -> str | None:
+    """一次 gui pixel 讀底部列 → bottom_state；讀不到回 None"""
+    sig = SIG_SWITCH_FULL if full else SIG_SWITCH_MAIN
+    pts = [(x, y) for x, y, *_ in SIG_CLOSE_ROW] + CLOSE_ROW_DARK + [(x, y) for x, y, *_ in sig]
     try:
         cols = [tuple(int(v) for v in c.split(',')) for c in gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()]
     except Exception:
         return None
-    if len(cols) != len(pts):
+    if len(cols) != len(pts) or any(len(c) != 3 for c in cols):
         return None
-    btn_ok = all(close(c, (r, g, b), 22) for c, (_, _, r, g, b, _t) in zip(cols, SIG_CLOSE_ROW))
-    return btn_ok and all(max(c) < 95 for c in cols[len(SIG_CLOSE_ROW):])
+    return bottom_state(dict(zip(pts, cols)), full)
 
 
-CLOSE_ROW_CLICKS = [(510, 745), (510, 745), (510, 725), (510, 765)]   # 都在「關閉」直式鈕範圍內（約 y 686～783）；errlog #61：BOSS 戰 2 下收不掉，改成最多 4 下、每下等動畫 + 輪詢驗證
-CLOSE_ROW_POLL = 6                   # 每點一下後最多輪詢幾次（每次間隔 CLOSE_ROW_POLL_GAP 秒）等關閉列消失（收起動畫 / 戰鬥播放中可能 > 600ms 才生效）
-CLOSE_ROW_POLL_GAP = 0.5
+CLOSE_ROW_CLICKS = [(510, 745), (510, 745), (510, 725), (510, 765)]   # 都在「關閉」直式鈕範圍內（約 y 686～783）；每次嘗試輪流換一個點（errlog #61）
+CLOSE_ROW_SETTLE_MS = 500            # 點「關閉」後等多久再讀一次底部列（只點一下就回主迴圈，不再阻塞等 3 秒 × 4 下）
 BATTLE_OVER_STATES = ('idle', 'walking', 'dialog', 'reward')   # 看到這些 = 戰鬥已結束（850,765 / 510,745 這時會點到主畫面的「組隊」鈕 / 地面）
+REFRESH_DONE = ('ok', 'unverified')  # refresh_characters 這兩種結果算「按到了」（unverified = seq 沒回 waitpix 結果，只有假遊戲 / 測試會這樣）
 
 
 def battle_over() -> bool:
@@ -1011,41 +1033,13 @@ def battle_over() -> bool:
         return False
 
 
-def hide_close_row(max_clicks: int = len(CLOSE_ROW_CLICKS)) -> bool:
-    """底部關閉列在 → 點左側「關閉」收起來（第一下常被吃掉，最多點 max_clicks 次；每下點完等 0.9 秒再輪詢驗證最多 CLOSE_ROW_POLL 次，
-    避免動畫還沒跑完就誤判「還在」而連點 / 放棄）。讀不到像素（None）沿用舊行為視為沒有列。
-    回 True = 確認沒有關閉列（可以安全點切換）；False = 收不掉（存 snap 圖 close-row-stuck，呼叫端不點切換）"""
-    def gone():
-        """點一下後輪詢（最多約 3 秒）：列消失 = True；仍在 = False（才有資格再點下一下）；中途戰鬥已結束 = 'over'（不再點）"""
-        for i in range(CLOSE_ROW_POLL):
-            v = close_row_visible()
-            if not v:        # False = 沒有列；None = 讀不到像素（維持舊行為視為沒有列，不卡住刷新）
-                return True
-            if i >= 2 and battle_over():                 # 狀態已改變（戰鬥打完回主畫面）：不是「沒反應」，別再點
-                return 'over'
-            if i < CLOSE_ROW_POLL - 1:
-                time.sleep(CLOSE_ROW_POLL_GAP)
-        return False
-    if not close_row_visible():
-        return True
-    for x, y in CLOSE_ROW_CLICKS[:max_clicks]:
-        if battle_over():
-            event('刷新前戰鬥已結束 → 不再點底部「關閉」列')
-            return False
-        gui('seq', f'click {x} {y}; wait 900', note='戰鬥底部列：點「關閉」收起頭像列')
-        event(f'刷新前底部有「關閉 + 頭像」列 → 點關閉收起（{x},{y}）')
-        g = gone()                                 # 每下點完先輪詢驗證（約 3 秒）；沒收起才點下一下，同一次不連點
-        if g == 'over':
-            event('收「關閉」列期間戰鬥已結束 → 不再點')
-            return False
-        if g:
-            return True
-    try:
-        shot = snap('close-row-stuck')
-    except Exception:
-        shot = None
-    event(f'底部「關閉」列點了 {min(max_clicks, len(CLOSE_ROW_CLICKS))} 下仍收不掉', shot)
-    return False
+def waitpix_result(out: str) -> str | None:
+    """純函式：gui seq 輸出裡 waitpix 那行 → 'ok' / 'timeout' / 'pwfail'；沒有 waitpix 結果（假遊戲 / 輸出空）→ None"""
+    for ln in (out or '').splitlines():
+        head = ln.split()[0] if ln.split() else ''
+        if head in ('ok', 'timeout', 'pwfail'):
+            return head
+    return None
 
 
 def panel_visible() -> bool:
@@ -1058,23 +1052,34 @@ def panel_visible() -> bool:
     return len(cols) == len(pts) and all(close(c, (r, g, b)) for c, (_, _, r, g, b, _t) in zip(cols, SIG_PANEL))
 
 
-def refresh_characters(full: bool = False) -> bool:
-    """戰鬥中按「刷新角色」加速：（底部有關閉列先收起）→ 切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ 等面板 → 刷新角色 910,578；面板還開著就點 ✕。
-    關閉列收不掉 → 不點切換（會點到角色頭像換人下指令），回 False。
-    按之前先確認仍在戰鬥畫面（戰鬥剛結束時 850,765 會點到主畫面「組隊」鈕，2026-10-11）；已回主畫面 → 不按，回 False"""
-    t0 = time.time()
-    if not hide_close_row():
-        event('底部「關閉」列收不掉 → 這次不按刷新角色（避免點到頭像）')
-        return False
+def refresh_characters(full: bool = False, attempt: int = 0) -> str:
+    """戰鬥中按「刷新角色」加速，**只做一次嘗試、不阻塞**（2026-10-13 改；舊版收「關閉」列最多 4 下 × 約 4.5 秒，每場卡 15～20 秒）：
+    1. 讀底部列（一次 gui pixel）：
+       - 「關閉 + 頭像」列蓋住切換鈕 → 點一下「關閉」（CLOSE_ROW_CLICKS[attempt % 4]）、等 CLOSE_ROW_SETTLE_MS 再讀；還在 → 回 'row'（主迴圈 REFRESH_RETRY 秒後再試）
+       - 切換鈕圖示沒露出（轉場 / 被蓋 / 完整戰鬥已結束回主畫面，850,765 是「組隊」）→ 不點，回 'notready'
+       - 讀不到像素 → 照舊直接按（不卡住刷新）
+    2. 切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ waitpix 等面板 → 刷新角色 910,578；**看 waitpix 結果**：面板沒出現 → 回 'nopanel'（沒點刷新，主迴圈很快重試）。
+       面板還開著就點 ✕。按到了回 'ok'（seq 沒有 waitpix 結果時回 'unverified'，視同按到）。
+    主迴圈只把 REFRESH_DONE 當成刷新成功（才開始算 REFRESH_GAP）"""
+    b = bottom_bar(full)
+    if b == 'row':
+        x, y = CLOSE_ROW_CLICKS[attempt % len(CLOSE_ROW_CLICKS)]
+        gui('seq', f'click {x} {y}; wait {CLOSE_ROW_SETTLE_MS}', note='戰鬥底部列：點「關閉」收起頭像列')
+        (event if attempt == 0 else log)(f'刷新前底部有「關閉 + 頭像」列 → 點關閉收起（{x},{y}，第 {attempt + 1} 次嘗試）')
+        b = bottom_bar(full)
+        if b == 'row':
+            return 'row'
+    if b == 'other':
+        return 'notready'
     sw = SWITCH_FULL if full else SWITCH_BTN
     sig = screen_sigs.sig_str(SIG_PANEL)
-    if time.time() - t0 > 1.0 and battle_over():       # 收「關閉」列花了時間：戰鬥可能已結束，再確認一次仍在戰鬥才按（主迴圈剛讀過畫面，沒收列時不重讀）
-        event('收列期間戰鬥已結束（主畫面 / 對話 / 領獎）→ 不按刷新角色（避免點到主畫面按鈕）')
-        return False
-    gui('seq', f'click {sw[0]} {sw[1]}; waitpix 1500 {sig} 40; ifok click {REFRESH_BTN[0]} {REFRESH_BTN[1]}; wait 500')
+    out = gui('seq', f'click {sw[0]} {sw[1]}; waitpix 1500 {sig} 40; ifok click {REFRESH_BTN[0]} {REFRESH_BTN[1]}; wait 500')
+    w = waitpix_result(out)
+    if w is not None and w != 'ok':
+        return 'nopanel'
     if panel_visible():
         gui('seq', f'click {PANEL_CLOSE[0]} {PANEL_CLOSE[1]}; wait 500', note='刷新後面板還開著 → 點 ✕ 關')
-    return True
+    return 'ok' if w == 'ok' else 'unverified'
 
 
 def pick_select_card(blobs: list) -> tuple[int, int] | None:
@@ -1630,6 +1635,7 @@ def _main() -> int:
     select_tries = 0             # 連續幾輪看到「選擇對象」面板（點了還在就別一直點）
     byes = 0                     # 已 ESC 關掉的「只有再見」閒聊對話次數（BYE_MAX）
     last_refresh_t = 0.0         # 本場戰鬥最後一次按刷新角色的時間（REFRESH_GAP）
+    refresh_tries = 0            # 本場戰鬥連續幾次刷新沒成功（面板沒開 / 關閉列還在 / 切換鈕沒露出）
     if guard_ko:
         event(f'模式：{"單人逃跑 --solo" if a.solo else "戰鬥步 --fight"}；起點 {last_pos}')
     team_size = 5 if a.team_size is None else a.team_size
@@ -1705,6 +1711,7 @@ def _main() -> int:
             last_action = time.time()
             event('--fight --no-click：不點 NPC，從現在起算 BOSS 戰時間窗')
     while True:
+        nap = a.every                # 這一輪結束後睡多久（戰鬥中刷新角色快到期時縮短，見 battle 分支）
         s = read_screen()
         st = s['state']
         wclock.tick(st, time.time())
@@ -1888,6 +1895,7 @@ def _main() -> int:
             if in_battle_new:
                 auto_presses = 0
                 last_refresh_t = 0.0
+                refresh_tries = 0
             if manual and not full:
                 if not boss_now and not warned_quick:
                     event(f'--{"solo" if a.solo else "fight"}：遇敵但沒有完整戰鬥畫面（只看到 VS 牌 = 快速戰鬥還開著？）→ 無法逃跑，只能等；請先關快速戰鬥')
@@ -1917,14 +1925,35 @@ def _main() -> int:
                     last_click_t = time.time()
                     auto_presses += 1
                     event(f'組隊完整戰鬥：自動戰鬥鈕是關的 → 按 {AUTO_BTN}（本場第 {auto_presses} 次）')
-            if should_refresh(a, boss_now, full, s.get('auto_off'), time.time() - last_refresh_t):
-                battles += 1
-                refresh_characters(full)
-                last_refresh_t = time.time()
-                event(f'戰鬥中（{"完整" if full else "快速"}戰鬥）：按刷新角色（第 {battles} 次）')
+            if should_refresh(a, boss_now, full, s.get('auto_off'), time.time() - last_refresh_t, time.time() - battle_t0):
+                rr = refresh_characters(full, refresh_tries)
+                kind = "完整" if full else "快速"
+                if rr in REFRESH_DONE:
+                    battles += 1
+                    last_refresh_t = time.time()
+                    event(f'戰鬥中（{kind}戰鬥）：按刷新角色（第 {battles} 次，開戰 {last_refresh_t - battle_t0:.1f} 秒' + (f'，前面 {refresh_tries} 次沒成功' if refresh_tries else '') + '）'
+                          + ('' if rr == 'ok' else '（沒有 waitpix 結果，未驗證）'))
+                    refresh_tries = 0
+                else:
+                    refresh_tries += 1
+                    last_refresh_t = time.time() - REFRESH_GAP + REFRESH_RETRY     # 沒成功：REFRESH_RETRY 秒後重試，不等 REFRESH_GAP
+                    why = {'row': '底部「關閉 + 頭像」列還在', 'notready': '切換鈕沒露出（轉場 / 被蓋 / 戰鬥剛結束）→ 沒點',
+                           'nopanel': '按了切換但面板沒出現 → 沒點刷新'}.get(rr, rr)
+                    (event if rr == 'nopanel' or refresh_tries == 1 else log)(f'戰鬥中（{kind}戰鬥）刷新角色沒成功：{why}（本場第 {refresh_tries} 次，{REFRESH_RETRY:.0f} 秒後重試）')
+                    if refresh_tries == REFRESH_STUCK_SNAP:
+                        try:
+                            shot = snap('close-row-stuck' if rr == 'row' else 'refresh-fail')
+                        except Exception:
+                            shot = None
+                        event(f'本場刷新角色連續 {refresh_tries} 次沒成功（最後一次：{why}）', shot)
+                        _errlog(f'quest 戰鬥刷新角色連續 {refresh_tries} 次沒成功：{why}')
             elif not act and full and time.time() - last_full_log > 20:
                 event('完整戰鬥畫面（自動戰鬥已開，等打完）')
                 last_full_log = time.time()
+            if should_refresh(a, boss_now, full, s.get('auto_off'), 1e9, 1e9):
+                # 這場要刷新：下一次到期（開戰延遲 / 失敗重試 / REFRESH_GAP）比輪詢間隔早 → 只睡到到期（最少 0.2 秒），不多等一整輪
+                due = max(last_refresh_t + REFRESH_GAP, battle_t0 + (REFRESH_FIRST_DELAY if full else 0.0))
+                nap = min(a.every, max(0.2, due - time.time()))
         elif st == 'panel':
             gui('key', '{ESC}')
             event('切換角色面板殘留，ESC 關閉')
@@ -2095,7 +2124,7 @@ def _main() -> int:
         if wclock.expired(time.time()) and not slice_defer(st, time.time() - wclock.end):   # 戰鬥 / 對話 / 領獎中不收片（60 秒切片會切到 BOSS 戰中間，丟掉 BOSS 判斷）
             event(f'時間到，結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}；巡路中不計時 {wclock.walked:.0f} 秒）')
             return 0
-        time.sleep(a.every)
+        time.sleep(nap)
 
 
 def main() -> int:
