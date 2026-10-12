@@ -584,14 +584,43 @@ export function questNames(py: string): Map<number, string> {
   return m
 }
 
-// 找最後一筆 [questrun] 行：結束 → 完成 / 失敗（rc≠0 後還有別的事件行 → 接手中），其他 → 進行中；
+// 任務驅動器的事件行標籤：questrun（questrun.py）/ rebirth（rebirth.py 轉生任務）；取檔案中最後一筆
+const TASK_TAG = /\[(?:questrun|rebirth)\]/
+
+// [rebirth] 最後一筆：任務名取「階段 X 開始（名稱）」或本 run 開始行「轉到第 N 轉（名稱）」；階段取最後一個「階段 X 開始」
+// 結束 rc=0 → 已完成；rc≠0 後還有別的事件行 → 接手中（rebirth rc=N），否則失敗 rc=N；其餘進行中（附階段）
+function rebirthTitle(lines: string[], last: number): string | undefined {
+  let start = -1
+  for (let i = last; i >= 0; i--) if (/\[rebirth\].*開始：轉到第/.test(lines[i]!)) { start = i; break }
+  let name: string | undefined
+  let stage: string | undefined
+  for (let i = last; i >= Math.max(start, 0); i--) {
+    const m = /\[rebirth\]\s*階段 (\S+) 開始(?:（([^）]+)）)?/.exec(lines[i]!)
+    if (m) { stage ??= m[1]; name ??= m[2] }
+    if (stage && name) break
+  }
+  if (!name && start >= 0) name = /轉到第 \d+ 轉（([^）]+)）/.exec(lines[start]!)?.[1]
+  if (!name) return undefined
+  const line = lines[last]!
+  let state = stage ? `${stage} 進行中` : '進行中'
+  const end = /\]\s*結束 rc=(\d+)/.exec(line)
+  if (end) {
+    const later = lines.slice(last + 1).some(l => l.trim() !== '')
+    state = end[1] === '0' ? '已完成' : later ? `接手中（rebirth rc=${end[1]}）` : `失敗 rc=${end[1]}`
+  }
+  const t = `${TITLE_PREFIX}${name} ${state}`
+  return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) : t
+}
+
+// 找最後一筆 [questrun] / [rebirth] 行：結束 → 完成 / 失敗（rc≠0 後還有別的事件行 → 接手中），其他 → 進行中；
 // 任務名只在本 run（最後一個「開始：任務」行起）內取最後一個「任務 N「名」」，沒有就用開始行第一個 ID 查 questdefs。沒有 questrun 紀錄回 undefined
 export function titleFromLog(log: string, names: Map<number, string> = new Map()): string | undefined {
   const lines = log.split(/\r?\n/).slice(-LOG_TAIL_LINES)
   let last = -1
-  for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.includes('[questrun]')) { last = i; break }
+  for (let i = lines.length - 1; i >= 0; i--) if (TASK_TAG.test(lines[i]!)) { last = i; break }
   if (last < 0) return undefined
   const line = lines[last]!
+  if (line.includes('[rebirth]')) return rebirthTitle(lines, last)
   // 本次 run 邊界 = 最後一個「開始：任務」行（含）；名字只在邊界之後找，不抓到前一次 run
   let start = -1
   for (let i = last; i >= 0; i--) if (/\[questrun\].*開始：任務/.test(lines[i]!)) { start = i; break }
@@ -647,7 +676,7 @@ export function grindActivity(i: ProgIn): Grind | undefined {
   if (encAge === undefined || encAge > GRIND_MAX_S) return undefined
   // 最後一筆 questrun 行比遇敵開還新 → 還在任務中
   if (i.quest) {
-    const q = i.quest.split(/\r?\n/).slice(-LOG_TAIL_LINES).filter(l => l.includes('[questrun]'))
+    const q = i.quest.split(/\r?\n/).slice(-LOG_TAIL_LINES).filter(l => TASK_TAG.test(l))
     const qa = q.length ? questLineAgeS(q[q.length - 1]!, i.now) : undefined
     if (qa !== undefined && qa <= encAge) return undefined
   }
@@ -682,9 +711,9 @@ const IDLE_S = 120           // 最後動作超過這麼久沒動 → 標「閒�
 export type ProgIn = { quest?: string; actions?: string; state?: WState | null; now: number }
 const cut = (t: string) => (t.length > PROG_W ? `${t.slice(0, PROG_W - 1)}…` : t)
 
-// 事件行去掉日期、截圖路徑、[questrun] 標籤
+// 事件行去掉日期、截圖路徑、[questrun] / [rebirth] 標籤
 export function cleanEvent(l: string): string {
-  return l.replace(/^\d{4}-\d\d-\d\d\s+/, '').replace(/\s*\S*[\\/]\S*\.(?:png|jpe?g|bmp)\b/gi, '').replace(/\[questrun\]\s*/, '').trim()
+  return l.replace(/^\d{4}-\d\d-\d\d\s+/, '').replace(/\s*\S*[\\/]\S*\.(?:png|jpe?g|bmp)\b/gi, '').replace(/\[(?:questrun|rebirth)\]\s*/, '').trim()
 }
 
 // actions.log 一行是「HH:MM:SS 描述」（沒有日期）；以今天的 HH:MM:SS 算距今秒數（跨午夜 +86400）

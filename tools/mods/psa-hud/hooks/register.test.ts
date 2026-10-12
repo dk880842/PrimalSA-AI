@@ -332,6 +332,28 @@ test('titleFromLog：進行中 / 已完成 / 失敗 / 四大洞窟前綴 / 長�
   expect((titleFromLog('[questrun] 任務 1「' + '很長'.repeat(30) + '」詳情結果：ok\n') ?? '').length).toBeLessThanOrEqual(40)
 })
 
+test('titleFromLog：[rebirth] 行（取最後一筆 questrun / rebirth）', () => {
+  const q = '2026-10-12 20:00:00 [questrun] 結束 rc=0，完成 [3003]\n'
+  const st = '2026-10-12 21:43:28 [rebirth] 開始：轉到第 2 轉（漆黑洞窟(二轉)），從階段 enter，選項 {}\n2026-10-12 21:43:52 [rebirth] 階段 enter 結束 rc=0\n'
+  expect(titleFromLog(q + st, NAMES)).toBe('PSA｜漆黑洞窟(二轉) 進行中')
+  const run = st + '2026-10-12 21:49:37 [rebirth] 階段 boss10 開始（漆黑洞窟(二轉)）\n'
+  expect(titleFromLog(q + run, NAMES)).toBe('PSA｜漆黑洞窟(二轉) boss10 進行中')
+  const fail = run + '2026-10-12 21:49:22 [rebirth] 失敗 rc=84：boss10：x\n2026-10-12 21:49:22 [rebirth] 結束 rc=84；續跑：--from boss10 --trans 2\n'
+  expect(titleFromLog(fail, NAMES)).toBe('PSA｜漆黑洞窟(二轉) 失敗 rc=84')
+  expect(titleFromLog(fail + '22:00:00 [quiztower] x\n', NAMES)).toBe('PSA｜漆黑洞窟(二轉) 接手中（rebirth rc=84）')
+  expect(titleFromLog(run + '[rebirth] 結束 rc=0\n', NAMES)).toBe('PSA｜漆黑洞窟(二轉) 已完成')
+  // 較新的 questrun 蓋過舊 rebirth
+  expect(titleFromLog(fail + '[questrun] 開始：任務 [3003]\n', NAMES)).toBe('PSA｜猜謎三兄弟 進行中')
+  expect(cleanEvent('2026-10-12 21:49:37 [rebirth] 階段 boss10 開始')).toBe('21:49:37 階段 boss10 開始')
+})
+
+test('grindActivity：[rebirth] 比遇敵開新 → 任務中', () => {
+  const n = new Date(2026, 9, 12, 22, 0, 0).getTime()
+  const acts = '21:50:00 grind 原地遇敵：開\n'
+  expect(grindActivity({ quest: '2026-10-12 21:40:00 [rebirth] 結束 rc=0\n', actions: acts, state: null, now: n })).toEqual({ spot: '原地', quick: false })
+  expect(grindActivity({ quest: '2026-10-12 21:55:00 [rebirth] 階段 boss10 開始（x）\n', actions: acts, state: null, now: n })).toBeUndefined()
+})
+
 test('titleFromLog：不跨 run 抓名字；rc≠0 後有別的事件 → 接手中', () => {
   const prev = '14:00:00 [questrun] 開始：任務 [2002]\n14:01:00 [questrun] 任務 2002「碧青洞窟」詳情結果：ok\n14:02:00 [questrun] 結束 rc=0，完成 [2002]\n'
   const cur = '14:36:09 [questrun] 開始：任務 [3003]，選項 {}\n14:36:30 [questrun] 追蹤 x\n14:37:07 [questrun] 結束 rc=111，完成 []；失敗退出，不恢復掛機\n'
