@@ -98,7 +98,7 @@ def set_autoswap(roles: list, on: bool, tools=None) -> int:
 
 def relock(roles: list, battle_pet: str = '朵拉比斯', mount_species: str = '布拉奇多斯', which=('騎寵', '戰寵'), tools=None) -> int:
     """外掛「鎖定騎寵 / 鎖定戰寵」重勾（交寵物任務 / 換戰寵後）：讀寵物欄決定每人要選哪一隻（騎寵沒名字用成長字串）→
-    外掛面板只開一次逐人：下拉 OCR 讀字找剛好一列吻合的（每人順序不同，errlog #257）→ 讀回欄位 → 勾 → 讀回勾選。→ 0 / rebirth_pets 退出碼"""
+    外掛面板只開一次逐人：下拉 OCR 讀字找剛好一列吻合的（每人順序不同，errlog #257）→ 讀回欄位 → 勾 → 讀回勾選（每項當場讀回，不另開面板）。→ 0 / rebirth_pets 退出碼"""
     T = tools or rp.Tools()
     rc, pets = T.pets_list(roles)
     if rc:
@@ -111,11 +111,7 @@ def relock(roles: list, battle_pet: str = '朵拉比斯', mount_species: str = '
     if rc:
         print(f'pet_catch：{bad} 鎖定失敗 rc {rc}')
         return rc
-    rc, sts = T.lock_get_many(roles)                              # 最後再讀回一次（全部勾著才算）
-    miss = [r for r in roles if not all((sts.get(r) or {}).get(w) for w in which)] if not rc else roles
-    if miss:
-        print(f'pet_catch：讀回鎖定沒勾：{miss}')
-        return rp.EXIT_LOCK
+    # 不再另開一次面板讀回：_lock_set_here 每項都讀回欄位 / 勾選（2026-10-12 實機多讀一輪要 14 s，結果相同）
     print(f'pet_catch：{"、".join(which)} 鎖定完成：{roles}')
     return 0
 

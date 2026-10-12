@@ -433,6 +433,9 @@ check('--no-boxes：不開禮盒、其餘照跑、誘餌 0 → 取誘餌由 bag 
 
 # ---------------- 2026-10-12：外掛批次（面板只開一次）+ 鎖定下拉讀字選（D，errlog #257）----------------
 import ass  # noqa: E402
+check('role_ident：騎寵物種沒登錄 → 用騎乘中的那隻（成長字串）；騎乘中 0 隻 → None',
+      rp.role_ident([S(1, unnamed='49/9/8/2', species=None, state='騎乘'), S(2, name=DOR, state='出戰')], BRA, DOR, '騎寵') == ('growth', '49/9/8/2')
+      and rp.role_ident([S(1, unnamed='49/9/8/2', species=None, state='等待')], BRA, DOR, '騎寵') is None)
 check('lock_items：5 人 × 2 項、騎寵用成長字串 / 戰寵用名字；找不到唯一一隻 → 訊息',
       rp.lock_items({'DKBO': [S(1, unnamed='49/9/8/2', species=BRA, state='騎乘'), S(2, name=DOR, state='出戰')]}, ['DKBO'], BRA, DOR)[0]
       == [('DKBO', '騎寵', True, ('growth', '49/9/8/2')), ('DKBO', '戰寵', True, ('name', DOR))]

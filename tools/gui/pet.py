@@ -1583,7 +1583,9 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
                         if rc:
                             break
                         sl, why = find_slot(slots, nm, None, pick)
-                        if sl is None and skip_missing and not predicted and not any(x.get('unnamed') and not x.get('species') for x in slots):
+                        unknown = [x for x in slots if x.get('unnamed') and not x.get('species')
+                                   and not (x.get('state') == '騎乘' and nm not in uikit.MOUNTS)]    # 騎乘中的沒名字寵物不可能是非騎寵目標（2026-10-12 實機 DKBO2 騎寵 ?(49/9/7/2) 擋住 --skip-missing）
+                        if sl is None and skip_missing and not predicted and not unknown:
                             op['skipped'] = why
                             print(f'pet：{r} 沒有 {nm}，略過')
                             break

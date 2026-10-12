@@ -128,7 +128,7 @@ class FT3(FT2):
 BRA, DOR = '布拉奇多斯', '朵拉比斯'
 pp = {r: [{'slot': 1, 'empty': False, 'unnamed': '49/9/8/2', 'species': BRA, 'state': '騎乘'}, {'slot': 2, 'empty': False, 'name': DOR, 'state': '出戰'}] for r in ('DKBO', 'DKBO3')}
 f3 = FT3(pp)
-check('relock：一次 lock_set_many（2 人 × 2 項，騎寵用成長字串）+ 一次讀回 → 0', pet_catch.relock(['DKBO', 'DKBO3'], tools=f3) == 0 and f3.opens == ['set', 'get']
+check('relock：一次 lock_set_many（2 人 × 2 項，騎寵用成長字串）→ 0', pet_catch.relock(['DKBO', 'DKBO3'], tools=f3) == 0 and f3.opens == ['set']
       and ('DKBO3', '騎寵', True, ('growth', '49/9/8/2')) in f3.items and ('DKBO3', '戰寵', True, ('name', DOR)) in f3.items)
 f3 = FT3({'DKBO': [{'slot': 1, 'empty': False, 'name': DOR}, {'slot': 2, 'empty': False, 'name': DOR}]})
 check('relock：戰寵同名 2 隻 → 107、不開外掛', pet_catch.relock(['DKBO'], which=('戰寵',), tools=f3) == rp.EXIT_LOCK and f3.opens == [])

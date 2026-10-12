@@ -933,6 +933,10 @@ g = new(pets=mk(), depot=mkdp())
 rc, out, err = run(pet.store_many, 'DKBO,DKBO2', ['迪基格斯', '魯尼帖斯'], 'personal')
 check('store-many 每人 2 隻：每人頭像只點 1 次（第 2 隻用推算的欄位、選格重讀核對）', rc == 0 and depot_free(g) == 4
       and g.clicks.count((83, petmatch.AVATAR_Y['DKBO'])) == 1 and g.clicks.count((83, petmatch.AVATAR_Y['DKBO2'])) == 1, f'rc={rc} {err[-300:]}')
+fresh_tpl()
+g = new(pets=mk_pets(DKBO=[unn(0, '騎乘'), {'name': '朵拉比斯', 'state': '出戰', 'level': 1}, None, None, None]))
+rc, out, err = run(pet.store_many, 'DKBO', ['摩娜西普'], 'public', skip_missing=True)
+check('store-many --skip-missing：騎乘中的沒名字騎寵不擋「沒有就略過」', rc == 0 and depot_free(g) == 0 and last_json(out)['ops'][0].get('skipped'), f'rc={rc}')
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

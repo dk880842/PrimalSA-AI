@@ -144,6 +144,8 @@ def role_ident(slots: list, species: str, battle_pet: str, which: str) -> tuple 
         n = sum(1 for s in slots if not s.get('empty') and s.get('name') == battle_pet)
         return ('name', battle_pet) if n == 1 else None             # 同名 2 隻（朵拉比斯 Lv126 / Lv1）下拉分不出來 → 不鎖、交人
     hits = [s for s in slots if not s.get('empty') and ((s.get('unnamed') and s.get('species') == species) or s.get('name') == species)]
+    if not hits:                                                   # 物種沒登錄（縮圖 / 字串認不出）：退而用「目前騎乘中」的那隻（唯一才用；2026-10-12 實機 DKBO ?(49/9/8/2)）
+        hits = [s for s in slots if not s.get('empty') and s.get('state') == '騎乘' and (s.get('unnamed') or s.get('name'))]
     if len(hits) != 1:
         return None
     s = hits[0]
