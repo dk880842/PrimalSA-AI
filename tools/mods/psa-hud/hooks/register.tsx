@@ -93,6 +93,7 @@ export type WHud = {
   pet?: { level?: WF<string>; hp?: WF<number>; name?: WF<string> & { stale?: boolean } }
   map?: WF<string> & { id?: number }
   pos?: WF<number[]>
+  buffs?: WF<string[]> & { stale?: boolean }   // 頭像下方 buff：'exp'（2倍智慧果）/ 'dragon'（龍王的守護）
 }
 
 // state.json（只認 v 主版本 1；不認得的鍵一律忽略）
@@ -369,6 +370,13 @@ export function nameText(f?: (WF<string> & { stale?: boolean; conflict?: boolean
   return `${v}${f.stale ? '?' : ''}${f.conflict ? '!' : ''}`
 }
 
+// state.hud.buffs → 「EXP×2 龍王」；沒有 buff / 沒欄位 → undefined；舊值（stale）每項加 ?
+const BUFF_NAME: Record<string, string> = { exp: 'EXP×2', dragon: '龍王' }
+export function buffText(b?: (WF<string[]> & { stale?: boolean }) | null): string | undefined {
+  const l = (b?.v ?? []).map(k => BUFF_NAME[k]).filter((x): x is string => !!x)
+  return l.length ? l.map(x => `${x}${b?.stale ? '?' : ''}`).join(' ') : undefined
+}
+
 export function hudText(state: WState | null, now: number, seenAt: number): string | null {
   const h = state?.hud
   if (!h) return null
@@ -386,6 +394,8 @@ export function hudText(state: WState | null, now: number, seenAt: number): stri
     const why = COVER_TEXT[state?.screen?.state ?? ''] ?? '讀取中'
     t += `（${why} · ${age}s 前）`
   }
+  const bt = buffText(h.buffs)
+  if (bt) t += `  |  ${bt}`
   return t
 }
 
@@ -672,7 +682,7 @@ export function progressLines(i: ProgIn, names: Map<number, string> = new Map())
   const out: ProgLine[] = []
   const g = grindActivity(i)
   const t = i.quest === undefined ? undefined : titleFromLog(i.quest, names)
-  out.push({ text: g ? `練功中：${g.spot}${g.quick ? '（快速戰鬥）' : ''}` : `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
+  out.push({ text: g ? `練功中：${g.spot}${g.quick ? '（快速戰鬥）' : ''}${i.state?.hud?.buffs?.v?.includes('exp') ? '＋EXP×2' + (i.state.hud.buffs.stale ? '?' : '') : ''}` : `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
   const ev = i.quest === undefined ? [] : i.quest.split(/\r?\n/).filter(l => l.trim()).slice(-3).map(cleanEvent)
   if (ev.length === 0) out.push({ text: '事件：—', tone: 'gray' })
   for (const e of ev) out.push({ text: cut(` ${e}`), tone: 'gray' })

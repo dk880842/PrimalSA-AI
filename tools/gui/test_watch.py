@@ -20,6 +20,7 @@ sys.path.insert(0, str(HERE))
 import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 os.environ.setdefault('PSA_LAYOUT', '2880x1659')     # heal / walk 匯入時會問版面；測試不碰遊戲
 import charname  # noqa: E402
+import bag  # noqa: E402
 import errlog  # noqa: E402
 import heal  # noqa: E402
 import screen_sigs  # noqa: E402
@@ -1190,6 +1191,56 @@ watch.LEARN_EVERY = 60.0
 import shutil  # noqa: E402
 shutil.rmtree(dm_tmp, ignore_errors=True)
 
+# ---------------------------------------------------------------- buff 列（頭像下方 2倍智慧果 / 龍王）
+w, clk, fk = make('buff')
+main_px = fk.pixel
+buff_state = {'row': 'exp', 'fail': False}
+S0 = {(x, y) for x0, y0, ww, hh in bag.BUFF_SLOTS[:1] for x in range(x0, x0 + ww) for y in range(y0, y0 + hh)}
+
+
+def buff_or_main():
+    if not fk.last_arg or len(fk.last_arg.split()) != len(w.buff_pts):
+        return main_px
+    if buff_state['fail']:
+        return (0, 'garbage', '')
+    cols = ['255,255,255' if (buff_state['row'] == 'exp' and pt in S0) else '0,0,0' for pt in w.buff_pts]
+    return (0, ' '.join(cols), '')
+
+
+orig_call = fk.__call__
+fk.last_arg = ''
+fk.on_call = lambda script, args: setattr(fk, 'last_arg', args[1] if len(args) > 1 else '')
+fk.pixel = buff_or_main
+w.cycle()
+nb = lambda: sum(1 for c in fk.calls if c[0] == 'gui.ps1' and len(c[1]) > 1 and len(c[1][1].split()) == len(w.buff_pts))
+b = watchstate.read()['hud'].get('buffs')
+check('idle 時讀 buff 列 → hud.buffs.v == [exp]、不 stale', b and b['v'] == ['exp'] and not b['stale'], str(b))
+check('buff 點數在 ~700 以內（CPU）', len(w.buff_pts) <= 700, str(len(w.buff_pts)))
+clk.t += 3
+w.cycle()
+check('間隔未到（BUFF_EVERY）不重讀', nb() == 1, str(nb()))
+buff_state['row'] = None
+clk.t += watch.BUFF_EVERY + 1
+w.cycle()
+b = watchstate.read()['hud']['buffs']
+check('buff 消失 → v 變空（不是 stale）', b['v'] == [] and not b['stale'] and nb() == 2, str(b))
+buff_state['row'] = 'exp'
+buff_state['fail'] = True
+clk.t += watch.BUFF_EVERY + 1
+w.cycle()
+check('讀取失敗保留舊值', watchstate.read()['hud']['buffs']['v'] == [], '')
+buff_state['fail'] = False
+# 面板 / 戰鬥蓋住：不讀，保留舊值並標 stale
+fk.pixel = lambda: buff_or_main() if len((fk.last_arg or '').split()) == len(w.buff_pts) else (0, px_out('battle'), '')
+n0 = nb()
+clk.t += watch.BUFF_EVERY + 1
+w.cycle()
+st = watchstate.read()
+check('非主畫面不讀 buff', st['screen']['state'] not in watch.BUFF_STATES and nb() == n0, st['screen']['state'])
+check('非主畫面 buffs 保留舊值並標 stale', st['hud']['buffs']['v'] == [] and st['hud']['buffs']['stale'], str(st['hud']['buffs']))
+fk.on_call = None
+fk.pixel = main_px
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
+
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

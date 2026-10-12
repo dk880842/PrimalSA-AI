@@ -448,3 +448,23 @@ test('練功中：快速戰鬥紀錄在 600 行之前也認得；任一人最後
   expect(grindActivity({ quest: GQ, actions: a, state: gst(), now: gnow })!.quick).toBe(true)
   expect(grindActivity({ quest: GQ, actions: a + '15:44:40 grind ass：DKBO3 快速戰鬥 → 關\n', state: gst(), now: gnow })!.quick).toBe(false)
 })
+
+// ───────── buff 顯示 ─────────
+import { buffText } from './register'
+
+test('buffText / hudText：EXP×2、龍王；stale 加 ?；沒有就不顯示', () => {
+  expect(buffText(undefined)).toBeUndefined()
+  expect(buffText({ v: [] })).toBeUndefined()
+  expect(buffText({ v: ['exp', 'dragon'] })).toBe('EXP×2 龍王')
+  expect(buffText({ v: ['exp'], stale: true })).toBe('EXP×2?')
+  const st = { v: 1, hud: { ...HUD, buffs: { v: ['exp'], ts: 1 } }, screen: { state: 'idle' } }
+  expect(hudText(st, 0, 0)).toBe('0轉77級  HP 208  MP 45  |  寵 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29  |  EXP×2')
+  expect(hudText({ v: 1, hud: { ...HUD, buffs: { v: [], ts: 1 } } }, 0, 0)).toBe('0轉77級  HP 208  MP 45  |  寵 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29')
+})
+
+test('練功中那行：有 exp buff 加「＋EXP×2」（stale 加 ?）', () => {
+  const l0 = (b: object) => progressLines({ quest: GQ, actions: GA, state: gst({ hud: { map: { v: '庫塔伊洞窟地下一樓', id: 60049 }, buffs: b } }), now: gnow }, NAMES)[0]!.text
+  expect(l0({ v: ['exp'], ts: 1 })).toBe('練功中：地雷區（快速戰鬥）＋EXP×2')
+  expect(l0({ v: ['exp'], ts: 1, stale: true })).toBe('練功中：地雷區（快速戰鬥）＋EXP×2?')
+  expect(l0({ v: ['dragon'], ts: 1 })).toBe('練功中：地雷區（快速戰鬥）')
+})

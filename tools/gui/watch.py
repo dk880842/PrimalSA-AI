@@ -38,6 +38,7 @@ if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 import battleguard  # noqa: E402
+import bag  # noqa: E402   # 只用純資料 BUFF_SLOTS / BUFF_STEP / buff_classify（不呼叫任何 GUI 函式）
 import charname  # noqa: E402
 import charstate  # noqa: E402
 import digitmatch  # noqa: E402
@@ -64,6 +65,9 @@ OCR_ON = True                     # 測試可關（關了就完全不呼叫 stat
 DIGIT_ON = True                   # HUD 數值第一順位用 digitmatch 樣板比對；False = 一律 stat.ps1 OCR（測試 / 緊急退路）
 LEARN_EVERY = 60.0                # 自動補樣板（需要 stat 當標籤 + 多截一張圖）最短間隔：每分鐘最多一次
 OCR_STATES = ('idle', 'walking', 'battle')   # 只在這些畫面讀 HUD（battle 僅限非完整戰鬥；對話 / 面板 / 未知畫面可能蓋住 HUD，OCR 會讀到雜訊）
+BUFF_EVERY = 12.0                 # 頭像下方 buff 列（2倍智慧果 / 龍王的守護）讀取間隔；一次約 675 點像素（唯讀 pixel，不併入每輪的 classify 點）
+BUFF_STALE_S = 45.0               # 超過這麼久沒讀到 → hud.buffs.stale
+BUFF_STATES = ('idle', 'walking')  # 只在主畫面讀（對話 / 面板 / 戰鬥會蓋住 buff 列）
 LAYOUT_OK = '2880x1659'
 TRANSITIONS_KEEP = 20
 STABLE_CAP = 5                    # stable_n 上限（不封頂會每輪都「內容有變」）
@@ -238,6 +242,10 @@ class Watcher:
         self.hud_ts = None               # 最近一次成功（有資料）的時間
         self.hud_fail = True             # 最近一次嘗試是否失敗 / 跳過
         self.last_ocr = -1e9
+        self.buffs = None                # {'v': ['exp', ...], 'ts'}；讀不到 / 被蓋住時保留舊值
+        self.last_buff = -1e9
+        self.buff_pts = [(x, y) for x0, y0, w, h in bag.BUFF_SLOTS for y in range(y0, y0 + h, bag.BUFF_STEP) for x in range(x0, x0 + w, bag.BUFF_STEP)]
+        self.buff_arg = ' '.join(f'{x},{y}' for x, y in self.buff_pts)
         self.ocr_ms = 0
         self.hud_src: dict = {}          # 欄位名 -> 'digit' | 'ocr'（除錯用：這個值是樣板比對還是 stat OCR 讀的）
         self.dm_n = {'digit': 0, 'mixed': 0, 'ocr': 0, 'learned': 0}   # 每輪 HUD 讀取的來源計數 + 自動補的樣板數
@@ -419,6 +427,7 @@ class Watcher:
         self._update_interval()
         self._update_alerts()
         self._maybe_ocr(kind)
+        self._maybe_buffs(kind)
         self.flush()
 
     def _apply(self, kind: str, px) -> None:
@@ -620,6 +629,24 @@ class Watcher:
             self.merge_stat(self._parse_stat(r), self.call_t0, 'ocr')
         self._read_names()
 
+    def _maybe_buffs(self, kind: str) -> None:
+        """每 BUFF_EVERY 秒在主畫面讀一次 buff 列（pixel 唯讀）→ bag.buff_classify；其他畫面不讀、保留舊值"""
+        if kind != 'ok' or self.cur not in BUFF_STATES or self.mono() - self.last_buff < BUFF_EVERY:
+            return
+        self.last_buff = self.mono()
+        r, how, ms = self._call(_gui, 'pixel', self.buff_arg)
+        if r is None or self._kind(r) != 'ok':
+            return
+        try:
+            cols = [tuple(int(v) for v in c.split(',')) for c in (r.stdout or '').split()]
+        except ValueError:
+            return
+        if len(cols) != len(self.buff_pts) or any(len(c) != 3 for c in cols):
+            return
+        d = dict(zip(self.buff_pts, cols))
+        row = bag.buff_classify(lambda x, y: d[(x, y)])
+        self.buffs = {'v': [k for k in row if k], 'ts': self.call_t0}
+
     def _tpl_for(self, layout: str) -> dict:
         if layout not in self._tpl:
             self._tpl[layout] = digitmatch.load_tpl(layout)
@@ -792,6 +819,10 @@ class Watcher:
             out['dm'] = dict(self.dm_n)
         nm = self.names.resolve(self.side, now)
         out['name'] = nm or {'v': '?', 'ts': None, 'src': None, 'stale': True}
+        if self.buffs:
+            b = dict(self.buffs)
+            b['stale'] = self.cur not in BUFF_STATES or now - b['ts'] > BUFF_STALE_S
+            out['buffs'] = b
         if pet or self.pet_name:
             pn = dict(self.pet_name) if self.pet_name else {'v': '?', 'ts': None, 'src': None}
             pn['stale'] = pn.get('ts') is None or now - pn['ts'] > charname.NAME_STALE_S
