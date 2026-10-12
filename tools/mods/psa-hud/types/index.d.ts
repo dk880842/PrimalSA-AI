@@ -37,6 +37,8 @@ declare module 'claude-code' {
       at: number
       // watch 活著時的等級 / HP 行（state.hud 組成）；null = watch 不在，改用 stat
       hud: string | null
+      // 遇敵狀態行（state.screen.enc_on；warn = 不遇敵，黃字）；null = 不顯示
+      enc: { text: string; warn: boolean } | null
       // 即時狀態行（讀 tools/.cache/state.json 組成；顯示文字變了才更新）
       line: WatchLine
       // 即時進度區（任務 / 最近事件 / 最後動作 / 警報，最多 6 行）

@@ -100,7 +100,7 @@ export type WHud = {
 type WState = {
   v?: number; seq?: number; phase?: string; ts?: number
   watcher?: { token?: string; running?: boolean; interval?: number }
-  screen?: { label?: string; age_s?: number; state?: string; full?: boolean; annot?: string[]; enc_on?: boolean }
+  screen?: { label?: string; age_s?: number; state?: string; full?: boolean; annot?: string[]; enc_on?: boolean | null }
   hud?: WHud
   flags?: { verify_suspect?: boolean; netwatch_halt?: boolean }
   alerts?: { msg?: string; line?: string }[]
@@ -335,6 +335,8 @@ const stat = atom({ plugin: 'psa-hud', key: 'stat' } as const, null)
 const acts = atom({ plugin: 'psa-hud', key: 'errs' } as const, [] as ErrEntry[])
 const at = atom({ plugin: 'psa-hud', key: 'at' } as const, 0)
 const hudAtom = atom({ plugin: 'psa-hud', key: 'hud' } as const, null as string | null)
+const encAtom = atom({ plugin: 'psa-hud', key: 'enc' } as const, null as { text: string; warn: boolean } | null)
+let lastEnc: boolean | undefined
 const prog = atom({ plugin: 'psa-hud', key: 'prog' } as const, [] as ProgLine[])
 const line = atom({ plugin: 'psa-hud', key: 'line' } as const, { main: '（沒有狀態）', hints: [] } as WatchLine)
 
@@ -371,10 +373,23 @@ export function nameText(f?: (WF<string> & { stale?: boolean; conflict?: boolean
 }
 
 // state.hud.buffs → 「EXP×2 龍王」；沒有 buff / 沒欄位 → undefined；舊值（stale）每項加 ?
-const BUFF_NAME: Record<string, string> = { exp: 'EXP×2', dragon: '龍王' }
+const BUFF_NAME: Record<string, string> = { exp: 'EXP×2', dragon: '龍王（不遇敵）' }
 export function buffText(b?: (WF<string[]> & { stale?: boolean }) | null): string | undefined {
   const l = (b?.v ?? []).map(k => BUFF_NAME[k]).filter((x): x is string => !!x)
   return l.length ? l.map(x => `${x}${b?.stale ? '?' : ''}`).join(' ') : undefined
+}
+
+// 遇敵狀態：screen.enc_on（watch 依右下「取消遇敵」鈕：true 開 / false 主畫面看不到 / null 戰鬥或面板蓋住不判）。
+// null / 沒欄位時沿用 last（最後已知值）並加 ?；都沒有 → undefined（不顯示）。
+// 龍王的守護是「不遇敵」buff：enc_on=true 又有龍王時只並列說明（推測：實際不會遇敵，未實測），不下結論。warn = 不遇敵（黃字提醒掛機可能停了）
+export function encText(state: WState | null, last?: boolean): { text: string; warn: boolean; val?: boolean } | undefined {
+  const cur = state?.screen?.enc_on
+  const val = typeof cur === 'boolean' ? cur : last
+  if (val === undefined) return undefined
+  const q = typeof cur === 'boolean' ? '' : ' ?'
+  const dragon = (state?.hud?.buffs?.v ?? []).includes('dragon')
+  const text = val ? (dragon ? `遇敵中${q}（有龍王守護，推測實際不遇敵）` : `遇敵中${q}`) : (dragon ? `不遇敵${q}（龍王守護）` : `不遇敵${q}`)
+  return { text, warn: !val, val }
 }
 
 export function hudText(state: WState | null, now: number, seenAt: number): string | null {
@@ -533,6 +548,10 @@ async function tickState($: EngineInterface): Promise<void> {
     hudAlive = alive
     const ht = alive ? (hudText(state, now, sup.seenAt) ?? '（等級 / HP 讀取中…）') : null
     if ((await read($, hudAtom)) !== ht) await update($, hudAtom, () => ht)
+    const et = alive ? encText(state, lastEnc) : undefined
+    if (typeof et?.val === 'boolean') lastEnc = et.val
+    const eo = et ? { text: et.text, warn: et.warn } : null
+    if (JSON.stringify(await read($, encAtom)) !== JSON.stringify(eo)) await update($, encAtom, () => eo)
     if (wasAlive && !alive) void refresh($)       // watch 剛死：馬上用一次性 stat 補上，不等 15 s
     const old = await read($, line)
     if (JSON.stringify(old) !== JSON.stringify(vm)) await update($, line, () => vm)
@@ -813,6 +832,7 @@ export const register: Register = on => {
     const wl = await read($, line)
     const st = await read($, stat)
     const ht = await read($, hudAtom)
+    const en = await read($, encAtom)
     const pg = await read($, prog)
     const color = (t: WatchTone) => (t === 'red' ? 'red' : t === 'yellow' ? 'yellow' : undefined)
 
@@ -821,6 +841,7 @@ export const register: Register = on => {
         <Text wrap="truncate-end" bold>{wl.main}</Text>
         {wl.hints.map(h => <Text wrap="truncate-end" color={color(h.tone)} dimColor={h.tone === 'gray'}>{h.text}</Text>)}
         <Text wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>
+        {en ? <Text wrap="truncate-end" color={en.warn ? 'yellow' : 'green'}>{en.text}</Text> : null}
         <Text dimColor>{'─'.repeat(20)}</Text>
         {pg.map(p => <Text wrap="truncate-end" color={p.tone === 'red' ? 'red' : p.tone === 'yellow' ? 'yellow' : undefined} dimColor={p.tone === 'gray'} bold={p.tone === 'red'}>{p.text}</Text>)}
         <Text dimColor>{'─'.repeat(20)}</Text>

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   Supervisor, backoffMs, decideExit, errEntries, errLine, format, logPathFromCwd, parseState, stallThresholdMs, statPathFromCwd,
-  viewModel, watchAlive, watchPathFromCwd, hudText, nameText,
+  viewModel, watchAlive, watchPathFromCwd, hudText, nameText, encText,
 } from './register'
 import type { SupDeps, ViewIn } from './register'
 
@@ -455,7 +455,7 @@ import { buffText } from './register'
 test('buffText / hudText：EXP×2、龍王；stale 加 ?；沒有就不顯示', () => {
   expect(buffText(undefined)).toBeUndefined()
   expect(buffText({ v: [] })).toBeUndefined()
-  expect(buffText({ v: ['exp', 'dragon'] })).toBe('EXP×2 龍王')
+  expect(buffText({ v: ['exp', 'dragon'] })).toBe('EXP×2 龍王（不遇敵）')
   expect(buffText({ v: ['exp'], stale: true })).toBe('EXP×2?')
   const st = { v: 1, hud: { ...HUD, buffs: { v: ['exp'], ts: 1 } }, screen: { state: 'idle' } }
   expect(hudText(st, 0, 0)).toBe('0轉77級  HP 208  MP 45  |  寵 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29  |  EXP×2')
@@ -467,4 +467,16 @@ test('練功中那行：有 exp buff 加「＋EXP×2」（stale 加 ?）', () =>
   expect(l0({ v: ['exp'], ts: 1 })).toBe('練功中：地雷區（快速戰鬥）＋EXP×2')
   expect(l0({ v: ['exp'], ts: 1, stale: true })).toBe('練功中：地雷區（快速戰鬥）＋EXP×2?')
   expect(l0({ v: ['dragon'], ts: 1 })).toBe('練功中：地雷區（快速戰鬥）')
+})
+
+test('encText：遇敵狀態；null 沿用最後值加 ?；龍王只並列說明', () => {
+  const b = (k: string[]) => ({ v: k, ts: 1 })
+  expect(encText({ v: 1, screen: { enc_on: true } } as never)).toEqual({ text: '遇敵中', warn: false, val: true })
+  expect(encText({ v: 1, screen: { enc_on: false } } as never)).toEqual({ text: '不遇敵', warn: true, val: false })
+  expect(encText({ v: 1, screen: { enc_on: null } } as never, false)).toEqual({ text: '不遇敵 ?', warn: true, val: false })
+  expect(encText({ v: 1, screen: { enc_on: null } } as never, true)?.text).toBe('遇敵中 ?')
+  expect(encText({ v: 1, screen: {} } as never)).toBeUndefined()
+  expect(encText({ v: 1, screen: { enc_on: true }, hud: { buffs: b(['dragon']) } } as never)?.text).toContain('龍王')
+  expect(encText({ v: 1, screen: { enc_on: false }, hud: { buffs: b(['dragon']) } } as never)?.text).toBe('不遇敵（龍王守護）')
+  expect(buffText({ v: ['exp', 'dragon'] } as never)).toBe('EXP×2 龍王（不遇敵）')
 })
