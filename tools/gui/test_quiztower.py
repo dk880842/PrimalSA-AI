@@ -63,28 +63,29 @@ check('題目：名字不在題庫 → 不認', P(['以下哪只寵物的名字�
 check('題目：沒有「哪只」→ 不認', P(['請選出諾克斯'], BANK)[0] is None)
 check('題目：驗證視窗樣的字 → 不認', P(['防外掛驗證', '請點選正確的圖片'], BANK)[0] is None)
 
-# ---------------------------------------------------------------- 安全閘四條件
+# ---------------------------------------------------------------- 安全閘（gate 純函式：①③④⑥；②⑤⑦ 在下面假 gui 實跑）
 G = q.gate
 T0 = 1000.0
 good = ['知識答題', '以下哪只寵物的名字叫做“諾克斯”']
-check('閘：四條件都符合 → 作答', G(803, T0, T0 + 2, good, BANK) == (True, '諾克斯'))
-check('閘：810 也算塔內', G(810, T0, T0 + 2, good, BANK)[0])
+check('閘：條件都符合 → 作答', G(803, T0, T0 + 2, good, BANK) == (True, '諾克斯'))
+r = G(810, T0, T0 + 2, good, BANK)
+check('閘缺①：810（沒有守衛）→ 停', not r[0] and r[1].startswith('①'), r)
 r = G(1000, T0, T0 + 2, good, BANK)
-check('閘缺①：地圖不是 800～810 → 停', not r[0] and r[1].startswith('①'), r)
+check('閘缺①：地圖不是塔 → 停', not r[0] and r[1].startswith('①'), r)
 r = G(None, T0, T0 + 2, good, BANK)
 check('閘缺①：地圖讀不到 → 停', not r[0] and r[1].startswith('①'), r)
-r = G(803, None, T0 + 2, good, BANK)
-check('閘缺②：沒按過「猜謎答題」→ 停', not r[0] and r[1].startswith('②'), r)
-r = G(803, T0, T0 + q.GATE_WINDOW_S + 1, good, BANK)
-check('閘缺②：按「猜謎答題」太久以前 → 停', not r[0] and r[1].startswith('②'), r)
+r = G(803, T0, T0 + 3.5, good, BANK)
+check('閘缺③：按「猜謎答題」3 秒後才出現 → 停', not r[0] and r[1].startswith('③'), r)
+r = G(803, None, T0 + 1, good, BANK)
+check('閘缺④：這次按鍵的視窗已用掉（沒有未用的按鍵）→ 停', not r[0] and r[1].startswith('④'), r)
 r = G(803, T0, T0 + 2, ['以下哪只寵物的名字叫做“諾克斯”'], BANK)
-check('閘缺③：沒有「知識答題」標題 → 停', not r[0] and r[1].startswith('③'), r)
+check('閘缺⑥：沒有「知識答題」標題 → 停', not r[0] and r[1].startswith('⑥'), r)
 r = G(803, T0, T0 + 2, ['防腳本驗證', '以下哪只寵物的名字叫做“諾克斯”'], BANK)
-check('閘缺③：標題是「防腳本驗證」→ 停', not r[0] and r[1].startswith('③'), r)
+check('閘缺⑥：標題是「防腳本驗證」→ 停', not r[0] and r[1].startswith('⑥'), r)
 r = G(803, T0, T0 + 2, ['知識答題', '四聖獸中水屬性的聖獸是?'], BANK)
-check('閘缺④：不是名字題 → 停', not r[0] and r[1].startswith('④'), r)
+check('閘缺⑥：不是名字題 → 停', not r[0] and r[1].startswith('⑥'), r)
 r = G(803, T0, T0 + 2, ['知識答題', '以下哪個不是人龍系?'], BANK)
-check('閘缺④：「不是」題 → 停', not r[0] and r[1].startswith('④'), r)
+check('閘缺⑥：「不是」題 → 停', not r[0] and r[1].startswith('⑥'), r)
 
 # ---------------------------------------------------------------- decide（純矩陣）
 d = q.decide([[0.9, 0.5, 0.4, 0.3], [0.5, 0.9, 0.4, 0.3], [0.4, 0.4, 0.9, 0.3], [0.3, 0.3, 0.3, 0.9]], [1, 2, 3, 4], 3)
@@ -196,8 +197,12 @@ _SCENES: dict = {}
 class Fake:
     """模擬猜謎三兄弟的家：座標、圍欄（答對才開）、守衛 / 伊那多對話框、答題視窗、追蹤巡路（works / dead）"""
 
-    def __init__(self, at=(811, 29, 15), track='dead', answered=(), title='知識答題', questions=None, wrong_stays=True,
-                 guard_buttons=('猜謎答題', '再見'), inado_body=('拿去吧',), walk_fail=False, pre_rc=0):
+    def __init__(self, at=(811, 29, 15), track='dead', answered=(), title='知識答題', questions=None, wrong_stays=False,
+                 guard_buttons=('猜謎答題', '再見'), inado_body=('拿去吧',), walk_fail=False, pre_rc=0,
+                 wrong_first=None, quiz_delay=0.0, pre_window=False, second_window=False, walk_window=False):
+        self.wrong_stays, self.wrong_first, self.quiz_delay = wrong_stays, dict(wrong_first or {}), quiz_delay
+        self.second_window, self.walk_window, self.reopen = second_window, walk_window, 0
+        self.attempts, self.quiz_at = {}, 0.0
         self.m, self.x, self.y = at
         self.track_mode, self.answered = track, set(answered)
         self.title, self.questions = title, {**QUESTIONS, **(questions or {})}
@@ -207,6 +212,8 @@ class Fake:
         self.t, self.log, self.clicks, self.quiz_clicks, self.events = 0.0, [], [], [], []
         self.walks, self.tracks = [], 0
         self.got_pet = False
+        if pre_window:
+            self.screen = 'quiz'
 
     # 時間
     def now(self):
@@ -252,6 +259,8 @@ class Fake:
 
     def walk_to(self, m, x, y, exit_map=None, auto=True):
         self.walks.append((m, x, y, exit_map))
+        if self.walk_window:                    # 走路途中跳出答題視窗（不是自己按的）
+            self.walk_window, self.screen, self.quiz_at = False, 'quiz', self.t
         if self.walk_fail or m != self.m:
             raise RuntimeError(f'不在地圖 {m}')
         fence = m in q.QUIZ_FLOORS and m not in self.answered and y < q.floor_info(m)['guard'][1] <= self.y
@@ -280,7 +289,7 @@ class Fake:
             self.screen, self.dlg = 'dialog', 'inado1'
         elif self.screen == 'dialog' and (x, y) == q.DIALOG_LEFT:
             if self.dlg == 'guard':
-                self.screen, self.dlg, self.picked = 'quiz', None, None
+                self.screen, self.dlg, self.picked, self.quiz_at = 'quiz', None, None, self.t + self.quiz_delay
             elif self.dlg == 'inado1':
                 self.dlg = 'inado2'
             elif self.dlg == 'inado2':
@@ -297,7 +306,11 @@ class Fake:
         return list(self.inado_body) if self.dlg and self.dlg.startswith('inado') else ['回答我的問題']
 
     def quiz_texts(self):
-        if self.screen != 'quiz':
+        if self.reopen == 1:                    # 答完關掉後第 1 次看：還是關的；第 2 次看：又跳出來（④）
+            self.reopen = 2
+        elif self.reopen == 2:
+            self.reopen, self.screen, self.quiz_at = 0, 'quiz', self.t
+        if self.screen != 'quiz' or self.t < self.quiz_at:
             return []
         return [self.title, self.questions[self.m][1], 'A', 'B', 'C', 'D', '確認']
 
@@ -316,16 +329,16 @@ class Fake:
         self.quiz_clicks.append((x, y))
         if (x, y) == q.CONFIRM:
             want = self._scene()[1]
-            if self.picked == want:
+            n = self.attempts[self.m] = self.attempts.get(self.m, 0) + 1
+            if self.picked == want and n > self.wrong_first.get(self.m, 0):
                 self.answered.add(self.m)
                 self.screen = 'idle'
-            elif not self.wrong_stays_open():
+                if self.second_window:
+                    self.second_window, self.reopen = False, 1
+            elif not self.wrong_stays:          # 答錯：視窗關、圍欄不開
                 self.screen = 'idle'
         else:
             self.picked = q.OPT_XS.index(x)
-        return True
-
-    def wrong_stays_open(self):
         return True
 
     def snap(self, tag):
@@ -338,8 +351,10 @@ class Fake:
         self.events.append(msg)
 
 
-def go(fake, **kw):
-    q.PROGRESS.unlink(missing_ok=True)
+def go(fake, keep=False, **kw):
+    if not keep:
+        q.PROGRESS.unlink(missing_ok=True)
+    kw.setdefault('confirm_first', False)
     return q.Runner(fake, dict(bank=BANK, no_dump=True, **kw)).run(), fake
 
 
@@ -383,12 +398,61 @@ rc, f = go(Fake(at=(804, 29, 20)))
 check('不明確：rc 135、答題視窗內 0 點擊', rc == q.EXIT_UNSURE and not f.quiz_clicks and f.screen == 'quiz', (rc, f.quiz_clicks))
 del _SCENES[(804, '哥斯哥斯')]
 
-# 答錯（確認後視窗沒關）→ 136：假場景故意標錯正解位置
-img, want = scene('加格', random.Random(801))
-_SCENES[(801, '加格')] = (img, (want + 1) % 4)
-rc, f = go(Fake(at=(801, 18, 20)))
+# 答錯：確認後視窗沒關（畫面未知）→ 136
+rc, f = go(Fake(at=(801, 18, 20), wrong_stays=True, wrong_first={801: 1}))
 check('答錯：確認後視窗沒關 → rc 136', rc == q.EXIT_WRONG, (rc, f.events[-2:]))
-del _SCENES[(801, '加格')]
+# 答錯 1 次（視窗關、圍欄沒開）→ 重新點守衛再答 → 過關
+rc, f = go(Fake(at=(801, 18, 20), wrong_first={801: 1}))
+check('答錯 1 次：重答後 rc 0', rc == 0 and f.got_pet and f.attempts[801] == 2, (rc, f.events[-3:]))
+check('答錯 1 次：有「答錯（第 1 次）→ 重新點守衛」事件與 errlog', any('答錯（第 1 次）' in e for e in f.events)
+      and any('答錯' in m for k, m in f.log if k == 'errlog'))
+# 同一層連錯 3 次 → 136
+rc, f = go(Fake(at=(801, 18, 20), wrong_first={801: 3}))
+check('連錯 3 次：rc 136、剛好答 3 次', rc == q.EXIT_WRONG and f.attempts[801] == 3 and len(f.quiz_clicks) == 6, (rc, f.attempts))
+# 連錯 2 次第 3 次對 → 繼續
+rc, f = go(Fake(at=(801, 18, 20), wrong_first={801: 2}))
+check('錯 2 次第 3 次對：rc 0', rc == 0 and f.attempts[801] == 3, rc)
+
+# ②⑤④ 答題視窗不是這次按鍵觸發的 → 9、不點
+rc, f = go(Fake(at=(802, 29, 20), pre_window=True))
+check('⑤ 開跑時已有答題視窗（沒有待續答紀錄）→ rc 9、什麼都沒點', rc == 9 and not f.clicks and not f.quiz_clicks, rc)
+rc, f = go(Fake(at=(803, 32, 26), walk_window=True))
+check('⑤ 走路途中跳答題視窗 → rc 9、0 次答題點擊', rc == 9 and not f.quiz_clicks, rc)
+rc, f = go(Fake(at=(802, 29, 20), second_window=True))
+check('④ 答完又跳一個答題視窗 → rc 9、只答了 1 次', rc == 9 and len(f.quiz_clicks) == 2, (rc, f.quiz_clicks))
+rc, f = go(Fake(at=(802, 29, 20), quiz_delay=4.0))
+check('③ 按「猜謎答題」4 秒後才出現 → rc 9、0 次答題點擊', rc == 9 and not f.quiz_clicks, rc)
+
+
+class PreWin(Fake):
+    """② 對話框開著時就已經有答題視窗（按「猜謎答題」前 OCR 看得到）"""
+    def quiz_texts(self):
+        if self.screen == 'dialog':
+            return ['知識答題', '以下哪只寵物的名字叫做“諾克斯”']
+        return super().quiz_texts()
+
+
+rc, f = go(PreWin(at=(802, 29, 20)))
+check('② 按「猜謎答題」前就有答題視窗 → rc 9、沒按', rc == 9 and q.DIALOG_LEFT not in f.clicks, rc)
+
+# --confirm-first：第一個視窗只比對不點 → 140；--answer N 續答 → 之後全自動
+rc, f = go(Fake(at=(802, 29, 20)), confirm_first=True)
+pend = q.load_progress().get('pending') or {}
+check('confirm-first：rc 140、0 次答題點擊、視窗留著', rc == q.EXIT_CONFIRM and not f.quiz_clicks and f.screen == 'quiz', rc)
+check('confirm-first：進度檔記 pending（802 烏寶寶）', pend.get('map') == 802 and pend.get('name') == '烏寶寶', pend)
+check('confirm-first：訊息含選項名字與腳本建議', any('A=' in e and '腳本建議' in e for e in f.events), f.events[-1:])
+want = f._scene()[1]
+rc, f = go(f, keep=True, confirm_first=True, answer=want)
+check('--answer N 續答：rc 0、之後 803～809 不再停', rc == 0 and f.got_pet and f.answered >= set(range(802, 810)), (rc, f.events[-3:]))
+rc, f = go(Fake(at=(802, 29, 20)), confirm_first=True)
+rc, f = go(f, keep=True, confirm_first=False)
+check('confirm-first 後去掉旗標續跑：照比對結果答、rc 0', rc == 0 and f.got_pet, rc)
+rc, f = go(Fake(at=(802, 29, 20)), confirm_first=True)
+f.t += q.PENDING_MAX_S + 1
+rc, f = go(f, keep=True, answer=0)
+check('待確認紀錄過期再 --answer → rc 9、不點', rc == 9 and not f.quiz_clicks, rc)
+rc, f = go(Fake(at=(802, 29, 20)), answer=0)
+check('--answer 但畫面上沒有答題視窗 → rc 1、不點', rc == 1 and not f.clicks, rc)
 
 # 守衛對話框不是猜謎答題 → 132
 rc, f = go(Fake(at=(800, 29, 20), guard_buttons=('再見',)))
@@ -406,7 +470,7 @@ check('不在塔：rc 130', rc == q.EXIT_NOT_TOWER, rc)
 # 進度檔：記答過但圍欄其實沒開 → 清掉重做守衛
 q.PROGRESS.unlink(missing_ok=True)
 fk = Fake(at=(807, 18, 20))
-rn = q.Runner(fk, dict(bank=BANK, no_dump=True))
+rn = q.Runner(fk, dict(bank=BANK, no_dump=True, confirm_first=False))
 rn.prog['floors']['807'] = {'ts': fk.now()}
 rc = rn.run()
 check('進度檔誤記答過：清掉後重答 807 → rc 0', rc == 0 and 807 in fk.answered, (rc, fk.events[-4:]))

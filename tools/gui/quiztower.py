@@ -6,37 +6,45 @@
 「點追蹤能不能在塔內巡路」都**待實機驗證**（清單見 .claude/skills/psa-game-ui/ui/quest.md「猜謎三兄弟爬塔」）。第一次實跑請在旁邊看。
 
 用法（專案根目錄；WSL / Windows 原生相同）：
-  uv run --no-project python tools/gui/quiztower.py run [--dry-run] [--at 地圖] [--no-track] [--max-min 45]
+  uv run --no-project python tools/gui/quiztower.py run [--dry-run] [--at 地圖] [--no-track] [--max-min 45] [--no-confirm-first] [--answer N]
         從目前位置接著爬（中斷後重跑 = 續跑：讀座標判斷在第幾層、該層答過沒）；--dry-run 只印每層計畫（不碰遊戲，--at 指定起點地圖，預設 811）
+        --confirm-first（預設開）：第一個答題視窗只比對、印出 4 個選項最像誰與分數、存截圖，**不點**，退出 140 交給使用者確認；
+          使用者同意後 `run --answer N`（N = 1～4 / A～D，續答那個還開著的視窗）或 `run --no-confirm-first`（照腳本比對結果答）續跑，之後全自動。
+          確認過一次記在進度檔（confirmed_ts，2 小時內重跑不再問）。135（比對不明確）停下的視窗也可以用 --answer N 續答。
   uv run --no-project python tools/gui/quiztower.py bank [名稱]              # 印題庫（名字題 → 正解 imageId / 靜態圖），不碰遊戲
   uv run --no-project python tools/gui/quiztower.py match 截圖.png --question "以下哪只寵物的名字叫做“諾克斯”" [--dump]
         離線比對一張存好的截圖（1440×830）：印 4 個選項分數、選哪個、夠不夠明確；--dump 把 4 張裁切存到 tools/.cache/quiztower/。不碰遊戲
   uv run --no-project python tools/gui/quiztower.py status                   # 唯讀：讀座標 → 印目前在第幾層、下一步
-  可 import：quiztower.run(dry_run=False, use_track=True, tools=None, ...) → 退出碼；結果 dict 在 quiztower.LAST
+  可 import：quiztower.run(dry_run=False, use_track=True, tools=None, confirm_first=True, answer=None, ...) → 退出碼；結果 dict 在 quiztower.LAST
 
 前置：questrun 已接取 3003（questdetail「傳送」→ 受理A「接藍暴任務」→「接受」，人在 811），5 人同隊、原地遇敵關著（questrun 交接已做）。
 
 每層流程（800～809；偶數層守衛 29,19 / 出口 29,13 / 進場 14,26，奇數層守衛 18,19 / 出口 18,13 / 進場 32,26）：
-  1 preflight    uikit.preflight（版面 / 斷線 / 畫面連 3 次不認得 → 9）
+  1 preflight    uikit.preflight（版面 / 斷線 / 畫面連 3 次不認得 → 9）；每輪開頭、走路 / 巡路 / 戰鬥 / 換層後都 OCR 看有沒有答題視窗（⑤）
   2 到守衛正下方 先點任務追蹤卡（quest.track_task「猜謎三兄弟」）讓遊戲自動巡路；點後 TRACK_MOVE_S 秒座標沒變 = 這張圖不能巡路
                  （800～810 屬 noTaskNavigate，10-09 實測沒反應）→ 本次執行之後都不再點追蹤，改 walk.py 走到 (守衛 x, 20)；
                  800 層 maps.bin 沒通行格：從進場點照紀錄點地面 FLOOR800_CLICKS，再 walk.py 直線分段補到 29,20
   3 點守衛       GUARD_CLICKS（紀錄座標）→ 沒對話框再試 walk.npc_screen 算出來的點；對話框按鈕 OCR 要有「猜謎答題」（且在左鈕位置）才按左鈕 948,461
   4 安全閘       見下；不符 → 退出碼 9，不點任何東西
   5 作答         截圖 → 裁 4 張選項圖 → 與題庫 4（～5）張正解候選靜態圖比對 → 最佳指派（排列）選出正解位置；不明確 → 135 交人
-                 → 點選項 → 藍「確認」735,610 → 答題視窗要消失（還在 = 疑似答錯 → 136）
-  6 走出口       walk.py 走到出口格（exit_map = 上一層）→ 換層等 HUD 載入；走不過去（圍欄沒開）→ 136
+                 → 點選項 → 藍「確認」735,610 → 答題視窗要消失（沒消失 = 畫面未知 → 136 停）→ 再等 1 秒確認沒有又跳視窗（④）
+  6 走出口       walk.py 走到出口格（exit_map = 上一層）→ 換層等 HUD 載入。
+                 **走不過圍欄 = 答錯**（使用者 2026-10-12：答錯只要重答）：存那題 4 張裁切與分數（*-WRONG.json）→ 重新點守衛 →「猜謎答題」
+                 → 同樣安全閘再答（新的一次按鍵 = 允許一個新視窗）；同一層連續答錯 WRONG_MAX（3）次才停 136
   810：伊那多 28,16（先試追蹤，否則走到 28,17 點她）→ 按鈕「拿金豬」→「完成」→ Loading → 傳回 811 = 完成（退出碼 0）
 
-答題安全閘（鐵則 5；四條件全部成立才作答，任一不符 = 當伺服器防腳本驗證，立刻停手、不點任何東西、退出碼 9）：
-  ① 目前地圖 800～810（點守衛前讀的座標）
-  ② GATE_WINDOW_S 秒內本腳本剛按過守衛對話框的「猜謎答題」鈕（答題視窗是自己觸發的）
-  ③ 視窗文字有標題「知識答題」
-  ④ 題目是題庫裡的「哪只寵物叫(做) X」名字題（knowledge/quests/answers.md + Answer.jsonl；正解 = 選項中名字剛好是 X 的那張圖）。
+答題安全閘（鐵則 5；全部成立才作答，任一不符 = 當伺服器防腳本驗證，立刻停手、不點任何東西、退出碼 9）：
+  ① 地圖是有守衛的 800～809（點守衛前讀的座標）
+  ② 按「猜謎答題」之前先 OCR 確認畫面上沒有答題視窗（先跳的 = 伺服器驗證）
+  ③ 答題視窗必須在按下「猜謎答題」後 GATE_WINDOW_S（3）秒內出現
+  ④ 每次按「猜謎答題」只認一個答題視窗：答完（視窗關掉）後又跳答題視窗 → 停
+  ⑤ 走路、巡路、戰鬥、換層途中、開跑時出現任何答題視窗 → 停（開跑時例外：進度檔 pending 記的、PENDING_MAX_S 內、同一題的那個視窗才准續答）
+  ⑥ 標題「知識答題」+ 題目是題庫裡的「哪只寵物叫(做) X」名字題（knowledge/quests/answers.md + Answer.jsonl；正解 = 選項中名字剛好是 X 的那張圖）。
      註：10-09 實際出現的題目句型不只「以下哪只寵物的名字叫做“X”」，還有「以下哪只寵物叫做烏寶寶？」「下列圖片中哪只寵物叫加格？」
      「以下圖中哪只寵物叫做朵洛將恩？」「下列圖中哪只寵物叫哥斯哥斯？」（Answer 51 / 52 / 65 / 66），只認字面前綴會在這幾層誤停，
-     所以 ④ 認的是「題庫裡的名字題全文」（句型 + 名字都要對上題庫），系別 / 四聖獸 / 「不是 XX」這類題一律不認 → 9。
-  殘餘風險：伺服器驗證剛好在 ② 的窗口內跳出、而且長得一模一樣（同標題、同題庫）時分不出來；GATE_WINDOW_S 刻意短。
+     所以認的是「題庫裡的名字題全文」（句型 + 名字都要對上題庫），系別 / 四聖獸 / 「不是 XX」「屬於 XX」這類題一律不認 → 9。
+  ⑦ 比對分數不明確 → 135（不是 9：視窗是自己觸發的，只是沒把握）
+  殘餘風險：伺服器驗證剛好在 ③ 的 3 秒內跳出、而且長得一模一樣（同標題、同題庫）時分不出來。
 
 作答比對（answer_from_image，只用標準函式庫）：
   畫面選項：截圖（1440×830）裁 OPT_XS × OPT_Y 為中心 OPT_W×OPT_H 的框；外圈 3 px 取中位數當底色，與底色差 > BG_TOL 的像素 = 前景，
@@ -45,21 +53,23 @@
   特徵：前景外框縮成 GRID×GRID 格（每格前景比例 + 平均色）+ 4×4×4 色彩直方圖 + 長寬比；相似度 = 形狀 / 格色 / 直方圖 / 長寬比加權。
   決策：4 個選項 × 候選圖的分數矩陣，取總分最高的一對一指派（排列）；正解圖被指派到的選項 = 答案。
         明確度 = 「最佳指派」與「正解放在別的選項的最佳指派」總分差（MIN_MARGIN）、正解圖那一欄第一名與第二名的差（MIN_GAP）、
-        正解分數下限（MIN_ABS），任一不夠 → 135 停手交人，不猜。答錯 1 題（確認後視窗沒關 / 圍欄沒開）就停（136）。
-  每次作答的 4 張裁切與分數存 tools/.cache/quiztower/（實機校準用，3 天自動清）。
+        正解分數下限（MIN_ABS），任一不夠 → 135 停手交人，不猜。
+  每次作答的 4 張裁切與分數存 tools/.cache/quiztower/（實機校準用，3 天自動清）；答錯的另存 <時間>-<層>-WRONG.json。
 
-退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；quiztower 自己 130～139）：
+退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；quiztower 自己 130～140）：
   0   拿到金布伊（810 伊那多「完成」後傳回 811）
+  1   --answer 用錯（畫面上沒有待續答的答題視窗 / 值不是 1～4、A～D）
   130 不在塔內（800～811）且點追蹤也沒進塔 / 地圖讀不到
   131 走路失敗（走不到守衛下方 / 出口、換層逾時）
   132 點守衛沒有對話框，或對話按鈕沒有「猜謎答題」（不在左鈕）
-  133 按「猜謎答題」後 QUIZ_WAIT_S 秒內沒出現答題視窗（畫面是已知的主畫面 / 對話框）
+  133 按「猜謎答題」後 3 秒內沒出現答題視窗（畫面是已知的主畫面 / 對話框）
   134 答題視窗的選項圖讀不到（截圖失敗 / 正解候選缺靜態圖）
-  135 比對不明確（第一、二名差太小 / 分數太低）→ 答題視窗維持開著，交人
-  136 確認後答題視窗沒關，或出口走不過去（疑似答錯 / 圍欄沒開）→ 停
+  135 比對不明確（第一、二名差太小 / 分數太低）→ 答題視窗維持開著，交人（可 --answer N 續答）
+  136 同一層連續答錯 3 次，或確認後答題視窗沒關（畫面未知）→ 停
   137 810 伊那多對話失敗（按鈕不是「拿金豬」/「完成」、完成後沒回 811）
   138 對話框含不可逆關鍵字（quest.find_irreversible）→ 沒按
   139 超過 --max-min 分鐘
+  140 --confirm-first：第一個答題視窗只比對沒點，等使用者確認（訊息含 4 個選項最像誰、分數、腳本建議）
 """
 import argparse
 import itertools
@@ -92,7 +102,7 @@ PROGRESS = logpaths.p(uikit.CACHE / 'quiztower.json')
 EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
 
 (EXIT_NOT_TOWER, EXIT_WALK, EXIT_GUARD, EXIT_NO_QUIZ, EXIT_NO_IMAGE, EXIT_UNSURE,
- EXIT_WRONG, EXIT_INADO, EXIT_IRREV, EXIT_TIME) = range(130, 140)
+ EXIT_WRONG, EXIT_INADO, EXIT_IRREV, EXIT_TIME, EXIT_CONFIRM) = range(130, 141)
 EXIT_VERIFY = uikit.EXIT_UNKNOWN_SCREEN    # 9：安全閘不符 = 當防腳本驗證
 
 # ---- 塔的資料（knowledge：psa.py map 800～811；test_quiztower 會和 MapWarp / Npc 表核對）----
@@ -126,8 +136,11 @@ QUIZ_CLICKS = {(x, OPT_Y) for x in OPT_XS} | {CONFIRM}   # 答題視窗內只准
 TRACK_MOVE_S = 6.0          # 點追蹤後這麼久座標都沒變 = 巡路沒反應（noTaskNavigate）
 TRACK_SETTLE_S = 60.0       # 巡路最多等多久停下
 POLL_S = 0.7
-GATE_WINDOW_S = 15.0        # ② 按「猜謎答題」到看到答題視窗最多隔多久
-QUIZ_WAIT_S = 6.0           # 按「猜謎答題」後等答題視窗
+GATE_WINDOW_S = 3.0         # ③ 按「猜謎答題」後答題視窗必須在這麼多秒內出現（使用者 2026-10-12：15 → 3）
+QUIZ_WAIT_S = GATE_WINDOW_S # 按「猜謎答題」後等答題視窗
+AFTER_CLOSE_S = 1.0         # ④ 答完視窗關掉後再等這麼久看會不會又跳視窗
+PENDING_MAX_S = 900.0       # 確認模式 / 不明確停下的視窗，這段時間內才准用 --answer 續答
+WRONG_MAX = 3               # 同一層連續答錯幾次才停（使用者：答錯只要重答）
 QUIZ_CLOSE_S = 4.0          # 確認後等答題視窗消失
 HUD_WAIT_S = 8.0            # 換層後等 HUD
 LOAD_WAIT_S = 20.0          # 810 完成後等傳回 811
@@ -248,16 +261,20 @@ def title_ok(texts) -> bool:
 
 
 def gate(map_id, quiz_clicked_at, now: float, texts, bank: dict) -> tuple:
-    """答題安全閘（純函式）：→ (True, 名字) 或 (False, 不符理由)。四條件見檔頭"""
-    if map_id is None or not (800 <= map_id <= 810):
-        return False, f'① 地圖 {map_id} 不在 800～810'
-    if quiz_clicked_at is None or not (0 <= now - quiz_clicked_at <= GATE_WINDOW_S):
-        return False, '② 不是剛按過守衛的「猜謎答題」（答題視窗不是自己觸發的）'
+    """答題視窗出現後的安全閘（純函式）：→ (True, 名字) 或 (False, 不符理由)。
+    ① 有守衛的樓層 800～809 ③ 按「猜謎答題」後 GATE_WINDOW_S 秒內（quiz_clicked_at = None = 這次按鍵的視窗已用掉，④）
+    ⑥ 標題「知識答題」+ 題庫名字題。② 按前沒有視窗、⑤ 途中跳視窗、⑦ 比對不明確 在 Runner 裡檢查（見檔頭）"""
+    if map_id is None or map_id not in QUIZ_FLOORS:
+        return False, f'① 地圖 {map_id} 不是有守衛的 800～809'
+    if quiz_clicked_at is None:
+        return False, '④ 沒有未用掉的「猜謎答題」按鍵（一次按鍵只認一個答題視窗）'
+    if not (0 <= now - quiz_clicked_at <= GATE_WINDOW_S):
+        return False, f'③ 答題視窗不是按「猜謎答題」後 {GATE_WINDOW_S:.0f} 秒內出現的'
     if not title_ok(texts):
-        return False, '③ 標題不是「知識答題」'
+        return False, '⑥ 標題不是「知識答題」'
     name, e = parse_question(texts, bank)
     if not name:
-        return False, f'④ {e}'
+        return False, f'⑥ {e}'
     return True, name
 
 
@@ -592,10 +609,15 @@ class Runner:
         self.bank = opts.get('bank') or build_bank()
         self.track_dead = not opts.get('use_track', True)
         self.tracked: set = set()            # 這次執行已試過點追蹤的地圖
-        self.quiz_clicked_at = None
+        self.quiz_clicked_at = None          # 最近一次按「猜謎答題」的時間；答完一個視窗就清掉（④ 一次按鍵只認一個視窗）
         self.prog = load_progress()
         self.prog.setdefault('floors', {})
         self.info: dict = {'answers': []}
+        self.wrong: dict = {}                # 樓層 → 這層連續答錯次數
+        self.last_answer: dict = {}          # 樓層 → 本次執行最後一次作答（答錯時存校準檔用）
+        self.answer = opts.get('answer')     # --answer N（0～3）：只用在續答「確認模式停下的那個視窗」
+        ct = self.prog.get('confirmed_ts', 0)
+        self.confirmed = (not opts.get('confirm_first', True)) or (bool(ct) and T.now() - ct < DONE_TRUST_S)
 
     # ---- 共用 ----
     def fail(self, rc: int, msg: str, snap: bool = True) -> int:
@@ -612,6 +634,13 @@ class Runner:
     def mark_answered(self, m: int, **kw) -> None:
         self.prog['floors'][str(m)] = dict(ts=self.T.now(), **kw)
         save_progress(self.prog)
+
+    def stray_quiz(self, where: str) -> int:
+        """⑤ 不是剛按「猜謎答題」時看到答題視窗（走路 / 戰鬥 / 換層途中、開跑時）→ 9，不點"""
+        texts = self.T.quiz_texts()
+        if title_ok(texts):
+            return self.fail(EXIT_VERIFY, f'{where}出現答題視窗（不是剛按「猜謎答題」觸發的）→ 當防腳本驗證，停手不點（鐵則 5）；讀到 {texts[:6]}')
+        return 0
 
     def wait_state(self, want: tuple, timeout: float) -> str | None:
         t0 = self.T.now()
@@ -715,14 +744,81 @@ class Runner:
                 return 0
         return self.fail(EXIT_GUARD, f'{m}：點守衛 {tries} 都沒有對話框')
 
+    def match(self, m: int, name: str) -> tuple:
+        """截圖比對 → (rc, r)；rc 0 = 有結果（r['ok'] 看明不明確）"""
+        shot = self.T.shot()
+        if shot is None:
+            return self.fail(EXIT_NO_IMAGE, f'{m}：答題截圖失敗'), None
+        tag = f'{time.strftime("%H%M%S")}-{m}'
+        r = answer_from_image(shot, name, self.bank, dump=None if self.o.get('no_dump') else tag)
+        r['tag'] = tag
+        self.info['answers'].append(dict(floor=m, name=name, choice=r.get('choice'), ok=r.get('ok'), margin=r.get('margin'),
+                                         gap=r.get('gap'), score=r.get('score'), reason=r.get('reason')))
+        if r.get('choice') is None and 'S' not in r:
+            return self.fail(EXIT_NO_IMAGE, f'{m}：「{name}」{r.get("reason")}'), r
+        return 0, r
+
+    def options_text(self, r: dict) -> str:
+        """每個選項最像哪張候選（名字 + 分數），給人確認用"""
+        out = []
+        for i, row in enumerate(r.get('S') or []):
+            j = max(range(len(row)), key=lambda k: row[k])
+            c = r['cands'][j]
+            nm = '/'.join(sorted(_image_names(c)))[:16]
+            out.append(f'{"ABCD"[i]}={nm}({c}) {row[j]:.3f}' + ('【正解圖】' if c == r.get('correct') else ''))
+        return '；'.join(out)
+
+    def hold(self, m: int, name: str, r: dict, rc: int, why: str) -> int:
+        """不作答停下（確認模式 140 / 不明確 135）：答題視窗留著，記 pending 讓 --answer N 或關掉確認模式續答"""
+        self.prog['pending'] = dict(map=m, name=name, ts=self.T.now(), choice=r.get('choice'), S=r.get('S'), cands=r.get('cands'),
+                                   correct=r.get('correct'), tag=r.get('tag'))
+        save_progress(self.prog)
+        sug = '' if r.get('choice') is None else f'；腳本建議 {"ABCD"[r["choice"]]}（第 {r["choice"] + 1} 個）'
+        return self.fail(rc, f'{m}：「{name}」{why}；選項：{self.options_text(r)}{sug}。'
+                             f'同意後 `quiztower.py run --answer N`（N = 1～4）或 `--no-confirm-first` 續跑')
+
+    def submit(self, m: int, name: str, c: int, r: dict) -> int:
+        """點選項 c → 確認 → 視窗要關；關了再看一下有沒有又跳視窗（④）"""
+        self.T.event(f'{m}：題目「{name}」→ 選 {"ABCD"[c]}（正解圖 {r.get("correct")}，分數 {r.get("score")}、指派差 {r.get("margin")}、欄差 {r.get("gap")}）')
+        for xy, what in (((OPT_XS[c], OPT_Y), f'選項 {"ABCD"[c]}'), (CONFIRM, '確認')):
+            if xy not in QUIZ_CLICKS:
+                raise uikit.ForbiddenClick(f'答題視窗只准點 {sorted(QUIZ_CLICKS)}，要點 {xy}')
+            if not self.T.quiz_click(xy[0], xy[1], f'quiztower {m} {name} {what}'):
+                return self.fail(EXIT_WRONG, f'{m}：點{what}前答題視窗不見了')
+        t0 = self.T.now()
+        closed = False
+        while self.T.now() - t0 < QUIZ_CLOSE_S:
+            self.T.sleep(POLL_S)
+            if not title_ok(self.T.quiz_texts()):
+                closed = True
+                break
+        if not closed:
+            return self.fail(EXIT_WRONG, f'{m}：確認後答題視窗沒關（答錯訊息？畫面未知）→ 停，請人看')
+        self.quiz_clicked_at = None            # ④ 這次按鍵的視窗已用掉
+        self.T.sleep(AFTER_CLOSE_S)
+        rc = self.stray_quiz(f'{m}：答完後又')
+        if rc:
+            return rc
+        self.last_answer[m] = dict(name=name, choice='ABCD'[c], tag=r.get('tag'), S=r.get('S'), cands=r.get('cands'), correct=r.get('correct'))
+        self.mark_answered(m, name=name, choice='ABCD'[c])
+        self.prog.pop('pending', None)
+        if not self.confirmed:
+            self.confirmed = True
+        self.prog['confirmed_ts'] = self.prog.get('confirmed_ts') or self.T.now()
+        save_progress(self.prog)
+        return 0
+
     def quiz_flow(self, m: int) -> int:
-        """對話框已開（守衛）→ 驗按鈕「猜謎答題」→ 按 → 安全閘 → 作答 → 確認 → 視窗消失"""
+        """對話框已開（守衛）→ 驗按鈕「猜謎答題」→ ② 確認沒有答題視窗 → 按 → ③ 3 秒內出現 → 安全閘 → 比對 → 作答"""
         lines = self.buttons()
         if not self.left_button_has(lines, '猜謎答題'):
             return self.fail(EXIT_GUARD, f'{m}：守衛對話框左鈕不是「猜謎答題」（讀到 {[ln["text"] for ln in lines]}）')
         rc = self.check_irrev(lines)
         if rc:
             return rc
+        pre = self.T.quiz_texts()
+        if title_ok(pre):
+            return self.fail(EXIT_VERIFY, f'{m}：② 還沒按「猜謎答題」就有答題視窗 → 當防腳本驗證，停手不點（鐵則 5）；讀到 {pre[:6]}')
         self.T.click(*DIALOG_LEFT, f'quiztower {m} 守衛對話「猜謎答題」')
         self.quiz_clicked_at = self.T.now()
         texts = []
@@ -731,47 +827,86 @@ class Runner:
             texts = self.T.quiz_texts()
             if title_ok(texts):
                 break
-        if not title_ok(texts) and self.T.screen_state() in ('idle', 'dialog', 'walking'):
-            return self.fail(EXIT_NO_QUIZ, f'{m}：按「猜謎答題」後 {QUIZ_WAIT_S:.0f} 秒沒出現答題視窗')
+        if not title_ok(texts):
+            if self.T.screen_state() in ('idle', 'dialog', 'walking'):
+                return self.fail(EXIT_NO_QUIZ, f'{m}：按「猜謎答題」後 {QUIZ_WAIT_S:.0f} 秒沒出現答題視窗')
+            return self.fail(EXIT_VERIFY, f'{m}：按「猜謎答題」後出現的不是「知識答題」視窗 → 當防腳本驗證，停手不點')
         ok, why = gate(m, self.quiz_clicked_at, self.T.now(), texts, self.bank)   # ① 用點守衛前讀的地圖（答題視窗蓋著時 HUD 可能讀不到）
         if not ok:
             return self.fail(EXIT_VERIFY, f'{m}：答題安全閘不符（{why}）→ 當防腳本驗證，停手不點，請人處理（鐵則 5）；讀到 {texts[:6]}')
         name = why
-        shot = self.T.shot()
-        if shot is None:
-            return self.fail(EXIT_NO_IMAGE, f'{m}：答題截圖失敗')
-        tag = f'{time.strftime("%H%M%S")}-{m}'
-        r = answer_from_image(shot, name, self.bank, dump=None if self.o.get('no_dump') else tag)
-        info = dict(floor=m, name=name, choice=r.get('choice'), ok=r.get('ok'), margin=r.get('margin'), gap=r.get('gap'),
-                    score=r.get('score'), reason=r.get('reason'))
-        self.info['answers'].append(info)
-        if r.get('choice') is None and 'S' not in r:
-            return self.fail(EXIT_NO_IMAGE, f'{m}：「{name}」{r.get("reason")}')
+        rc, r = self.match(m, name)
+        if rc:
+            return rc
         if not r['ok']:
-            return self.fail(EXIT_UNSURE, f'{m}：「{name}」比對不明確（{r["reason"]}；分數 {r.get("S")}）→ 答題視窗留著交人')
-        c = r['choice']
-        self.T.event(f'{m}：題目「{name}」→ 選 {"ABCD"[c]}（正解圖 {r["correct"]}，分數 {r["score"]}、指派差 {r["margin"]}、欄差 {r["gap"]}）')
-        for xy, what in (((OPT_XS[c], OPT_Y), f'選項 {"ABCD"[c]}'), (CONFIRM, '確認')):
-            if xy not in QUIZ_CLICKS:
-                raise uikit.ForbiddenClick(f'答題視窗只准點 {sorted(QUIZ_CLICKS)}，要點 {xy}')
-            if not self.T.quiz_click(xy[0], xy[1], f'quiztower {m} {name} {what}'):
-                return self.fail(EXIT_WRONG, f'{m}：點{what}前答題視窗不見了')
-        t0 = self.T.now()
-        while self.T.now() - t0 < QUIZ_CLOSE_S:
-            self.T.sleep(POLL_S)
-            if not title_ok(self.T.quiz_texts()):
-                self.mark_answered(m, name=name, choice='ABCD'[c])
-                return 0
-        return self.fail(EXIT_WRONG, f'{m}：確認後答題視窗沒關（疑似答錯，後果未知）→ 停')
+            return self.hold(m, name, r, EXIT_UNSURE, f'⑦ 比對不明確（{r["reason"]}）→ 答題視窗留著交人')
+        if not self.confirmed:
+            return self.hold(m, name, r, EXIT_CONFIRM, '第一個答題視窗（--confirm-first）：只比對不點，請使用者確認')
+        return self.submit(m, name, r['choice'], r)
+
+    def resume_pending(self) -> int:
+        """開跑時畫面上已有答題視窗：只有「上次確認模式 / 不明確停下的那個視窗」（進度檔 pending、PENDING_MAX_S 內、同一題）才續答，否則 9"""
+        texts = self.T.quiz_texts()
+        pend = self.prog.get('pending') or {}
+        name, _e = parse_question(texts, self.bank)
+        p = self.T.pos()
+        why = ('進度檔沒有待確認的答題' if not pend else
+               f'待確認紀錄已超過 {PENDING_MAX_S:.0f} 秒' if self.T.now() - pend.get('ts', 0) > PENDING_MAX_S else
+               f'題目「{name}」和待確認的「{pend.get("name")}」不同' if name != pend.get('name') else
+               f'地圖 {p} 和待確認的 {pend.get("map")} 不同' if p and p[0] != pend.get('map') else
+               '標題不是「知識答題」' if not title_ok(texts) else '')
+        if why:
+            return self.fail(EXIT_VERIFY, f'開跑時畫面已有答題視窗，但不是上次停下的那個（{why}）→ 當防腳本驗證，停手不點（鐵則 5）')
+        m = pend['map']
+        if self.answer is not None:
+            self.T.event(f'{m}：使用者指定答 {"ABCD"[self.answer]}（腳本建議 {"ABCD"[pend["choice"]] if pend.get("choice") is not None else "無"}）')
+            r = dict(pend, score=None, margin=None, gap=None)
+            self.confirmed = True
+            return self.submit(m, name, self.answer, r)
+        rc, r = self.match(m, name)
+        if rc:
+            return rc
+        if not r['ok']:
+            return self.hold(m, name, r, EXIT_UNSURE, f'⑦ 比對不明確（{r["reason"]}）→ 答題視窗留著交人')
+        if not self.confirmed:
+            return self.hold(m, name, r, EXIT_CONFIRM, '第一個答題視窗（--confirm-first）：只比對不點，請使用者確認')
+        return self.submit(m, name, r['choice'], r)
+
+    def wrong_answer(self, m: int, p2) -> int:
+        """答完圍欄仍走不過 = 答錯：存校準檔，連錯 WRONG_MAX 次才 136，否則清掉這層紀錄回主迴圈重答"""
+        la = self.last_answer.pop(m, None)
+        self.prog['floors'].pop(str(m), None)
+        save_progress(self.prog)
+        if la is None:
+            self.T.event(f'{m}：進度檔記答過但圍欄走不過（在 {p2}）→ 清掉這層紀錄，重做守衛')
+            return 0
+        n = self.wrong[m] = self.wrong.get(m, 0) + 1
+        try:
+            if self.o.get('no_dump'):
+                raise OSError('--no-dump')
+            DUMP_DIR.mkdir(parents=True, exist_ok=True)
+            (DUMP_DIR / f'{la.get("tag") or time.strftime("%H%M%S")}-WRONG.json').write_text(
+                json.dumps(dict(floor=m, **la), ensure_ascii=False), encoding='utf-8')
+        except OSError:
+            pass
+        self.T.errlog(f'quiztower {m}「{la["name"]}」選 {la["choice"]} 答錯（第 {n} 次；裁切與分數 tools/.cache/quiztower/{la.get("tag")}-*）')
+        if n >= WRONG_MAX:
+            return self.fail(EXIT_WRONG, f'{m}：「{la["name"]}」連續答錯 {n} 次 → 停')
+        self.T.event(f'{m}：「{la["name"]}」選 {la["choice"]} 後圍欄沒開 = 答錯（第 {n} 次）→ 重新點守衛再答')
+        return 0
 
     def do_floor(self, m: int, p) -> int:
         fi = floor_info(m)
         past_guard = p[2] < fi['guard'][1]       # 已經在圍欄裡（守衛那排以北）= 這層答過
         if not (past_guard or self.answered(m)):
             if self.try_track(m, p):
-                return 0                           # 巡路有動：回主迴圈重新看位置 / 對話框
+                return self.stray_quiz(f'{m} 巡路途中')   # 巡路有動：回主迴圈重新看位置 / 對話框
             if (p[1], p[2]) != fi['stand']:
-                if not self.walk(m, fi['stand']):
+                ok = self.walk(m, fi['stand'])
+                rc = self.stray_quiz(f'{m} 走路途中')
+                if rc:
+                    return rc
+                if not ok:
                     return self.fail(EXIT_WALK, f'{m}：走不到守衛正下方 {fi["stand"]}')
             rc = self.guard_dialog(m)
             if rc:
@@ -779,18 +914,18 @@ class Runner:
             rc = self.quiz_flow(m)
             if rc:
                 return rc
-        if not self.walk(m, fi['exit'], exit_map=fi['up']):
+        ok = self.walk(m, fi['exit'], exit_map=fi['up'])
+        rc = self.stray_quiz(f'{m} 走出口 / 換層途中')
+        if rc:
+            return rc
+        if not ok:
             p2 = self.T.pos()
             if p2 and p2[0] == m and p2[2] >= fi['guard'][1]:
-                if self.answered(m) and not past_guard:
-                    self.T.event(f'{m}：進度檔記答過但圍欄走不過 → 清掉這層紀錄，重做守衛')
-                    self.prog['floors'].pop(str(m), None)
-                    save_progress(self.prog)
-                    return 0
-                return self.fail(EXIT_WRONG, f'{m}：走不過圍欄（在 {p2}）→ 疑似沒答對 / 圍欄沒開')
+                return self.wrong_answer(m, p2)
             return self.fail(EXIT_WALK, f'{m}：走不到出口 {fi["exit"]}（在 {p2}）')
         if not self.wait_map(fi['up']):
             return self.fail(EXIT_WALK, f'{m}：換到 {fi["up"]} 後 {HUD_WAIT_S:.0f} 秒 HUD / 座標沒好')
+        self.wrong.pop(m, None)
         self.T.event(f'{m} → {fi["up"]} 完成')
         return 0
 
@@ -799,8 +934,13 @@ class Runner:
         if self.T.screen_state() != 'dialog':
             if not self.try_track(TOP, p) or self.T.screen_state() != 'dialog':
                 p = self.T.pos()
-                if p and (p[1], p[2]) != INADO_STAND and not self.walk(TOP, INADO_STAND):
-                    return self.fail(EXIT_WALK, f'810：走不到伊那多前 {INADO_STAND}')
+                if p and (p[1], p[2]) != INADO_STAND:
+                    ok = self.walk(TOP, INADO_STAND)
+                    rc = self.stray_quiz('810 走路途中')
+                    if rc:
+                        return rc
+                    if not ok:
+                        return self.fail(EXIT_WALK, f'810：走不到伊那多前 {INADO_STAND}')
                 self.T.primer()
                 x, y = self.T.npc_xy(INADO, INADO_STAND)
                 self.T.click(x, y, 'quiztower 810 點伊那多')
@@ -822,11 +962,12 @@ class Runner:
         self.T.event('810 伊那多「完成」→ 回到 811（應獲得寵物 金布伊；寵物欄請另行確認）')
         self.prog['done_ts'] = self.T.now()
         self.prog['floors'] = {}
+        self.prog.pop('pending', None)
         save_progress(self.prog)
         return 0
 
     def dialog_now(self, p) -> int | None:
-        """主迴圈開頭就是對話框（巡路自動開的）：守衛「猜謎答題」/ 伊那多「拿金豬」才接手；其他 → 132 停"""
+        """主迴圈開頭就是對話框（巡路自動開的 / 答錯後守衛又說話）：守衛「猜謎答題」/ 伊那多「拿金豬」才接手；其他 → 132 停"""
         lines = self.buttons()
         if p and p[0] in QUIZ_FLOORS and self.left_button_has(lines, '猜謎答題'):
             return self.quiz_flow(p[0]) or None
@@ -838,13 +979,28 @@ class Runner:
         T = self.T
         t0 = T.now()
         rc = T.preflight()
-        if rc:
+        if rc and rc != EXIT_VERIFY:
+            return self.fail(rc, f'preflight 失敗 rc={rc}', snap=False)
+        if title_ok(T.quiz_texts()):                    # 開跑就有答題視窗：只有上次停下的那個能續答
+            rc = self.resume_pending()
+            if rc:
+                return rc
+        elif self.answer is not None:
+            return self.fail(uikit.EXIT_USAGE, '--answer 只用在續答「上次停下、還開著的答題視窗」，現在畫面上沒有答題視窗', snap=False)
+        elif rc:
             return self.fail(rc, f'preflight 失敗 rc={rc}', snap=False)
         for _ in range(60):
             if T.now() - t0 > self.o.get('max_min', MAX_MIN) * 60:
                 return self.fail(EXIT_TIME, f'超過 {self.o.get("max_min", MAX_MIN)} 分鐘')
+            rc = self.stray_quiz('')
+            if rc:
+                return rc
             if T.screen_state() == 'battle':
-                if self.wait_state(('idle', 'dialog', 'walking'), 60) == 'battle':
+                st = self.wait_state(('idle', 'dialog', 'walking'), 60)
+                rc = self.stray_quiz('戰鬥後')
+                if rc:
+                    return rc
+                if st == 'battle':
                     return self.fail(EXIT_WALK, '戰鬥 60 秒沒結束')
             p = T.pos()
             if not p:
@@ -877,9 +1033,10 @@ class Runner:
         return self.fail(EXIT_TIME, '主迴圈 60 輪仍未完成')
 
 
-def plan_lines(at: int = LOBBY) -> list:
+def plan_lines(at: int = LOBBY, confirm_first: bool = True) -> list:
     """--dry-run：從 at 開始每層要做的事（不碰遊戲）"""
-    out = [f'起點 {at}；巡路：每層先點追蹤「{TRACK}」，{TRACK_MOVE_S:.0f} 秒座標沒變 → 本次改 walk.py']
+    out = [f'起點 {at}；巡路：每層先點追蹤「{TRACK}」，{TRACK_MOVE_S:.0f} 秒座標沒變 → 本次改 walk.py；'
+           + ('--confirm-first：第一個答題視窗只比對不點，退出 140 等確認' if confirm_first else '全自動作答')]
     m = at
     if m == LOBBY:
         out.append(f'811：walk.py 走到出口 {LOBBY_EXIT} → 800')
@@ -887,21 +1044,23 @@ def plan_lines(at: int = LOBBY) -> list:
     while m in QUIZ_FLOORS:
         fi = floor_info(m)
         extra = '（maps.bin 沒通行格：從進場點照紀錄點地面 ' + ' '.join(f'{a},{b}' for a, b in FLOOR800_CLICKS) + '）' if m == 800 else ''
-        out.append(f'{m}：到守衛正下方 {fi["stand"]}{extra} → 點守衛 {fi["guard"]}（{GUARD_CLICKS[m % 2]}）→「猜謎答題」→ 安全閘 → 比對作答 → 確認 → 出口 {fi["exit"]} → {fi["up"]}')
+        out.append(f'{m}：到守衛正下方 {fi["stand"]}{extra} → 點守衛 {fi["guard"]}（{GUARD_CLICKS[m % 2]}）→「猜謎答題」→ 安全閘 → 比對作答 → 確認 → 出口 {fi["exit"]} → {fi["up"]}（圍欄沒開 = 答錯，重答，連錯 {WRONG_MAX} 次停）')
         m += 1
     out.append(f'810：伊那多 {INADO}（站 {INADO_STAND}）→「拿金豬」→「完成」→ 傳回 811 = 拿到金布伊')
-    out.append('退出碼：0 完成 9 安全閘不符 130 不在塔 131 走路 132 守衛對話 133 沒答題視窗 134 選項圖讀不到 135 比對不明確 136 疑似答錯 137 伊那多 138 不可逆 139 時間')
+    out.append('退出碼：0 完成 1 參數 9 安全閘不符 130 不在塔 131 走路 132 守衛對話 133 沒答題視窗 134 選項圖讀不到 135 比對不明確 136 連錯 / 視窗沒關 137 伊那多 138 不可逆 139 時間 140 確認模式停下')
     return out
 
 
-def run(dry_run: bool = False, use_track: bool = True, at: int = LOBBY, max_min: float = MAX_MIN, tools=None, no_dump: bool = False) -> int:
+def run(dry_run: bool = False, use_track: bool = True, at: int = LOBBY, max_min: float = MAX_MIN, tools=None, no_dump: bool = False,
+        confirm_first: bool = True, answer: int | None = None) -> int:
+    """answer = 0～3（--answer N 的 N - 1）"""
     global LAST
     if dry_run:
-        for ln in plan_lines(at):
+        for ln in plan_lines(at, confirm_first):
             print(ln)
         LAST = {'dry_run': True}
         return 0
-    r = Runner(tools or Tools(), dict(use_track=use_track, max_min=max_min, no_dump=no_dump))
+    r = Runner(tools or Tools(), dict(use_track=use_track, max_min=max_min, no_dump=no_dump, confirm_first=confirm_first, answer=answer))
     rc = r.run()
     r.info.setdefault('rc', rc)
     LAST = r.info
@@ -965,6 +1124,10 @@ def main() -> int:
     r.add_argument('--no-track', action='store_true', help='不試點追蹤，一律 walk.py')
     r.add_argument('--max-min', type=float, default=MAX_MIN)
     r.add_argument('--no-dump', action='store_true', help='不存選項裁切')
+    r.add_argument('--confirm-first', dest='confirm_first', action='store_true', default=True,
+                   help='（預設）第一個答題視窗只比對、印選項與分數、退出 140 等使用者確認')
+    r.add_argument('--no-confirm-first', dest='confirm_first', action='store_false', help='全自動作答（使用者確認過後）')
+    r.add_argument('--answer', help='續答上次停下（140 / 135）還開著的答題視窗：1～4 或 A～D')
     b = sub.add_parser('bank')
     b.add_argument('key', nargs='?', default='')
     mt = sub.add_parser('match')
@@ -982,7 +1145,15 @@ def main() -> int:
     if not a.dry_run:
         import winenv
         winenv.enable_server()
-    return run(dry_run=a.dry_run, use_track=not a.no_track, at=a.at, max_min=a.max_min, no_dump=a.no_dump)
+    ans = None
+    if a.answer:
+        k = a.answer.strip().upper()
+        ans = {'1': 0, '2': 1, '3': 2, '4': 3, 'A': 0, 'B': 1, 'C': 2, 'D': 3}.get(k)
+        if ans is None:
+            print('--answer 要 1～4 或 A～D', file=sys.stderr)
+            return uikit.EXIT_USAGE
+    return run(dry_run=a.dry_run, use_track=not a.no_track, at=a.at, max_min=a.max_min, no_dump=a.no_dump,
+               confirm_first=a.confirm_first, answer=ans)
 
 
 if __name__ == '__main__':
