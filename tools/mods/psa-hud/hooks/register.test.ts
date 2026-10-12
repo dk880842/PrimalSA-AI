@@ -2,9 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   Supervisor, backoffMs, decideExit, errEntries, errLine, format, logPathFromCwd, parseState, stallThresholdMs, statPathFromCwd,
-  viewModel, watchAlive, watchPathFromCwd, hudText, nameText, encText,
+  viewModel, watchAlive, watchPathFromCwd, hudText, nameText, encText, levelText, paneTree,
 } from './register'
-import type { SupDeps, ViewIn } from './register'
+import type { PaneEls, SupDeps, ViewIn } from './register'
 
 const OK = '{"ok":true,"level":"0轉38級","hp":208,"mp":45,"petLevel":"0轉38級","petHp":434,"map":"奇努伊的海底通路","pos":"31401:91,29"}'
 
@@ -501,4 +501,88 @@ test('encText：遇敵狀態；null 沿用最後值加 ?；龍王只並列說明
   expect(encText({ v: 1, screen: { enc_on: true }, hud: { buffs: b(['dragon']) } } as never)?.text).toContain('龍王')
   expect(encText({ v: 1, screen: { enc_on: false }, hud: { buffs: b(['dragon']) } } as never)?.text).toBe('不遇敵（龍王守護）')
   expect(buffText({ v: ['exp', 'dragon'] } as never)).toBe('EXP×2 龍王（不遇敵）')
+})
+
+// ───────────── pane 空白（2026-10-13）：jsxFactory h 被 hints.map(h => …) 蓋掉；熱重載後 session.start 沒重發 ─────────────
+const ROOT = '/mnt/c/games/PrimalSA-AI'
+const PANE_SITE = { component: 'Pane' as const, requestId: 'psa-hud', props: { title: '精靈王石器', isFocused: false, bodyColumns: 60, placement: 'dock' as const, scroll: { offset: 0, bodyRows: 40 }, view: {} } }
+const NOW_S = 1791848148
+// 實際發生時的 state.json 形狀：verify_suspect + 2 筆 alerts → 狀態行一定有提示行（hints 非空）
+const STATE_ALERT = JSON.stringify({
+  v: 1, seq: 7, phase: 'run', ts: NOW_S, watcher: { token: 't1', running: true, interval: 0.5 },
+  screen: { label: '戰鬥中（完整・演出中）', age_s: 0.5, state: 'battle', annot: [], enc_on: null },
+  hud: { stale: true, age_s: 3, level: { v: '2轉125級' }, hp: { v: 475 }, mp: { v: 90 }, pet: { level: { v: 'o級' }, hp: { v: 909 }, name: { v: '?' } }, map: { v: '柯奧的民家', id: 1112 }, pos: { v: [15, 15] }, name: { v: 'DKBO' } },
+  flags: { verify_suspect: true }, alerts: [{ msg: '警告：連續 3 次遇到不認得的畫面' }, { msg: '警告：第二筆' }],
+})
+
+// 模擬「熱重載後」：測試只接 command.run，不送 session.start
+type TestOn = Parameters<Extract<Parameters<typeof test>[1], (...a: never[]) => unknown>>[1]
+function fakeHost(on: TestOn, files: Record<string, string>, log: string[]) {
+  on('session.cwd', () => ({ value: ROOT }))
+  on('clock.now', () => ({ value: NOW_S * 1000 }))
+  on('clock.every', () => ({ value: undefined }) as never)
+  on('clock.sleep', () => ({ value: undefined }) as never)
+  on('ui.status', () => ({ value: undefined }) as never)
+  on('ui.open', () => { log.push('open'); return { value: { isPlaced: true } } })
+  on('ui.close', () => { log.push('close'); return { value: undefined } as never })
+  on('fs.read', (_$, e) => {
+    const p = String((e as { path: string }).path).replace(`${ROOT}/`, '')
+    if (p in files) return { value: files[p]! }
+    throw new Error(`ENOENT ${p}`)
+  })
+  on('fs.write', () => ({ value: undefined }) as never)
+  on('process.run', () => ({ value: { exitCode: 1, stdout: '', stderr: 'x', isStdoutTruncated: false, isStderrTruncated: false } }))
+  // watch 子程序：立刻以退出碼 3（已有 watch 在跑）結束 → 只讀
+  on('process.spawn', async function* () { return { value: { code: 3 } } as never })
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`熱重載後沒有 session.start：/psa-hud on 補初始化、pane 畫出提示行不空白（${surface}）`, async ($, on) => {
+    const log: string[] = []
+    fakeHost(on, { 'tools/.cache/state.json': STATE_ALERT, 'tools/.cache/psa-hud.json': '{"watch":true}' }, log)
+    const { text } = await $.command.run({ command: 'psa-hud', args: 'on' } as never)
+    expect(log).toContain('open')
+    expect(text).toContain('監看：')                        // sup 已由 lazy init 建立
+    const ui = await $.ui.mount({ plugin: 'psa-hud', surface, ...PANE_SITE } as never)
+    const tree = await ui.drawn()
+    expect(tree).toMatchObject({ type: 'Box' })
+    expect(await ui.find({ type: 'Text', text: /疑似答題/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /2轉125級/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /寵 \? \?級 HP 909/ })).toBeDefined()   // 'o級' 不顯示怪字
+    await ui.unmount()
+  })
+
+  test(`pane 什麼都還沒讀到也照畫（${surface}）`, async ($, on) => {
+    on('clock.now', () => ({ value: 0 }))
+    const ui = await $.ui.mount({ plugin: 'psa-hud', surface, ...PANE_SITE } as never)
+    expect(await ui.find({ type: 'Text', text: /沒有狀態/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /還沒有錯誤紀錄/ })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('paneTree：hints 非空不拋（jsxFactory h 不可被參數蓋掉）；欄位 undefined / 壞形狀也不拋', () => {
+  const els = { Box: (p: unknown) => ({ type: 'Box', p }), Text: (p: unknown) => ({ type: 'Text', p }) } as unknown as PaneEls
+  expect(() => paneTree(els, { wl: { main: 'x', hints: [{ text: '疑似答題', tone: 'red' }] } })).not.toThrow()
+  expect(() => paneTree(els, {})).not.toThrow()
+  expect(() => paneTree(els, { wl: { main: 'x', hints: undefined } as never, pg: undefined, lines: null, en: null, st: null, ht: undefined })).not.toThrow()
+  expect(() => paneTree(els, { lines: [{ id: 1, ts: 0, error: 'e', fix: null, source: null }], pg: [{ text: 'p', tone: 'red' }] })).not.toThrow()
+})
+
+test('/psa-hud off 只關 pane（不碰監看）；on 重開', async ($, on) => {
+  const log: string[] = []
+  fakeHost(on, { 'tools/.cache/state.json': STATE_ALERT }, log)
+  const off = await $.command.run({ command: 'psa-hud', args: 'off' } as never)
+  expect(log).toEqual(['close'])
+  expect(off.text).toContain('已關閉')
+  await $.command.run({ command: 'psa-hud', args: 'on' } as never)
+  expect(log).toEqual(['close', 'open'])
+})
+
+test('levelText / format：等級沒有數字（OCR 讀成 o級）顯示 ?級', () => {
+  expect(levelText('o級')).toBe('?級')
+  expect(levelText('2轉125級')).toBe('2轉125級')
+  expect(levelText('abc')).toBe('?')
+  expect(levelText(undefined)).toBeUndefined()
+  expect(format({ ok: true, level: '2轉125級', hp: 475, mp: 90, petLevel: 'o級', petHp: 909, petName: '?' })).toBe('2轉125級  HP 475  MP 90  |  寵 ? ?級 HP 909')
 })

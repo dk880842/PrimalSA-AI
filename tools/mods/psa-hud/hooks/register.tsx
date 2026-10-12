@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { BoxProps, ElementConstructor, EngineInterface, Register, RenderElement, TextProps } from 'claude-code'
 
 import type { ErrEntry, ProgLine, Stat, WatchLine, WatchTone } from '../types'
 
@@ -340,6 +340,12 @@ let lastEnc: boolean | undefined
 const prog = atom({ plugin: 'psa-hud', key: 'prog' } as const, [] as ProgLine[])
 const line = atom({ plugin: 'psa-hud', key: 'line' } as const, { main: '（沒有狀態）', hints: [] } as WatchLine)
 
+// 等級字串沒有任何數字（例：寵物等級 OCR 把數字讀成 'o級'）→ 數字部分換成 ?（'?級'），不顯示怪字
+export function levelText(l: string | undefined): string | undefined {
+  if (!l || /\d/.test(l)) return l
+  return l.endsWith('級') ? '?級' : '?'
+}
+
 // 數值排成一行文字
 export function format(s: Stat): string {
   if (!s.ok) return `PSA: ${s.error ?? '讀取失敗'}`
@@ -347,8 +353,8 @@ export function format(s: Stat): string {
   // OCR 讀不到數字時改顯示血條比例（hpPct / mpPct），都沒有才是 ?
   const num = (n: number | null | undefined, pct: number | null | undefined) => (n != null ? String(n) : pct != null ? `${pct}%` : '?')
   if (!s.level && s.hp == null && s.mp == null && s.hpPct == null) return 'PSA: 讀不到 HUD（對話 / 戰鬥 / 其他畫面蓋住，或視窗被遮）'
-  const parts = [`${s.name ? `${s.name}  ` : ''}${s.level || '?'}  HP ${num(s.hp, s.hpPct)}  MP ${num(s.mp, s.mpPct)}`]
-  if (s.petLevel || s.petHp != null) parts.push(`寵 ${s.petName ? `${s.petName} ` : ''}${s.petLevel || '?'} HP ${v(s.petHp)}`)
+  const parts = [`${s.name ? `${s.name}  ` : ''}${levelText(s.level) || '?'}  HP ${num(s.hp, s.hpPct)}  MP ${num(s.mp, s.mpPct)}`]
+  if (s.petLevel || s.petHp != null) parts.push(`寵 ${s.petName ? `${s.petName} ` : ''}${levelText(s.petLevel) || '?'} HP ${v(s.petHp)}`)
   if (s.map || s.pos) parts.push(`${s.map ?? ''} ${s.pos ?? ''}`.trim())
   return parts.join('  |  ')
 }
@@ -791,6 +797,77 @@ async function tickProg($: EngineInterface): Promise<void> {
   }
 }
 
+const PSA_HUD_DESC = '打開精靈王石器資訊 pane 並立即更新；/psa-hud off 關 pane；/psa-hud watch on|off 開關即時監看；/psa-hud ack 清掉驗證警報'
+
+// 初始化（session.start 呼叫；熱重載後 session.start 沒重發時由 command.run 補呼叫）：
+// 設路徑、開 pane（openPane）、起計時器、建監督並視設定啟動 watch。同一份模組只做一次（inited）
+let inited = false
+async function init($: EngineInterface, cwd: string, o: { openPane: boolean }): Promise<void> {
+  if (inited) return
+  inited = true
+  statPs1 = statPathFromCwd(cwd) ?? statPs1
+  logFile = logPathFromCwd(cwd) ?? logFile
+  projCwd = cwd
+  // 舊版（0.1）放在狀態列，改用 pane 後清掉
+  $.ui.status(undefined)
+  if (o.openPane) void $.ui.open({ id: PANE, title: '精靈王石器' })
+  void refresh($)
+  $.clock.every(PERIOD_MS, () => void refresh($))
+  void refreshLog($)
+  $.clock.every(LOG_PERIOD_MS, () => void refreshLog($))
+  // 即時狀態監看：設定 off 就不啟動；否則 spawn 自己的 watch 並開始每秒讀 state.json
+  // （熱重載時舊模組 spawn 的 watch 可能還在收尾：新的會拿到退出碼 3，grace 等 3 s 重試一次，見 decideExit）
+  sup = makeSup($)
+  if (await cfgWatchOn($)) sup.start()
+  else sup.status = 'off'
+  void tickState($)
+  $.clock.every(STATE_PERIOD_MS, () => void tickState($))
+  void tickProg($)
+  $.clock.every(PROG_PERIOD_MS, () => void tickProg($))
+}
+
+// pane 內容（純函式，測試直接呼叫）。注意：tsconfig 的 jsxFactory 是 h，
+// 這裡的箭頭函式參數不可以叫 h（會蓋掉 JSX 工廠 → 每個 <Text> 都變成「h is not a function」→ 整個 pane 空白）
+export type PaneData = {
+  wl?: WatchLine | null; st?: Stat | null; ht?: string | null; en?: { text: string; warn: boolean } | null
+  pg?: ProgLine[] | null; lines?: ErrEntry[] | null
+}
+export type PaneEls = { Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps> }
+export function paneTree(els: PaneEls, d: PaneData): RenderElement {
+  const { Box, Text } = els
+  const color = (t: WatchTone) => (t === 'red' ? 'red' : t === 'yellow' ? 'yellow' : undefined)
+  const wl = d.wl ?? { main: '（沒有狀態）', hints: [] }
+  const hints = Array.isArray(wl.hints) ? wl.hints : []
+  const st = d.st ?? null
+  const ht = d.ht ?? null
+  const en = d.en ?? null
+  const pg = Array.isArray(d.pg) ? d.pg : []
+  const lines = Array.isArray(d.lines) ? d.lines : []
+  return (
+    <Box flexDirection="column">
+      <Text wrap="truncate-end" bold>{String(wl.main ?? '')}</Text>
+      {hints.map((hint, i) => <Text key={`hint${i}`} wrap="truncate-end" color={color(hint.tone)} dimColor={hint.tone === 'gray'}>{String(hint.text ?? '')}</Text>)}
+      <Text wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>
+      {en ? <Text wrap="truncate-end" color={en.warn ? 'yellow' : 'green'}>{String(en.text ?? '')}</Text> : null}
+      <Text dimColor>{'─'.repeat(20)}</Text>
+      {pg.map((p, i) => <Text key={`prog${i}`} wrap="truncate-end" color={p.tone === 'red' ? 'red' : p.tone === 'yellow' ? 'yellow' : undefined} dimColor={p.tone === 'gray'} bold={p.tone === 'red'}>{String(p.text ?? '')}</Text>)}
+      <Text dimColor>{'─'.repeat(20)}</Text>
+      <Text dimColor>{`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆）`}</Text>
+      {lines.length === 0
+        ? <Text dimColor>（還沒有錯誤紀錄）</Text>
+        : lines.map((ent, i) => {
+            const r = errLine(ent)
+            return (
+              <Box key={`err${ent.id ?? i}-${i}`} flexDirection="column">
+                <Text wrap="truncate-end">{r.head}</Text>
+                <Text wrap="truncate-end" color={r.pending ? 'yellow' : 'green'} bold={r.pending}>{`   ${r.fix}`}</Text>
+              </Box>
+            )
+          })}
+    </Box>
+  )
+}
+
 export const register: Register = on => {
   // 標題：UserPromptSubmit / SessionStart 都試；任何錯誤都吞掉，不擋使用者送訊息
   on('classic.UserPromptSubmit', async ($, e, next) => {
@@ -807,30 +884,25 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // 設定在使用者層級（每個專案都會載入），只在精靈王石器專案裡啟動
     if (!e.cwd.includes('PrimalSA-AI') || !e.isInteractive) return next(e)
-    statPs1 = statPathFromCwd(e.cwd) ?? statPs1
-    logFile = logPathFromCwd(e.cwd) ?? logFile
-    projCwd = e.cwd
-    await $.command.register({ name: 'psa-hud', description: '打開精靈王石器資訊 pane 並立即更新；/psa-hud watch on|off 開關即時監看；/psa-hud ack 清掉驗證警報' })
-    // 舊版（0.1）放在狀態列，改用 pane 後清掉
-    $.ui.status(undefined)
-    void $.ui.open({ id: PANE, title: '精靈王石器' })
-    void refresh($)
-    $.clock.every(PERIOD_MS, () => void refresh($))
-    void refreshLog($)
-    $.clock.every(LOG_PERIOD_MS, () => void refreshLog($))
-    // 即時狀態監看：設定 off 就不啟動；否則 spawn 自己的 watch 並開始每秒讀 state.json
-    sup = makeSup($)
-    if (await cfgWatchOn($)) sup.start()
-    else sup.status = 'off'
-    void tickState($)
-    $.clock.every(STATE_PERIOD_MS, () => void tickState($))
-    void tickProg($)
-    $.clock.every(PROG_PERIOD_MS, () => void tickProg($))
+    await $.command.register({ name: 'psa-hud', description: PSA_HUD_DESC })
+    await init($, e.cwd, { openPane: true })
     return next(e)
   })
 
   on('command.run', { command: 'psa-hud' }, async ($, e) => {
     const arg = String((e as { args?: string }).args ?? '').trim().split(/\s+/)
+    // 熱重載（/reload-plugins、存檔、worker 重生）後模組變數歸零、計時器被丟掉，session.start 不一定重發：
+    // 指令進來時發現還沒初始化就補做（路徑、計時器、監督），不重開 pane（下面各分支自己決定）
+    if (!inited) {
+      let cwd = ''
+      try { cwd = await $.session.cwd() } catch { /* 讀不到 cwd：照舊只用預設路徑 */ }
+      if (cwd.includes(PROJECT)) await init($, cwd, { openPane: false })
+    }
+    if (arg[0] === 'off') {
+      // 只關 pane；監看（watch）照跑，關監看用 /psa-hud watch off
+      await $.ui.close({ id: PANE })
+      return { text: 'psa-hud pane 已關閉（監看照跑；/psa-hud 或 /psa-hud on 重開）' }
+    }
     if (arg[0] === 'ack') {
       // 人工確認過 quest 轉述的驗證警報：叫 watch 清掉（unknown_long 靠畫面恢復自動清）
       if (!sup) return { text: '監看未啟用（只在精靈王石器專案的互動 session 裡啟動）' }
@@ -856,37 +928,21 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
-    const lines = await read($, acts)
-    const wl = await read($, line)
-    const st = await read($, stat)
-    const ht = await read($, hudAtom)
-    const en = await read($, encAtom)
-    const pg = await read($, prog)
-    const color = (t: WatchTone) => (t === 'red' ? 'red' : t === 'yellow' ? 'yellow' : undefined)
-
-    return (
-      <Box flexDirection="column">
-        <Text wrap="truncate-end" bold>{wl.main}</Text>
-        {wl.hints.map(h => <Text wrap="truncate-end" color={color(h.tone)} dimColor={h.tone === 'gray'}>{h.text}</Text>)}
-        <Text wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>
-        {en ? <Text wrap="truncate-end" color={en.warn ? 'yellow' : 'green'}>{en.text}</Text> : null}
-        <Text dimColor>{'─'.repeat(20)}</Text>
-        {pg.map(p => <Text wrap="truncate-end" color={p.tone === 'red' ? 'red' : p.tone === 'yellow' ? 'yellow' : undefined} dimColor={p.tone === 'gray'} bold={p.tone === 'red'}>{p.text}</Text>)}
-        <Text dimColor>{'─'.repeat(20)}</Text>
-        <Text dimColor>{`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆）`}</Text>
-        {lines.length === 0
-          ? <Text dimColor>（還沒有錯誤紀錄）</Text>
-          : lines.map(en => {
-              const r = errLine(en)
-              return (
-                <Box flexDirection="column">
-                  <Text wrap="truncate-end">{r.head}</Text>
-                  <Text wrap="truncate-end" color={r.pending ? 'yellow' : 'green'} bold={r.pending}>{`   ${r.fix}`}</Text>
-                </Box>
-              )
-            })}
-      </Box>
-    )
+    const els = $.ui.resolve(e)
+    const { Box, Text } = els
+    try {
+      return paneTree(els, {
+        wl: await read($, line), st: await read($, stat), ht: await read($, hudAtom), en: await read($, encAtom),
+        pg: await read($, prog), lines: await read($, acts),
+      })
+    } catch (err) {
+      // 繪製出錯也要畫一行說明，不讓 pane 空白（hook 拋例外時引擎不畫任何東西）
+      return (
+        <Box flexDirection="column">
+          <Text color="red">{`psa-hud 繪製失敗：${String(err).slice(0, 200)}`}</Text>
+          <Text dimColor>（/psa-hud 重試；錯誤細節請回報開發）</Text>
+        </Box>
+      )
+    }
   })
 }
