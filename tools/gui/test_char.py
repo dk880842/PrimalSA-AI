@@ -218,5 +218,39 @@ check('timing：_out 帶 t 分段', 't' in last_json(out) and any(k == 'open' fo
 uikit._stages = None
 check('LAST 帶最後一次結果', char.LAST.get('ok') is True and char.LAST.get('target') == 'DKBO')
 
+# ---- errlog #383～#396「讀不到面板像素」：沒開常駐 server 時 pixel 參數超過 Windows 命令列上限 ----
+import winenv  # noqa: E402
+CMDLINE_MAX = 32767
+g = install(Game(mk()))
+_real_gui = g.gui
+_px_calls = []
+
+
+def limited_gui(*args, note=''):
+    """模擬一次性 powershell.exe：參數總長超過 32767 字元就啟動失敗（輸出錯誤訊息、沒有像素）"""
+    if args and args[0] == 'pixel':
+        _px_calls.append(len(args[1]))
+        if len(args[1]) > CMDLINE_MAX:
+            return 'Program \'powershell.exe\' failed to run: The filename or extension is too long'
+    return _real_gui(*args, note=note)
+
+
+uikit.gui = limited_gui
+_orig_long = winenv.long_args_ok
+winenv.long_args_ok = lambda script='gui.ps1': False
+rc, out = run(char.current)
+check('沒開 server：team 5784 點分批讀 → current 成功（不再「讀不到面板像素」）', rc == 0 and max(_px_calls) <= uikit.PX_ARG_MAX, f'rc={rc} 各批字元 {_px_calls[:6]}')
+_px_calls.clear()
+winenv.long_args_ok = lambda script='gui.ps1': True
+g = install(Game(mk()))
+_real_gui = g.gui
+uikit.gui = lambda *a, note='': (_px_calls.append(len(a[1])) if a and a[0] == 'pixel' else None) or _real_gui(*a, note=note)
+rc, out = run(char.current)
+check('走 server：大點陣一次送完（同一張截圖）', rc == 0 and max(_px_calls) > CMDLINE_MAX, f'rc={rc} 最大 {max(_px_calls)}')
+winenv.long_args_ok = _orig_long
+ch = uikit.px_chunks([(1000 + i % 400, 100 + i % 700) for i in range(6000)], 20000)
+check('px_chunks：每批 <= 上限、合起來順序不變', all(len(' '.join(f'{x},{y}' for x, y in c)) <= 20000 for c in ch) and sum(ch, []) == [(1000 + i % 400, 100 + i % 700) for i in range(6000)] and len(ch) > 1, str([len(c) for c in ch]))
+check('px_chunks：空清單 / 不切', uikit.px_chunks([], 100) == [[]] and len(uikit.px_chunks([(1, 1)] * 50, 0)) == 1)
+
 print('失敗', fails)
 sys.exit(1 if fails else 0)

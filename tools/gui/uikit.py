@@ -74,14 +74,42 @@ def gui(*args: str, note: str = '') -> str:
     return walk.gui(*args, note=note)
 
 
-def px(points) -> list | None:
-    """一次讀多點 → [(r,g,b), ...]；失敗 / 數量不符回 None（同 ass._px）"""
+PX_ARG_MAX = 20000               # 一次性 powershell.exe 時 pixel 點字串最長字元數（Windows 命令列上限 32767，留給路徑 / 其他參數）
+
+
+def px_chunks(points, max_chars: int = PX_ARG_MAX) -> list:
+    """純函式：點清單切成「每批 'x,y x,y …' 字串 <= max_chars」的多批（順序不變）；max_chars <= 0 = 不切"""
     pts = list(points)
-    out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
-    try:
-        cols = [tuple(int(v) for v in c.split(',')) for c in out]
-    except ValueError:
-        return None
+    if max_chars <= 0:
+        return [pts]
+    out, cur, n = [], [], 0
+    for x, y in pts:
+        w = len(f'{x},{y}') + 1
+        if cur and n + w > max_chars:
+            out.append(cur)
+            cur, n = [], 0
+        cur.append((x, y))
+        n += w
+    if cur or not out:
+        out.append(cur)
+    return out
+
+
+def px(points) -> list | None:
+    """一次讀多點 → [(r,g,b), ...]；失敗 / 數量不符回 None（同 ass._px）。
+    走常駐 server 時一次送完（同一張截圖）；一次性 powershell.exe 時依 PX_ARG_MAX 分批（errlog #383～#396：
+    team.read_pixels 5784 點約 46000 字元超過 Windows 命令列上限，沒開 server 的程序〔questdetail roles 0be283c 前、Windows 原生預設〕一律「讀不到面板像素」）"""
+    pts = list(points)
+    cols = []
+    for ch in px_chunks(pts, 0 if winenv.long_args_ok('gui.ps1') else PX_ARG_MAX):
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in ch)).split()
+        try:
+            part = [tuple(int(v) for v in c.split(',')) for c in out]
+        except ValueError:
+            return None
+        if len(part) != len(ch):
+            return None
+        cols += part
     return cols if len(cols) == len(pts) and all(len(c) == 3 for c in cols) else None
 
 

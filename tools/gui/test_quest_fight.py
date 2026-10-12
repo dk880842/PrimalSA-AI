@@ -231,10 +231,10 @@ WALK = dict(IDLE, state='walking')
 FULL_CMD_OFF = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': True, 'auto_off': True}
 
 print('(f) --stop-after-dialog：步 1 對話完（含獎勵）→ 閒置滿 2.5 秒就停，沒點追蹤 / 黃問號（深紅事故）')
-s = Script([DIALOG, DIALOG, REWARD, IDLE, IDLE, IDLE, IDLE, DIALOG, DIALOG])   # 預設 --every 1.0：閒置要滿 2.5 秒（第 4 個閒置畫面）才停
+s = Script([DIALOG, DIALOG, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE, DIALOG, DIALOG])   # 預設 --every 1.0：閒置要滿 2.5 秒（第 4 個閒置畫面）才停；第 1 個閒置是領獎後確認視窗已關的那次讀圖
 rc = run2(['--stop-after-dialog', '--task', '深紅洞窟', '--max-seconds', '120'], s)
 ok &= check('exit 0', rc == 0, f'rc={rc}')
-ok &= check('停在步 1：只用掉 7 個畫面（沒看到步 2 的對話）、花 6 秒', s.i == 7 and s.t - 1000 == 6.0, f'i={s.i} t={s.t - 1000}')
+ok &= check('停在步 1：只用掉 8 個畫面（含領獎後確認關閉 1 次；沒看到步 2 的對話）、花 6.3 秒', s.i == 8 and abs(s.t - 1000 - 6.3) < 1e-6, f'i={s.i} t={s.t - 1000}')
 ok &= check('沒有任何追蹤 / 問號點擊（只有對話左鈕 + 獎勵確認）', all(c[1].startswith(('click 948 461', 'click 720 572')) for c in s.clicks), str(s.clicks))
 
 print('(f1) 預設輪詢間隔 = 1.0 秒')
@@ -301,13 +301,13 @@ for _k, _v in _LB.items():
     ok &= check(f'隊長標實機樣本 {_k} → {_v["expect"]}', (_n >= quest.LEADER_BADGE_MIN) == _v['expect'], f'紅點 {_n}')
 
 
-def disband_case(name, tab, badges, sigs, want_rc, want_btn, want_leader):
+def disband_case(name, tab, badges, sigs, want_rc, want_btn, want_leader, expect_leader=False):
     s = Script([IDLE], px_fake(tab, badges))
     quest.time.time, quest.time.sleep = s.time, s.sleep
     quest.gui, quest.snap = s.gui, lambda tag: 'sim.png'
     quest.event = lambda m, shot=None: print(f'   {m}')
     sig_seq(*sigs)
-    rc = quest.disband_team()
+    rc = quest.disband_team(expect_leader=expect_leader)
     ok_ = rc == want_rc and bool(has(s, 'click 200 372')) == want_btn and bool(has(s, 'click 210 320')) == want_leader
     return check(f'disband {name}', ok_, f'rc={rc} {[c[1][-14:] for c in s.clicks]}')
 
@@ -320,6 +320,8 @@ def sig_seq(*vals):
 ok &= disband_case('成功（紅標消失、面板有變）', TAB_TEAM_PX, (True, False), ('a', 'b', 'c'), 0, True, True)
 ok &= disband_case('分頁沒切過去 → 不點隊長列也不點解散', TAB_TASK_PX, (True, False), ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, False, False)
 ok &= disband_case('已是單人（無紅標）→ 不點任何東西、退出碼 0', TAB_TEAM_PX, (False,), ('a', 'b', 'c'), 0, False, False)
+ok &= disband_case('expect_leader（team.py：面板說當前是隊長）但沒有隊長標 → 26 不點（不當已單人）', TAB_TEAM_PX, (False,), ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, False, False, expect_leader=True)
+ok &= disband_case('expect_leader + 小「L」標實機樣本 → 照常解散', TAB_TEAM_PX, (True, False), ('a', 'b', 'c'), 0, True, True, expect_leader=True)
 ok &= disband_case('紅標讀不到 → 26 不點', TAB_TEAM_PX, ('err',), ('a', 'b', 'c'), quest.EXIT_DISBAND_FAIL, False, False)
 ok &= disband_case('選單沒彈出 → 不點解散', TAB_TEAM_PX, (True, False), ('a', 'a', 'c'), quest.EXIT_DISBAND_FAIL, False, True)
 ok &= disband_case('解散後畫面沒變 → 未確認', TAB_TEAM_PX, (True, False), ('a', 'b', 'b'), quest.EXIT_DISBAND_FAIL, True, True)
@@ -1299,6 +1301,55 @@ rc = run(['--task', '某任務', '--team-fresh', '--max-seconds', '30'], s)
 ok &= check('主迴圈：座標讀不到、畫面 40 秒不變 → 不點地面、直接重點追蹤 1 次', not [c for c in s.clicks if 'waitstill 2000' in c[1]] and TT[:1] == ['某任務'] and len(ERRS) >= 1, f'rc={rc} TT={TT} {ERRS[:1]}')
 quest.read_world_sig, quest.track_task = _keep_ws, _keep_tt
 quest._errlog = _keep_err
+
+print('(RW) 獲得物品：按確認後驗證視窗消失；沒消失重按（2026-10-10 / 10-12 紅暴步 8 按了沒關）')
+s = Script([DIALOG, REWARD] + [REWARD] * 6 + [IDLE] * 6)            # 第 1 下被吃掉：之後 1.5 秒內仍是 reward（5 次輪詢），第 2 下才關
+rc = run2(['--stop-after-rewards', '1', '--no-track', '--max-seconds', '60'], s)
+n_ok = len([c for c in s.clicks if c[1] == 'click 720 572'])
+ok &= check('第 1 下沒關 → 重按 1 次就關，rc 0（只算 1 次獎勵）', rc == 0 and n_ok == 2, f'rc={rc} 確認鈕 {n_ok} 次 {s.clicks}')
+s = Script([DIALOG, REWARD, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--stop-after-rewards', '1', '--no-track', '--max-seconds', '60'], s)
+ok &= check('一下就關 → 只按 1 次', rc == 0 and len([c for c in s.clicks if c[1] == 'click 720 572']) == 1, f'rc={rc} {s.clicks}')
+s = Script([DIALOG, REWARD])                                         # 一直都在
+rc = run2(['--stop-after-rewards', '1', '--no-track', '--max-seconds', '60'], s)
+ok &= check(f'按 {quest.REWARD_CLICK_MAX} 次都還在 → 退出碼 {quest.EXIT_REWARD_STUCK}、不點別的', rc == quest.EXIT_REWARD_STUCK
+            and [c[1] for c in s.clicks] == ['click 948 461'] + ['click 720 572'] * quest.REWARD_CLICK_MAX, f'rc={rc} {s.clicks}')
+s = Script([DIALOG, REWARD, IDLE, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE])   # 兩個連續領獎窗（中間有空檔）→ 各算 1 次
+rc = run2(['--stop-after-rewards', '2', '--no-track', '--max-seconds', '60'], s)
+ok &= check('連續兩個領獎窗（中間讀到主畫面）→ 各按 1 次、算 2 次獎勵', rc == 0 and len([c for c in s.clicks if c[1] == 'click 720 572']) == 2, f'rc={rc} {s.clicks}')
+
+print('(BYE) 只有「再見」一顆鈕的閒聊對話（2026-10-12 紅暴步 1 誤報 rc 2）')
+# 實機像素（quest-log/140941-UNKNOWN.png、140927-dialog.png、battle-samples/vs_1.png、141940-reward.png；SIG_BYE 9 點的順序）
+_BYE_PX = {
+    '閒聊（只有再見）': ([(107, 70, 44), (107, 70, 44), (111, 73, 47), (108, 70, 44), (107, 70, 44), (107, 70, 44), (229, 200, 161), (235, 201, 159), (234, 200, 159)], True),
+    '一般兩鈕對話': ([(107, 70, 44), (107, 70, 44), (229, 199, 157), (229, 198, 154), (235, 201, 159), (234, 197, 157), (108, 71, 44), (155, 113, 80), (235, 201, 159)], False),
+    '快速戰鬥 VS（最多中 7 點）': ([(125, 110, 41), (104, 84, 38), (103, 78, 37), (111, 79, 32), (105, 88, 40), (107, 94, 42), (244, 232, 157), (98, 83, 49), (109, 84, 41)], False),
+    '獲得物品': ([(0, 0, 0), (41, 48, 48), (255, 229, 90), (0, 0, 0), (134, 121, 100), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)], False),
+}
+for _nm, (_cols, _want) in _BYE_PX.items():
+    _px = {(x, y): c for (x, y, *_), c in zip(quest.SIG_BYE, _cols)}
+    ok &= check(f'bye_probe_ok {_nm} → {_want}', quest.bye_probe_ok(_px) == _want)
+ok &= check('bye_probe_ok 缺點 → False', not quest.bye_probe_ok({}))
+for _t, _want in [('再見', True), ('戰鬥再見', False), ('再見再見', False), ('', False), ('再', False), ('A再見', False)]:
+    ok &= check(f'bye_text_only {_t!r} → {_want}', quest.bye_text_only(_t) == _want)
+
+BYE = dict(IDLE, state='bye')
+
+
+class KeySim(Script):
+    def gui(self, *args, note=''):
+        if args[0] == 'key':
+            self.clicks.append((round(self.t - 1000, 1), 'key ' + args[1]))
+            return ''
+        return super().gui(*args, note=note)
+
+
+s = KeySim([DIALOG, REWARD, IDLE, BYE, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--stop-after-dialog', '--task', 'x', '--max-seconds', '60'], s)
+ok &= check('領獎後跳閒聊 → ESC 1 次、回原流程（--stop-after-dialog 閒置後停 0，不是 rc 2）', rc == 0 and [c[1] for c in s.clicks].count('key {ESC}') == 1, f'rc={rc} {s.clicks}')
+s = KeySim([DIALOG] + [BYE, IDLE] * 3 + [BYE] * 12)
+rc = run2(['--stop-after-dialog', '--task', 'x', '--max-seconds', '120'], s)
+ok &= check(f'閒聊一直出現 → 最多 ESC {quest.BYE_MAX} 次，之後照不認得規則 rc 2', rc == 2 and [c[1] for c in s.clicks].count('key {ESC}') == quest.BYE_MAX, f'rc={rc} {s.clicks}')
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

@@ -178,6 +178,13 @@ def _server_wanted(script: str) -> bool:
     return p.stem in SERVER_SCRIPTS and p.suffix == '.ps1' and platform_kind() != 'linux'
 
 
+def long_args_ok(script: str = 'gui.ps1') -> bool:
+    """這支腳本在本程序會不會走常駐 server（參數經 stdin JSON 傳，沒有 Windows 命令列 32767 字元上限）。
+    False = 一次性 powershell.exe：參數太長會直接啟動失敗（errlog #383～#396：team.read_pixels 5784 點約 46000 字元），呼叫端要自己分批（uikit.px）。
+    註：server 起不來時 run_ps 仍會退回一次性，所以 True 只是「預期」走 server"""
+    return _server_wanted(script)
+
+
 def _log_err(kind: str, msg: str) -> None:
     """errlog 限頻：同一種錯 5 分鐘最多一筆（psa-hud 會顯示 errlog，不能洗版）"""
     now = time.time()

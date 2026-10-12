@@ -121,8 +121,9 @@ calls = {'disband': 0, 'tab': 0}
 
 
 def fake_disband(g, rc_ret=0, clear=True):
-    def f():
+    def f(expect_leader=False):
         calls['disband'] += 1
+        calls['expect_leader'] = expect_leader
         if clear and rc_ret == 0:
             for c in g.cards:
                 c['label'] = 'solo'
@@ -136,7 +137,7 @@ g = install(Game(mk()))
 quest.disband_team = fake_disband(g)
 calls.update(disband=0, tab=0)
 rc, out = run(team.disband)
-check('disband 成功 → 0、quest.disband_team 1 次、切回任務分頁', rc == 0 and calls == {'disband': 1, 'tab': 1}, f'{rc} {calls}')
+check('disband 成功 → 0、quest.disband_team 1 次（expect_leader=True）、切回任務分頁', rc == 0 and calls == {'disband': 1, 'tab': 1, 'expect_leader': True}, f'{rc} {calls}')
 check('disband 面板內 0 次點擊（點擊交給 quest）', g.inner_clicks() == [] and not g.panel)
 
 g = install(Game(mk(labels=('other',) * 5)))

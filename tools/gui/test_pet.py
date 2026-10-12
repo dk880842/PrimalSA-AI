@@ -19,6 +19,8 @@ import petmatch  # noqa: E402
 import uikit  # noqa: E402
 from fake_pet import Game, install, mk_pets  # noqa: E402
 import pet  # noqa: E402
+import winenv  # noqa: E402
+winenv.long_args_ok = lambda script='gui.ps1': True   # 模擬 pet.py main 的常駐 server 路徑：大塊取樣一次送完（fake_pet 的 EXP 橫幅以「單次 >5000 點」計次；不走 server 時 uikit.px 會分批，見 test_char）
 
 errlog.LOG = Path(tempfile.mkdtemp()) / 'errlog.jsonl'
 sys.modules['grind'] = types.SimpleNamespace(_other_running=lambda: None)      # 不讀真實鎖檔 / /proc

@@ -621,7 +621,7 @@ def disband() -> int:
         uikit.snap('team-disband-not-leader')
         return uikit.fail(SRC, EXIT_NOT_LEADER, f'當前角色不是隊長（當前 {s["current"] or "?"}、隊長 {s["leader"] or "?"}）：不點，先切到隊長再解散')
     import quest
-    d = quest.disband_team()
+    d = quest.disband_team(expect_leader=True)       # 上面已確認當前是隊長：組隊分頁沒隊長標 = 矛盾，不當「已單人」回 0
     if d:
         uikit.snap('team-disband-quest-fail')
         return uikit.fail(SRC, EXIT_DISBAND_FAIL, f'quest.disband_team 回 {d}（解散沒做成）')
