@@ -51,8 +51,8 @@ SRC = 'relogin'
 LOGOUT_BTN = (517, 731)              # 設置面板底部「全員登出」
 LOGOUT_SIG = [(517, 722, 195, 89, 57, 30), (517, 731, 201, 82, 50, 30)]   # 橘紅鈕面（p4/panel_setting.png / set_DKBO.png 量得）
 OTHER_BTNS = {'fix': uikit.rect(290, 731, 40), 'save_point': uikit.rect(921, 731, 40), 'offline': uikit.rect(1145, 731, 40)}
-SETTING_SIG = [(x, y, r, g, b, screen_sigs.TITLE_TOL) for x, y, r, g, b in screen_sigs.PANEL_TITLE['setting'][:6]] + [
-    (1340, 85, 197, 73, 49, 40)]                                           # 標題板 6 個字點 + 右上 ✕
+SETTING_SIG = [(x, y, r, g, b, screen_sigs.PANEL_TOL) for x, y, r, g, b in screen_sigs.PANEL_PTS['setting']] + [
+    (1340, 85, 197, 73, 49, 40)]                                           # 面板邊緣 / 底板 8 點 + 右上 ✕（標題板字點會隨底下地圖 / 動畫變色，實機 rc 100，不用）
 SETTING = uikit.Panel('SETTING', (1210, 760), SETTING_SIG, (1340, 85),
                       forbidden=dict(OTHER_BTNS, logout_all=uikit.rect(*LOGOUT_BTN, 40)))   # 全員登出只有本腳本 allow
 PROMPT_BOX = (500, 300, 430, 160)    # 提示窗訊息 OCR 框（同背包批量刪除提示窗）
