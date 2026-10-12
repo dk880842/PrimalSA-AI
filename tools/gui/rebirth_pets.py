@@ -408,7 +408,7 @@ class Tools:
                 return uikit.fail(SRC, bag.EXIT_ITEM, f'{role} 背包找不到 {name}（拆分）')
             if not bag.open_slot_popup(i):
                 return uikit.fail(SRC, bag.EXIT_PANEL, '拆分：點道具沒開彈窗')
-            if not bag.name_match(bag.popup_name(), name):
+            if not bag.name_match(bag.popup_name(name), name):
                 bag.close_popup()
                 return uikit.fail(SRC, bag.EXIT_NAME, '拆分：彈窗名稱不符')
             txt = bag._ocr_join(bag.POPUP_BTN_BOX, bag.BTN_OPTS)

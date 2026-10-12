@@ -58,6 +58,13 @@ for only, want in (('s4', True), ('s3', True), ('s2', True), ('s1', True), (None
 # popup_name：兩框都讀串起來（短彈窗預設框是雜訊也不能吃掉真標題）
 bag._ocr_join = lambda box, opts: '聊天雜訊' if box == bag.POPUP_NAME_BOX else '龍王的守護'
 check('popup_name 串兩框仍吻合', bag.name_match(bag.popup_name(), '龍王的守護'))
+# 2026-10-12 千年龜的殼存入彈窗：第一組（-Light 170）讀成「三三」→ 給 want 時改用其餘參數讀、吻合才採用；不給 want 維持第一組
+_oj, _uo = bag._ocr_join, uikit.ocr
+bag._ocr_join = lambda box, opts: '三三' if box == bag.POPUP_NAME_ALT else ''
+uikit.ocr = lambda box, *o: (['千年龜的殼', '消耗'] if tuple(box) == bag.POPUP_NAME_ALT and '-Dark' in o else [])
+check('popup_name(want)：第一組雜訊 → 第二組吻合', bag.name_match(bag.popup_name('千年龜的殼'), '千年龜的殼') and bag.popup_name() == '三三')
+check('popup_name(want)：第二組也不吻合 → 回第一組（核對失敗）', not bag.name_match(bag.popup_name('精靈王之弓'), '精靈王之弓'))
+bag._ocr_join, uikit.ocr = _oj, _uo
 
 # 使用鈕座標：OCR 漏讀「更多」(single) 但像素是並排 → 619；單鈕 → 732
 clicks = []
@@ -75,7 +82,7 @@ bag.load_icons = lambda: {}                       # 先測無樣板的舊路徑
 opened = []
 bag.read_slot_name = lambda i, depot=False: '守 4-0' if i == 3 else ('' if i > 3 else '木頭')
 bag.open_slot_popup = lambda i, depot=False: (opened.append(i), i in (0, 3))[1]
-bag.popup_name = lambda: '龍王的守護' if opened[-1] == 3 else '木頭'
+bag.popup_name = lambda *a: '龍王的守護' if opened[-1] == 3 else '木頭'
 bag.close_popup = lambda: True
 check('find_item OCR 讀歪 → 逐格彈窗核對', bag.find_item('龍王的守護') == 3 and opened[0] == 3)
 _real_find_item = bag.find_item
@@ -92,9 +99,9 @@ check('沒樣板的道具 → None', bag.icon_match_slots('別的') is None)
 opened.clear()
 bag.read_slot_name = lambda *a: (_ for _ in ()).throw(AssertionError('不該讀格名'))
 bag.open_slot_popup = lambda i, depot=False: (opened.append(i), True)[1]
-bag.popup_name = lambda: '龍王的守護'
+bag.popup_name = lambda *a: '龍王的守護'
 check('find_item 有樣板 → 只開命中格', bag.find_item('龍王的守護') == 8 and opened == [8])
-bag.popup_name = lambda: '木頭'
+bag.popup_name = lambda *a: '木頭'
 opened.clear()
 check('圖示命中但彈窗名稱不符 → None', bag.find_item('龍王的守護') is None and opened == [8])
 bag.load_icons = _real_icons
@@ -189,10 +196,10 @@ uikit.px = _partial(5, 6)
 bag.find_item = _real_find_item
 closed, opened = [], []
 bag.open_slot_popup = lambda i, depot=False: (opened.append(i), True)[1]
-bag.popup_name = lambda: '木頭'
+bag.popup_name = lambda *a: '木頭'
 bag.close_popup = lambda: (closed.append(1), True)[1]
 check('放寬命中但名稱不符 → None 且 ESC 關彈窗', bag.find_item('龍王的守護') is None and opened == [5] and closed == [1])
-bag.popup_name = lambda: '龍王的守護'
+bag.popup_name = lambda *a: '龍王的守護'
 check('放寬命中且名稱相符 → 回該格', bag.find_item('龍王的守護') == 5)
 
 # depot_take / depot_store：點按鈕前等 settle；取出 / 存入後輪詢（慢更新成功、逾時失敗）
@@ -204,7 +211,7 @@ bag.protected = lambda w: False
 bag._fail = lambda rc, msg, tag='': rc
 bag.popup_open = lambda: False
 bag.open_slot_popup = lambda i, depot=False: True
-bag.popup_name = lambda: '龍王的守護'
+bag.popup_name = lambda *a: '龍王的守護'
 bag._ocr_join = lambda box, opts: '取出 存入'
 bag._click = lambda x, y, panel, note, allow=(), wait_ms=350: (order.append(('click', len(sleeps))), True)[1]
 bag._wait = _real_wait
@@ -246,7 +253,7 @@ _bagx = [True, True, True] + [False] * 12
 def _fi3(want, depot=False, popup_fallback=True):
     return next((i for i in range(3) if _bagx[i]), None)
 bag.find_item = _fi3
-bag.popup_name = lambda: '千年龜的殼'
+bag.popup_name = lambda *a: '千年龜的殼'
 bag.slot_occupancy = lambda: list(_bagx)
 _open = [False]
 bag.popup_open = lambda: _open[0]

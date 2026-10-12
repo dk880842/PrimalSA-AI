@@ -393,11 +393,16 @@ def _ocr_all(box, optsets) -> str:
     return ' '.join(t for o in optsets for t in uikit.ocr(box, *o) if t.strip())
 
 
-def popup_name() -> str:
+def popup_name(want: str | None = None) -> str:
     """兩個標題框都讀、串起來（短彈窗時 y133 框在彈窗外，讀到的是 HUD / 聊天雜訊而非空字串，不能「讀不到才用備援」）。
-    每框兩組參數都讀：2026-10-12 千年龜的殼彈窗（倉庫頁存入）`-Light 170` 讀成「三三」、`-Dark 0` 才讀到名稱，
-    舊版第一組有字就停 → 名稱核對失敗 96。多讀的雜訊只會讓核對更保守（name_match 找子字串、保護名單照擋）"""
-    return (_ocr_all(POPUP_NAME_BOX, NAME_OPTS) + ' ' + _ocr_all(POPUP_NAME_ALT, NAME_OPTS)).strip()
+    want = 要核對的名稱：第一組 OCR 參數讀到的字不吻合時，再用其餘參數讀、吻合才採用（2026-10-12 千年龜的殼存入彈窗
+    `-Light 170` 讀成「三三」、`-Dark 0` 才讀到名稱，舊版第一組有字就停 → 96）。不給 want（例：讀武器格舊武器名稱當身分）維持只用第一組，
+    不把多組雜訊串進名稱"""
+    base = (_ocr_join(POPUP_NAME_BOX, NAME_OPTS) + ' ' + _ocr_join(POPUP_NAME_ALT, NAME_OPTS)).strip()
+    if want is None or name_match(base, want):
+        return base
+    more = (_ocr_all(POPUP_NAME_BOX, NAME_OPTS[1:]) + ' ' + _ocr_all(POPUP_NAME_ALT, NAME_OPTS[1:])).strip()
+    return more if name_match(more, want) else base
 
 
 def is_pair_layout() -> bool:
@@ -531,7 +536,7 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> in
         for i in cand:
             if not open_slot_popup(i, depot):
                 continue
-            nm = popup_name()
+            nm = popup_name(want)
             close_popup()
             if nm and name_match(nm, want):
                 return i
@@ -549,7 +554,7 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> in
     for _, i in sorted(unread):                       # 名稱 OCR 有重疊字的格先開（龍王的守護格曾被讀成「守 4-0」）
         if not open_slot_popup(i, depot):
             continue                                  # 空格不會開彈窗
-        nm = popup_name()
+        nm = popup_name(want)
         close_popup()
         if nm and name_match(nm, want):
             return i
@@ -865,7 +870,7 @@ def use_item(role: str, want: str, verify_buff: bool = False) -> int:
             return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
         if not open_slot_popup(i):
             return _fail(EXIT_PANEL, f'點第 {i + 1} 格沒開彈窗', 'bag-nopopup')
-        nm = popup_name()
+        nm = popup_name(want)
         if not name_match(nm, want):
             close_popup()
             return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不使用）', 'bag-popup-name')
@@ -905,7 +910,7 @@ def discard_item(role: str, slot: int, expect: str, forbid=None) -> int:
         return _fail(EXIT_GUARD, f'要丟的名稱「{expect}」在保護名單（{bad}）內，拒絕')
     if not open_slot_popup(slot):
         return _fail(EXIT_PANEL, f'第 {slot + 1} 格沒開彈窗（空格？），不丟', 'bag-drop-nopopup')
-    nm = popup_name()
+    nm = popup_name(expect)
     if not nm or not name_match(nm, expect) or any(name_match(nm, b, 0.8) for b in bad):
         close_popup()
         return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是預期的「{expect}」（或在保護名單）→ 不丟', 'bag-drop-name')
@@ -967,7 +972,7 @@ def swap_weapon(role: str, bow: str = '精靈王之弓', keep_old: bool = False)
             return _fail(EXIT_ITEM, f'{role} 背包找不到「{bow}」', 'bag-nobow')
         if not open_slot_popup(i):
             return _fail(EXIT_PANEL, f'點第 {i + 1} 格沒開彈窗', 'bag-nopopup')
-        nm = popup_name()
+        nm = popup_name(bow)
         if not name_match(nm, bow):
             close_popup()
             return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{bow}」（不穿）', 'bag-popup-name')
@@ -1028,7 +1033,7 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
             return _fail(EXIT_ITEM, f'{depot} 倉庫找不到「{want}」', 'bag-depot-noitem')
         if not open_slot_popup(i, depot=True):
             return _fail(EXIT_PANEL, f'點倉庫第 {i + 1} 格沒開彈窗（空格不要點取出，會進刪除管理）', 'bag-depot-nopopup')
-        nm = popup_name()
+        nm = popup_name(want)
         if not name_match(nm, want):
             close_popup()
             return _fail(EXIT_NAME, f'倉庫彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不取）', 'bag-depot-name')
@@ -1078,7 +1083,7 @@ def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = Fal
             x, y = slot_xy(i)
             if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
                 return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
-            nm = popup_name()
+            nm = popup_name(want)
             if not name_match(nm, want):
                 close_popup()
                 return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
