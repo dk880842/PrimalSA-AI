@@ -239,3 +239,18 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
   - **連戰不補血（questrun `hp_gate`）**：四寶玉之謎 `--no-dragon` 在步 2 / 3 BOSS 後 4 次 38（DKBO3～5 輪流被打死踢隊、傳回村 HP 1）——舊 questrun 只看隊長 HUD HP。能讀到的 HP：HUD 只有當前角色；切換面板、組隊面板（850,760）都沒有 HP；**背包頁左欄點頭像可以看每個人的 HP 條字**（`bag.hps`，5 人約 8 秒，實機驗過）。現在任務開始前、以及每次 quest.py 37（BOSS 戰贏、滿 5 人）後下一片之前：隊長 HUD HP < `--hp-min`（50）或任一人 < `--team-hp-min`（預設 60；0 = 不讀全隊）→ `heal.heal_trip --no-return`（小護士補整隊，ui/home.md）→ `team.form` 重組。某人 HP 讀不出不單獨觸發；背包打不開 → 只看隊長並記事件；bag 回 9 / 10 透傳。使用者「練功不自動補血」只限掛機，解任務可以補。**限制**：沒有在 BOSS 片之前（BOSS 戰還沒開始）讀血的時機——questrun 不知道下一片哪裡是 BOSS，只能在任務前 / 上一場 BOSS 後補；路上連續一般遇敵仍可能把人打低（長路任務建議照舊吃龍王的守護）；heal 從地城傳送若被地圖限制擋下 → 111 停手（未實測）。
   - **接取後 team.form rc 40**：根因見 ui/team.md（`open_panel_ex` 第 2 下補點時間算錯，4 s 內永遠不補點），已修。
   - **解散認不出隊長「L」標**：見 ui/team.md「左側分頁像素」。**bag.py find 回全空**：見 ui/bag.md「顯示道具名」。
+
+### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12，**只有離線測試，實機未驗證；questrun 還沒接線**）
+照 memory psa-team-check-after-boss：quest.py 38 / 21（questrun 114）時，被打飛的人自己追上進度，再切回 DKBO 重組。errlog #222 / #226 / #238（四寶玉之謎 38 手動處理）。
+```
+uv run --no-project python tools/gui/bossretry.py plan --track 琉璃洞窟        # 不碰遊戲：印流程
+uv run --no-project python tools/gui/bossretry.py run --track 琉璃洞窟 [--max-tries 2] [--max-slices 6] [--slice-s 300] [--hp-min 50]
+uv run --no-project python tools/gui/bossretry.py status                         # 唯讀：隊長 / 不在隊的人
+uv run --no-project python tools/gui/test_bossretry.py                           # 離線測試（假 Tools，27 項）
+```
+- **追趕法**：`team.check(5)` = 0 → 其實沒缺人，不動；否則切換面板卡片找「隊長（參考者）」與「不在隊的人」→ 讀隊長的追蹤步號（`quest.read_step_no`）→ 每個掉隊者 `char.switch` → 讀他的步號：相同 = 遊戲有給進度，只補血；落後 = HUD HP < 50% 先 `heal_trip --no-return` → `quest.py --task <追蹤> --team-size 1` 單人預設模式（點追蹤 = 自動傳送 / 巡路、BOSS 戰後停 37）→ 再讀步號，追到與隊長相同為止；BOSS 戰後步號沒前進 / 被打飛 = 輸一次，補血再打（≤ `--max-tries`）。最後（隊長不是 DKBO 時先切去解散舊隊）`char.ensure DKBO` → `team.form --regroup` → `team.check(5)`。
+- **多人掉隊**：`team.form` 只能「隊長 + 下排前 N 張」，不能指定子隊成員 → 不組小隊，逐一單人追。
+- **不盲打**：步號讀不到（隊長或掉隊者）→ 142；掉隊者步號超前 → 144；quest.py 39 / 33 / 29 / 25 / 19 / 3 → 146；9 / 10 立即透傳且不再點；其他失敗一律先 `char.ensure DKBO` 再回碼。
+- 退出碼 140～149：140 隊伍讀不到 / 沒隊長 / 名字讀不出、141 切角色、142 步號讀不到、143 補血、144 重打失敗、145 重組失敗、146 quest.py 要人看。
+- **待實機確認**：①被打飛的人步號是否真的沒前進；②單人（1 角色 + 戰寵）打不打得過洞窟守護獸；③掉隊者在醫院、隊伍在洞窟深處時快速組隊能否跨地圖（不行 → 145）；④DKBO 自己被打飛時的解散路徑。
+- **questrun 接線稿（等 play 結束才改 questrun.py）**：`questrun.Tools.boss_retry(track)` → `bossretry.run(track)`；`Run.run_task` 的 `knocked` / `boss_team` 分支改成「每任務最多 3 次呼叫 bossretry，0 → `team_ok_at` = 現在 → `hp_gate` → `continue` 下一片；非 0 → 114（info.boss_retry_rc）；9 / 10 透傳」；加 `--no-boss-retry`；test_questrun Fake 加 `boss_retry`。精確改法在 bossretry.py 檔頭「待接線」段。
