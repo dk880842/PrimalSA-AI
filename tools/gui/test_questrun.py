@@ -178,6 +178,12 @@ class Fake:
         self.rec('unfreeze')
         return None
 
+    reward_rr = 'closed'
+
+    def reward_retry(self):
+        self.rec('reward_retry')
+        return self.reward_rr
+
     vs_stuck_val = False
     relogin_rc = 0
 
@@ -423,6 +429,22 @@ check('3 且無 walk 步驟 → 112', go(f, [2017]) == questrun.EXIT_STEP and 'g
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, []), (0, [])])
 rc = go(f, [2017])
 check('3 且無 walk 步驟 → 先 unfreeze（刷新 + 出口格重踏）再重跑 quest', rc == 0 and f.names().count('unfreeze') == 1 and f.names().count('quest') == 2, str(f.names()))
+
+# 8a) quest.py 18 領獎窗關不掉：重試成功續跑 / 仍失敗 152 / 畫面已不是 reward 不點（Fake.reward_rr）
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(18, []), (0, [])])
+rc = go(f, [2017])
+check('18 → 重試關窗成功 → 續跑下一片', rc == 0 and f.names().count('reward_retry') == 1 and f.names().count('quest') == 2, str(f.names()))
+f = Fake(status={D17: [questrun.DOING]}, quest=[(18, [])] * 3)
+f.reward_rr = 'stuck'
+rc = go(f, [2017])
+check('18 → 重試仍失敗 → 152、不續跑、不恢復掛機', rc == questrun.EXIT_REWARD == 152 and f.names().count('quest') == 1 and 'grind_start' not in f.names() and 'snap' in f.names(), f'{rc} {f.names()}')
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(18, []), (0, [])])
+f.reward_rr = 'not_reward'
+rc = go(f, [2017])
+check('18 → 畫面已不是 reward（不點）→ 當已關、續跑', rc == 0 and f.names().count('reward_retry') == 1 and f.names().count('quest') == 2, str(f.names()))
+f = Fake(status={D17: [questrun.DOING]}, quest=[(18, [])] * 10)
+rc = go(f, [2017])
+check('18 反覆（每次重試都「成功」）→ 超過 REWARD_RETRY_MAX 次 152，不無限迴圈', rc == 152 and f.names().count('reward_retry') == questrun.REWARD_RETRY_MAX, f'{rc} {f.names().count("reward_retry")}')
 
 # 8b) VS 牌卡死：刷新 2 次無效 → 全員重登 → 續跑；重登失敗 → 112；沒卡 VS 不重登
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, [])] * 3 + [(0, [])])

@@ -63,6 +63,8 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀�
   119 接取失敗（info.accept_rc 是 questdetail 的 120～128）
   150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～125 / 切回 DKBO / 重組；info.turnin）
   151 丟獎勵寵失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；info.drop）
+  152 領獎視窗關不掉：quest.py 回 18（獲得物品按確認 3 次仍在）→ questrun 先重試關窗（只有畫面仍是 reward 才按確認 720,572 並驗證消失；已不是 reward 就不點，當成已關）
+      成功就續跑下一片；重試仍關不掉、或同一任務重試已達 REWARD_RETRY_MAX 次 → 152「請人工處理」，存 snap questrun-reward-stuck，不恢復掛機（info.reward_retry）
 """
 import argparse
 import json
@@ -88,6 +90,8 @@ PROGRESS = rebirth.logpaths.p(uikit.CACHE / 'questrun.json')
  EXIT_IRREV, EXIT_STALL, EXIT_BATTLE, EXIT_ACCEPT) = range(110, 120)
 EXIT_LAGGARD = 108                                                   # 逐人驗證後仍有人沒完成（grep 過 108 沒被其他工具用）
 EXIT_BATTLESET = 109                                                 # 戰鬥設定檢查失敗（rebirth_pets 也有 109，但兩者不互相呼叫）
+EXIT_REWARD = 152                                                    # 領獎視窗關不掉（quest.py 18 → 重試仍失敗；152 grep 過沒被用）
+REWARD_RETRY_MAX = 3                                                 # 每個任務最多重試關領獎窗幾次（避免無限迴圈）
 EXIT_TURNIN, EXIT_DROP = 150, 151                                    # 交寵物 / 丟獎勵寵失敗（150～151 grep 過沒被用）
 DROP_MAX_LEVEL = 1                                                   # --drop-reward 只丟這個等級以下（剛拿到的獎勵寵是 1 級）
 
@@ -200,6 +204,14 @@ class Tools(rebirth.Tools):
         import walk
         _q.refresh_characters()
         return walk.rewarp_if_on_exit()
+
+    def reward_retry(self) -> str:
+        """quest.py 回 18 後再關一次領獎窗：'not_reward'（畫面已不是領獎窗，不點）/ 'closed'（按確認後驗證消失）/ 'stuck'（仍關不掉）"""
+        import quest as _q
+        if _q.read_screen().get('state') != 'reward':
+            return 'not_reward'
+        ok, _n = _q.close_reward()
+        return 'closed' if ok else 'stuck'
 
     def vs_stuck(self) -> bool:
         """全隊頭上 VS 牌卡死：連續 3 次（間隔 1 s）讀到「快速戰鬥 VS 牌、沒有完整戰鬥畫面」且 VS 牌一直在"""
@@ -314,7 +326,7 @@ def retry_form(T, form_fn, what: str, tries: int = FORM_TRIES) -> int:
 def classify(rc: int, tail=()) -> str:
     """quest.py 退出碼 → 動作字串（測試直接餵）：done? / boss / stuck3 / gone / team / stall / battle / irrev / verify / halt / knocked / other"""
     return {0: 'check', 37: 'boss', 38: 'boss_team', 3: 'no_track', 5: 'gone', 30: 'team', 32: 'team', 33: 'stall', 29: 'stall', 25: 'battle',
-            39: 'irrev', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked'}.get(rc, 'other')
+            39: 'irrev', 18: 'reward_stuck', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked'}.get(rc, 'other')
 
 
 def walk_secs(tail) -> int:
@@ -379,7 +391,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 152 領獎窗關不掉；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -678,6 +690,7 @@ class Run:
         rewarps = 0
         relogins = 0
         boss_retries = 0
+        reward_retries = 0
         turnin_tried = False
         for k in range(self.o['max_slices']):
             if time.time() - t0 > self.o['max_min'] * 60:
@@ -725,6 +738,17 @@ class Run:
                 return self.fail(uikit.EXIT_UNKNOWN_SCREEN, 'quest.py 看到不認得的畫面（疑似驗證視窗）→ 停手通知使用者（鐵則 5）', quest_rc=rc)
             if act == 'halt':
                 return uikit.EXIT_HALT
+            if act == 'reward_stuck':                                   # quest.py 18：領獎窗按確認 3 次沒關 → 重試關窗一次，成功續跑，否則停手交人
+                reward_retries += 1
+                if reward_retries > REWARD_RETRY_MAX:
+                    T.snap('questrun-reward-stuck')
+                    return self.fail(EXIT_REWARD, f'任務 {tid}：領獎視窗關不掉（已重試 {REWARD_RETRY_MAX} 次），請人工處理', quest_rc=rc, reward_retry=reward_retries - 1)
+                rr = T.reward_retry()
+                event(f'任務 {tid}：quest.py 18 領獎窗關不掉 → 重試關窗（第 {reward_retries}/{REWARD_RETRY_MAX} 次）：{rr}')
+                if rr == 'stuck':
+                    T.snap('questrun-reward-stuck')
+                    return self.fail(EXIT_REWARD, f'任務 {tid}：領獎視窗關不掉，請人工處理', quest_rc=rc, reward_retry=reward_retries)
+                continue
             if act == 'irrev':
                 T.snap('questrun-irrev')
                 return self.fail(EXIT_IRREV, f'任務 {tid}：對話含不可逆字樣（quest.py 39），沒按、對話框維持開著，請人看圖', quest_rc=rc)
