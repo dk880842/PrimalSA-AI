@@ -224,21 +224,47 @@ check('depot_take 背包慢更新 → 輪詢成功且先 settle', bag.depot_take
 bag.find_item = lambda want, depot=False, popup_fallback=True: 0 if depot else None
 clk[0] = 0.0
 check('depot_take 逾時仍找不到 → EXIT_VERIFY', bag.depot_take('DKBO', '龍王的守護') == bag.EXIT_VERIFY and clk[0] >= 4.0)
-# 存入：背包第 1 次仍有、第 3 次消失 → 成功；一直有 → 逾時失敗
+# 存入：那一格（像素）第 1、2 次仍有、第 3 次變空 → 成功；一直有 → 逾時失敗（2026-10-12 改看格子變空，同名多格不誤報）
+_real_occ = bag.slot_occupancy
 n = [0]
-def _fs(want, depot=False, popup_fallback=True):
+def _occ():
     n[0] += 1
-    return 1 if n[0] < 3 else None
-bag.find_item = _fs
+    return [i == 1 and n[0] < 3 for i in range(15)]
+bag.slot_occupancy = _occ
+bag.find_item = lambda want, depot=False, popup_fallback=True: 1
 sleeps.clear()
 _po = [True, False]                                    # 點背包格後彈窗開（True），按存入後關（False）
 bag.popup_open = lambda: _po.pop(0) if len(_po) > 1 else _po[0]
 check('depot_store 背包慢更新 → 輪詢成功且先 settle', bag.depot_store('DKBO', '龍王的守護') == 0 and n[0] == 3 and bag.POPUP_SETTLE_S in sleeps)
-bag.find_item = lambda want, depot=False, popup_fallback=True: 1
+bag.slot_occupancy = lambda: [i == 1 for i in range(15)]
 _po = [True, False]
 bag.popup_open = lambda: _po.pop(0) if len(_po) > 1 else _po[0]
 clk[0] = 0.0
 check('depot_store 逾時仍有 → EXIT_VERIFY', bag.depot_store('DKBO', '龍王的守護') == bag.EXIT_VERIFY and clk[0] >= 4.0)
+# --all-copies：同名 3 格（不疊加，千年龜的殼）→ 一格一格存到沒有；每次驗「那一格變空」
+_bagx = [True, True, True] + [False] * 12
+def _fi3(want, depot=False, popup_fallback=True):
+    return next((i for i in range(3) if _bagx[i]), None)
+bag.find_item = _fi3
+bag.popup_name = lambda: '千年龜的殼'
+bag.slot_occupancy = lambda: list(_bagx)
+_open = [False]
+bag.popup_open = lambda: _open[0]
+def _clk3b(x, y, panel, note, allow=(), wait_ms=350):
+    if (x, y) == (732, 648):
+        _bagx[_fi3('')] = False
+        _open[0] = False
+    else:
+        _open[0] = True
+    return True
+bag._click = _clk3b
+clk[0] = 0.0
+rc = bag.depot_store('DKBO', '千年龜的殼', all_copies=True)
+check('depot_store --all-copies：3 格全存、LAST stored=3', rc == 0 and _bagx[:3] == [False] * 3 and bag.LAST.get('stored') == 3)
+_bagx[:] = [True, True] + [False] * 13
+rc = bag.depot_store('DKBO', '千年龜的殼')
+check('depot_store 預設只存 1 格（同名另一格還在也不誤報 95）', rc == 0 and _bagx[:2] == [False, True] and bag.LAST.get('stored') == 1)
+bag.slot_occupancy = _real_occ
 # ---- depot_many：多人批次（2026-10-12）----
 opened = []
 class CountSession(FakeSession):
@@ -247,7 +273,7 @@ class CountSession(FakeSession):
         return self
 bag.Session = CountSession
 seen = []
-bag.depot_store = lambda r, w, d='public', keep_ok=False: (seen.append(r), bag.EXIT_ITEM if r == 'DKBO3' else 0)[1]
+bag.depot_store = lambda r, w, d='public', keep_ok=False, **k: (seen.append(r), bag.EXIT_ITEM if r == 'DKBO3' else 0)[1]
 rc, d = bag.depot_many('store', ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4'], '人龍隨機蛋', skip_missing=True)
 check('depot_many store --skip-missing：外層 Session 1 次、4 人都做、沒有的略過 rc 0', rc == 0 and len(opened) == 1 and seen == ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4'] and d['DKBO3'] == bag.EXIT_ITEM)
 seen.clear()

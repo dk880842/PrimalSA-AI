@@ -16,16 +16,19 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py store DKBO 龍王的守護 [--depot public|personal]  # 倉庫存入
   uv run --no-project python tools/gui/bag.py store all 人龍隨機蛋 --depot public [--skip-missing]   # 多人（all / DKBO2,DKBO3）：背包面板只開一次逐人存（take 同）
   uv run --no-project python tools/gui/bag.py drop DKBO 名稱 --confirm-name 名稱               # 丟棄背包道具（名稱必須完全對上）
-最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / find_items / use_item / swap_weapon / depot_take / depot_store / drop_item。
+  uv run --no-project python tools/gui/bag.py list all|DKBO,DKBO3                                  # 唯讀：每人背包每格名稱 + 空格數（面板開一次逐人切頭像）
+  uv run --no-project python tools/gui/bag.py purge all|DKBO2,DKBO3 --names 名稱,名稱 [--dry-run]   # 刪除管理批次刪：只勾名單內道具 → 提示窗清單必須是名單子集且條數 = 像素勾選數才按確定，否則 X 停手
+  uv run --no-project python tools/gui/bag.py store all 千年龜的殼 --depot public --all-copies --skip-missing   # 同名多格（不疊加）全部存
+最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；bag 自己 90～96）：
   90 背包面板打不開 / 分頁不對 / 中途消失（沒點面板內座標）
   91 左欄角色沒選到（黃框不對 / 名牌不是該角色）
   92 找不到指定道具（背包或倉庫沒有）
-  93 防護擋下（要丟的名稱是精靈王之弓 / 不是預期名稱 / 沒給舊武器名稱…），零丟棄點擊
+  93 防護擋下（要丟的名稱是精靈王之弓 / 不是預期名稱 / 沒給舊武器名稱…），零丟棄點擊；purge：名單含保護道具、像素勾選與目標不一致（已取消刪除）
   94 倉庫 / 背包滿
   95 動作後驗證失敗（不重點；請人看 snap）
-  96 彈窗 / 提示窗名稱 OCR 對不上或讀不到（不點確定）
+  96 彈窗 / 提示窗名稱 OCR 對不上或讀不到（不點確定）；purge：提示窗清單不是名單子集 / 條數不符（已按 X、取消刪除）
 
 防護原則：
   - 丟棄：彈窗名稱與提示窗名稱都必須模糊吻合「預期名稱」，且不能吻合 PROTECT（精靈王之弓…）；任何一塊讀不到 = 不丟。
@@ -385,9 +388,16 @@ def read_slot_name(i: int, depot: bool = False) -> str:
 POPUP_NAME_ALT = (600, 250, 330, 45)                                # 說明越長標題越高（2倍智慧果 y≈270）；只含標題列
 
 
+def _ocr_all(box, optsets) -> str:
+    """每組 OCR 參數都讀、全部串起來（_ocr_join 是第一組讀到字就停）"""
+    return ' '.join(t for o in optsets for t in uikit.ocr(box, *o) if t.strip())
+
+
 def popup_name() -> str:
-    """兩個標題框都讀、串起來（短彈窗時 y133 框在彈窗外，讀到的是 HUD / 聊天雜訊而非空字串，不能「讀不到才用備援」）"""
-    return (_ocr_join(POPUP_NAME_BOX, NAME_OPTS) + ' ' + _ocr_join(POPUP_NAME_ALT, NAME_OPTS)).strip()
+    """兩個標題框都讀、串起來（短彈窗時 y133 框在彈窗外，讀到的是 HUD / 聊天雜訊而非空字串，不能「讀不到才用備援」）。
+    每框兩組參數都讀：2026-10-12 千年龜的殼彈窗（倉庫頁存入）`-Light 170` 讀成「三三」、`-Dark 0` 才讀到名稱，
+    舊版第一組有字就停 → 名稱核對失敗 96。多讀的雜訊只會讓核對更保守（name_match 找子字串、保護名單照擋）"""
+    return (_ocr_all(POPUP_NAME_BOX, NAME_OPTS) + ' ' + _ocr_all(POPUP_NAME_ALT, NAME_OPTS)).strip()
 
 
 def is_pair_layout() -> bool:
@@ -577,6 +587,251 @@ def find_items(role: str, names) -> tuple:
         else:
             out['_free'] = occ.count(False)
             out['_unread'] = [i for i in idx if not texts[i].strip()]
+    return 0, out
+
+
+def dedup_text(t) -> str:
+    """純函式：格名稱 OCR 會把 zoom 2 / 3 兩次結果串起來（「杉的手環 杉的手環」）→ 去掉重複的片段"""
+    seen = []
+    for w in str(t or '').split():
+        if w not in seen:
+            seen.append(w)
+    return ' '.join(seen)
+
+
+def read_bag_names() -> tuple:
+    """目前選中角色、背包頁：→ (occ | None, {格號: 名稱 OCR})；只讀有道具的格（像素判空格），名稱全空 = 「顯示道具名」被關 → 點開一次再讀"""
+    occ = slot_occupancy()
+    idx = [i for i in range(n_slots()) if occ is None or occ[i]]
+    texts = {i: read_slot_name(i) for i in idx}
+    if occ is not None and names_hidden(occ, texts) and ensure_names_shown(occ):
+        texts = {i: read_slot_name(i) for i in idx}
+    return occ, texts
+
+
+def list_all(roles) -> tuple:
+    """唯讀：逐人列背包每格名稱（Session 開一次）→ (rc, {角色: {'slots': {格號: 名稱}, 'free': 空格數, 'unread': [格號]}})。
+    只看可見 15 格（3 列；2026-10-12 刪除模式紅框也只框 3 列）"""
+    out = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            rc = select_role(r)
+            if rc:
+                return rc, out
+            occ, texts = read_bag_names()
+            out[r] = {'slots': {i: dedup_text(t) for i, t in texts.items() if t.strip()},
+                      'free': occ.count(False) if occ else None,
+                      'unread': [i for i, t in texts.items() if not t.strip()]}
+    return 0, out
+
+
+def item_slots(want: str) -> list:
+    """背包頁：名稱 OCR 吻合 want 的所有格號（同名多格，例：千年龜的殼不疊加、每個佔一格）"""
+    _, texts = read_bag_names()
+    return [i for i, t in sorted(texts.items()) if t.strip() and name_match(t, want)]
+
+
+# ---- 刪除管理（bag.py purge，2026-10-12 實機量測：DKBO2 巴巴洛的許可證）----
+# 普通模式下方三鈕：顯示道具名 968,561 / 刪除管理 968,625（紅區）/ 整理背包 968,688（藍）。
+# 按刪除管理 → 刪除模式：道具區紅框、鈕變「刪除選中」968,625（紅）/「取消刪除」968,688（黃）；單擊格子 = 勾 / 取消勾（不開彈窗），
+# 勾選標記 = 格子右上紅圓白勾（中心約 格中心 +29,-27，紅 (243,69,84)）。「刪除選中」→「提示」窗：綠字 `名稱*數量|…|` + 「是否批量刪除道具?」，
+# 只有一顆「確定」715,557、右上 X 947,208（X 後仍在刪除模式、勾選保留）。**968,688 在普通模式是「整理背包」**，只准在 DELMODE 特徵吻合時點。
+DEL_BTN, DEL_CANCEL = (968, 625), (968, 688)
+DELOK_XY, DELX_XY = (715, 557), (947, 208)
+DELMODE_SIG = [(1280, 113, 197, 70, 43, 30), (700, 350, 245, 69, 82, 26), (1232, 350, 245, 69, 82, 26), (965, 192, 241, 65, 82, 26),
+               (730, 688, 179, 113, 56, 26), (730, 625, 165, 54, 31, 30)]
+DELMODE = uikit.Panel('BAGDEL', None, DELMODE_SIG, None, esc_close=False, forbidden={'delete_sel': FORBID['delete_mgr'], 'expand': FORBID['expand']})
+# 提示窗：X 紅、確定鈕藍（兩側）、底色米黃；560,545 是米黃（丟寵等兩顆鈕的提示窗這裡是藍「確定」→ 不會混淆 pet.CONFIRM）
+DELCONFIRM_SIG = [(946, 208, 197, 73, 49, 24), (645, 557, 57, 101, 159, 24), (785, 557, 56, 104, 163, 24), (700, 460, 243, 215, 179, 24),
+                  (520, 300, 237, 211, 175, 24), (560, 545, 245, 213, 179, 24)]
+DELCONFIRM = uikit.Panel('BAGDELOK', None, DELCONFIRM_SIG, DELX_XY, esc_close=False)
+DEL_LIST_BOX = (500, 300, 430, 160)
+DEL_LIST_ZOOMS = ('2', '3')                     # 每個 zoom 單獨 OCR、各自數條目（同一份 OCR 結果裡 zoom 2 / 3 會重複）
+MARK_DXY = (29, -27)
+MARK_PROBE = [(dx, dy) for dx in (-6, -3, 0, 3, 6) for dy in (-6, -3, 0, 3, 6)]
+MARK_MIN = 12                                   # 25 點至少幾點是紅（實測勾了 ≈ 20、沒勾 0：名稱字是黑白）
+# purge 永遠不勾的名稱（PROTECT 之外）：二轉要交的四大洞窟產物與中間品（plan-182-finish §2.3）
+PURGE_FORBID = ['大地的羈絆', '火的羽毛飾品', '風的鎖', '水的戒指', '雅哈奴的日記', '拉魯的項鍊', '不死鳥的羽毛', '風的豎琴',
+                '深藍色石頭', '群青的水', '碧青水晶', '龍王的守護', '2倍智慧果', '離線水晶', '安撫之素', '寵物誘餌', '2轉新手禮盒']
+
+
+def mark_red(c) -> bool:
+    r, g, b = c
+    return r > 200 and g < 110 and b < 120
+
+
+def slot_marked(cols) -> bool:
+    """純函式：MARK_PROBE 各點顏色 → 這格有沒有被勾"""
+    return sum(1 for c in cols if mark_red(c)) >= MARK_MIN
+
+
+def marked_slots() -> list | None:
+    """刪除模式：15 格哪些被勾（一次 uikit.px）；讀不到 None"""
+    pts = [(x + MARK_DXY[0] + dx, y + MARK_DXY[1] + dy) for i in range(n_slots()) for x, y in [slot_xy(i)] for dx, dy in MARK_PROBE]
+    cols = uikit.px(pts)
+    if not cols or len(cols) != len(pts):
+        return None
+    k = len(MARK_PROBE)
+    return [i for i in range(n_slots()) if slot_marked(cols[i * k:(i + 1) * k])]
+
+
+def purge_guard(text) -> str | None:
+    """名稱（OCR）吻合 PROTECT / PURGE_FORBID → 回吻合的保護名；否則 None"""
+    for p in list(PROTECT) + PURGE_FORBID:
+        if name_match(text, p, 0.8):
+            return p
+    return None
+
+
+def purge_target(text, names) -> str | None:
+    """純函式：格名稱 OCR → 吻合名單內哪個名稱（不吻合 / 被保護 → None）"""
+    t = dedup_text(text)
+    if not t.strip() or purge_guard(t):
+        return None
+    return next((n for n in names if name_match(t, n)), None)
+
+
+def del_entries(lines) -> list:
+    """純函式：提示窗某一個 zoom 的 OCR 行 → 條目清單（去掉「是否批量刪除道具?」行、行與行串起來再用 | 切、去 *數量）"""
+    body = ''.join(re.sub(r'\s+', '', str(t)) for t in lines or [] if '是否' not in str(t) and '刪除' not in str(t))
+    out = []
+    for e in body.split('|'):
+        e = re.sub(r'\*?\d*$', '', e.strip()).rstrip('*')
+        if e:
+            out.append(e)
+    return out
+
+
+def del_entry_name(entry, names) -> str | None:
+    """純函式：條目是否就是名單內某個名稱（OCR 會掉「*」和重複字：巴巴洛→巴洛）→ 名稱 / None。
+    條目長度不得比名稱長 2 字以上（兩個條目黏在一起時「完全包含」會誤過）；被保護的名稱一律 None"""
+    e = norm_name(entry)
+    if not e or purge_guard(e):
+        return None
+    for n in names:
+        w = norm_name(n)
+        if not w or len(e) > len(w) + 2:
+            continue
+        if difflib.SequenceMatcher(None, e, w).ratio() >= 0.72:
+            return n
+        if len(e) >= max(2, -(-len(w) * 3 // 5)) and all(c in w for c in e):     # 掉字：條目每個字都在名稱裡、且至少 60% 長
+            return n
+    return None
+
+
+def del_list_ok(zoom_lines, names, n_marked: int) -> tuple:
+    """純函式：{zoom: OCR 行} → (ok, 說明)。全部 zoom 的每個條目都必須是名單內名稱；至少一個 zoom 的條目數 == 勾選數；
+    任何 zoom 的條目數 > 勾選數 → 不過（多出來的就是名單外 / 黏字）"""
+    counts, seen = [], []
+    for z, lines in zoom_lines.items():
+        ents = del_entries(lines)
+        counts.append(len(ents))
+        for e in ents:
+            if not del_entry_name(e, names):
+                return False, f'zoom {z} 條目 {e!r} 不在名單 {list(names)} 內（或被保護）'
+        seen += ents
+    if not seen:
+        return False, '提示窗讀不到任何條目'
+    if max(counts) > n_marked:
+        return False, f'條目數 {counts} 多於勾選數 {n_marked}'
+    if n_marked not in counts:
+        return False, f'條目數 {counts} 與勾選數 {n_marked} 不一致'
+    return True, f'條目 {seen}'
+
+
+def _leave_delmode() -> bool:
+    """刪除模式 / 提示窗開著 → X / 取消刪除，回到普通背包頁；回 True = 已回到普通模式"""
+    if uikit.is_open(DELCONFIRM):
+        uikit.safe_click(DELX_XY[0], DELX_XY[1], DELCONFIRM, note='bag purge 提示窗 X（取消）', wait_ms=500)
+        _wait(lambda: not uikit.is_open(DELCONFIRM), 1.5)
+    if uikit.is_open(DELMODE):
+        uikit.safe_click(DEL_CANCEL[0], DEL_CANCEL[1], DELMODE, note='bag purge 取消刪除', wait_ms=500)
+    return _wait(lambda: uikit.is_open(BAG), 2.0)
+
+
+def purge_role(role: str, names, dry_run: bool = False) -> tuple:
+    """單人（背包已開、在背包頁）：只勾名單內道具 → 讀提示窗清單核對 → 確定。→ (rc, {'targets': {格號: 名稱}, 'deleted': [名稱], 'skipped_unread': [格號]})"""
+    info = {'targets': {}, 'deleted': []}
+    rc = select_role(role)
+    if rc:
+        return rc, info
+    occ, texts = read_bag_names()
+    tg = {i: purge_target(t, names) for i, t in texts.items()}
+    tg = {i: n for i, n in sorted(tg.items()) if n}
+    info['targets'] = tg
+    info['skipped_unread'] = [i for i, t in texts.items() if not t.strip()]
+    guarded = {i: purge_guard(dedup_text(t)) for i, t in texts.items() if t.strip() and purge_guard(dedup_text(t))}
+    if guarded:
+        info['protected'] = guarded
+    if not tg or dry_run:
+        return 0, info
+    want = sorted(tg)
+    if not _click(DEL_BTN[0], DEL_BTN[1], BAG, f'bag purge {role} 刪除管理', allow=('delete_mgr',), wait_ms=500):
+        return _fail(EXIT_PANEL, '背包頁特徵不在，沒按刪除管理', 'bag-purge-nobag'), info
+    if not _wait(lambda: uikit.is_open(DELMODE), 2.0):
+        return _fail(EXIT_PANEL, '按了刪除管理但沒看到刪除模式（紅框 / 取消刪除鈕）', 'bag-purge-nodel'), info
+    pre = marked_slots()
+    if pre is None or pre:
+        _leave_delmode()
+        return _fail(EXIT_GUARD, f'剛進刪除模式就有勾選 {pre}（或讀不到），不動', 'bag-purge-premark'), info
+    for i in want:
+        x, y = slot_xy(i)
+        if not _click(x, y, DELMODE, f'bag purge {role} 勾第 {i + 1} 格 {tg[i]}', wait_ms=250):
+            _leave_delmode()
+            return _fail(EXIT_PANEL, '刪除模式特徵消失，停止勾選', 'bag-purge-gone'), info
+    uikit.sleep(0.3)
+    got = marked_slots() or []
+    for i in [i for i in want if i not in got]:            # 勾選偶爾沒吃到（ui/bag.md）：補點一次
+        x, y = slot_xy(i)
+        _click(x, y, DELMODE, f'bag purge {role} 補勾第 {i + 1} 格', wait_ms=300)
+    got = marked_slots() if [i for i in want if i not in got] else got
+    if got != want:
+        _leave_delmode()
+        return _fail(EXIT_GUARD, f'像素勾選 {got} 與目標 {want} 不一致 → 取消刪除', f'bag-purge-mark-{role}'), info
+    for k in range(3):                                      # 「戰鬥中無法操作」時提示窗不出來：隔 2.5 s 再按（勾選保留）
+        if not _click(DEL_BTN[0], DEL_BTN[1], DELMODE, f'bag purge {role} 刪除選中', allow=('delete_sel',), wait_ms=500):
+            break
+        if _wait(lambda: uikit.is_open(DELCONFIRM), 2.0):
+            break
+        uikit.sleep(2.5)
+    if not uikit.is_open(DELCONFIRM):
+        _leave_delmode()
+        return _fail(EXIT_VERIFY, '按了刪除選中但提示窗沒出現', 'bag-purge-noconfirm'), info
+    zl = {z: uikit.ocr(DEL_LIST_BOX, '-Dark', 0, '-Zooms', z) for z in DEL_LIST_ZOOMS}
+    ok, why = del_list_ok(zl, [tg[i] for i in want], len(want))
+    info['confirm_ocr'] = {z: [t for t in v if t.strip()] for z, v in zl.items()}
+    if not ok:
+        _leave_delmode()
+        return _fail(EXIT_NAME, f'{role} 提示窗清單核對不過：{why} → 按 X 取消', f'bag-purge-list-{role}'), info
+    log(f'{role} 提示窗清單核對通過：{why}')
+    if not uikit.safe_click(DELOK_XY[0], DELOK_XY[1], DELCONFIRM, note=f'bag purge {role} 確定刪除 {[tg[i] for i in want]}', wait_ms=700):
+        _leave_delmode()
+        return _fail(EXIT_VERIFY, '提示窗特徵消失，沒按確定', 'bag-purge-confirm-gone'), info
+    if not _wait(lambda: not uikit.is_open(DELCONFIRM), 2.5):
+        return _fail(EXIT_VERIFY, '按了確定但提示窗沒關（不重點）', 'bag-purge-confirm-stay'), info
+    if not _leave_delmode():
+        return _fail(EXIT_PANEL, '刪除後回不到普通背包頁', 'bag-purge-leave'), info
+    if not _wait(lambda: not any((slot_occupancy() or [True] * n_slots())[i] for i in want), 4.0):
+        return _fail(EXIT_VERIFY, f'刪除後第 {[i + 1 for i in want]} 格仍有道具', f'bag-purge-verify-{role}'), info
+    info['deleted'] = [tg[i] for i in want]
+    return 0, info
+
+
+def purge(roles, names, dry_run: bool = False) -> tuple:
+    """多人刪除管理（背包面板開一次、左欄頭像切人）。names 有任何一個是保護名稱 → 93 零點擊。→ (rc, {角色: info})；某人失敗立即停"""
+    out = {}
+    bad = [n for n in names if purge_guard(n)]
+    if bad:
+        return _fail(EXIT_GUARD, f'名單含保護道具 {bad}，拒絕'), out
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            rc, out[r] = purge_role(r, names, dry_run)
+            if rc:
+                return rc, out
     return 0, out
 
 
@@ -796,65 +1051,84 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
     return 0
 
 
-def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = False) -> int:
-    """背包 want 存入倉庫（彈窗「存入」鈕；整疊）。keep_ok = 背包另有同名道具（拆分後的新疊）時不驗「消失」。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存"""
+def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = False, all_copies: bool = False) -> int:
+    """背包 want 存入倉庫（彈窗「存入」鈕；整疊）。keep_ok = 背包另有同名道具（拆分後的新疊）時不驗「消失」。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存。
+    all_copies = 同名多格（不疊加的道具，例：千年龜的殼每個佔一格）一格一格存到背包沒有為止。
+    驗證：存後輪詢到「那一格變空」（像素；存入後不補位，ui/bag.md）——舊版等「背包找不到」，同名多格時誤報 95；像素讀不到才退回「找不到」。結果 LAST['stored']"""
     LAST.clear()
     if protected(want):
         return _fail(EXIT_GUARD, f'「{want}」在保護名單，不存倉')
+    stored = 0
     with Session() as s:
         if s.rc:
             return s.rc
         rc = select_role(role)
         if rc:
             return rc
-        i = find_item(want)
-        if i is None:
-            return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
-        rc = open_depot(depot)
-        if rc:
-            return rc
-        # 倉庫頁右半是背包，座標同背包頁；面板特徵要用倉庫頁的（背包頁特徵在倉庫頁不吻合，safe_click 會擋）
-        x, y = slot_xy(i)
-        if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
-            return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
-        nm = popup_name()
-        if not name_match(nm, want):
-            close_popup()
-            return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
-        txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
-        if '存入' not in re.sub(r'\s+', '', txt):
-            close_popup()
-            return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「存入」（不點）', 'bag-store-btn')
-        uikit.sleep(POPUP_SETTLE_S)                      # 同取出：彈窗動畫期間點會落空
-        if not _click(732, 648, POPUP, f'bag 存入「{want}」', wait_ms=700):
-            return _fail(EXIT_PANEL, '彈窗特徵消失，沒點存入', 'bag-store-gone')
-        if not _wait(lambda: not popup_open(), 2.5):
-            return _fail(EXIT_VERIFY, '按了存入但彈窗沒關（不重點）', 'bag-store-verify')
-        rc = goto_page('bag')
-        if rc:
-            return rc
-        if keep_ok:
-            return 0
-        if not _wait(lambda: find_item(want) is None, 4.0):      # 同上：背包頁更新有延遲，輪詢到消失
-            return _fail(EXIT_VERIFY, f'存入後背包仍找到「{want}」', 'bag-store-verify')
+        while True:
+            i = find_item(want)
+            if i is None:
+                if stored:
+                    break
+                return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
+            rc = open_depot(depot)
+            if rc:
+                return rc
+            # 倉庫頁右半是背包，座標同背包頁；面板特徵要用倉庫頁的（背包頁特徵在倉庫頁不吻合，safe_click 會擋）
+            x, y = slot_xy(i)
+            if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
+                return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
+            nm = popup_name()
+            if not name_match(nm, want):
+                close_popup()
+                return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
+            txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
+            if '存入' not in re.sub(r'\s+', '', txt):
+                close_popup()
+                return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「存入」（不點）', 'bag-store-btn')
+            uikit.sleep(POPUP_SETTLE_S)                      # 同取出：彈窗動畫期間點會落空
+            if not _click(732, 648, POPUP, f'bag 存入「{want}」', wait_ms=700):
+                return _fail(EXIT_PANEL, '彈窗特徵消失，沒點存入', 'bag-store-gone')
+            if not _wait(lambda: not popup_open(), 2.5):
+                return _fail(EXIT_VERIFY, '按了存入但彈窗沒關（不重點）', 'bag-store-verify')
+            rc = goto_page('bag')
+            if rc:
+                return rc
+            if keep_ok:
+                return 0
+            def gone(i=i):
+                occ = slot_occupancy()
+                return (not occ[i]) if occ else find_item(want) is None
+            if not _wait(gone, 4.0):                         # 同上：背包頁更新有延遲，輪詢到那格變空
+                LAST['stored'] = stored
+                return _fail(EXIT_VERIFY, f'存入後背包「{want}」格數沒減少（倉庫滿？已存 {stored} 個）', 'bag-store-verify')
+            stored += 1
+            LAST['stored'] = stored
+            if not all_copies:
+                break
     return 0
 
 
-def depot_many(op: str, roles, want: str, depot: str = 'public', kind: str = 'consumable', skip_missing: bool = False) -> tuple:
+def depot_many(op: str, roles, want: str, depot: str = 'public', kind: str = 'consumable', skip_missing: bool = False, all_copies: bool = False) -> tuple:
     """多人倉庫存 / 取同一樣道具（2026-10-12 批次化）：背包面板只開一次（外層 Session；depot_store / depot_take 內的 Session 巢狀時不重開、不關），
-    逐人左欄頭像切換。op = 'store' / 'take'。skip_missing：該人沒有（92）就略過。→ (rc, {角色: rc})；某人其他失敗立即停"""
-    out = {}
+    逐人左欄頭像切換。op = 'store' / 'take'。skip_missing：該人沒有（92）就略過。all_copies：store 時同名多格全存。
+    → (rc, {角色: rc})；每人存了幾格在 LAST['stored_by']；某人其他失敗立即停"""
+    out, stored = {}, {}
     with Session() as s:
         if s.rc:
             return s.rc, out
         for r in roles:
-            rc = depot_store(r, want, depot) if op == 'store' else depot_take(r, want, depot, kind)
+            rc = depot_store(r, want, depot, all_copies=all_copies) if op == 'store' else depot_take(r, want, depot, kind)
             out[r] = rc
+            if op == 'store':
+                stored[r] = LAST.get('stored', 0)
             if rc == EXIT_ITEM and skip_missing:
                 log(f'{r} 沒有「{want}」，略過')
                 continue
             if rc:
+                LAST['stored_by'] = stored
                 return rc, out
+    LAST['stored_by'] = stored
     return 0, out
 
 
@@ -888,12 +1162,15 @@ def main() -> int:
     p = sub.add_parser('level'); p.add_argument('role')
     p = sub.add_parser('hp'); p.add_argument('role')
     p = sub.add_parser('find'); p.add_argument('role'); p.add_argument('names', nargs='+')
+    p = sub.add_parser('list'); p.add_argument('role')
+    p = sub.add_parser('purge'); p.add_argument('role'); p.add_argument('--names', required=True); p.add_argument('--dry-run', action='store_true')
     p = sub.add_parser('use'); p.add_argument('role'); p.add_argument('name')
     p = sub.add_parser('swap-weapon'); p.add_argument('role'); p.add_argument('--keep-old', action='store_true'); p.add_argument('--bow', default='精靈王之弓')
     for n in ('take', 'store'):
         p = sub.add_parser(n); p.add_argument('role'); p.add_argument('name'); p.add_argument('--depot', default='public', choices=['public', 'personal'])
         p.add_argument('--kind', default='consumable', choices=['consumable', 'equip'])
         p.add_argument('--skip-missing', action='store_true', help='多人（all / 逗號）時沒有該道具的人略過')
+        p.add_argument('--all-copies', action='store_true', help='store：同名多格（不疊加）全部存')
     p = sub.add_parser('drop'); p.add_argument('role'); p.add_argument('name'); p.add_argument('--confirm-name', required=True)
     a = ap.parse_args()
     roles = _roles(a.role)
@@ -910,17 +1187,24 @@ def main() -> int:
     if a.cmd == 'find':
         rc, d = find_items(r, a.names)
         return _out(rc, {'slots': d})
+    if a.cmd == 'list':
+        rc, d = list_all(roles)
+        return _out(rc, {'bags': d})
+    if a.cmd == 'purge':
+        names = [n.strip() for n in a.names.replace('，', ',').split(',') if n.strip()]
+        rc, d = purge(roles, names, a.dry_run)
+        return _out(rc, {'purge': d, 'dry_run': a.dry_run})
     if a.cmd == 'use':
         return _out(use_item(r, a.name, verify_buff=True), {})
     if a.cmd == 'swap-weapon':
         return _out(swap_weapon(r, a.bow, a.keep_old), {})
     if a.cmd in ('take', 'store') and len(roles) > 1:
-        rc, d = depot_many(a.cmd, roles, a.name, a.depot, a.kind, a.skip_missing)
+        rc, d = depot_many(a.cmd, roles, a.name, a.depot, a.kind, a.skip_missing, a.all_copies)
         return _out(rc, {'roles': d})
     if a.cmd == 'take':
         return _out(depot_take(r, a.name, a.depot, a.kind), {})
     if a.cmd == 'store':
-        return _out(depot_store(r, a.name, a.depot), {})
+        return _out(depot_store(r, a.name, a.depot, all_copies=a.all_copies), {})
     return _out(drop_item(r, a.name, a.confirm_name), {})
 
 

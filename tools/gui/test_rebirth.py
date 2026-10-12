@@ -514,6 +514,150 @@ for _name, _img in _fx['images'].items():
 rc, lv = quiet(bag.levels, ['DKBO', 'DKBO2'])
 check('levels：兩人 (0,133)', rc == 0 and lv == {'DKBO': (0, 133), 'DKBO2': (0, 133)}, str(lv))
 
+# ================= bag.py purge（刪除管理，2026-10-12）=================
+B = ['巴巴洛的許可證']
+check('del_entries：行串接、去 *數量、去「是否」行', bag.del_entries(['巴巴洛的許可證*1|千年龜', '的殼*1|', '是否批量刪除道具?']) == ['巴巴洛的許可證', '千年龜的殼'])
+check('del_entry_name：完全 / 掉字（巴巴洛→巴洛）/ 掉 *', bag.del_entry_name('巴巴洛的許可證', B) and bag.del_entry_name('巴洛的許可證', B) and bag.del_entry_name('巴巴洛的許可證1', B))
+check('del_entry_name：兩條黏在一起 / 名單外 / 保護道具 → None', bag.del_entry_name('巴巴洛的許可證千年龜的殼', B) is None
+      and bag.del_entry_name('千年龜的殼', B) is None and bag.del_entry_name('精靈王之弓', ['精靈王之弓']) is None and bag.del_entry_name('大地的羈絆', ['大地的羈絆']) is None)
+REAL = {'2': ['巴巴洛的許可證*1|', '是否刪除道具?'], '3': ['巴巴洛的許可證1|', '是否捇量刪除道具?']}       # 2026-10-12 DKBO2 實機 OCR
+check('del_list_ok：實機 OCR（zoom 2 / 3）→ 過', bag.del_list_ok(REAL, B, 1)[0])
+check('del_list_ok：多一條名單外 → 不過', not bag.del_list_ok({'2': ['巴巴洛的許可證*1|千年龜的殼*1|']}, B, 1)[0])
+check('del_list_ok：條數 > 勾選數 → 不過', not bag.del_list_ok({'2': ['巴巴洛的許可證*1|巴巴洛的許可證*1|']}, B, 1)[0])
+check('del_list_ok：條數 < 勾選數（每個 zoom 都少）→ 不過', not bag.del_list_ok({'2': ['巴巴洛的許可證*1|'], '3': ['巴巴洛的許可證1|']}, B, 2)[0])
+check('del_list_ok：讀不到 → 不過', not bag.del_list_ok({'2': ['是否批量刪除道具?']}, B, 1)[0])
+check('purge_target：名單內 / 名單外 / 保護', bag.purge_target('巴巴洛的許 可證 巴巴洛的許 可證', B) == '巴巴洛的許可證'
+      and bag.purge_target('千年龜的殼', B) is None and bag.purge_target('精靈王之弓', ['精靈王之弓']) is None)
+_mk = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'bag_mark_px.json').read_text(encoding='utf-8'))
+for _name, _img in _mk['images'].items():
+    _k = len(bag.MARK_PROBE)
+    _cols = [tuple(int(h[j:j + 2], 16) for j in (0, 2, 4)) for h in _img['px']]
+    _got = ''.join('X' if bag.slot_marked(_cols[i * _k:(i + 1) * _k]) else '.' for i in range(15))
+    check(f'slot_marked 實機樣本 {_name}', _got == _img['expect'], _got)
+
+
+class FakeDelBag(FakeBag):
+    """FakeBag + 刪除模式：DEL_BTN 進模式 / 刪除選中、單擊格子勾選、提示窗清單、確定刪掉勾的格；roles = {角色: 格子清單}"""
+
+    def __init__(self, roles, list_override=None, drop_first_mark=False):
+        super().__init__(roles[next(iter(roles))])
+        self.bags = {r: list(v) + [None] * (15 - len(v)) for r, v in roles.items()}
+        self.role = next(iter(roles))
+        self.slots = self.bags[self.role]
+        self.mode, self.marks, self.delconfirm = 'normal', set(), False
+        self.list_override, self.drop_first_mark, self.dropped_once = list_override, drop_first_mark, False
+        self.deleted = []
+
+    def is_open(self, p):
+        if self.delconfirm:
+            return p.name == 'BAGDELOK'
+        if p.name == 'BAGDELOK':
+            return False
+        if p.name == 'BAGDEL':
+            return self.mode == 'del'
+        if self.mode == 'del':
+            return False                              # 刪除模式下普通背包特徵（整理背包藍鈕）不在
+        return super().is_open(p)
+
+    def px(self, pts):
+        out = []
+        for x, y in pts:
+            hit = None
+            for i in range(15):
+                sx, sy = bag.slot_xy(i)
+                if 20 <= x - sx <= 38 and -36 <= y - sy <= -18:
+                    hit = i
+            if hit is not None and self.mode == 'del':
+                out.append((243, 69, 84) if hit in self.marks else (255, 255, 255))
+            elif hit is not None:
+                out.append((255, 255, 255))
+            else:
+                out += super().px([(x, y)])
+        return out
+
+    def click(self, x, y):
+        self.clicks.append((x, y))
+        if self.delconfirm:
+            if (x, y) == bag.DELOK_XY:
+                for i in sorted(self.marks):
+                    self.deleted.append(self.slots[i])
+                    self.slots[i] = None
+                self.marks.clear()
+            self.delconfirm = False
+            return
+        if self.mode == 'del':
+            if (x, y) == bag.DEL_BTN:
+                self.delconfirm = bool(self.marks)
+            elif (x, y) == bag.DEL_CANCEL:
+                self.mode, self.marks = 'normal', set()
+            else:
+                i = self.slot_at(x, y)
+                if i is not None and self.slots[i]:
+                    if self.drop_first_mark and not self.dropped_once:
+                        self.dropped_once = True              # 勾選偶爾沒吃到
+                        return
+                    self.marks ^= {i}
+            return
+        if (x, y) == bag.DEL_BTN:
+            self.mode = 'del'
+            return
+        if x == 83:
+            super().click(x, y)
+            self.slots = self.bags[self.role]
+            return
+        super().click(x, y)
+
+    def ocr(self, box, *opts):
+        if tuple(box) == bag.DEL_LIST_BOX:
+            if not self.delconfirm:
+                return []
+            if self.list_override is not None:
+                return list(self.list_override)
+            return [''.join(f'{self.slots[i]}*1|' for i in sorted(self.marks)), '是否批量刪除道具?']
+        return super().ocr(box, *opts)
+
+
+W = ['薩頓家的秘藥', '千年龜的殼', '巴巴洛的許可證', '月光的手鐲']
+fb = FakeDelBag({'DKBO2': W}).install()
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：只勾巴巴洛、確定、回普通模式、其他格不動', rc == 0 and fb.deleted == ['巴巴洛的許可證'] and fb.mode == 'normal'
+      and fb.slots[:4] == ['薩頓家的秘藥', '千年龜的殼', None, '月光的手鐲'] and d['DKBO2']['deleted'] == B, str((rc, d, fb.deleted)))
+fb = FakeDelBag({'DKBO2': W, 'DKBO3': ['巴巴洛的許可證', '千年龜的殼'], 'DKBO4': ['千年龜的殼']}).install()
+rc, d = quiet(bag.purge, ['DKBO2', 'DKBO3', 'DKBO4'], B)
+check('purge 多人：面板開一次逐人切、沒有的人 targets 空', rc == 0 and fb.deleted == ['巴巴洛的許可證'] * 2 and d['DKBO4']['targets'] == {} and fb.bags['DKBO4'][0] == '千年龜的殼')
+fb = FakeDelBag({'DKBO2': W}).install()
+rc, d = quiet(bag.purge, ['DKBO2'], ['巴巴洛的許可證', '精靈王之弓'])
+check('purge：名單含精靈王之弓 → 93、零點擊', rc == 93 and fb.clicks == [] and fb.deleted == [])
+fb = FakeDelBag({'DKBO2': W}).install()
+rc, d = quiet(bag.purge, ['DKBO2'], ['巴巴洛的許可證', '大地的羈絆'])
+check('purge：名單含四大洞窟產物 → 93、零點擊', rc == 93 and fb.clicks == [])
+fb = FakeDelBag({'DKBO2': W}, list_override=['巴巴洛的許可證*1|千年龜的殼*1|', '是否批量刪除道具?']).install()
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：提示窗多一條名單外 → 96、按 X、取消刪除、沒刪', rc == 96 and fb.deleted == [] and bag.DELX_XY in fb.clicks and bag.DELOK_XY not in fb.clicks and fb.mode == 'normal')
+fb = FakeDelBag({'DKBO2': W}, list_override=['巴洛的許可證1|', '是否量刪除道具?、']).install()
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：OCR 掉字 / 掉 * 仍過', rc == 0 and fb.deleted == B)
+fb = FakeDelBag({'DKBO2': W}, drop_first_mark=True).install()
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：第一下勾沒吃到 → 補點一次成功', rc == 0 and fb.deleted == B and fb.clicks.count(bag.slot_xy(2)) == 2)
+fb = FakeDelBag({'DKBO2': W}).install()
+_c = fb.click
+def _stuck(x, y):
+    _c(x, y)
+    if (x, y) == bag.DEL_BTN and fb.mode == 'del' and not fb.delconfirm:
+        fb.marks.add(1)                                       # 一進模式就有別格（千年龜的殼）被勾
+fb.click = _stuck
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：進模式就有名單外的勾 → 93、取消、沒刪', rc == 93 and fb.deleted == [] and fb.mode == 'normal' and bag.DELOK_XY not in fb.clicks)
+fb = FakeDelBag({'DKBO2': W}).install()
+rc, d = quiet(bag.purge, ['DKBO2'], B, True)
+check('purge --dry-run：列出目標、不按刪除管理', rc == 0 and d['DKBO2']['targets'] == {2: '巴巴洛的許可證'} and bag.DEL_BTN not in fb.clicks and fb.deleted == [])
+try:
+    uikit.check_forbidden(bag.DELMODE, *bag.DEL_BTN)
+    check('DELMODE 刪除選中鈕是禁區（沒 allow 會擋）', False)
+except uikit.ForbiddenClick:
+    check('DELMODE 刪除選中鈕是禁區（沒 allow 會擋）', True)
+
 # ================= petdrop =================
 check('guard_target：第 1 格 / 騎乘 / 出戰 / 騎寵名 / 名字不符 / 正常',
       petdrop.guard_target({'slot': 1, 'name': '烏力斯坦', 'state': '等待'}, '烏力斯坦') is not None

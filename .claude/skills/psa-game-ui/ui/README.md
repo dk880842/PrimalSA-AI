@@ -12,7 +12,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 人物資訊（屬性、抗性、潛力點） | [role.md](role.md) | 頭像 119,68 | 實測 |
 | 切換角色、**快速組隊**、組隊面板、**解散隊伍** | [team.md](team.md) | 切換 763,760／組隊 850,760 | 實測（組隊、解散都成功） |
 | 任務面板、任務詳情、**自動巡路 / 解任務監測 quest.py（--task、黃色問號、追蹤列表 OCR；--solo / --fight 單人逃跑、完整戰鬥逃跑鈕 1283,168 / 自動戰鬥鈕 1380,600）；猜謎三兄弟爬塔答題 quiztower.py（離線測試）** | [quest.md](quest.md) | 左側 148,236／詳情 368,328／追蹤 205,325 | 實測（成人儀式） |
-| 背包、倉庫、材料圖鑑 | [bag.md](bag.md) | 背包 1120,760 | 實測（腳本 `bag.py` 未實機驗證） |
+| 背包、倉庫、材料圖鑑 | [bag.md](bag.md) | 背包 1120,760 | 實測（`bag.py` find / hp / list / purge / store --all-copies 2026-10-12 實機；drop / swap-weapon 未實機） |
 | 漆黑洞窟轉生任務一行腳本 | [rebirth.md](rebirth.md) | — | 離線測試（實機未驗證） |
 | 寵物面板（出戰 / 騎乘 / 休息、技能、成長） | [pet.md](pet.md) | 寵物頭像 318,80 | 實測（設定出戰、騎乘） |
 | 地圖傳送（大陸／練級／便捷／英雄戰場） | [transfer.md](transfer.md) | 圓形傳送鈕 1340,65 | 實測（練級傳送實際等級門檻已全測） |
