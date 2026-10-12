@@ -97,9 +97,9 @@ export type WHud = {
 
 // state.json（只認 v 主版本 1；不認得的鍵一律忽略）
 type WState = {
-  v?: number; seq?: number; phase?: string
+  v?: number; seq?: number; phase?: string; ts?: number
   watcher?: { token?: string; running?: boolean; interval?: number }
-  screen?: { label?: string; age_s?: number; state?: string; full?: boolean; annot?: string[] }
+  screen?: { label?: string; age_s?: number; state?: string; full?: boolean; annot?: string[]; enc_on?: boolean }
   hud?: WHud
   flags?: { verify_suspect?: boolean; netwatch_halt?: boolean }
   alerts?: { msg?: string; line?: string }[]
@@ -538,7 +538,7 @@ const STATUS_TEXT: Record<SupStatus, string> = {
 const supSummary = (s: Supervisor) => `監看：${STATUS_TEXT[s.status]}｜spawn ${s.spawns} 次｜卡住重開 ${s.stalls} 次｜最後退出碼 ${s.lastCode ?? '無'}`
 
 // ───────────────────────── 自動 session 標題（PSA｜…）─────────────────────────
-// 讀 notes/quest-events.log 最後一筆 [questrun] 行組短標題，由 classic.UserPromptSubmit / SessionStart 的 sessionTitle 設定。
+// 讀 notes/quest-events.log 最後一筆 [questrun] 行組短標題（練功中則改「PSA｜練功中 地點」，見 grindActivity），由 classic.UserPromptSubmit / SessionStart 的 sessionTitle 設定。
 // 只覆蓋空標題或「PSA｜」開頭（本 mod 自己設的）；使用者 /rename 的名字不動。讀不到 / 沒紀錄就不輸出
 export const TITLE_PREFIX = 'PSA｜'
 const TITLE_MAX = 40
@@ -590,6 +590,61 @@ export function titleFromLog(log: string, names: Map<number, string> = new Map()
   return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) : t
 }
 
+// ───────────────────────── 練功中判斷 ─────────────────────────
+// 規則：最後一筆 [questrun] 行之後，actions.log 最新的「原地遇敵：開 / 關」是「開」，
+// 且 watch 沒說遇敵是關的（screen.enc_on === false 不算）、地圖沒離開最近一次「傳送到 X id:」的練功點。
+// state 太舊（> STATE_FRESH_S）當沒有；沒有 state 時只信遇敵「開」在 GRIND_MAX_S 內（離線上限 2 小時）。
+// 之後只要有更新的 questrun 行（新任務開始）就回到任務顯示。純函式，時間比較用「距今秒數」所以跨午夜也對
+const ACT_TAIL_LINES = 600
+const STATE_FRESH_S = 60
+const GRIND_MAX_S = 7200
+export type Grind = { spot: string; quick: boolean }
+
+// quest-events.log 行首「YYYY-MM-DD HH:MM:SS」→ 距今秒數
+function questLineAgeS(l: string, now: number): number | undefined {
+  const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)/.exec(l)
+  if (!m) return undefined
+  return Math.round((now - new Date(+m[1]!, +m[2]! - 1, +m[3]!, +m[4]!, +m[5]!, +m[6]!).getTime()) / 1000)
+}
+
+export function grindActivity(i: ProgIn): Grind | undefined {
+  if (!i.actions) return undefined
+  const acts = i.actions.split(/\r?\n/).filter(l => l.trim()).slice(-ACT_TAIL_LINES)
+  const age = (l: string) => actionAgeS(l, i.now)
+  let enc: string | undefined
+  for (let k = acts.length - 1; k >= 0; k--) if (/原地遇敵：[開關]/.test(acts[k]!)) { enc = acts[k]; break }
+  if (!enc || !/原地遇敵：開/.test(enc)) return undefined
+  const encAge = age(enc)
+  if (encAge === undefined || encAge > GRIND_MAX_S) return undefined
+  // 最後一筆 questrun 行比遇敵開還新 → 還在任務中
+  if (i.quest) {
+    const q = i.quest.split(/\r?\n/).slice(-LOG_TAIL_LINES).filter(l => l.includes('[questrun]'))
+    const qa = q.length ? questLineAgeS(q[q.length - 1]!, i.now) : undefined
+    if (qa !== undefined && qa <= encAge) return undefined
+  }
+  const st = i.state
+  const fresh = !!st && typeof st.ts === 'number' && (i.now / 1000 - st.ts) <= STATE_FRESH_S
+  if (fresh && st!.screen?.enc_on === false) return undefined
+  let spot: string | undefined
+  let spotId: number | undefined
+  for (let k = acts.length - 1; k >= 0; k--) {
+    const m = /grind 傳送到 (\S+) (\d+):/.exec(acts[k]!)
+    if (m) { spot = m[1]; spotId = Number(m[2]); break }
+  }
+  const mapId = fresh ? st!.hud?.map?.id : undefined
+  if (spotId !== undefined && mapId !== undefined && mapId !== spotId) return undefined   // 已離開練功點
+  if (!spot) spot = (fresh ? st!.hud?.map?.v : undefined) || '原地'
+  // 快速戰鬥：各角色最後一筆「ass：X 快速戰鬥 → 開/關」（掃整份 actions.log，開快戰常在很久以前），至少一人且全部為開才標
+  const quickBy = new Map<string, boolean>()
+  for (const l of i.actions.split(/\r?\n/)) { const m = /ass：(\S+) 快速戰鬥 → ([開關])/.exec(l); if (m) quickBy.set(m[1]!, m[2] === '開') }
+  const quick = quickBy.size > 0 && [...quickBy.values()].every(Boolean)
+  return { spot, quick }
+}
+
+export function grindTitle(g: Grind): string {
+  return `${TITLE_PREFIX}練功中 ${g.spot}`
+}
+
 // ───────────────────────── 即時進度區（任務 / 最近事件 / 最後動作 / 警報）─────────────────────────
 // 純函式：假檔內容 → 最多 6 行 {text, tone}；任一來源讀不到（undefined）該行顯示「—」
 const PROG_PERIOD_MS = 3000
@@ -615,8 +670,9 @@ export function actionAgeS(hms: string, now: number): number | undefined {
 
 export function progressLines(i: ProgIn, names: Map<number, string> = new Map()): ProgLine[] {
   const out: ProgLine[] = []
+  const g = grindActivity(i)
   const t = i.quest === undefined ? undefined : titleFromLog(i.quest, names)
-  out.push({ text: `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
+  out.push({ text: g ? `練功中：${g.spot}${g.quick ? '（快速戰鬥）' : ''}` : `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
   const ev = i.quest === undefined ? [] : i.quest.split(/\r?\n/).filter(l => l.trim()).slice(-3).map(cleanEvent)
   if (ev.length === 0) out.push({ text: '事件：—', tone: 'gray' })
   for (const e of ev) out.push({ text: cut(` ${e}`), tone: 'gray' })
@@ -646,7 +702,10 @@ export async function autoTitle($: EngineInterface, cwd: string, cur: string | u
       const py = await $.fs.read(`${root}/tools/gui/questdefs.py`)
       if (typeof py === 'string') names = questNames(py)
     } catch { /* 沒有 questdefs 就只靠 log 內的名字 */ }
-    const t = titleFromLog(log, names)
+    const rd = async (f: string) => { try { const x = await $.fs.read(`${root}/${f}`); return typeof x === 'string' ? x : undefined } catch { return undefined } }
+    const [actions, stText] = await Promise.all([rd('tools/.cache/actions.log'), rd('tools/.cache/state.json')])
+    const g = grindActivity({ quest: log, actions, state: parseState(stText).state, now: await $.clock.now() })
+    const t = g ? grindTitle(g) : titleFromLog(log, names)
     return t && t !== cur ? t : undefined
   } catch {
     return undefined

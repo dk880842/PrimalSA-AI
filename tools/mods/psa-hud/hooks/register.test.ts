@@ -354,7 +354,7 @@ test('mayRetitle：空與 PSA｜ 開頭才可改，使用者自取的不動', ()
 
 test('autoTitle：輸出標題；已是同標題 / 使用者自取名 / 非本專案 / 讀檔失敗都不輸出也不拋錯', async () => {
   const log = '[questrun] 任務 2000「琉璃洞窟」詳情結果：accepted\n'
-  const mk = (fail = false) => ({ fs: { read: async (p: string) => { if (fail) throw new Error('boom'); return p.endsWith('quest-events.log') ? log : "dict(id=2000, detail='琉璃洞窟')" } } }) as never
+  const mk = (fail = false) => ({ clock: { now: async () => Date.now() }, fs: { read: async (p: string) => { if (fail) throw new Error('boom'); return p.endsWith('quest-events.log') ? log : "dict(id=2000, detail='琉璃洞窟')" } } }) as never
   const root = '/mnt/c/games/PrimalSA-AI'
   expect(await autoTitle(mk(), root, undefined)).toBe('PSA｜四大洞窟：琉璃洞窟 進行中')
   expect(await autoTitle(mk(), 'C:\\games\\PrimalSA-AI\\tools', '')).toBe('PSA｜四大洞窟：琉璃洞窟 進行中')
@@ -393,4 +393,58 @@ test('progressLines：任務 / 3 行事件 / 動作 / 警報，≤6 行；壞檔
   const v = progressLines({ state: { v: 1, flags: { verify_suspect: true } } as never, now })
   expect(v.map(x => x.text)).toEqual(['任務：—', '事件：—', '動作：—', '警報：疑似答題 / 驗證視窗，請人工處理'])
   expect(v.length).toBeLessThanOrEqual(6)
+})
+
+// ───────── 練功中判斷 ─────────
+import { grindActivity, grindTitle } from './register'
+
+const GQ = '2026-10-12 15:00:58 [questrun] 結束 rc=0，完成 [3003]\n'
+const GA = '14:43:25 grind 傳送到 地雷區 60049:30,25\n14:43:33 grind ass：DKBO2 快速戰鬥 → 開（已確認）\n14:43:44 grind ass：DKBO 快速戰鬥 → 開（已確認）\n15:44:30 depot_use 原地遇敵：開\n15:44:57 click 1318,90 ass.py 關外掛面板\n'
+const gnow = new Date(2026, 9, 12, 15, 45, 30).getTime()
+const gst = (o: object = {}) => ({ v: 1, ts: gnow / 1000 - 1, screen: { enc_on: true }, hud: { map: { v: '庫塔伊洞窟地下一樓', id: 60049 } }, ...o }) as never
+
+test('練功中：questrun 完成後 grind → 顯示練功中（快速戰鬥）；標題同步', () => {
+  const g = grindActivity({ quest: GQ, actions: GA, state: gst(), now: gnow })
+  expect(g).toEqual({ spot: '地雷區', quick: true })
+  expect(grindTitle(g!)).toBe('PSA｜練功中 地雷區')
+  expect(progressLines({ quest: GQ, actions: GA, state: gst(), now: gnow }, NAMES)[0]).toEqual({ text: '練功中：地雷區（快速戰鬥）', tone: 'plain' })
+})
+
+test('練功中：grind 後又開新 questrun → 回任務顯示；沒有快速戰鬥紀錄不加；無 state 仍判斷', () => {
+  const q2 = GQ + '2026-10-12 15:45:00 [questrun] 開始：任務 [2000]，選項 {}\n'
+  expect(grindActivity({ quest: q2, actions: GA, state: gst(), now: gnow })).toBeUndefined()
+  expect(progressLines({ quest: q2, actions: GA, state: gst(), now: gnow }, NAMES)[0]!.text).toBe('任務：四大洞窟：琉璃洞窟 進行中')
+  expect(grindActivity({ quest: GQ, actions: '14:43:25 grind 傳送到 地雷區 60049:30,25\n15:44:30 drv 原地遇敵：開\n', state: null, now: gnow })).toEqual({ spot: '地雷區', quick: false })
+})
+
+test('練功中：遇敵關掉 / enc_on=false / 離開練功點 / 太久 都不算', () => {
+  expect(grindActivity({ quest: GQ, actions: GA + '15:45:10 drv 原地遇敵：關\n', state: gst(), now: gnow })).toBeUndefined()
+  expect(grindActivity({ quest: GQ, actions: GA, state: gst({ screen: { enc_on: false } }), now: gnow })).toBeUndefined()
+  expect(grindActivity({ quest: GQ, actions: GA, state: gst({ hud: { map: { v: '薩姆吉爾村', id: 1000 } } }), now: gnow })).toBeUndefined()
+  expect(grindActivity({ quest: GQ, actions: GA, state: null, now: new Date(2026, 9, 12, 18, 0, 0).getTime() })).toBeUndefined()
+  // state 太舊 → 當沒有，不因地圖 / enc_on 判掉
+  expect(grindActivity({ quest: GQ, actions: GA, state: gst({ ts: gnow / 1000 - 600, screen: { enc_on: false } }), now: gnow })).toBeDefined()
+  expect(grindActivity({ quest: GQ, actions: undefined, state: gst(), now: gnow })).toBeUndefined()
+})
+
+test('練功中：actions 跨午夜（遇敵 23:50 開、現在 00:10）仍算；questrun 昨天結束不影響', () => {
+  const n = new Date(2026, 9, 13, 0, 10, 0).getTime()
+  expect(grindActivity({ quest: '2026-10-12 23:00:00 [questrun] 結束 rc=0，完成 [3003]\n', actions: '23:50:00 grind 原地遇敵：開\n', state: null, now: n })).toEqual({ spot: '原地', quick: false })
+  // questrun 00:05（今天）比 23:50 遇敵開新 → 任務
+  expect(grindActivity({ quest: '2026-10-13 00:05:00 [questrun] 開始：任務 [2000]\n', actions: '23:50:00 grind 原地遇敵：開\n', state: null, now: n })).toBeUndefined()
+})
+
+test('autoTitle：練功中 → PSA｜練功中 地雷區；使用者自取名不動', async () => {
+  const mk = () => ({ clock: { now: async () => gnow }, fs: { read: async (p: string) => p.endsWith('quest-events.log') ? GQ + '2026-10-12 15:00:58 [questrun] 任務 3003「猜謎三兄弟」已完成（x）\n' : p.endsWith('actions.log') ? GA : p.endsWith('state.json') ? JSON.stringify(gst()) : '' } }) as never
+  const root = '/mnt/c/games/PrimalSA-AI'
+  expect(await autoTitle(mk(), root, 'PSA｜猜謎三兄弟 已完成')).toBe('PSA｜練功中 地雷區')
+  expect(await autoTitle(mk(), root, 'PSA｜練功中 地雷區')).toBeUndefined()
+  expect(await autoTitle(mk(), root, '我的名字')).toBeUndefined()
+})
+
+test('練功中：快速戰鬥紀錄在 600 行之前也認得；任一人最後是關就不標', () => {
+  const filler = Array.from({ length: 700 }, () => '15:00:00 click 1,1\n').join('')
+  const a = GA.split('\n').slice(0, 3).join('\n') + '\n' + filler + '15:44:30 depot_use 原地遇敵：開\n'
+  expect(grindActivity({ quest: GQ, actions: a, state: gst(), now: gnow })!.quick).toBe(true)
+  expect(grindActivity({ quest: GQ, actions: a + '15:44:40 grind ass：DKBO3 快速戰鬥 → 關\n', state: gst(), now: gnow })!.quick).toBe(false)
 })
