@@ -289,7 +289,75 @@ check('全黑轉場：annotate=[black]、label=黑畫面（轉場）', c['state'
 bk[S.BLACK_PTS[3]] = (S.BLACK_MAX, 0, 0)
 check('黑畫面：任一點亮度 ≥ BLACK_MAX → 不是黑畫面', S.annotate(bk, S.classify(bk)) == [])
 check('黑 / 載入只在 classify=unknown 時附註（idle 畫面剛好暗不算）', S.annotate({**bk, **{pt: (0, 0, 0) for pt in S.BLACK_PTS}}, {'state': 'idle'}) == [])
-check('ANNOT_KNOWN 含 login / charsel / loading / black', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black'})
+check('ANNOT_KNOWN = login / charsel / loading / black + 三種面板上已知彈窗', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm'})
+
+# ---- 6. 面板上疊已知彈窗（2026-10-12，watch 誤報 #243 #244 #254 #261 #264）----
+PP = json.loads((HERE / 'fixtures' / 'popup_px.json').read_text(encoding='utf-8'))
+qpts = [tuple(p) for p in PP['points']]
+check('popup fixture 取樣點 == points() + annot_points()', qpts == S.points() + S.annot_points())
+bad, npos, nneg, kinds = [], 0, 0, {}
+for smp in PP['samples']:
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(qpts)}
+    c = S.classify(px)
+    a = S.annotate(px, c)
+    hit = S.popup_over_panel(px)
+    if a != smp['annot']:
+        bad.append((smp['f'], 'frozen', a))
+    if smp['expect']:
+        npos += 1
+        kinds[smp['expect'][1]] = kinds.get(smp['expect'][1], 0) + 1
+        if c['state'] != 'unknown' or list(hit or []) != smp['expect'] or not any(k in a for k in S.ANNOT_KNOWN):
+            bad.append((smp['f'], 'recall', hit))
+    else:
+        nneg += 1
+        if hit or any(k in a for k in S.ANNOT_KNOWN):
+            bad.append((smp['f'], 'FP', a))
+check(f'popup fixture：{npos} 張正例（{kinds}）全認對、{nneg} 張負例（含壓暗背包上的道具詳情彈窗）仍 unknown', not bad and npos >= 20 and nneg >= 7, str(bad[:4]))
+# 既有 panel 樣本：除了本來就是彈窗正例的（i1 / store-nochange）以外，沒有任何一張被當成「面板上已知彈窗」
+PXS = json.loads((HERE / 'fixtures' / 'panel_px.json').read_text(encoding='utf-8'))
+pos_files = {smp['f'] for smp in PP['samples'] if smp['expect']}
+fp = []
+for smp in PXS['samples']:
+    if smp['f'] in pos_files:
+        continue
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(ppts)}
+    if S.popup_over_panel(px):
+        fp.append(smp['f'])
+check(f'panel fixture {len(PXS["samples"])} 張（扣掉彈窗正例）：0 張被認成面板上彈窗', not fp, str(fp[:3]))
+
+
+def dim_title(name, k):
+    return {(x, y): (round(r * k), round(g * k), round(b * k)) for x, y, r, g, b in S.PANEL_TITLE[name]}
+
+
+def popup_px(kind):
+    return {(x, y): (r, g, b) for x, y, r, g, b, *_ in S.POPUP_SIGS[kind]}
+
+
+base = {pt: (70, 70, 70) for pt in S.points() + S.annot_points()}
+for kind in S.POPUP_SIGS:
+    for pn in S.POPUP_PANELS:
+        q = {**base, **dim_title(pn, 0.5), **popup_px(kind)}
+        c = S.classify(q)
+        check(f'合成：壓暗 {pn} ×0.5 + {kind} → annotate 認得、不算 unknown', c['state'] == 'unknown' and S.annotate(q, c) == ['popup_' + kind, 'over_' + pn])
+q = {**base, **popup_px('qty')}
+check('只有彈窗、底下不是壓暗的面板 → 不認（驗證視窗若長得像也要有面板才放行）', S.annotate(q, S.classify(q)) == [])
+q = {**base, **dim_title('bag', 0.5)}
+check('壓暗的背包、彈窗不認得（驗證視窗 / 道具詳情）→ 仍 unknown', S.annotate(q, S.classify(q)) == [] and S.dim_panel(q) == 'bag')
+q = {**base, **dim_title('bag', 1.0), **popup_px('qty')}
+check('背包沒壓暗（k=1）+ 彈窗特徵 → 不是模態彈窗，不認', S.dim_panel(q) is None and S.popup_over_panel(q) is None)
+q = {**base, **dim_title('quest', 0.5), **popup_px('confirm')}
+check('壓暗的任務詳情 + 確認窗 → 沒有正例樣本的面板不放行', S.popup_over_panel(q) is None)
+for kind in S.POPUP_SIGS:
+    q = {**base, **dim_title('bag', 0.5), **popup_px(kind)}
+    pts_k = S.POPUP_SIGS[kind]
+    for x, y, *_ in pts_k[:len(pts_k) - S.POPUP_NEED + 1]:
+        q[(x, y)] = (0, 255, 0)
+    check(f'{kind}：{len(pts_k) - S.POPUP_NEED + 1} 點不符 → 不認', S.popup_over_panel(q) is None)
+check('label：面板上已知彈窗顯示面板名 + 彈窗名', S.label({'state': 'unknown'}, ['popup_qty', 'over_bag']) == '面板：背包＋數量輸入視窗'
+      and S.label({'state': 'unknown'}, ['popup_confirm', 'over_pet']) == '面板：寵物＋確定 / 取消提示窗')
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

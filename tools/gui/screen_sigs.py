@@ -228,15 +228,64 @@ def classify(px: dict) -> dict:
 
 # ---- annotate 特徵（watch 專用附註；只上「有正例樣本」的特徵，2026-10-10 以 tools/.cache 等 677 張 1440×830 樣本驗證：
 # 4 種各有正例（提示視窗 1、登入 2、選角 1、遇敵鈕 30）、其餘樣本 0 誤判，見 fixtures/annot_px.json）----
-# 沒有可靠特徵 / 沒有正例所以**不上線**：通用彈窗（popup）、背包 / 寵物 / 外掛面板（沙地與米色面板太像，沒有樣本證明 0 誤判）、驗證 / 答題視窗（沒有任何樣本）
+# 沒有可靠特徵 / 沒有正例所以**不上線**：通用彈窗（popup；只有「壓暗的背包 / 寵物面板 + 三種已知彈窗」例外，見下方 POPUP_SIGS）、背包 / 寵物 / 外掛面板（沙地與米色面板太像，沒有樣本證明 0 誤判）、驗證 / 答題視窗（沒有任何樣本）
 ANNOT_SIGS = {'notice_dialog': NET_DIALOG, 'login': NET_LOGIN, 'charsel': NET_CHARSEL}
-ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場）
+
+# ---- 面板上疊「已知彈窗」（2026-10-12，errlog #243 #244 #254 #261 #264 誤報 verify_suspect）----
+# 遊戲的模態彈窗會把底下整個畫面壓暗成約 ×0.5（實測背包 ×0.49～0.50、寵物 ×0.47，每點每通道比例一致），所以面板標題板的字仍在、只是變暗。
+# 判定 = 底下是「壓暗的已知面板」（PANEL_TITLE 8 點同一個比例 k ∈ DIM_K、TITLE_NEED 點在 DIM_TOL 內）**且** 彈窗本身吻合下列其中一種（8 點至少 POPUP_NEED）：
+#   keypad  = 拆分 / 數量的數字鍵盤（0～9、✕、↵ 大鍵，watch-alerts/unknown-1791750847 / 1791750914）
+#   qty     = 「數量輸入」視窗（− 數量 ＋、確定 / 取消，unknown-1791756186 / 1791756276）
+#   confirm = 「提示」確定（藍）/ 取消（橘）兩顆鈕的確認窗（丟寵 / 存入戰鬥寵；前 6 點與 pet.CONFIRM_SIG 相同，unknown-1791754960）
+# 兩個條件缺一不可：驗證 / 答題視窗（選項是圖片）、網路異常提示（只有一顆確定鈕）、其他沒見過的彈窗即使疊在面板上也仍是 unknown → 10 s 後照報。
+DIM_K = (0.40, 0.56)
+DIM_TOL = 10
+POPUP_TOL = 16
+POPUP_NEED = 7
+POPUP_SIGS = {
+    'keypad': [(465, 335, 201, 175, 128), (838, 335, 201, 175, 128), (465, 574, 197, 173, 122), (715, 574, 198, 173, 122),
+               (840, 440, 205, 177, 122), (980, 590, 209, 177, 122), (552, 395, 70, 61, 50), (437, 300, 53, 47, 39)],
+    'qty': [(612, 190, 140, 86, 56), (950, 205, 194, 74, 49), (560, 545, 193, 133, 69), (770, 545, 177, 69, 45),
+            (620, 440, 135, 153, 38), (890, 440, 135, 153, 38), (560, 300, 240, 212, 175), (520, 400, 242, 213, 175)],
+    'confirm': [(946, 208, 197, 73, 49), (550, 545, 58, 105, 167), (670, 545, 66, 113, 171), (750, 545, 179, 69, 44),
+                (870, 545, 193, 87, 53), (700, 460, 243, 215, 179), (715, 190, 139, 85, 57), (700, 300, 241, 213, 176)],
+}
+POPUP_PANELS = ('bag', 'pet')          # 只有這兩種面板上有正例樣本；其他面板上的彈窗仍不認得
+
+
+def dim_panel(px: dict):
+    """被模態彈窗壓暗的已知面板名（PANEL_TITLE 同一比例 k 縮暗）或 None。缺點一律不符。未壓暗（k≈1）的面板不算"""
+    for name, pts in PANEL_TITLE.items():
+        if not all((x, y) in px for x, y, *_ in pts):
+            return None
+        ratios = sorted(c / ref for x, y, *refc in pts for c, ref in zip(px[(x, y)], refc) if ref >= 80)
+        if not ratios:
+            continue
+        k = ratios[len(ratios) // 2]
+        if not DIM_K[0] <= k <= DIM_K[1]:
+            continue
+        ok = sum(1 for x, y, r, g, b in pts if all(abs(c - ref * k) <= DIM_TOL for c, ref in zip(px[(x, y)], (r, g, b))))
+        if ok >= TITLE_NEED:
+            return name
+    return None
+
+
+def popup_over_panel(px: dict):
+    """面板上疊已知彈窗 → (面板名, 彈窗種類) 或 None（兩個條件見上方註解）"""
+    kinds = [k for k, pts in POPUP_SIGS.items() if _count_ok(px, pts, POPUP_TOL) >= POPUP_NEED]
+    if len(kinds) != 1:
+        return None
+    pn = dim_panel(px)
+    return (pn, kinds[0]) if pn in POPUP_PANELS else None
+
+
+ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗）
 
 
 def annot_points() -> list:
     """annotate 需要的取樣點（不在 points() 裡；watch 的 pixel 呼叫把兩組一起讀，classify 的 points() 不變）"""
     seen, out = set(points()), []
-    for sig in list(ANNOT_SIGS.values()) + [ENC_ON, SIG_LOADING]:
+    for sig in list(ANNOT_SIGS.values()) + [ENC_ON, SIG_LOADING] + list(POPUP_SIGS.values()):
         for x, y, *_ in sig:
             if (x, y) not in seen:
                 seen.add((x, y))
@@ -264,6 +313,9 @@ def annotate(px: dict, base: dict) -> list:
             return ['loading']
         if is_black(px):
             return ['black']
+        hit = popup_over_panel(px)
+        if hit:
+            return ['popup_' + hit[1], 'over_' + hit[0]]
     return []
 
 
@@ -280,7 +332,8 @@ _LABELS = {'idle': '主畫面（未偵測到已知視窗）', 'walking': '自動
            'select': '選擇對象面板', 'panel': '切換角色面板', 'unknown': '不認得的畫面',
            'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
 
-_ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面', 'loading': '載入畫面', 'black': '黑畫面（轉場）'}
+_ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面', 'loading': '載入畫面', 'black': '黑畫面（轉場）',
+               'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗'}
 
 
 def label(d: dict, annot=None) -> str:
@@ -291,6 +344,9 @@ def label(d: dict, annot=None) -> str:
     if st == 'unknown':                     # 登入 / 選角畫面沒有 HUD → classify 是 unknown，但那是認得的畫面
         for k in ANNOT_KNOWN:
             if k in annot:
+                if k.startswith('popup_'):              # 面板上疊已知彈窗：「面板：背包＋數量輸入視窗」
+                    pn = next((a[5:] for a in annot if a.startswith('over_')), None)
+                    return f'面板：{PANEL_NAMES.get(pn, pn)}＋{_ANNOT_TEXT[k]}'
                 return _ANNOT_TEXT[k]
     if st == 'panel' and d.get('panel'):
         base = '面板：' + PANEL_NAMES.get(d['panel'], d['panel'])

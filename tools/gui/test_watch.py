@@ -714,6 +714,29 @@ w.cycle()
 check('不認得的畫面 → enc_on = null', watchstate.read()['screen']['enc_on'] is None)
 
 
+# ---- 面板上疊已知彈窗（2026-10-12，#243 #244 #254 #261 #264：拆分數字鍵盤 / 數量輸入 / 丟寵確認窗開著 >10 s 被誤報）----
+def px_popup(panel, kind, k=0.5):
+    d = {(x, y): f'{round(r * k)},{round(g * k)},{round(b * k)}' for x, y, r, g, b in screen_sigs.PANEL_TITLE[panel]}
+    d.update({(x, y): f'{r},{g},{b}' for x, y, r, g, b in screen_sigs.POPUP_SIGS[kind]})
+    return ' '.join(d.get(pt, '70,70,70') for pt in ALLPTS)
+
+
+for panel, kind, lab in (('bag', 'keypad', '面板：背包＋數字鍵盤'), ('bag', 'qty', '面板：背包＋數量輸入視窗'), ('pet', 'confirm', '面板：寵物＋確定 / 取消提示窗')):
+    w, clk, fk = make(f'popup-{kind}')
+    fk.pixel = (0, px_popup(panel, kind), '')
+    for _ in range(40):              # 36 s
+        w.cycle(); clk.t += 0.9
+    st = watchstate.read()
+    check(f'{lab} 開 36 s：不觸發 unknown_long、label 正確', st['alerts'] == [] and st['flags']['verify_suspect'] is False and st['screen']['label'] == lab
+          and not errlog._read(errlog.LOG), str(st['screen']))
+w, clk, fk = make('popup-unknown')
+d = {(x, y): f'{round(r / 2)},{round(g / 2)},{round(b / 2)}' for x, y, r, g, b in screen_sigs.PANEL_TITLE['bag']}
+fk.pixel = (0, ' '.join(d.get(pt, '70,70,70') for pt in ALLPTS), '')      # 背包被壓暗、上面的彈窗不認得（= 驗證視窗 / 道具詳情）
+for _ in range(13):
+    w.cycle(); clk.t += 0.9
+check('壓暗的背包 + 不認得的彈窗 ≥ 10 s → 照樣 unknown_long + verify_suspect', watchstate.read()['flags']['verify_suspect'] is True)
+
+
 # ---- 面板辨識 / 主畫面多組 / 載入 / 黑畫面 / 警報截圖（2026-10-11：使用者開寵物視窗被誤報疑似驗證）----
 def px_panel(name):
     d = {}

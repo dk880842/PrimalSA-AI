@@ -2,7 +2,7 @@
 """離線 fixture 抽取（P0；只用標準函式庫、不碰遊戲）：用 shotcache（像素快取，底層 pngread 解碼一次）從 tools/.cache 既有 1440×830 截圖抽像素，
 存成 tools/gui/fixtures/{switch,pet,depot,exp}_px.json，給 uikit / char / team / pet / grind 的離線測試用。
 截圖不存在就印出「跳過」並回報（不報錯）。計畫：notes/plan-scriptify.md §1.4。
-用法：uv run --no-project python tools/gui/make_fixtures.py [--only bag_slots,leader_badge,world]
+用法：uv run --no-project python tools/gui/make_fixtures.py [--only bag_slots,leader_badge,world,panel,popup]
 注意：來源是舊截圖（新帳號 Lv1、別的地圖），各值要在對應實機量測時重確認。"""
 import json
 import os
@@ -169,6 +169,40 @@ def make_panel_fixture() -> list:
     return miss
 
 
+# ---- 面板上疊已知彈窗（screen_sigs.popup_over_panel；watch 誤報 #243 #244 #254 #261 #264，2026-10-12）----
+# 檔名 → 期望 (面板, 彈窗種類) 或 None（負例：壓暗的面板上疊「不認得」的彈窗 / 其他 unknown 畫面，必須仍是 unknown）；人工看圖確認
+POPUP_SRC = {
+    'watch-alerts/unknown-1791750847.png': ('bag', 'keypad'), 'watch-alerts/unknown-1791750914.png': ('bag', 'keypad'), 'f3.png': ('bag', 'keypad'),
+    'watch-alerts/unknown-1791756186.png': ('bag', 'qty'), 'watch-alerts/unknown-1791756276.png': ('bag', 'qty'), 'f4.png': ('bag', 'qty'),
+    'h5.png': ('bag', 'qty'), 'i1.png': ('bag', 'qty'), 'catch-m0/split.png': ('bag', 'qty'), 'ui-log/060258-rebirth-split-dialog.png': ('bag', 'qty'),
+    'watch-alerts/unknown-1791754960.png': ('pet', 'confirm'), 'c470.png': ('pet', 'confirm'), 'c599.png': ('pet', 'confirm'), 'c695.png': ('pet', 'confirm'),
+    'now.png': ('pet', 'confirm'), 'p1.png': ('pet', 'confirm'), 'p210.png': ('pet', 'confirm'), 'p340.png': ('pet', 'confirm'), 'p5.png': ('pet', 'confirm'),
+    'ui-log/025725-pet-store-nochange.png': ('pet', 'confirm'),
+    # 負例：背包道具詳情彈窗（穿戴 / 丟棄）、背包其他彈窗、任務詳情上的彈窗、其他不認得畫面
+    'watch-alerts/unknown-1791708455.png': None, 'watch-alerts/unknown-1791709188.png': None, 'e3.png': None, 'eq1.png': None,
+    'ui-log/164242-bag-noitem.png': None, 'ui-log/165858-bag-depot-verify.png': None, 'qd-after.png': None,
+    'watch-alerts/unknown-1791706006.png': None, 'watch-alerts/unknown-1791709473.png': None,
+}
+
+
+def make_popup_fixture() -> list:
+    """popup_px.json：points = points() + annot_points()；每張存 hex 與期望 / 凍結的 annotate 結果。回缺的檔案"""
+    pts = screen_sigs.points() + screen_sigs.annot_points()
+    samples, miss = [], []
+    for rel, want in POPUP_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = {tuple(map(int, k.split(','))): tuple(v) for k, v in grab(p, pts).items()}
+        c = screen_sigs.classify(px)
+        samples.append({'f': rel, 'expect': list(want) if want else None, 'state': c['state'], 'annot': screen_sigs.annotate(px, c),
+                        'px': ''.join('%02x%02x%02x' % px[pt] for pt in pts)})
+    write('popup_px.json', {'note': '面板上疊已知彈窗樣本（2026-10-12）：expect = 人工看圖的 [面板, 彈窗] 或 null（負例須仍 unknown）；annot = 當時凍結結果',
+                            'points': [list(p) for p in pts], 'samples': samples})
+    return miss
+
+
 # ---- 追蹤列表 ▲ / ▼ 捲動箭頭（quest.classify_arrows；2026-10-12 解救老爺爺冗餘捲動修正）----
 # 檔名 → 期望 {'up','down'}（None = 遮罩 / 不可信）；人工看圖確認
 QUESTLIST_SRC = {
@@ -273,7 +307,8 @@ def main() -> int:
     if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge
         names = sys.argv[sys.argv.index('--only') + 1].split(',')
         for n in names:
-            miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture}[n]()
+            miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture,
+                    'panel': make_panel_fixture, 'popup': make_popup_fixture}[n]()
             print(n, '缺', miss) if miss else None
         return 0
     done, skipped = [], []
@@ -326,6 +361,8 @@ def main() -> int:
 
     miss_panel = make_panel_fixture()
     done.append('panel_px.json' + (f'（缺 {miss_panel}）' if miss_panel else ''))
+    miss_pp = make_popup_fixture()
+    done.append('popup_px.json' + (f'（缺 {miss_pp}）' if miss_pp else ''))
     miss_ql = make_questlist_fixture()
     done.append('questlist_px.json' + (f'（缺 {miss_ql}）' if miss_ql else ''))
     for n, fn in (('bag_slots_px.json', make_bag_slots_fixture), ('leader_badge_px.json', make_leader_badge_fixture), ('world_px.json', make_world_fixture)):
