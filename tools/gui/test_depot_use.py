@@ -118,10 +118,9 @@ class FakeSession:
 
 
 bag.Session = FakeSession
-bag._buff_icon_seq = None
 calls = []
 bag.depot_take = lambda *a: (calls.append('take'), 0)[1]
-bag._buff_icon = lambda: False
+bag.buff_row = lambda: [None, None, None]
 _real_wait = bag._wait
 bag._wait = lambda pred, secs=2.0: pred()
 bag.depot_store = lambda *a: (calls.append('store'), 0)[1]
@@ -129,24 +128,24 @@ bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), bag.EXIT_PA
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('吃失敗 → 仍存回、回吃的 rc', rc == bag.EXIT_PANEL and calls == ['take', 'use', 'store'])
 calls.clear()
-_seq = [False, True]
-bag._buff_icon = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]          # 吃之前沒圖示、吃完關背包後看到
+_seq = [[None, None, None], ['dragon', None, None]]
+bag.buff_row = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]          # 吃之前沒圖示、吃完關背包後看到
 bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('全流程成功 rc 0 buff', rc == 0 and info.get('buff') and calls == ['take', 'use', 'store'])
 calls.clear()
-bag._buff_icon = lambda: False
+bag.buff_row = lambda: [None, None, None]
 bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('沒看到人形圖示 → 95 但仍存回', rc == bag.EXIT_VERIFY and calls[-1] == 'store')
 bag.goto_page = lambda page: 0
 bag.find_item = lambda *a, **k: None
 bag.depot_take = lambda *a: bag.EXIT_ITEM
-bag._buff_icon = lambda: True
+bag.buff_row = lambda: ['dragon', None, None]
 calls.clear()
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('人形圖示已在 → 整個跳過（不取不吃不存）', rc == 0 and info['step'] == 'skip' and not calls)
-bag._buff_icon = lambda: False
+bag.buff_row = lambda: [None, None, None]
 calls.clear()
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('倉庫沒有 → 92 不吃不存', rc == bag.EXIT_ITEM and 'use' not in calls)
@@ -154,18 +153,45 @@ check('倉庫沒有 → 92 不吃不存', rc == bag.EXIT_ITEM and 'use' not in c
 # 倉庫空但背包有（上次取出後失敗沒存回）→ 用背包那份吃、剩的存回
 bag.find_item = lambda *a, **k: 4
 bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
-_seq = [False, True]
-bag._buff_icon = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]
+_seq = [[None, None, None], ['dragon', None, None]]
+bag.buff_row = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]
 calls.clear()
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('倉庫空但背包有 → 用背包那份', rc == 0 and calls == ['use', 'store'] and '背包' in info.get('note', ''))
 # 取出後驗證失敗（背包找不到）→ 一定嘗試存回，仍回取出的 rc
 bag.find_item = lambda *a, **k: None
-bag._buff_icon = lambda: False
+bag.buff_row = lambda: [None, None, None]
 bag.depot_take = lambda *a: (calls.append('take'), bag.EXIT_VERIFY)[1]
 calls.clear()
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('取出驗證失敗 → 仍嘗試存回、不吃', rc == bag.EXIT_VERIFY and calls == ['take', 'store'])
+
+# 2倍智慧果（2026-10-12 bug：按了使用、彈窗關了卻沒扣道具，舊版沒驗就回 0）：成敗看 buff 列 EXP 圖示
+uikit.snap = lambda tag: None
+bag.depot_take = lambda *a: (calls.append('take'), 0)[1]
+bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
+check('buff_kind 2倍智慧果 = exp、龍王 = dragon、其他 None', bag.buff_kind('2倍智慧果') == 'exp' and bag.buff_kind('龍王的守護') == 'dragon' and bag.buff_kind('木頭') is None)
+_seq = [[None, None, None], ['exp', None, None]]                                # 吃前沒有 EXP、吃完關背包後出現
+bag.buff_row = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False)
+check('智慧果 吃前無 exp → 吃後有 exp → rc 0', rc == 0 and info.get('buff') and info['step'] == 'done' and calls == ['take', 'use', 'store'])
+bag.buff_row = lambda: [None, None, None]                                         # 吃完仍沒有 EXP（就是 15:03 的情況）
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False)
+check('智慧果 吃後沒 exp → 95、剩的已存回', rc == bag.EXIT_VERIFY and info['step'] == 'verify' and calls == ['take', 'use', 'store'])
+bag.buff_row = lambda: ['dragon', None, None]                                     # 只有龍王圖示不能算智慧果吃到
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False)
+check('智慧果 只有 dragon 圖示 → 95', rc == bag.EXIT_VERIFY and calls == ['take', 'use', 'store'])
+bag.buff_row = lambda: ['dragon', 'exp', None]                                    # 吃前 EXP 已在 → 跳過（不取不吃）
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False)
+check('智慧果 EXP 已在 → 跳過', rc == 0 and info['step'] == 'skip' and not calls)
+bag.buff_row = lambda: None                                                       # 讀不到 buff 列 → 算沒看到
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False)
+check('智慧果 buff 列讀不到 → 95', rc == bag.EXIT_VERIFY and calls == ['take', 'use', 'store'])
 
 # ---- bag 新增：settle 等待 / 圖示嚴格→放寬 / 取出存入輪詢 ----
 sleeps = []

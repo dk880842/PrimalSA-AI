@@ -3,8 +3,11 @@
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果 [--depot public] [--no-restore] [--have]
-流程：buff 列有人形圖示（龍王）就跳過；暫停遇敵 + 等戰鬥結束（heal.set_encounter(False)）→ bag.depot_take（整疊取出）→ bag.use_item（verify_buff）→ bag.depot_store（剩餘存回）
-→ 開回遇敵（不管成敗都會開回）。每步失敗就停、回該步的退出碼（bag 90～96），不重點；取出後失敗會提醒「道具還在背包」。
+流程：暫停遇敵 + 等戰鬥結束（heal.set_encounter(False)）→ buff 列已有該道具的圖示（bag.BUFF_KIND：龍王的守護 = 人形 dragon、2倍智慧果 = EXP exp）就跳過
+→ bag.depot_take（整疊取出）→ bag.use_item → bag.depot_store（剩餘存回）→ 關背包後等 buff 列出現圖示（4 秒）→ 開回遇敵（不管成敗都會開回）。
+成敗判準：BUFF_KIND 的道具一定要看到圖示才回 0，沒看到 = 95（剩的已存回倉庫）；use_item 回 0 只代表「按了使用、彈窗關了」
+（2026-10-12 2倍智慧果按了使用、彈窗關了卻沒扣道具，舊版沒驗就回 0）。不在 BUFF_KIND 的道具沒辦法驗，維持 use_item 結果。
+每步失敗就停、回該步的退出碼（bag 90～96），不重點；取出後失敗會提醒「道具還在背包」。
 最後一行 JSON {"ok","rc","step","buff",...}。
 """
 import argparse
@@ -43,15 +46,16 @@ def use_one(role: str, want: str) -> int:
 
 
 def run(role: str, item: str, depot: str = 'public', restore: bool = True, have: bool = False, reopen: bool = True) -> tuple:
-    """→ (rc, info)。人形圖示已在就跳過；encounter 先關、結束後一定開回（原本就關著也開回：本工具只在掛機時用）"""
+    """→ (rc, info)。buff 圖示已在就跳過；encounter 先關、結束後一定開回（原本就關著也開回：本工具只在掛機時用）"""
     info = {'role': role, 'item': item, 'depot': depot}
+    kind = bag.buff_kind(item)
     enc_off = False
     try:
         heal.set_encounter(False)
         enc_off = True
         heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')       # 關遇敵不會中止正在打的那場：等 VS 牌消失
-        if item == '龍王的守護' and bag._buff_icon():               # 人形圖示已在 = 還有效，整個跳過（不開背包）
-            info.update(buff_before=True, buff=True, step='skip', note='buff 列已有龍王人形圖示，不吃')
+        if kind and bag.has_buff(kind):                              # 圖示已在 = 還有效，整個跳過（不開背包）；吃了也驗不出有沒有吃到
+            info.update(buff_before=True, buff=True, step='skip', note=f'buff 列已有 {kind} 圖示，不吃')
             return 0, info
         info['buff_before'] = False
         with bag.Session() as sess:                                      # 一次開背包做完 取出 → 使用 → 存回，最後才關（內部各步看到已開著不會關）
@@ -80,12 +84,13 @@ def run(role: str, item: str, depot: str = 'public', restore: bool = True, have:
                 elif st and st != bag.EXIT_ITEM:
                     info['warn'] = f'{item} 還在 {role} 背包，沒存回倉庫（rc {st}）'
                     return (use_rc or st), info
-        if item == '龍王的守護' and not use_rc:                          # 成功判定看 buff 列的人形圖示（不是 2倍智慧果 EXP 圖示）；背包已關才看得到
-            info['buff'] = bag._wait(bag._buff_icon, 4.0)
+        if kind and not use_rc:                                          # 成功判定看 buff 列圖示（龍王 = 人形、2倍智慧果 = EXP）；背包已關才看得到
+            info['buff'] = bag._wait(lambda: bag.has_buff(kind), 4.0)
             if not info['buff']:
                 use_rc = bag.EXIT_VERIFY
-                info['warn_buff'] = '使用後 buff 列沒看到龍王的人形圖示'
+                info['warn_buff'] = f'使用後 buff 列沒看到 {kind} 圖示（沒吃到；剩的已存回倉庫）'
                 info['step'] = 'verify'
+                uikit.snap('depot-use-nobuff')
         if use_rc:
             return use_rc, info
         info['step'] = 'done'

@@ -232,9 +232,23 @@ def buff_row() -> list | None:
     return buff_classify(lambda x, y: d[(x, y)])
 
 
+# 吃了會在 buff 列出現圖示的道具 → buff_classify 的種類；使用後成敗以圖示為準（buff 列被背包面板蓋住，要關背包後才看得到）
+BUFF_KIND = {'龍王的守護': 'dragon', '2倍智慧果': 'exp'}
+
+
+def buff_kind(item: str) -> str | None:
+    """道具名稱 → buff 種類（BUFF_KIND；名稱先 norm_name）；不是 buff 道具 = None"""
+    return BUFF_KIND.get(norm_name(item))
+
+
+def has_buff(kind: str) -> bool:
+    """buff 列有 kind（'dragon' / 'exp'）圖示嗎；讀不到 = False"""
+    return kind in (buff_row() or [])
+
+
 def _buff_icon() -> bool:
     """龍王的守護人形圖示在 buff 列嗎（不會被 2倍智慧果 EXP 圖示騙到）；讀不到 = False"""
-    return 'dragon' in (buff_row() or [])
+    return has_buff('dragon')
 
 
 def _click(x: int, y: int, panel, note: str, allow=(), wait_ms: int = 350) -> bool:
@@ -857,7 +871,9 @@ def click_popup_button(label: str, allow=()) -> tuple:
 
 
 def use_item(role: str, want: str, verify_buff: bool = False) -> int:
-    """背包找 want → 彈窗名稱核對 → 使用。verify_buff = 用 buff 圖示確認（找不到只警告，不重點）。結果 LAST['buff']"""
+    """背包找 want → 彈窗名稱核對 → 使用。回 0 只代表「按了使用、彈窗關了」，不代表伺服器真的扣了道具（2026-10-12 2倍智慧果
+    按了使用、彈窗關了卻沒吃到）。verify_buff = 關背包後用 buff 圖示確認（BUFF_KIND 有的道具才看；找不到只警告，不重點）；
+    要當成敗判準的呼叫端（depot_use.run）自己在關背包後看 has_buff。巢狀在外層 Session 裡（背包還開著）時 buff 列被蓋住，不看。結果 LAST['buff']"""
     LAST.clear()
     with Session() as s:
         if s.rc:
@@ -883,11 +899,12 @@ def use_item(role: str, want: str, verify_buff: bool = False) -> int:
                 return _fail(EXIT_VERIFY, '按了使用但彈窗沒關（不重點）', 'bag-use-verify')
             close_popup()                                # 疊加道具使用後彈窗可能還開著：ESC 關掉，不重點，成敗交給 buff 圖示判斷
             LAST['popup_stayed'] = True
-        if verify_buff:
-            LAST['buff'] = _wait(_buff_icon, 3.0)
-            if not LAST['buff']:
-                log('警告：使用後沒看到 buff 圖示（特徵只有單張樣本，可能讀不到；不重點）')
-                uikit.snap('bag-buff-unseen')
+    kind = buff_kind(want)
+    if verify_buff and kind and not uikit.is_open(BAGANY):   # 背包關了才看得到 buff 列（舊版在 Session 裡看，永遠被面板蓋住）
+        LAST['buff'] = _wait(lambda: has_buff(kind), 4.0)
+        if not LAST['buff']:
+            log(f'警告：使用後 buff 列沒看到 {kind} 圖示（不重點）')
+            uikit.snap('bag-buff-unseen')
     return 0
 
 
