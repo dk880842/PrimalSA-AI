@@ -64,6 +64,8 @@ bag._ocr_join = lambda box, opts: '三三' if box == bag.POPUP_NAME_ALT else ''
 uikit.ocr = lambda box, *o: (['千年龜的殼', '消耗'] if tuple(box) == bag.POPUP_NAME_ALT and '-Dark' in o else [])
 check('popup_name(want)：第一組雜訊 → 第二組吻合', bag.name_match(bag.popup_name('千年龜的殼'), '千年龜的殼') and bag.popup_name() == '三三')
 check('popup_name(want)：第二組也不吻合 → 回第一組（核對失敗）', not bag.name_match(bag.popup_name('精靈王之弓'), '精靈王之弓'))
+check('name_match：OCR 首/百混淆 薩姆百爾的百飾 吻合 薩姆吉爾的首飾', bag.name_match('薩姆吉爾百飾 薩姆百爾的百飾 姆百爾百飾 5 魅力', '薩姆吉爾的首飾'))
+check('popup_buttons：OCR 讀成 穿 穿 仍判 equip', bag.popup_buttons('穿 穿').get('丟棄') == (826, 662))
 bag._ocr_join, uikit.ocr = _oj, _uo
 
 # 使用鈕座標：OCR 漏讀「更多」(single) 但像素是並排 → 619；單鈕 → 732

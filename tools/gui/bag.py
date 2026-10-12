@@ -119,11 +119,15 @@ def norm_name(t) -> str:
     return re.sub(r'[\s\W_]+', '', s)
 
 
+OCR_CONFUSE = str.maketrans({'百': '首'})
+
+
 def name_match(text, want, cutoff: float = 0.72) -> bool:
     """text（OCR 文字，可含多行）是否吻合 want：完全包含，或整體相似度 >= cutoff（OCR 錯一兩字仍過）"""
     a, w = norm_name(text), norm_name(want)
     if not a or not w:
         return False
+    a, w = a.translate(OCR_CONFUSE), w.translate(OCR_CONFUSE)   # 「首 / 百」等 OCR 常混淆字先對齊（薩姆吉爾的首飾 常讀成 薩姆百爾的百飾）
     if w in a:
         return True
     if difflib.SequenceMatcher(None, a, w).ratio() >= cutoff:
@@ -171,7 +175,7 @@ def popup_buttons(text) -> dict:
     """彈窗按鈕列文字 → {'kind', 按鈕: (x, y)}（依 ui/bag.md 的座標表；kind = equip / stack / consumable / single / depot）"""
     t = re.sub(r'\s+', '', str(text or ''))
     d = {}
-    if '穿戴' in t:
+    if '穿戴' in t or '穿' in t:       # OCR 常把「穿戴」讀成「穿 穿」
         d.update(kind='equip', 穿戴=(618, 662), 丟棄=(826, 662))
     elif '取出' in t:
         d.update(kind='depot', 取出=(732, 648))
@@ -670,11 +674,11 @@ DELMODE_SIG = [(1280, 113, 197, 70, 43, 30), (700, 350, 245, 69, 82, 26), (1232,
                (730, 688, 179, 113, 56, 26), (730, 625, 165, 54, 31, 30)]
 DELMODE = uikit.Panel('BAGDEL', None, DELMODE_SIG, None, esc_close=False, forbidden={'delete_sel': FORBID['delete_mgr'], 'expand': FORBID['expand']})
 # 提示窗：X 紅、確定鈕藍（兩側）、底色米黃；560,545 是米黃（丟寵等兩顆鈕的提示窗這裡是藍「確定」→ 不會混淆 pet.CONFIRM）
-DELCONFIRM_SIG = [(946, 208, 197, 73, 49, 24), (645, 557, 57, 101, 159, 24), (785, 557, 56, 104, 163, 24), (700, 460, 243, 215, 179, 24),
+DELCONFIRM_SIG = [(946, 208, 197, 73, 49, 24), (645, 557, 57, 101, 159, 24), (785, 557, 56, 104, 163, 24), (690, 470, 243, 215, 179, 24),
                   (520, 300, 237, 211, 175, 24), (560, 545, 245, 213, 179, 24)]
 DELCONFIRM = uikit.Panel('BAGDELOK', None, DELCONFIRM_SIG, DELX_XY, esc_close=False)
 DEL_LIST_BOX = (500, 300, 430, 160)
-DEL_LIST_ZOOMS = ('2', '3')                     # 每個 zoom 單獨 OCR、各自數條目（同一份 OCR 結果裡 zoom 2 / 3 會重複）
+DEL_LIST_ZOOMS = ('2', '3', '4', '5')                     # 每個 zoom 單獨 OCR、各自數條目（同一份 OCR 結果裡 zoom 2 / 3 會重複）
 MARK_DXY = (29, -27)
 MARK_PROBE = [(dx, dy) for dx in (-6, -3, 0, 3, 6) for dy in (-6, -3, 0, 3, 6)]
 MARK_MIN = 12                                   # 25 點至少幾點是紅（實測勾了 ≈ 20、沒勾 0：名稱字是黑白）
