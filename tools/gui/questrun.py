@@ -183,6 +183,21 @@ class Tools(rebirth.Tools):
         _q.refresh_characters()
         return walk.rewarp_if_on_exit()
 
+    def vs_stuck(self) -> bool:
+        """全隊頭上 VS 牌卡死：連續 3 次（間隔 1 s）讀到「快速戰鬥 VS 牌、沒有完整戰鬥畫面」且 VS 牌一直在"""
+        import quest as _q
+        for i in range(3):
+            if i:
+                time.sleep(1.0)
+            r = _q.read_screen()
+            if r.get('state') != 'battle' or r.get('full'):
+                return False
+        return True
+
+    def relogin(self) -> int:
+        import relogin
+        return relogin.run(confirm=True)
+
     def unstick_exit(self):
         import quest as _q
         import walk
@@ -526,6 +541,7 @@ class Run:
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
         team_retry = 0
         rewarps = 0
+        relogins = 0
         boss_retries = 0
         for k in range(self.o['max_slices']):
             if time.time() - t0 > self.o['max_min'] * 60:
@@ -604,6 +620,15 @@ class Run:
                 if kind2 == 'walk':
                     self.pending = (st2, kind2, sd2)
                     continue                                           # 下一圈 special_step 會走 walk
+                if rewarps >= 2 and relogins < 1 and self.T.vs_stuck():  # 刷新 + 點追蹤都無效且全隊頭上 VS 牌卡住（無戰鬥介面）→ 主動全員重登（碧青 12 樓 2026-10-12）
+                    relogins += 1
+                    event(f'任務 {tid}：VS 牌卡住（無戰鬥介面、刷新 {rewarps} 次無效）→ 全員重登（relogin.py）')
+                    rr = self.T.relogin()
+                    event(f'任務 {tid}：全員重登 rc={rr}')
+                    if rr:
+                        return self.fail(EXIT_STEP, f'任務 {tid}：VS 卡住後全員重登失敗 rc={rr}', quest_rc=rc)
+                    rewarps = 0
+                    continue
                 if rewarps < 6:                                        # 自動巡路停住後角色凍住（琉璃洞窟 / 奇喀喀村 2026-10-12）：先刷新角色解凍，
                     rewarps += 1                                       # 再（若站在出口格上沒換圖）踏出再踏回，然後重點追蹤
                     try:

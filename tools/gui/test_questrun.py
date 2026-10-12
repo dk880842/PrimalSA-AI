@@ -178,6 +178,17 @@ class Fake:
         self.rec('unfreeze')
         return None
 
+    vs_stuck_val = False
+    relogin_rc = 0
+
+    def vs_stuck(self):
+        self.rec('vs_stuck')
+        return self.vs_stuck_val
+
+    def relogin(self):
+        self.rec('relogin')
+        return self.relogin_rc
+
     def walk_to(self, m, x, y):
         self.rec('walk_to', m, x, y)
         r = self.walk_script.pop(0) if self.walk_script else (m, x, y)
@@ -380,6 +391,18 @@ check('3 且無 walk 步驟 → 112', go(f, [2017]) == questrun.EXIT_STEP and 'g
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, []), (0, [])])
 rc = go(f, [2017])
 check('3 且無 walk 步驟 → 先 unfreeze（刷新 + 出口格重踏）再重跑 quest', rc == 0 and f.names().count('unfreeze') == 1 and f.names().count('quest') == 2, str(f.names()))
+
+# 8b) VS 牌卡死：刷新 2 次無效 → 全員重登 → 續跑；重登失敗 → 112；沒卡 VS 不重登
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, [])] * 3 + [(0, [])])
+f.vs_stuck_val = True
+rc = go(f, [2017])
+check('3 連續 + VS 卡死 → relogin 一次後續跑', rc == 0 and f.names().count('relogin') == 1 and f.names().count('unfreeze') == 2, str(f.names()))
+f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8)
+f.vs_stuck_val = True
+f.relogin_rc = 105
+check('VS 卡死但重登失敗 → 112', go(f, [2017]) == questrun.EXIT_STEP and f.names().count('relogin') == 1)
+f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8)
+check('沒 VS 卡死 → 不重登', go(f, [2017]) == questrun.EXIT_STEP and 'relogin' not in f.names())
 
 # 9) 5：詳情已完成 → 成功；仍進行中 → 112
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(5, [])])
