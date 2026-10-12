@@ -313,3 +313,40 @@ test('hudText：帶人物名 / 寵物名；沒學過的寵物顯示 ?；只有�
   expect(hudText(unk, 0, 0)).toBe('?  0轉77級  HP 208  MP 45  |  寵 ? 0轉77級 HP 434  |  奇努伊的海底通路 31401:91,29')
   expect(hudText({ v: 1, hud: { ok: false, stale: true, name: { v: 'DKB0' } } }, 0, 0)).toBeNull()
 })
+
+// ───────── 自動 session 標題 ─────────
+import { autoTitle, mayRetitle, questNames, titleFromLog } from './register'
+
+const NAMES = questNames("dict(id=2000, detail='琉璃洞窟', track='x'),\n dict(id=2019, detail='卡坦的願望(1.82)', track='y')")
+
+test('titleFromLog：進行中 / 已完成 / 失敗 / 四大洞窟前綴 / 長度', () => {
+  const run = '2026-10-12 10:56:32 [questrun] 開始：任務 [2000]，選項 {}\n2026-10-12 10:57:11 [questrun] 任務 2000「琉璃洞窟」詳情結果：accepted\n追蹤 x\n'
+  expect(titleFromLog(run, NAMES)).toBe('PSA｜四大洞窟：琉璃洞窟 進行中')
+  expect(titleFromLog(run + '2026-10-12 11:00:00 [questrun] 結束 rc=112，完成 []；失敗退出\n', NAMES)).toBe('PSA｜四大洞窟：琉璃洞窟 失敗 rc=112')
+  const done = '[questrun] 任務 2019「卡坦的願望(1.82)」已完成（quest.py 任務完成；219 秒、1 片）\n'
+  expect(titleFromLog(done, NAMES)).toBe('PSA｜卡坦的願望 已完成')
+  expect(titleFromLog('x [questrun] 開始：任務 [2000]，選項 {}\n', NAMES)).toBe('PSA｜四大洞窟：琉璃洞窟 進行中')
+  expect(titleFromLog('x [questrun] 結束 rc=0，完成 [2019]\n[questrun] 開始：任務 [2019]\n', NAMES)).toBe('PSA｜卡坦的願望 進行中')
+  expect(titleFromLog('沒有紀錄\n', NAMES)).toBeUndefined()
+  expect(titleFromLog('', NAMES)).toBeUndefined()
+  expect((titleFromLog('[questrun] 任務 1「' + '很長'.repeat(30) + '」詳情結果：ok\n') ?? '').length).toBeLessThanOrEqual(40)
+})
+
+test('mayRetitle：空與 PSA｜ 開頭才可改，使用者自取的不動', () => {
+  expect(mayRetitle(undefined)).toBe(true)
+  expect(mayRetitle('')).toBe(true)
+  expect(mayRetitle('PSA｜舊標題')).toBe(true)
+  expect(mayRetitle('我的名字')).toBe(false)
+})
+
+test('autoTitle：輸出標題；已是同標題 / 使用者自取名 / 非本專案 / 讀檔失敗都不輸出也不拋錯', async () => {
+  const log = '[questrun] 任務 2000「琉璃洞窟」詳情結果：accepted\n'
+  const mk = (fail = false) => ({ fs: { read: async (p: string) => { if (fail) throw new Error('boom'); return p.endsWith('quest-events.log') ? log : "dict(id=2000, detail='琉璃洞窟')" } } }) as never
+  const root = '/mnt/c/games/PrimalSA-AI'
+  expect(await autoTitle(mk(), root, undefined)).toBe('PSA｜四大洞窟：琉璃洞窟 進行中')
+  expect(await autoTitle(mk(), 'C:\\games\\PrimalSA-AI\\tools', '')).toBe('PSA｜四大洞窟：琉璃洞窟 進行中')
+  expect(await autoTitle(mk(), root, 'PSA｜四大洞窟：琉璃洞窟 進行中')).toBeUndefined()
+  expect(await autoTitle(mk(), root, '使用者的名字')).toBeUndefined()
+  expect(await autoTitle(mk(), '/home/x/other', undefined)).toBeUndefined()
+  expect(await autoTitle(mk(true), root, undefined)).toBeUndefined()
+})

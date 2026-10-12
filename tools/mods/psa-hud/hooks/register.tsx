@@ -536,7 +536,85 @@ const STATUS_TEXT: Record<SupStatus, string> = {
 }
 const supSummary = (s: Supervisor) => `監看：${STATUS_TEXT[s.status]}｜spawn ${s.spawns} 次｜卡住重開 ${s.stalls} 次｜最後退出碼 ${s.lastCode ?? '無'}`
 
+// ───────────────────────── 自動 session 標題（PSA｜…）─────────────────────────
+// 讀 notes/quest-events.log 最後一筆 [questrun] 行組短標題，由 classic.UserPromptSubmit / SessionStart 的 sessionTitle 設定。
+// 只覆蓋空標題或「PSA｜」開頭（本 mod 自己設的）；使用者 /rename 的名字不動。讀不到 / 沒紀錄就不輸出
+export const TITLE_PREFIX = 'PSA｜'
+const TITLE_MAX = 40
+const CAVE_IDS = new Set([2000, 2001, 2002, 2003])    // 四大洞窟（questdefs.QCAVE）
+const LOG_TAIL_LINES = 400
+
+export const mayRetitle = (cur: string | undefined) => !cur || cur.startsWith(TITLE_PREFIX)
+const cleanName = (n: string) => n.replace(/\(1\.82\)\s*$/, '').trim()
+
+// questdefs.py → {id: detail}（只解析 id=…, detail='…'，不執行 Python）
+export function questNames(py: string): Map<number, string> {
+  const m = new Map<number, string>()
+  for (const x of py.matchAll(/id=(\d+),\s*detail='([^']+)'/g)) m.set(Number(x[1]), cleanName(x[2]!))
+  return m
+}
+
+// 找最後一筆 [questrun] 行：結束 → 完成 / 失敗，其他 → 進行中；任務名取該行往回最近一個「任務 N「名」」，
+// 沒有就用該行或「開始：任務 [..]」的 ID 查 questdefs。沒有 questrun 紀錄回 undefined
+export function titleFromLog(log: string, names: Map<number, string> = new Map()): string | undefined {
+  const lines = log.split(/\r?\n/).slice(-LOG_TAIL_LINES)
+  let last = -1
+  for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.includes('[questrun]')) { last = i; break }
+  if (last < 0) return undefined
+  const line = lines[last]!
+  let id: number | undefined
+  let name: string | undefined
+  for (let i = last; i >= 0 && !name; i--) {
+    const l = lines[i]!
+    const m = /\[questrun\].*?任務 (\d+)「([^」]+)」/.exec(l)
+    if (m) { id = Number(m[1]); name = cleanName(m[2]!) }
+  }
+  if (!name) {
+    const m = /任務 \[?(\d+)/.exec(line) ?? /任務 \[?(\d+)/.exec(lines.slice(0, last + 1).reverse().find(l => /\[questrun\].*開始：任務/.test(l)) ?? '')
+    if (m) { id = Number(m[1]); name = names.get(id) }
+  }
+  if (!name) return undefined
+  if (id !== undefined && CAVE_IDS.has(id)) name = `四大洞窟：${name}`
+  let state = '進行中'
+  const end = /結束 rc=(\d+)/.exec(line)
+  if (end) state = end[1] === '0' ? '已完成' : `失敗 rc=${end[1]}`
+  else if (/已完成（/.test(line)) state = '已完成'
+  const t = `${TITLE_PREFIX}${name} ${state}`
+  return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) : t
+}
+
+// 兩個 hook 共用：回新標題或 undefined（不該改 / 讀檔失敗 / 沒紀錄 / 與現在相同）
+export async function autoTitle($: EngineInterface, cwd: string, cur: string | undefined): Promise<string | undefined> {
+  try {
+    const root = rootFromCwd(cwd)
+    if (!root || !mayRetitle(cur)) return undefined
+    const log = await $.fs.read(`${root}/notes/quest-events.log`)
+    if (typeof log !== 'string') return undefined
+    let names = new Map<number, string>()
+    try {
+      const py = await $.fs.read(`${root}/tools/gui/questdefs.py`)
+      if (typeof py === 'string') names = questNames(py)
+    } catch { /* 沒有 questdefs 就只靠 log 內的名字 */ }
+    const t = titleFromLog(log, names)
+    return t && t !== cur ? t : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export const register: Register = on => {
+  // 標題：UserPromptSubmit / SessionStart 都試；任何錯誤都吞掉，不擋使用者送訊息
+  on('classic.UserPromptSubmit', async ($, e, next) => {
+    const r = await next(e)
+    const t = await autoTitle($, e.cwd, e.session_title)
+    return t ? { ...r, sessionTitle: t } : r
+  })
+  on('classic.SessionStart', async ($, e, next) => {
+    const r = await next(e)
+    const t = await autoTitle($, e.cwd, e.session_title)
+    return t ? { ...r, sessionTitle: t } : r
+  })
+
   on('session.start', async ($, e, next) => {
     // 設定在使用者層級（每個專案都會載入），只在精靈王石器專案裡啟動
     if (!e.cwd.includes('PrimalSA-AI') || !e.isInteractive) return next(e)
