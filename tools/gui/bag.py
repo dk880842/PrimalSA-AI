@@ -702,7 +702,7 @@ def del_entries(lines) -> list:
     """純函式：提示窗某一個 zoom 的 OCR 行 → 條目清單（去掉「是否批量刪除道具?」行、行與行串起來再用 | 切、去 *數量）"""
     body = ''.join(re.sub(r'\s+', '', str(t)) for t in lines or [] if '是否' not in str(t) and '刪除' not in str(t))
     out = []
-    for e in body.split('|'):
+    for e in re.split(r'[|丨｜]', body):
         e = re.sub(r'\*?\d*$', '', e.strip()).rstrip('*')
         if e:
             out.append(e)

@@ -399,7 +399,7 @@ def exits_of(map_id: int) -> set:
     return {(e['fX'], e['fY']) for e in psa.T('MapWarp') if e.get('fMap') == map_id and not e.get('isNotUse')}
 
 
-def pick_unstick(cs, exits: set, x: int, y: int, radii=(2, 3)) -> tuple[int, int] | None:
+def pick_unstick(cs, exits: set, x: int, y: int, radii=(4, 3, 5)) -> tuple[int, int] | None:
     """純函式：站在 (x, y) 時要點哪一格地面讓自動巡路解開 → 相對位移 (dx, dy)；找不到 None。
     條件：通行格 = 1、離 NPC 與出口都 ≥ 2 格（點到出口會整隊傳走）、點擊位置不在 UI 上；
     先找距離 2 的、再找 3 的（近一點、走一下就停），同距離依固定順序（可重現）"""
@@ -430,7 +430,98 @@ def unstick_click(map_id: int, x: int, y: int) -> tuple[int, int] | None:
         return None
     sx, sy = screen(*d)
     gui('seq', f'{PRIMER}; click {sx} {sy}; waitstill 2000', note=f'巡路卡住 {map_id}:{x},{y} → 點地面 {d[0]:+d},{d[1]:+d} 格')
+    try:                                                    # 點到隊友會跳「選人小窗」擋住巡路（2026-10-12 琉璃 10 樓）→ ESC 關
+        import uikit
+        if uikit.is_open(uikit.PLAYERPICK):
+            log('點地面點到隊友，跳出選人小窗 → ESC')
+            gui('key', '{ESC}')
+    except Exception:                                       # noqa: BLE001
+        pass
     return sx, sy
+
+
+# ---------------- 自動巡路停在出口格上沒換圖（2026-10-12 琉璃洞窟 / 奇喀喀村）----------------
+def warp_at(map_id: int, x: int, y: int):
+    """(map, x, y) 是不是出口格 → MapWarp 那筆（含 tMap）/ None"""
+    return next((e for e in psa.T('MapWarp') if e.get('fMap') == map_id and e.get('fX') == x and e.get('fY') == y and not e.get('isNotUse')), None)
+
+
+def pick_stepoff(cs, exits: set, x: int, y: int) -> tuple[int, int] | None:
+    """純函式：站在出口格 (x, y)，找相鄰（切比雪夫 1）一格通行、非出口的格 → 絕對座標；沒有 None（固定順序，可重現）"""
+    if not cs:
+        return None
+    w, h, c, _ = cs
+    for dy in (1, -1, 0):
+        for dx in (-1, 0, 1):
+            nx, ny = x + dx, y + dy
+            if (dx or dy) and 0 <= nx < w and 0 <= ny < h and c[ny * w + nx] == 1 and (nx, ny) not in exits:
+                return nx, ny
+    return None
+
+
+def rewarp_if_on_exit() -> tuple | None:
+    """自動巡路（點任務追蹤）會停在出口格「上面」卻沒換圖，之後角色像凍住（點地面不動、追蹤回「無任務尋路資訊」）。
+    現在座標若正好是出口格：走到相鄰格再走回出口 → 換圖。→ 換圖後的 (map, x, y)；不在出口格 / 做不到 None"""
+    p = wait_pos()
+    if p is None:
+        return None
+    wp = warp_at(*p)
+    if not wp or wp['tMap'] == prev_map(p[0]):              # 剛到的落點本身就是「回頭」的出口：不踏
+        return None
+    off = pick_stepoff(_cells(p[0]), exits_of(p[0]), p[1], p[2])
+    if off is None:
+        return None
+    log(f'站在出口格 {p[0]}:{p[1]},{p[2]} 沒換圖 → 先踏到 {off} 再踏回（目標 {wp["tMap"]}）')
+    step_to(p[0], off[0], off[1])
+    return step_to(p[0], p[1], p[2], exit_map=wp['tMap'])
+
+
+MAPHIST = ROOT / 'tools' / '.cache' / 'maphist.json'
+
+
+def note_map(map_id: int) -> None:
+    """記錄走過的地圖順序（最多 20 筆、連續相同不重複）；quest.py 巡路監測時呼叫，出口卡住時用來避開回頭的出口"""
+    try:
+        h = json.loads(MAPHIST.read_text())
+    except Exception:                                       # noqa: BLE001
+        h = []
+    if not h or h[-1] != map_id:
+        MAPHIST.write_text(json.dumps((h + [map_id])[-20:]))
+
+
+def prev_map(cur: int) -> int | None:
+    """maphist 裡「目前地圖之前」最近的另一張地圖（沒有 None）"""
+    try:
+        h = json.loads(MAPHIST.read_text())
+    except Exception:                                       # noqa: BLE001
+        return None
+    while h and h[-1] == cur:
+        h.pop()
+    return h[-1] if h else None
+
+
+def nearest_exit(map_id: int, x: int, y: int, max_d: int = 3, avoid_map: int | None = None):
+    """純函式：(x, y) 切比雪夫 ≤ max_d 內最近的「換圖」出口（tMap != 本圖）→ MapWarp 那筆 / None（同距離取座標小的，可重現）"""
+    best = None
+    for e in psa.T('MapWarp'):
+        if e.get('fMap') != map_id or e.get('isNotUse') or e.get('tMap') in (map_id, avoid_map):
+            continue
+        d = max(abs(e['fX'] - x), abs(e['fY'] - y))
+        if d <= max_d and (best is None or (d, e['fX'], e['fY']) < best[0]):
+            best = ((d, e['fX'], e['fY']), e)
+    return best[1] if best else None
+
+
+def walk_onto_nearby_exit(max_d: int = 3) -> tuple | None:
+    """自動巡路在出口附近原地打轉（2026-10-12 琉璃 9 樓 45,45 距出口 47,47 兩格 150 秒）：直接走上最近的換圖出口。→ 換圖後 (map,x,y) / None"""
+    p = wait_pos()
+    if p is None:
+        return None
+    e = nearest_exit(p[0], p[1], p[2], max_d, avoid_map=prev_map(p[0]))
+    if not e:
+        return None
+    log(f'巡路卡在 {p[0]}:{p[1]},{p[2]}，附近出口 ({e["fX"]},{e["fY"]}) → {e["tMap"]}：直接走上去')
+    return step_to(p[0], e['fX'], e['fY'], exit_map=e['tMap'])
 
 
 # ---------------- NPC ----------------

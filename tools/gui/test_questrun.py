@@ -170,6 +170,14 @@ class Fake:
         self.rec('track', task)
         return True
 
+    def unstick_exit(self):
+        self.rec('unstick_exit')
+        return None
+
+    def unfreeze(self):
+        self.rec('unfreeze')
+        return None
+
     def walk_to(self, m, x, y):
         self.rec('walk_to', m, x, y)
         r = self.walk_script.pop(0) if self.walk_script else (m, x, y)
@@ -249,7 +257,7 @@ rc = go(f, [2017])
 n = f.names()
 check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', '地雷區') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
 check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
-check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh', ('quest', ('--task', '彌生和日美子', '--max-seconds', '300', '--team-fresh')) in f.calls, str(f.calls))
+check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh')) in f.calls, str(f.calls))
 check('交接不再另讀當前角色（team.form 同一次面板確認）', 'current' not in n and 'char_ensure' not in n)
 check('龍王的守護跑第一片前吃（have=False）', ('dragon', False) in f.calls and n.index('dragon') < n.index('quest'))
 check('進度檔記完成；quest-log 追加一筆', '"done"' in questrun.PROGRESS.read_text(encoding='utf-8') and '彌生和日美子' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
@@ -367,8 +375,11 @@ f = Fake(status={D17: [questrun.DOING]}, quest=[(32, [])] * 4)
 check('32 連續 4 次 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER)
 
 # 8) 3 追蹤沒反應、沒 walk 步驟 → 112
-f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])])
+f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8)
 check('3 且無 walk 步驟 → 112', go(f, [2017]) == questrun.EXIT_STEP and 'grind_start' not in f.names())
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, []), (0, [])])
+rc = go(f, [2017])
+check('3 且無 walk 步驟 → 先 unfreeze（刷新 + 出口格重踏）再重跑 quest', rc == 0 and f.names().count('unfreeze') == 1 and f.names().count('quest') == 2, str(f.names()))
 
 # 9) 5：詳情已完成 → 成功；仍進行中 → 112
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(5, [])])
@@ -431,6 +442,9 @@ go(f, [2017], team_hp_min=0)
 check('--team-hp-min 0 → 不讀全隊', f.team_hp_n == 0)
 f = Fake(status={D17: [questrun.DOING]}, quest=[(19, [])])
 check('quest.py 19（巡路卡住解卡失敗）→ 112', go(f, [2017]) == questrun.EXIT_STEP)
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(19, []), (0, [])])
+f.unstick_exit = lambda: (f.rec('unstick_exit'), (21010, 48, 48))[1]
+check('quest.py 19 → 先 unstick_exit（刷新 + 走上附近出口）成功就再跑 quest', go(f, [2017]) == 0 and f.names().count('unstick_exit') == 1 and f.names().count('quest') == 2, str(f.names()))
 f = Fake(status={D17: [questrun.DONE]}, cur='DKBO3')
 go(f, [2017])
 check('當前角色不是 DKBO：交接不另開面板讀（交給 team.form._finish 的 char.ensure）', 'current' not in f.names() and f.names().count('team_form') == 1, str(f.names()))
@@ -548,7 +562,7 @@ check('2999：步 1 quest 回 3 → 才 walk 再 quest；完成後恢復掛機',
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[2], quest=[(0, [])])
 go(f, [2999])
 check('2999：步 2（default）不 walk', 'walk_to' not in f.names() and 'quest' in f.names())
-f = Fake(status={D99: [questrun.DOING, questrun.DOING, questrun.DONE]}, steps=[None, 2], quest=[(3, []), (0, [])])
+f = Fake(status={D99: [questrun.DOING, questrun.DOING, questrun.DONE]}, steps=[None, 2], quest=[(3, [])] * 8)
 rc = go(f, [2999])
 check('2999：步號讀不到時 quest 回 3 → 112（沒有可走的 walk 步驟）', rc == questrun.EXIT_STEP)
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[None, 1], quest=[(3, []), (0, [])], pos=(10204, 14, 7))
@@ -728,7 +742,7 @@ check('slice「時間到」→ 不開詳情，直接下一片（只有開頭 acc
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, ['步驟結束（對話 1）'])])
 rc = go(f, [2017])
 check('不是時間到、也沒「任務完成」（模糊）→ 仍讀一次詳情確認', rc == 0 and f.names().count('status') == 1, str(f.names()))
-check('quest 子程序逾時 = slice + WALK_CAP_S + 120（巡路不計時，不能被 slice+120 砍）', f.timeouts and f.timeouts[0] == 300 + questrun.WALK_CAP_S + 120, str(getattr(f, 'timeouts', None)))
+check('quest 子程序逾時 = slice + WALK_CAP_S + 120（巡路不計時，不能被 slice+120 砍）', f.timeouts and f.timeouts[0] == questrun.SLICE_S + questrun.WALK_CAP_S + 120, str(getattr(f, 'timeouts', None)))
 # 巡路時間不計入 --max-min：假時鐘，每次 quest 過 40 秒，max_min=1（60 秒）
 import types as _ty  # noqa: E402
 import time as _t  # noqa: E402

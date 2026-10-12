@@ -453,6 +453,11 @@ def close_stray_panel() -> bool:
     """畫面停在已知的誤開面板（組隊 / 切換）→ 點它的 ✕ 關掉並回 True；都不是回 False（照舊當不認得 / 疑似驗證視窗）"""
     try:
         import uikit
+        if uikit.is_open(uikit.PLAYERPICK):                 # 選人小窗（點地面點到隊友）：ESC 關；它會擋住自動巡路
+            event('畫面上有「選人小窗」（解卡點地面點到隊友）→ ESC 關閉')
+            gui('key', '{ESC}')
+            time.sleep(0.6)
+            return not uikit.is_open(uikit.PLAYERPICK)
         for p in (uikit.TEAMPANEL, uikit.SWITCH):
             if uikit.is_open(p):
                 event(f'誤開了「{p.name}」面板（戰鬥剛結束時刷新鈕點到主畫面按鈕）→ 點 ✕ 關閉')
@@ -696,6 +701,15 @@ WALK_GRACE_READS = 2                 # 巡路中途連續 unknown 最多這麼�
 WALK: dict = {}                      # 本次執行的 WalkClock（main 結束時印「走路不計時 N 秒」給 questrun 扣總時限）
 
 
+SLICE_DEFER_STATES = ('battle', 'dialog', 'reward', 'select')
+SLICE_DEFER_MAX_S = 180.0          # 時間到後最多再等這麼久（戰鬥 / 對話收尾）；超過就照舊收片
+
+
+def slice_defer(st: str, over_s: float) -> bool:
+    """純函式：slice 時間到了但畫面正在戰鬥 / 對話 / 領獎 / 選擇對象 → True（先不結束，讓這一段在同一個程序收尾；over_s = 超時秒數，超過上限就放棄延後）"""
+    return st in SLICE_DEFER_STATES and over_s < SLICE_DEFER_MAX_S
+
+
 class WalkClock:
     """slice 計時：自動走路（Auto Walking = 任務進行中）不計入 --max-seconds；只有「連續非 walking 的閒置 / 其他狀態」才耗時限。
     巡路中途短暫 unknown 1～2 次又回 walking（過場 / 讀圖失敗）也算巡路；單次連續巡路超過 cap 就不再延長（防卡死）。
@@ -763,6 +777,11 @@ class WalkStuck:
         if not pos:
             return False
         if pos != self.pos:
+            try:                                          # 地圖換了就記進 maphist（questrun 在出口卡住時用它避開「回頭」的出口）
+                if pos != 'screen' and (self.pos in (None, 'screen') or pos[0] != self.pos[0]):
+                    walk.note_map(pos[0])
+            except Exception:                             # noqa: BLE001
+                pass
             self.pos, self.t0 = pos, now
             return False
         return now - self.t0 >= self.stuck_s
@@ -1962,7 +1981,7 @@ def _main() -> int:
                 return 2
         if a.once:
             return 0
-        if wclock.expired(time.time()):
+        if wclock.expired(time.time()) and not slice_defer(st, time.time() - wclock.end):   # 戰鬥 / 對話 / 領獎中不收片（60 秒切片會切到 BOSS 戰中間，丟掉 BOSS 判斷）
             event(f'時間到，結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}；巡路中不計時 {wclock.walked:.0f} 秒）')
             return 0
         time.sleep(a.every)

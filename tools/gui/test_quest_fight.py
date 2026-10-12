@@ -1240,6 +1240,14 @@ d = quest.walk.pick_unstick(cs, quest.walk.exits_of(300), 121, 170)
 ok &= check('吉魯島 121,170：選通行格、離出口 122,170 / 守門人 118,171 ≥ 2 格', d is not None and cs[2][(170 + d[1]) * cs[0] + 121 + d[0]] == 1
             and max(abs(121 + d[0] - 122), abs(170 + d[1] - 170)) >= 2 and max(abs(121 + d[0] - 118), abs(170 + d[1] - 171)) >= 2, str(d))
 ok &= check('沒有通行格資料 → None（不亂點）', quest.walk.pick_unstick(None, set(), 1, 1) is None)
+ok &= check('slice_defer：戰鬥 / 對話中時間到不收片、閒置收片、超過 180 秒放棄', quest.slice_defer('battle', 5) and quest.slice_defer('dialog', 0) and not quest.slice_defer('idle', 5) and not quest.slice_defer('battle', 181))
+import uikit as _uk
+_px = {(x, y): (r, g, b) for x, y, r, g, b, t in _uk.PLAYERPICK.sig}
+ok &= check('PLAYERPICK 特徵：自己的取樣值吻合；「選擇對象」面板外框色（104,79,48）不吻合', all(_uk.screen_sigs.close(_px[(x, y)], (r, g, b), t) for x, y, r, g, b, t in _uk.PLAYERPICK.sig)
+            and not all(_uk.screen_sigs.close((104, 79, 48), (r, g, b), t) for x, y, r, g, b, t in _uk.PLAYERPICK.sig[:2]))
+ok &= check('pick_unstick 預設半徑先 4 格（離隊友遠）', quest.walk.pick_unstick.__defaults__[0][0] == 4)
+ok &= check('nearest_exit：琉璃 9 樓 45,45 → 47,47（10 樓）、同圖出口不算、太遠 None', (quest.walk.nearest_exit(21009, 45, 45) or {}).get('tMap') == 21010 and quest.walk.nearest_exit(21009, 30, 30) is None)
+ok &= check('pick_stepoff：出口格相鄰通行非出口格 / 無資料 None', quest.walk.pick_stepoff(quest.walk._cells(21002), quest.walk.exits_of(21002), 40, 25) == (39, 26) and quest.walk.pick_stepoff(None, set(), 1, 1) is None)
 w_, h_ = 7, 7
 ok &= check('四周全是障礙 → None', quest.walk.pick_unstick((w_, h_, bytes([2]) * (w_ * h_), set()), set(), 3, 3) is None)
 
@@ -1253,7 +1261,7 @@ class WalkSim(Sim):
 
     def gui(self, *args, note=''):
         out = super().gui(*args, note=note)
-        if 'click 747 479' in (args[1] if args[0] == 'seq' else ''):
+        if 'click 459 410' in (args[1] if args[0] == 'seq' else ''):
             self.unstuck = True
         return out
 
@@ -1267,8 +1275,8 @@ quest._errlog = lambda m, fixed=None: ERRS.append((m, fixed))
 s = WalkSim()
 s.pos = lambda: (300, 121, 170)
 rc = run(['--no-track', '--max-seconds', '30'], s)
-clk = [c for c in s.clicks if 'click 747 479' in c[1]]
-ok &= check('主迴圈：walking 座標 40 秒不變 → 點地面 747,479 一次、記 errlog', len(clk) == 1 and 40 <= clk[0][0] <= 50 and len(ERRS) == 1, f'rc={rc} {clk} {ERRS}')
+clk = [c for c in s.clicks if 'click 459 410' in c[1]]
+ok &= check('主迴圈：walking 座標 40 秒不變 → 點地面 459,410 一次、記 errlog', len(clk) == 1 and 40 <= clk[0][0] <= 50 and len(ERRS) == 1, f'rc={rc} {clk} {ERRS}')
 # 座標讀不到（地圖名兩行，HUD 座標 OCR 失敗）→ 改比世界畫面取樣；實機樣本 fixtures/world_px.json
 import json as _json2
 _W = _json2.loads((Path(__file__).resolve().parent / 'fixtures' / 'world_px.json').read_text(encoding='utf-8'))['images']

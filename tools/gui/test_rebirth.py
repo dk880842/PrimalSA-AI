@@ -517,6 +517,7 @@ check('levels：兩人 (0,133)', rc == 0 and lv == {'DKBO': (0, 133), 'DKBO2': (
 # ================= bag.py purge（刪除管理，2026-10-12）=================
 B = ['巴巴洛的許可證']
 check('del_entries：行串接、去 *數量、去「是否」行', bag.del_entries(['巴巴洛的許可證*1|千年龜', '的殼*1|', '是否批量刪除道具?']) == ['巴巴洛的許可證', '千年龜的殼'])
+check('del_entries：丨（U+4E28）當分隔（2026-10-12 DKBO2 四條實機）', bag.del_entries(['薩頓家的秘藥*1|山賊的羽飾', '*1|杉的手環1丨月光的手鐲*1|', '是否捇量刪除道具?']) == ['薩頓家的秘藥', '山賊的羽飾', '杉的手環', '月光的手鐲'])
 check('del_entry_name：完全 / 掉字（巴巴洛→巴洛）/ 掉 *', bag.del_entry_name('巴巴洛的許可證', B) and bag.del_entry_name('巴洛的許可證', B) and bag.del_entry_name('巴巴洛的許可證1', B))
 check('del_entry_name：兩條黏在一起 / 名單外 / 保護道具 → None', bag.del_entry_name('巴巴洛的許可證千年龜的殼', B) is None
       and bag.del_entry_name('千年龜的殼', B) is None and bag.del_entry_name('精靈王之弓', ['精靈王之弓']) is None and bag.del_entry_name('大地的羈絆', ['大地的羈絆']) is None)

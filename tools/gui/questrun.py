@@ -4,7 +4,7 @@
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/questrun.py plan [任務ID …]            # 不碰遊戲：印交接 / 每任務步驟 / 指令 / 預估 / 退出碼（沒給 ID = questdefs 全部）
   uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--no-dragon] [--spot 地雷區]
-        [--max-slices 12] [--slice-s 300] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--no-boss-retry] [--no-verify-all] [--verify-skipped]
+        [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--no-boss-retry] [--no-verify-all] [--verify-skipped]
   uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態（當前角色）
   uv run --no-project python tools/gui/questrun.py status --role all|DKBO3,DKBO5 [任務ID …]   # 逐人：每人 char.switch → 開一次詳情讀這些任務 → 最後切回 DKBO（詳情面板沒有頭像列，只能切角色）
   可 import：questrun.run(ids, dry_run=False, after='grind', tools=None, ...) → 退出碼；結果 dict 在 questrun.LAST
@@ -77,7 +77,7 @@ LEADER = rebirth.LEADER
 ALL_ROLES = rebirth.ALL_ROLES
 DRAGON = rebirth.DRAGON
 DRAGON_REEAT_S = rebirth.DRAGON_REEAT_S
-SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 300, 12, 30, 50
+SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 60, 60, 30, 50
 BOSS_RETRY_MAX = 3              # 每個任務 38 / 21 時最多呼叫幾次 bossretry（四大洞窟每個 2～5 場 BOSS）
 TEAM_HP_MIN = 60                # 全隊任一人 HP < 這個 % → 補血（2026-10-12 四寶玉之謎：只看隊長 HP，隊員約 50% 連打 BOSS 被打死踢隊 4 次 38）；0 = 不讀全隊
 WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
@@ -175,6 +175,19 @@ class Tools(rebirth.Tools):
     def walk_to(self, m, x, y):
         import walk
         return walk.walk_to(m, x, y)
+
+    def unfreeze(self):
+        """自動巡路停住後角色凍住：刷新角色；站在出口格上沒換圖則踏出再踏回 → 換圖後 (map,x,y) / None"""
+        import quest as _q
+        import walk
+        _q.refresh_characters()
+        return walk.rewarp_if_on_exit()
+
+    def unstick_exit(self):
+        import quest as _q
+        import walk
+        _q.refresh_characters()
+        return walk.rewarp_if_on_exit() or walk.walk_onto_nearby_exit(2)
 
     def grind_start(self, spot):
         import grind
@@ -512,6 +525,7 @@ class Run:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
         team_retry = 0
+        rewarps = 0
         boss_retries = 0
         for k in range(self.o['max_slices']):
             if time.time() - t0 > self.o['max_min'] * 60:
@@ -590,6 +604,14 @@ class Run:
                 if kind2 == 'walk':
                     self.pending = (st2, kind2, sd2)
                     continue                                           # 下一圈 special_step 會走 walk
+                if rewarps < 6:                                        # 自動巡路停住後角色凍住（琉璃洞窟 / 奇喀喀村 2026-10-12）：先刷新角色解凍，
+                    rewarps += 1                                       # 再（若站在出口格上沒換圖）踏出再踏回，然後重點追蹤
+                    try:
+                        r = self.T.unfreeze() or self.T.unstick_exit()
+                        event(f'任務 {tid}：追蹤沒反應 → 刷新角色' + (f' + 出口格重踏 → {r[0]}:{r[1]},{r[2]}' if r else '') + f'，重點追蹤（第 {rewarps} 次）')
+                    except Exception as e:                             # noqa: BLE001
+                        event(f'任務 {tid} 解凍失敗：{e}')
+                    continue
                 return self.fail(EXIT_STEP, f'任務 {tid}：追蹤沒反應（quest.py 3）且目前步驟（{st2}）沒有 walk 設定', quest_rc=rc)
             if act in ('check', 'gone'):
                 if act == 'check' and any('任務完成' in str(x) for x in tail):   # quest.py：領獎後追蹤欄掃完沒有該任務 → 完成，不開詳情
@@ -613,6 +635,16 @@ class Run:
                 if s2 == PENDING:
                     return self.fail(EXIT_STEP, f'任務 {tid}：詳情狀態是待接取（沒接成？）', status=s2)
                 continue                                               # 進行中：下一片
+            if rc == 19 and rewarps < 6:                               # 自動巡路在出口附近打轉：刷新角色 + 走上最近的換圖出口，再重點追蹤
+                rewarps += 1
+                try:
+                    r = self.T.unstick_exit()
+                    event(f'任務 {tid}：巡路卡住（quest.py 19）→ 刷新 + 走上附近出口 → {r}，重點追蹤（第 {rewarps} 次）')
+                except Exception as e:                                 # noqa: BLE001
+                    event(f'任務 {tid} 走上附近出口失敗：{e}')
+                    r = None
+                if r:
+                    continue
             if rc == 19:
                 return self.fail(EXIT_STEP, f'任務 {tid}：自動巡路卡住，quest.py 自動點地面解卡 3 次仍卡（quest.py 19），請人看 snap walk-stuck', quest_rc=rc)
             return self.fail(EXIT_STEP, f'任務 {tid}：quest.py 非預期退出碼 {rc}', quest_rc=rc)
