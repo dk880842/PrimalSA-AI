@@ -118,6 +118,7 @@ class Game:
         self.ocr_calls = []
         self.ocr_name_override = None    # 名字 OCR 回傳覆寫（list）
         self.ocr_level_mode = 'good'     # good | bad（三組都亂讀）| none
+        self.card_lvl_ocr = False        # 倉庫卡綠字等級 OCR 讀得到（預設讀不到，實機未量）
         self.banner = 0                  # >0：接下來這麼多次「大塊取樣」（>5000 點）名字框被 EXP 橫幅蓋住（雜訊）
         self._banner_now = False
         self.slow_ui = 0                 # >0：點完先延遲這麼多次 pixel 才反映
@@ -363,6 +364,13 @@ class Game:
             return ['存入寵物'] if self.sel_kind == 'pet' else ['取出寵物']
         if tuple(box) == pet.CONFIRM_BOX:
             return list(self.confirm_text) if self.dialog else []
+        if self.view == 'depot' and len(box) == 4 and tuple(box[2:]) == tuple(pet.CARD_LVL_BOX[2:]):     # 倉庫卡下緣綠字等級
+            for idx in range(20):
+                cx, cy = pet.card_xy(idx)
+                if (box[0], box[1]) == (cx + pet.CARD_LVL_BOX[0], cy + pet.CARD_LVL_BOX[1]):
+                    c = self.depot[self.role][self.dtab][idx]
+                    return [f'0轉{c["level"]}級'] * 2 if c and self.card_lvl_ocr else []
+            return []
         p = self.cur()
         if self.view == 'depot' and self.sel_kind == 'card' and self.sel_card is not None and tuple(box) == petmatch.BOX_NAME:
             p = dict(self.depot[self.role][self.dtab][self.sel_card])

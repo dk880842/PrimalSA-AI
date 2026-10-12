@@ -239,5 +239,20 @@ _po = [True, False]
 bag.popup_open = lambda: _po.pop(0) if len(_po) > 1 else _po[0]
 clk[0] = 0.0
 check('depot_store 逾時仍有 → EXIT_VERIFY', bag.depot_store('DKBO', '龍王的守護') == bag.EXIT_VERIFY and clk[0] >= 4.0)
+# ---- depot_many：多人批次（2026-10-12）----
+opened = []
+class CountSession(FakeSession):
+    def __enter__(self):
+        opened.append(1)
+        return self
+bag.Session = CountSession
+seen = []
+bag.depot_store = lambda r, w, d='public', keep_ok=False: (seen.append(r), bag.EXIT_ITEM if r == 'DKBO3' else 0)[1]
+rc, d = bag.depot_many('store', ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4'], '人龍隨機蛋', skip_missing=True)
+check('depot_many store --skip-missing：外層 Session 1 次、4 人都做、沒有的略過 rc 0', rc == 0 and len(opened) == 1 and seen == ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4'] and d['DKBO3'] == bag.EXIT_ITEM)
+seen.clear()
+rc, d = bag.depot_many('store', ['DKBO', 'DKBO3', 'DKBO4'], '人龍隨機蛋')
+check('depot_many 沒 --skip-missing：沒有 → 92 停、後面不做', rc == bag.EXIT_ITEM and seen == ['DKBO', 'DKBO3'])
+check('_roles：逗號多人 / 不認得 → None', bag._roles('DKBO2,DKBO3') == ['DKBO2', 'DKBO3'] and bag._roles('DKBO,XYZ') is None)
 print('失敗', fails)
 sys.exit(1 if fails else 0)

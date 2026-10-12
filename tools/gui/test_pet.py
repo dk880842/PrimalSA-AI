@@ -534,30 +534,30 @@ rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '摩娜西普', False, True,
 check('take --expect-level 不符 → 76（取出後驗等級，不自動存回；朵拉比斯 Lv126 / Lv1 事故）', rc == 76 and last_json(out).get('level') != 99, f'rc={rc}')
 fresh_tpl()
 g = new()
-rc, out, err = run(pet.take, 'DKBO', 'personal', 5, None)
+rc, out, err = run(pet.take, 'DKBO', 'personal', 5, '摩娜西普')
 check('take 空格 → 72、取出鈕 0 次', rc == 72 and depot_free(g) == 0, f'rc={rc}')
 fresh_tpl()
 g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 128}, {'name': '迪基格斯', 'state': '出戰', 'level': 130}, {'name': '魯尼帖斯', 'state': '等待', 'level': 20}, {'name': '魯尼帖斯', 'state': '等待', 'level': 20}, {'name': '魯尼帖斯', 'state': '等待', 'level': 20}]))
-rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '摩娜西普')
 check('寵物欄滿 → 77、倉庫分頁都不開', rc == 77 and not g.depot_clicks and depot_free(g) == 0, f'rc={rc}')
 fresh_tpl()
 g = new()
 g.btn_ocr_override = ['存入寵物']
-rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '摩娜西普')
 check('take：按鈕文字不是「取出寵物」→ 75、0 次', rc == 75 and depot_free(g) == 0, f'rc={rc}')
 fresh_tpl()
 g = new()
 g.store_dead = True
-rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '摩娜西普')
 check('取出鈕沒反應 → 76，只點 1 次', rc == 76 and depot_free(g) == 1, f'rc={rc}')
 fresh_tpl()
 g = new()
 g.confirm_on_take = True
-rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '摩娜西普')
 check('take 遇到未預期的提示視窗 → 點取消（不點確定）、76、取出鈕只點 1 次', rc == 76 and g.dialog_clicks == [pet.CONFIRM_CANCEL_XY] and depot_free(g) == 1, f'rc={rc} {g.dialog_clicks}')
 for bad_idx in (0, 21):
     g = new()
-    rc, out, err = run(pet.take, 'DKBO', 'personal', bad_idx, None)
+    rc, out, err = run(pet.take, 'DKBO', 'personal', bad_idx, '摩娜西普')
     check(f'take --index {bad_idx} → 1（參數）、零點擊', rc == 1 and g.clicks == [], f'rc={rc}')
 # --- 往返：store → take 回來 ---
 fresh_tpl()
@@ -873,6 +873,66 @@ check('  存的是 slot 3 / 4 的（成長字串 49/9/7/2、48/9/7/1）', sorted
 rc, out, err = run(pet.take_many, 'DKBO', [BRA], 'public')
 check('take-many 從公共取回 1 隻沒名字的布拉奇多斯（成長字串靠登錄檔）', rc == 0 and g.pets['DKBO'][2] is not None and g.pets['DKBO'][2].get('unnamed') in (GS[1], GS[2]), f'rc={rc} {err[-200:]}')
 
+
+# ---------------- 2026-10-12：批次取出 / 不准盲取 / set-state-many ----------------
+fresh_tpl()
+check('parse_target：名字 / @等級 / #成長字串 / 組合 / 錯字', pet.parse_target('朵拉比斯') == {'name': '朵拉比斯', 'growth': None, 'level': None}
+      and pet.parse_target('朵拉比斯@126')['level'] == 126 and pet.parse_target('朵拉比斯@Lv1')['level'] == 1
+      and pet.parse_target('#35/7/3/8') == {'name': None, 'growth': '35/7/3/8', 'level': None}
+      and pet.parse_target('克邦凱斯#35/7/3/8@1') == {'name': '克邦凱斯', 'growth': '35/7/3/8', 'level': 1}
+      and pet.parse_target('亂碼寵') is None and pet.parse_target('') is None and pet.parse_target('#35/7/3') is None)
+check('parse_plan / group_ops：同角色排在一起、保持順序', [r for r, _ in pet.group_ops(pet.parse_plan('DKBO2:朵拉比斯,DKBO3:#1/2/3/4,DKBO2:迪基格斯'))] == ['DKBO2', 'DKBO2', 'DKBO3']
+      and pet.parse_plan('DKBO9:朵拉比斯') is None and pet.parse_plan('DKBO2朵拉比斯') is None)
+sl = [{'slot': 1, 'name': 'A'}, {'slot': 2, 'name': 'B'}, {'slot': 3, 'name': 'C'}, {'slot': 4, 'empty': True}, {'slot': 5, 'empty': True}]
+check('shift_slots：存走第 2 格 → 後面補位、最後空', [(x['slot'], x.get('name')) for x in pet.shift_slots(sl, 2)] == [(1, 'A'), (2, 'C'), (3, None), (4, None), (5, None)])
+check('parse_card_level：一致才採用', pet.parse_card_level(['0轉126級', '轉126']) == 126 and pet.parse_card_level(['0轉126級', '0轉12級']) is None and pet.parse_card_level([]) is None)
+cache = {0: 'a', 1: 'b', 2: 'c'}
+pet.shift_cache(cache, 1)
+check('shift_cache：取走第 2 格 → 後面格號 -1', cache == {0: 'a', 1: 'c'})
+g = new()
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, None)
+check('B：take --index 沒給 --expect-* → 1（不准盲取）、零點擊', rc == 1 and g.clicks == [], f'rc={rc}')
+# 批次：4 人各從公共取不同目標（面板 / 倉庫分頁 / 子分頁只切一次）
+pub = {'DKBO2': ['左迪洛斯', '加克拉'], 'DKBO3': ['加克拉', '左迪洛斯'], 'DKBO4': ['左迪洛斯', {'name': '加格', 'unnamed': '34/7/4/8', 'level': 1}], 'DKBO5': ['朵拉比斯']}
+g = new(pets=mk_pets(**{r: [{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None] for r in fake_pet.ROLES}),
+        depot=fake_pet.mk_depot(**{r: {'public': v} for r, v in pub.items()}))
+rc, out, err = run(pet.take_plan, pet.parse_plan('DKBO2:加克拉,DKBO3:加克拉,DKBO4:#34/7/4/8,DKBO5:朵拉比斯'), 'public')
+j = last_json(out)
+check('take_plan：4 人各取對的那隻（成長字串取沒名字的）', rc == 0 and [g.pets[r][1] and (g.pets[r][1].get('unnamed') or g.pets[r][1]['name']) for r in ('DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')] == ['加克拉', '加克拉', '34/7/4/8', '朵拉比斯']
+      and [c['name'] for c in g.depot['DKBO2']['public'] if c] == ['左迪洛斯'], f'rc={rc} {err[-300:]}')
+check('  面板開 / 關各 1 次、倉庫分頁點 1 次、公共子分頁點 1 次、切回寵物分頁 1 次、每人頭像 1 次',
+      g.clicks.count(uikit.PET.close_xy) == 1 and g.clicks.count(pet.DEPOT_TAB_XY) == 1 and g.clicks.count(pet.SUBTAB_XY['public']) == 1
+      and g.clicks.count(pet.PET_TAB_XY) == 1 and all(g.clicks.count((83, petmatch.AVATAR_Y[r])) == 1 for r in ('DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')), f'{len(g.clicks)} clicks')
+check('  沒有逐格讀寵物欄（點寵物格只有取出後選新寵物那 4 下）', sum(1 for c in g.clicks if c[0] == pet.SLOT_X) == 4, str([c for c in g.clicks if c[0] == pet.SLOT_X]))
+print(f'      （批次取 4 隻共 {len(g.clicks)} 下點擊）')
+# 同名多隻：等級讀不出來 → 不盲取；讀得到 → 取對的
+twin = {'DKBO': {'personal': [{'name': '朵拉比斯', 'level': 126}, {'name': '朵拉比斯', 'level': 1}]}}
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None]), depot=fake_pet.mk_depot(**twin))
+rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯', None, 1)
+check('B：同名 2 隻（Lv126 / Lv1）卡片等級讀不出來 → 72、取出鈕 0 次', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None]), depot=fake_pet.mk_depot(**twin))
+g.card_lvl_ocr = True
+rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯', None, 1)
+check('B：卡片等級讀得到 → 取 Lv1 那隻（不是第 1 格的 Lv126）', rc == 0 and g.pets['DKBO'][1]['level'] == 1 and g.depot['DKBO']['personal'][0]['level'] == 126, f'rc={rc} {err[-200:]}')
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None]), depot=fake_pet.mk_depot(**twin))
+g.card_lvl_ocr = True
+rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '朵拉比斯', False, True, None, None, 1)
+check('B：--index 1 --expect 朵拉比斯 --expect-level 1，第 1 格是 Lv126 → 取前就擋 72', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+# set-state-many
+g = new()
+rc, out, err = run(pet.set_state_many, 'all', '迪基格斯', '等待')
+check('set-state-many all 迪基格斯 等待：5 人各點 1 次、面板關 1 次、騎寵沒動', rc == 0 and len(g.state_clicks) == 5 and g.clicks.count(uikit.PET.close_xy) == 1
+      and all(g.pets[r][1]['state'] == '等待' and g.pets[r][0]['state'] == '騎乘' for r in fake_pet.ROLES), f'rc={rc} {g.state_clicks}')
+rc, out, err = run(pet.set_state_many, 'all', '迪基格斯', '等待')
+check('  再跑一次：已是目標 → 0 次狀態鈕', rc == 0 and len(g.state_clicks) == 5)
+rc, out, err = run(pet.set_state_many, 'DKBO,DKBO2', '瑪斯貝卡', '等待')
+check('set-state-many 騎寵沒 --allow-mount → 73、不點', rc == 73 and len(g.state_clicks) == 5, f'rc={rc}')
+# store-many：每人只完整讀一次寵物欄
+fresh_tpl()
+g = new(pets=mk(), depot=mkdp())
+rc, out, err = run(pet.store_many, 'DKBO,DKBO2', ['迪基格斯', '魯尼帖斯'], 'personal')
+check('store-many 每人 2 隻：每人頭像只點 1 次（第 2 隻用推算的欄位、選格重讀核對）', rc == 0 and depot_free(g) == 4
+      and g.clicks.count((83, petmatch.AVATAR_Y['DKBO'])) == 1 and g.clicks.count((83, petmatch.AVATAR_Y['DKBO2'])) == 1, f'rc={rc} {err[-300:]}')
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

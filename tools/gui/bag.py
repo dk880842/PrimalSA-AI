@@ -14,6 +14,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py swap-weapon DKBO [--keep-old] # 穿精靈王之弓、丟舊武器（名稱防護）
   uv run --no-project python tools/gui/bag.py take DKBO 龍王的守護 [--depot public|personal]   # 倉庫取出（整疊）
   uv run --no-project python tools/gui/bag.py store DKBO 龍王的守護 [--depot public|personal]  # 倉庫存入
+  uv run --no-project python tools/gui/bag.py store all 人龍隨機蛋 --depot public [--skip-missing]   # 多人（all / DKBO2,DKBO3）：背包面板只開一次逐人存（take 同）
   uv run --no-project python tools/gui/bag.py drop DKBO 名稱 --confirm-name 名稱               # 丟棄背包道具（名稱必須完全對上）
 最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / find_items / use_item / swap_weapon / depot_take / depot_store / drop_item。
 
@@ -839,12 +840,36 @@ def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = Fal
     return 0
 
 
+def depot_many(op: str, roles, want: str, depot: str = 'public', kind: str = 'consumable', skip_missing: bool = False) -> tuple:
+    """多人倉庫存 / 取同一樣道具（2026-10-12 批次化）：背包面板只開一次（外層 Session；depot_store / depot_take 內的 Session 巢狀時不重開、不關），
+    逐人左欄頭像切換。op = 'store' / 'take'。skip_missing：該人沒有（92）就略過。→ (rc, {角色: rc})；某人其他失敗立即停"""
+    out = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            rc = depot_store(r, want, depot) if op == 'store' else depot_take(r, want, depot, kind)
+            out[r] = rc
+            if rc == EXIT_ITEM and skip_missing:
+                log(f'{r} 沒有「{want}」，略過')
+                continue
+            if rc:
+                return rc, out
+    return 0, out
+
+
 # ---- CLI ----
 def _roles(arg: str):
+    """'all' / 'DKBO' / 'DKBO2,DKBO3'（逗號 = 多人）→ 角色清單；任一不認得 → None"""
     if str(arg).lower() == 'all':
         return [charstate.display(c) for c in charstate.chars()]
-    hit = charstate.norm_char(arg)
-    return [charstate.display(hit)] if hit else None
+    out = []
+    for t in str(arg).split(','):
+        hit = charstate.norm_char(t.strip())
+        if not hit:
+            return None
+        out.append(charstate.display(hit))
+    return out or None
 
 
 def _out(rc: int, info: dict) -> int:
@@ -868,6 +893,7 @@ def main() -> int:
     for n in ('take', 'store'):
         p = sub.add_parser(n); p.add_argument('role'); p.add_argument('name'); p.add_argument('--depot', default='public', choices=['public', 'personal'])
         p.add_argument('--kind', default='consumable', choices=['consumable', 'equip'])
+        p.add_argument('--skip-missing', action='store_true', help='多人（all / 逗號）時沒有該道具的人略過')
     p = sub.add_parser('drop'); p.add_argument('role'); p.add_argument('name'); p.add_argument('--confirm-name', required=True)
     a = ap.parse_args()
     roles = _roles(a.role)
@@ -888,6 +914,9 @@ def main() -> int:
         return _out(use_item(r, a.name, verify_buff=True), {})
     if a.cmd == 'swap-weapon':
         return _out(swap_weapon(r, a.bow, a.keep_old), {})
+    if a.cmd in ('take', 'store') and len(roles) > 1:
+        rc, d = depot_many(a.cmd, roles, a.name, a.depot, a.kind, a.skip_missing)
+        return _out(rc, {'roles': d})
     if a.cmd == 'take':
         return _out(depot_take(r, a.name, a.depot, a.kind), {})
     if a.cmd == 'store':

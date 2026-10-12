@@ -7,6 +7,9 @@
     --count N                  每人抓幾隻（預設 5）= 背包放 N 個誘餌 = 可抓捕數
     --stages                   bait（公共倉庫取整疊 → 拆 N → 其餘存回）/ setup（外掛捉寵設置 + 勾自動存倉庫 + 勾自動抓寵）/ wait（輪詢到全部抓完）；預設全做
     --dry-run                  只印計畫
+  uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）
+  uv run --no-project python tools/gui/pet_catch.py --autoswap on|off [--roles ...]                 # 自動轉換戰寵
+  批次（2026-10-12）：背包（取誘餌）/ 外掛（捉寵設置、輪詢、自動轉換、鎖定）面板都只開一次，逐人切頭像做完再關。
 退出碼：0 全部抓完；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
 安全：不點「+」（花石幣）、不碰丟棄區；沿用 rebirth_pets.Tools 的讀字驗證（讀不到 / 對不上就停，不盲點）。
 抓完後新寵物沒名字（成長字串），分配前要 `pet.py learn-species`，見 psa-pet-quest SKILL.md。
@@ -39,40 +42,35 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait'), dry_run:
     if dry_run:
         return 0
     if 'bait' in stages:
-        for role, fam, sp in assign:
-            rc = T.bait_take(role, count)
-            if rc:
-                print(f'pet_catch：{role} 取誘餌失敗 rc {rc}')
-                return rc
-            print(f'pet_catch：{role} 背包誘餌 = {count}')
-    if 'bait' in stages:
+        import contextlib
         import bag
-        if uikit.is_open(bag.BAGANY):                         # 2026-10-12 實機：拆分 / 存入後背包面板仍開著，外掛打不開
+        with (bag.Session() if tools is None else contextlib.nullcontext()) as bs:   # 背包面板只開一次，逐人切頭像（各步驟的 bag.Session 巢狀時不重開 / 不關）
+            if bs is not None and bs.rc:
+                return bs.rc
+            for role, fam, sp in assign:
+                rc = T.bait_take(role, count)
+                if rc:
+                    print(f'pet_catch：{role} 取誘餌失敗 rc {rc}')
+                    return rc
+                print(f'pet_catch：{role} 背包誘餌 = {count}')
+        if tools is None and uikit.is_open(bag.BAGANY):         # 2026-10-12 實機：拆分 / 存入後背包面板仍開著，外掛打不開
             uikit.close_panel(bag.BAGANY, known_open=True)
     if 'setup' in stages:
+        rc, bad = T.catch_setup_many(assign, count)              # 外掛面板只開一次：逐人捉寵設置 + 勾自動存倉庫 / 自動抓寵
+        if rc:
+            print(f'pet_catch：{bad} 捉寵設置 / 勾選失敗 rc {rc}')
+            return rc
         for role, fam, sp in assign:
-            rc = T.catch_setup(role, fam, sp, count)
-            if rc:
-                print(f'pet_catch：{role} 捉寵設置失敗 rc {rc}')
-                return rc
-            rc = T.catch_start(role, count)
-            if rc:
-                print(f'pet_catch：{role} 勾自動抓寵失敗 rc {rc}')
-                return rc
             print(f'pet_catch：{role} 開始抓 {count} 隻 {sp}')
     if 'wait' in stages:
-        import ass
         pending = {r for r, _, _ in assign}
         end = uikit.clock() + timeout
         while pending:
             T.sleep(rp.CATCH_POLL_S)
-            for role in sorted(pending):
-                rc = T._ass_open(role, 'catch')
-                if rc:
-                    return rc
-                left = rp.parse_count(''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, '-Zooms', '2,3,4')))
-                auto = T._checked(rp.CATCH_XY['auto'])
-                ass.close_panel()
+            rc, st = T.catch_poll_many(sorted(pending))          # 一次開面板讀所有還沒抓完的人
+            if rc:
+                return rc
+            for role, (left, auto) in st.items():
                 print(f'pet_catch：{role} 可抓捕數 {left} 自動抓寵 {auto}')
                 if auto is False and left in (0, None):                # 可抓捕數 OCR 常讀不到（None）；遊戲抓完會自己取消「自動抓寵」勾選 = 抓完（2026-10-12 實機）
                     pending.discard(role)
@@ -86,20 +84,39 @@ AUTOSWAP_XY = (656, 440)        # 外掛一般設置「自動轉換戰寵」勾�
 
 
 def set_autoswap(roles: list, on: bool, tools=None) -> int:
-    """5 人（或指定角色）外掛一般設置「自動轉換戰寵」勾 / 取消：逐人選角色 → 讀勾選框 → 只在不同時點 1 次 → 讀回驗證。→ 0 / 非 0（rebirth_pets 的外掛退出碼 2～7）"""
-    import ass
+    """5 人（或指定角色）外掛一般設置「自動轉換戰寵」勾 / 取消：外掛面板只開一次，逐人選角色 → 讀勾選框 → 只在不同時點 1 次 → 讀回驗證。→ 0 / 非 0（rebirth_pets 的外掛退出碼 2～7）"""
     T = tools or rp.Tools()
-    for role in roles:
-        rc = T._ass_open(role, 'general')
-        if rc:
-            return rc
-        try:
-            rc = T._toggle(AUTOSWAP_XY, on, f'{role} {"勾" if on else "取消"}自動轉換戰寵')
-            if rc:
-                return rc
+
+    def fn(role):
+        rc = T._toggle(AUTOSWAP_XY, on, f'{role} {"勾" if on else "取消"}自動轉換戰寵')
+        if not rc:
             print(f'pet_catch：{role} 自動轉換戰寵 = {"開" if on else "關"}')
-        finally:
-            ass.close_panel()
+        return rc, None if rc else on
+    rc, _, bad = T.ass_each(roles, 'general', fn)
+    return rc
+
+
+def relock(roles: list, battle_pet: str = '朵拉比斯', mount_species: str = '布拉奇多斯', which=('騎寵', '戰寵'), tools=None) -> int:
+    """外掛「鎖定騎寵 / 鎖定戰寵」重勾（交寵物任務 / 換戰寵後）：讀寵物欄決定每人要選哪一隻（騎寵沒名字用成長字串）→
+    外掛面板只開一次逐人：下拉 OCR 讀字找剛好一列吻合的（每人順序不同，errlog #257）→ 讀回欄位 → 勾 → 讀回勾選。→ 0 / rebirth_pets 退出碼"""
+    T = tools or rp.Tools()
+    rc, pets = T.pets_list(roles)
+    if rc:
+        return rc
+    items, why = rp.lock_items(pets, roles, mount_species, battle_pet, which)
+    if why:
+        print(f'pet_catch：{why}')
+        return rp.EXIT_LOCK
+    rc, bad = T.lock_set_many(items)
+    if rc:
+        print(f'pet_catch：{bad} 鎖定失敗 rc {rc}')
+        return rc
+    rc, sts = T.lock_get_many(roles)                              # 最後再讀回一次（全部勾著才算）
+    miss = [r for r in roles if not all((sts.get(r) or {}).get(w) for w in which)] if not rc else roles
+    if miss:
+        print(f'pet_catch：讀回鎖定沒勾：{miss}')
+        return rp.EXIT_LOCK
+    print(f'pet_catch：{"、".join(which)} 鎖定完成：{roles}')
     return 0
 
 
@@ -147,6 +164,9 @@ def main(argv=None) -> int:
     ap.add_argument('--assign')
     ap.add_argument('--autoswap', choices=['on', 'off'], help='改做：5 人外掛「自動轉換戰寵」勾 / 取消（不抓寵）')
     ap.add_argument('--verify-battle', action='store_true', help='改做：逐人讀回出戰寵（開遇敵練寵前；沒有出戰寵退出碼 105）')
+    ap.add_argument('--lock', default=None, metavar='騎寵,戰寵', help='改做：外掛鎖定重勾（騎寵 / 戰寵 / 兩者；下拉讀字選、讀回）')
+    ap.add_argument('--battle-pet', default='朵拉比斯')
+    ap.add_argument('--mount-species', default='布拉奇多斯')
     ap.add_argument('--roles', default='DKBO,DKBO2,DKBO3,DKBO4,DKBO5')
     ap.add_argument('--count', type=int, default=5)
     ap.add_argument('--stages', default='bait,setup,wait')
@@ -157,6 +177,13 @@ def main(argv=None) -> int:
         import winenv
         winenv.enable_server()
         return verify_battle(a.roles.split(','))
+    if a.lock:
+        import winenv
+        winenv.enable_server()
+        which = tuple(w for w in ('騎寵', '戰寵') if w in a.lock)
+        if not which:
+            ap.error('--lock 要 騎寵 / 戰寵 / 騎寵,戰寵')
+        return relock(a.roles.split(','), a.battle_pet, a.mount_species, which)
     if a.autoswap:
         import winenv
         winenv.enable_server()

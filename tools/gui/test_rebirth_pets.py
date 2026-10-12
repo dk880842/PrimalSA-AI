@@ -147,6 +147,32 @@ class Fake:
         self.lock_ident[(r, w)] = ident
         return 0
 
+    def lock_get_many(self, roles):
+        self.c('ass_open', tuple(roles))                 # 批次：外掛面板只開一次
+        out = {}
+        for r in roles:
+            rc, st = self.lock_get(r)
+            if rc:
+                return rc, out
+            out[r] = st
+        return 0, out
+
+    def lock_set_many(self, items):
+        self.c('ass_open', tuple(dict.fromkeys(r for r, *_ in items)))
+        for r, w, on, ident in items:
+            rc = self.lock_set(r, w, on, ident)
+            if rc:
+                return rc, r
+        return 0, None
+
+    def pet_set_state_many(self, roles, name, state, allow_mount=False):
+        self.c('pet_open', tuple(roles))
+        for r in roles:
+            rc = self.pet_set_state(r, name, state, allow_mount)
+            if rc:
+                return rc, r
+        return 0, None
+
     # --- 寵物 ---
     def view(self, r):
         out = []
@@ -404,6 +430,92 @@ check('進度檔沒有前置階段就 --from lock → 109、零呼叫', go(f2, f
 f = Fake()
 rc, _ = go(f, no_boxes=True)
 check('--no-boxes：不開禮盒、其餘照跑、誘餌 0 → 取誘餌由 bag 失敗之外的路徑（假 Tools 照給）', not ci('box_open') and rc == 0)
+
+# ---------------- 2026-10-12：外掛批次（面板只開一次）+ 鎖定下拉讀字選（D，errlog #257）----------------
+import ass  # noqa: E402
+check('lock_items：5 人 × 2 項、騎寵用成長字串 / 戰寵用名字；找不到唯一一隻 → 訊息',
+      rp.lock_items({'DKBO': [S(1, unnamed='49/9/8/2', species=BRA, state='騎乘'), S(2, name=DOR, state='出戰')]}, ['DKBO'], BRA, DOR)[0]
+      == [('DKBO', '騎寵', True, ('growth', '49/9/8/2')), ('DKBO', '戰寵', True, ('name', DOR))]
+      and rp.lock_items({'DKBO': [S(1, name=DOR), S(2, name=DOR)]}, ['DKBO'], BRA, DOR)[1] != '')
+
+
+class FakeAss:
+    """假外掛面板：每人的鎖定下拉列順序不同（DKBO3 朵拉比斯在上，#257）、欄位 / 勾選狀態；記錄點擊與開關次數"""
+    def __init__(self):
+        self.opens, self.closes, self.clicks, self.role = 0, 0, [], None
+        self.order = {r: [('49/9/8/2', 'm'), (DOR, 'b')] for r in ROLES}
+        self.order['DKBO3'] = [(DOR, 'b'), ('49/9/8/2', 'm')]
+        self.field = {r: {'騎寵': '', '戰寵': ''} for r in ROLES}
+        self.chk = {r: {'騎寵': False, '戰寵': False} for r in ROLES}
+        self.dd = None
+
+    def many(self, plan, visit, no_wait=False):
+        self.opens += 1
+        out, info = {}, {'secs': {}, 'changed': {}, 'role': None}
+        try:
+            for r in plan:
+                self.role = r
+                rc, st, msg, _ = visit(r)
+                if rc:
+                    info['role'] = r
+                    return rc, out, msg, info
+                out[r] = st
+            return 0, out, '', info
+        finally:
+            self.closes += 1
+
+    def ocr(self, box, *opts):
+        x, y, w, h = box
+        for which, xy in rp.LOCK_XY.items():
+            dy = xy['dd'][1]
+            if y == dy - 17:
+                return [(self.field[self.role][which], 1100, dy)] if self.field[self.role][which] else []
+            if y == dy + 22 and self.dd == which:
+                return [(t, 1047, dy + 45 + 42 * k) for k, (t, _) in enumerate(self.order[self.role])]
+        return []
+
+    def gui(self, *a, note=''):
+        for part in a[1].split(';') if a and a[0] == 'seq' else []:
+            w = part.split()
+            if w and w[0] == 'click':
+                xy = (int(w[1]), int(w[2]))
+                self.clicks.append((self.role, xy, note))
+                for which, d in rp.LOCK_XY.items():
+                    if xy == d['dd']:
+                        self.dd = None if self.dd == which else which
+                    elif xy == d['check']:
+                        self.chk[self.role][which] = not self.chk[self.role][which]
+                if self.dd and xy[0] == 1047:
+                    dy = rp.LOCK_XY[self.dd]['dd'][1]
+                    k = (xy[1] - dy - 45) // 42
+                    self.field[self.role][self.dd] = self.order[self.role][k][0]
+                    self.dd = None
+        return ''
+
+
+fa = FakeAss()
+T = rp.Tools()
+saved = (ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, rp.Tools._ass_tab, rp.Tools._checked)
+ass._many, ass.panel_open, rp.ocr_lines, uikit.gui = fa.many, (lambda: True), fa.ocr, fa.gui
+rp.Tools._ass_tab = lambda self, role, tab: 0
+rp.Tools._checked = lambda self, xy: next(fa.chk[fa.role][w] for w, d in rp.LOCK_XY.items() if d['check'] == xy)
+pets = {r: [S(1, unnamed='49/9/8/2', species=BRA, state='騎乘'), S(2, name=DOR, state='出戰')] for r in ROLES}
+items, _ = rp.lock_items(pets, ROLES, BRA, DOR)
+(rc, bad), _ = quiet(T.lock_set_many, items)
+check('lock_set_many 5 人 × 2 項：rc 0、外掛面板只開 / 關 1 次（舊版每人每項各開關一次 = 10 次）', rc == 0 and fa.opens == 1 and fa.closes == 1, f'rc={rc} opens={fa.opens}')
+check('  每人欄位都是對的（DKBO3 下拉順序相反也選對朵拉比斯 / 成長字串）、兩項都勾',
+      all(fa.field[r] == {'騎寵': '49/9/8/2', '戰寵': DOR} and fa.chk[r] == {'騎寵': True, '戰寵': True} for r in ROLES), str(fa.field['DKBO3']))
+n = len(fa.clicks)
+(rc, bad), _ = quiet(T.lock_set_many, items)
+check('  再跑一次：欄位已是目標、已勾 → 0 次點擊（不開下拉）', rc == 0 and len(fa.clicks) == n, str(fa.clicks[n:]))
+fa.order['DKBO2'] = [('49/9/8/2', 'm')]
+fa.field['DKBO2']['戰寵'] = ''
+fa.chk['DKBO2']['戰寵'] = False
+(rc, bad), _ = quiet(T.lock_set_many, [('DKBO2', '戰寵', True, ('name', DOR))])
+check('  下拉讀不到目標 → 7、不選不勾、收下拉', rc == 7 and bad == 'DKBO2' and fa.chk['DKBO2']['戰寵'] is False and fa.dd is None, f'rc={rc} {bad}')
+(rc, sts), _ = quiet(T.lock_get_many, ROLES)
+check('lock_get_many：一次讀 5 人', rc == 0 and len(sts) == 5 and sts['DKBO']['戰寵'] is True)
+ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, rp.Tools._ass_tab, rp.Tools._checked = saved
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

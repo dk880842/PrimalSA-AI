@@ -6,10 +6,13 @@
   uv run --no-project python tools/gui/pet.py set-state DKBO 迪基格斯 出戰|等待|騎乘 [--slot N] [--allow-mount]
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
   uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1] [--allow-mount-store 名字]
-  uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N [--expect 迪基格斯]
+  uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N --expect 迪基格斯|--expect-growth 35/7/3/8|--expect-level 126   # --index 一定要配 --expect-*（不准盲取）
   uv run --no-project python tools/gui/pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 瑪斯貝卡] [--skip-missing] [--pick first|last]
   uv run --no-project python tools/gui/pet.py take DKBO --depot public --pet 朵拉比斯        # 不給格號：現場逐張選卡讀名字找（沒名字的卡靠成長字串登錄檔）
   uv run --no-project python tools/gui/pet.py take-many --role all --pets 朵拉比斯 [--depot personal|public] [--skip-missing]
+  uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"   # 每人不同目標
+  uv run --no-project python tools/gui/pet.py set-state-many --role all 朵拉比斯 出戰 [--allow-mount]   # 多人同一隻寵物改狀態（面板只開一次）
+  批次（2026-10-12）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 左欄頭像換角色連續做 → 關一次。目標字串 = 名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級
   uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--timing
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
@@ -49,6 +52,7 @@ import time
 _T_START = time.time()
 import argparse  # noqa: E402
 import json  # noqa: E402
+import re  # noqa: E402
 import sys  # noqa: E402
 from pathlib import Path  # noqa: E402
 
@@ -595,6 +599,14 @@ def find_slot(slots: list, want: str, slot_no: int | None, pick: str | None = No
     return None, f'找不到 {want}' + (f'（格 {unk} 名字讀不出來' + (f'；沒名字且物種未確認：{unn}，先 learn-species' if unn else '') + '）' if unk else '')
 
 
+def shift_slots(slots: list, stored: int) -> list:
+    """存走第 stored 格（1 起算）後的寵物欄推算（純函式）：後面的往前補位、最後一格變空（實機 P8：存入後寵物欄補位、空格留在後面）"""
+    rest = [dict(x) for x in slots if x['slot'] != stored]
+    for k, x in enumerate(rest):
+        x['slot'] = k + 1
+    return rest + [{'slot': len(rest) + 1, 'empty': True}]
+
+
 def apply_state(role: str, sl: dict, target: str, ctx: dict) -> tuple:
     """選該格 → 點狀態鈕（只點 1 次）→ 讀回確認。→ (rc, 訊息)。呼叫前呼叫端已擋騎寵 / 已是目標"""
     f = scan_frames()
@@ -673,6 +685,54 @@ def set_state(role_arg: str, pet_text: str, state_text: str, slot_no: int | None
             return _out(rc, info, t0, msg)
         print(f'pet：{role} 的 {want}（第 {sl["slot"]} 格）{sl.get("state")} → {target}')
     return _out(0, info, t0)
+
+
+def set_state_many(role_arg: str, pet_text: str, state_text: str, allow_mount: bool = False, pause: bool = False, learn: bool = True) -> int:
+    """多角色同一隻寵物改狀態（2026-10-12 A）：面板開一次，左欄頭像逐人切 → 讀寵物欄 → 只點 1 次狀態鈕並讀回 → 關一次。
+    規則同 set_state（騎寵保護、同名多隻 72、已是目標不點）；某人失敗立即停（不往下做）。回退出碼，逐人結果在 LAST['ops']"""
+    t0 = time.time()
+    roles = roles_multi(role_arg)
+    target = norm_state(state_text)
+    want = uikit.snap_pet(pet_text)
+    info = {'cmd': 'set-state-many', 'pet': want, 'target': target, 'ops': []}
+    if not roles or target not in STATES or not want:
+        print(f'pet：set-state-many 參數不對（角色 {role_arg!r}、狀態 {state_text!r}、寵物 {pet_text!r}）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    ctx = load_ctx(learn)
+    final = 0
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            for r in roles:
+                op = {'role': r, 'changed': False}
+                info['ops'].append(op)
+                rc, slots = list_role(r, ctx)
+                if not rc:
+                    sl, why = find_slot(slots, want, None)
+                    if sl is None:
+                        rc = uikit_fail(EXIT_NAME, f'{r}：{why}')
+                    else:
+                        op['slot'], op['from'] = sl['slot'], sl.get('state')
+                        bad = guard_mount(sl, target, allow_mount)
+                        if bad:
+                            rc = uikit_fail(EXIT_FORBID, f'{r} 拒絕：{bad}')
+                        elif sl.get('state') != target:
+                            rc, msg = apply_state(r, sl, target, ctx)
+                            op['changed'] = rc == 0
+                            if rc:
+                                op['msg'] = msg
+                            else:
+                                print(f'pet：{r} 的 {want}（第 {sl["slot"]} 格）{sl.get("state")} → {target}')
+                        else:
+                            print(f'pet：{r} 的 {want} 本來就是「{target}」，沒有點擊')
+                op['rc'] = rc
+                if rc:
+                    final = rc
+                    break
+        finally:
+            save_ctx(ctx)
+    return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
 
 
 def plan_rest(slots: list, keep: list, only: list | None) -> tuple:
@@ -1217,92 +1277,212 @@ def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, in
     return None
 
 
+# ---- 取出目標（2026-10-12 B：不准盲取格號；errlog #294 --index 盲取遞補後的格子取到左迪洛斯）----
+TARGET_RE = re.compile(r'^(?P<name>[^#@]*?)\s*(?:#\s*(?P<growth>\d{1,3}/\d{1,3}/\d{1,3}/\d{1,3}))?\s*(?:@\s*(?:[Ll][Vv])?(?P<level>\d{1,3}))?$')
+CARD_LVL_BOX = (-50, 18, 100, 26)        # 倉庫卡下緣綠字「0轉129級」：相對卡心 (dx, dy, w, h)（depot5.png 實測位置；OCR 待實機量）
+CARD_LVL_OPTS = [('-Dark', 0, '-Zooms', '2,3,4')]
+
+
+def parse_target(text):
+    """取出目標字串 → {'name', 'growth', 'level'}（純函式）。
+    '朵拉比斯' / '朵拉比斯@126'（同名多隻用等級分）/ '#35/7/3/8'（沒名字的新寵物，成長字串）/ '克邦凱斯#35/7/3/8@1'。
+    名字對不到 Monster 表、格式錯、三者全空 → None"""
+    m = TARGET_RE.match(str(text or '').strip())
+    if not m:
+        return None
+    raw = m['name'].strip()
+    name = uikit.snap_pet(raw) if raw else None
+    if raw and not name:
+        return None
+    t = {'name': name, 'growth': m['growth'], 'level': int(m['level']) if m['level'] else None}
+    return t if (t['name'] or t['growth'] or t['level'] is not None) else None
+
+
+def fmt_target(t: dict) -> str:
+    return (t.get('name') or '') + (f'#{t["growth"]}' if t.get('growth') else '') + (f'@{t["level"]}' if t.get('level') is not None else '')
+
+
+def target_ok(idn: dict, t: dict, reg: dict) -> bool:
+    """名字框身分 idn 是不是目標 t（名字 / 成長字串；等級另外驗）。t 只有等級（--index + --expect-level）→ 身分不設限 True"""
+    if t.get('name') and not card_is(idn, t['name'], reg):
+        return False
+    if t.get('growth') and idn.get('growth') != t['growth']:
+        return False
+    return True
+
+
+def parse_card_level(lines) -> int | None:
+    """倉庫卡綠字 OCR 行 → 等級（純函式）：各行「轉N」的 N 全部相同才採用；沒有 / 不一致 → None（不猜）"""
+    vals = {int(m[1]) for t in (lines or []) for m in [re.search(r'轉\s*(\d{1,3})', str(t))] if m}
+    return vals.pop() if len(vals) == 1 else None
+
+
+def card_level_now(idx: int) -> int | None:
+    """倉庫第 idx 格（0 起算）卡片下緣的等級（OCR；倉庫分頁中間沒有等級欄，只有卡片綠字）。讀不到 None"""
+    cx, cy = card_xy(idx)
+    dx, dy, w, h = CARD_LVL_BOX
+    lines = []
+    for opts in CARD_LVL_OPTS:
+        lines += _petwatch().ocr((cx + dx, cy + dy, w, h), *opts)
+    return parse_card_level(lines)
+
+
 def take(role_arg: str, depot: str = 'personal', index: int | None = None, expect: str | None = None,
          pause: bool = False, learn: bool = True, pet_name: str | None = None, expect_growth: str | None = None, expect_level: int | None = None) -> int:
-    """倉庫第 index 格（1 起算）→ 寵物欄。名字框會顯示選中倉庫卡的名字：有 --expect 時先驗名字（不符不點）、取出後再驗新寵物名字（不符 76，不自動存回）。
-    pet_name（--pet）：不給格號，現場逐張選卡讀名字找第一張吻合的（沒名字的卡比成長字串 → 登錄檔物種）；找不到 72、不點取出"""
+    """倉庫 → 寵物欄（單一角色、單隻；多人 / 多隻用 take_plan）。**一定要給目標**（2026-10-12 B）：
+    - 找：--pet 名字 及 / 或 --expect-growth 成長字串（+ 可選 --expect-level）→ 現場逐張選卡讀名字框找；同名多隻且等級讀不出來 → 72 不取。
+    - 指定格：--index N 只能和 --expect / --expect-growth / --expect-level 至少一個一起用；取前讀該格核對，不符 72 不取。
+    取出後再驗新寵物（名字 / 成長字串；有等級目標且取前沒讀到卡片等級 → 切回寵物分頁讀等級），不符 76（不自動存回）"""
     t0 = time.time()
     role, info = _depot_prologue(role_arg, depot, 'take')
     if role is None:
         return _out(uikit.EXIT_USAGE, info, t0, '角色或倉庫參數不對')
-    if pet_name and index is None:
-        expect = expect or pet_name
-    elif index is None or not 1 <= index <= 20:
-        print('pet：--index 要 1～20（倉庫格，列優先、1 起算），或給 --pet 名字', file=sys.stderr)
+    if index is not None and not 1 <= index <= 20:
+        print('pet：--index 要 1～20（倉庫格，列優先、1 起算）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '--index 不對')
-    want = None
-    if expect:
-        want = uikit.snap_pet(expect)
-        if not want:
-            rc = uikit_fail(EXIT_NAME, f'--expect {expect!r} 對不到 Monster 表，拒絕')
-            return _out(rc, info, t0, '寵物名對不上')
-    info.update(index=index, expect=want, expect_growth=expect_growth)
-    info['_eg'] = expect_growth
-    info['_el'] = expect_level
+    if index is not None and not (expect or expect_growth or expect_level is not None):
+        print('pet：--index 不准盲取，要加 --expect 名字 / --expect-growth 成長字串 / --expect-level 等級（至少一個）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '--index 沒給 --expect-*')
+    if index is None and not (pet_name or expect or expect_growth):
+        print('pet：要給目標：--pet 名字 或 --expect-growth 成長字串（或 --index N + --expect-*）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '沒給目標')
+    nm_text = pet_name or expect
+    want = uikit.snap_pet(nm_text) if nm_text else None
+    if nm_text and not want:
+        rc = uikit_fail(EXIT_NAME, f'寵物名 {nm_text!r} 對不到 Monster 表，拒絕')
+        return _out(rc, info, t0, '寵物名對不上')
+    tgt = {'name': want, 'growth': expect_growth, 'level': expect_level}
+    info.update(index=index, expect=want, expect_growth=expect_growth, expect_level=expect_level)
     ctx = load_ctx(learn)
     with Session(pause, need_calm=True) as s:
         if s.rc:
             return _out(s.rc, info, t0)
         try:
-            rc = _take_body(role, depot, None if index is None else index - 1, want, ctx, info)
+            rc = select_role(role, ctx)
+            if not rc:
+                rc = _take_in_depot(role, depot, None if index is None else index - 1, tgt, ctx, info, {})
         finally:
             save_ctx(ctx)
             _back_to_pet_tab()
     return _out(rc, info, t0, info.get('msg', ''))
 
 
-def _take_body(role: str, depot: str, idx, want, ctx: dict, info: dict) -> int:
+def shift_cache(cache: dict, idx: int) -> None:
+    """取走倉庫第 idx 格後，後面的卡會往前遞補（#294 實機）：快取的格號跟著 -1（只當「先看哪格」的猜測，取之前一定現場重讀）"""
+    moved = {(k - 1 if k > idx else k): v for k, v in cache.items() if k != idx}
+    cache.clear()
+    cache.update(moved)
+
+
+def _ensure_depot(depot: str) -> tuple:
+    """現在在倉庫分頁且子分頁 = depot → (0, d)；不是就切（open_depot 每步驗證）"""
+    d = scan_depot()
+    if d is not None and d['sig'] and d['tab'] == depot:
+        return 0, d
+    return open_depot(depot)
+
+
+def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache: dict) -> tuple:
+    """逐張選卡讀名字框找目標 → (index 或 None, 說明)。順序：快取裡像目標的格 → 沒讀過的格 → 其他（快取只是猜測，每張都現場讀）。
+    有等級目標：名字 / 字串吻合的卡再 OCR 卡片綠字等級，相等就選；讀不到等級的候選只有 1 張 → 選它（取出後再驗）；≥ 2 張讀不到 → None（不盲取）"""
+    reg = species_reg(ctx)
+    filled = [k for k in range(20) if not d['empty'][k]]
+    hit = [k for k in filled if k in cache and target_ok(cache[k], t, reg)]
+    unk = [k for k in filled if k not in cache]
+    rest = [k for k in filled if k not in hit and k not in unk]
+    seen, cands = {}, []
+    for k in hit + unk + rest:
+        if not click_card(k, f'pet 找倉庫卡 第 {k + 1} 格'):
+            break
+        g, ok = wait_for_card(k, depot)
+        if not ok:
+            continue
+        idn = read_ident(ctx, 4, 1.0)
+        cache[k] = {'name': idn['name'], 'growth': idn['growth']}
+        seen[k + 1] = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
+        if not target_ok(idn, t, reg) or not (idn['name'] or idn['growth']):
+            continue
+        if t.get('level') is None:
+            info['cards'] = seen
+            return k, ''
+        lv = card_level_now(k)
+        seen[k + 1] = f'{seen[k + 1]}@{lv}'
+        if lv == t['level']:
+            info['cards'], info['pre_level'] = seen, lv
+            return k, ''
+        if lv is None:
+            cands.append(k)
+    info['cards'] = seen
+    if len(cands) == 1:
+        info['level_unverified'] = True
+        return cands[0], ''
+    if len(cands) > 1:
+        return None, f'{depot} 倉庫有 {len(cands)} 張 {fmt_target(t)} 候選（格 {[c + 1 for c in cands]}）但卡片等級讀不出來，不盲取'
+    return None, f'{depot} 倉庫裡逐張看不到 {fmt_target(t)}（讀到 {seen}）'
+
+
+def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, cache: dict) -> int:
+    """取出一隻（角色已選好；倉庫分頁不在就切）。idx = 指定格（0 起算，取前核對）/ None = 找目標。cache = 這個倉庫的卡片身分快取（批次共用）。
+    零點擊條件：寵物欄滿 77、找不到 / 不符 72、按鈕驗證 75；取出後驗證不符 76（不自動存回）"""
     def bad(rc, msg):
         info['msg'] = msg
         return uikit_fail(rc, msg)
 
-    rc, slots = list_role(role, ctx)
-    info['slots'] = slots
-    if rc:
-        return rc
-    free_slots = [x['slot'] for x in slots if x.get('empty')]
+    reg = species_reg(ctx)
+    f = scan_frames()
+    if f is None:
+        return bad(EXIT_PANEL, '讀不到面板像素')
+    free_slots = [i + 1 for i, e in enumerate(f['empty']) if e]          # 只看空格（爪印），不逐格讀名字 / 等級（舊版 list_role 每格約 3.5 s）
+    info['free'] = free_slots
     if not free_slots:
         return bad(EXIT_FULL, '寵物欄 5 / 5 滿了，沒有點取出鈕')
-    pets_empty = len(free_slots)
-    rc, d = open_depot(depot)
+    rc, d = _ensure_depot(depot)
     if rc:
         info['msg'] = '倉庫分頁沒切成功'
         return rc
-    if idx is None:                                            # --pet：現場逐張找
-        idx = find_card(d, depot, lambda idn: card_is(idn, want, species_reg(ctx)), ctx, info=info)
+    if idx is None:
+        idx, why = _find_target_card(d, depot, t, ctx, info, cache)
         if idx is None:
-            if ctx.get('skip_missing'):                        # take-many --skip-missing：這個角色倉庫沒有，略過（不記 errlog）
+            if ctx.get('skip_missing') and '看不到' in why:      # take-many --skip-missing：這個倉庫沒有，略過（不記 errlog）
                 info['missing'] = True
-                info['msg'] = f'{depot} 倉庫沒有 {want}（讀到 {info.get("cards")}）'
+                info['msg'] = why
                 return EXIT_NAME
-            return bad(EXIT_NAME, f'{depot} 倉庫裡逐張看不到 {want}（讀到 {info.get("cards")}）；沒取出')
+            return bad(EXIT_NAME, why + '；沒取出')
         info['index'] = idx + 1
     if d['empty'][idx]:
         return bad(EXIT_NAME, f'{depot} 倉庫第 {idx + 1} 格是空的，沒有點')
     depot_before = 20 - sum(d['empty'])
-    if not click_card(idx, f'pet 選倉庫第 {idx + 1} 格'):
-        return bad(EXIT_PANEL, '面板特徵不在，沒點倉庫格')
-    g, ok = wait_for_card(idx, depot)
-    if not ok:
-        uikit.snap('pet-take-select')
-        return bad(EXIT_DEPOT, f'點了倉庫第 {idx + 1} 格但選取框沒到那格；不點取出')
-    idn = read_ident(ctx)
+    g = scan_depot()
+    if not (g and g['sel'] == [k == idx for k in range(20)]):           # 找的時候最後選的不是這張（等級候選）/ 指定格：選它
+        if not click_card(idx, f'pet 選倉庫第 {idx + 1} 格'):
+            return bad(EXIT_PANEL, '面板特徵不在，沒點倉庫格')
+        g, ok = wait_for_card(idx, depot)
+        if not ok:
+            uikit.snap('pet-take-select')
+            return bad(EXIT_DEPOT, f'點了倉庫第 {idx + 1} 格但選取框沒到那格；不點取出')
+    idn = read_ident(ctx)                                                # 取前核對（每次都現場重讀，同一格連續取也一樣）
+    cache[idx] = {'name': idn['name'], 'growth': idn['growth']}
     nm = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
     info['depot_name'] = nm
-    if want and nm and not card_is(idn, want, species_reg(ctx)):
-        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {want}；沒取出（請人確認 --index）')
-    eg = info.get('_eg')                                      # --expect-growth：沒名字的卡必須成長字串吻合（2026-10-12 盲取 --index 取到左迪洛斯：格子遞補後同一格是別隻）
-    if eg and idn['growth'] != eg:
-        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，成長字串不是 {eg}；沒取出（格子可能遞補了，重讀倉庫再給 --index）')
+    if not nm:
+        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格名字框讀不出來；沒取出')
+    if not target_ok(idn, t, reg):
+        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {fmt_target(t)}；沒取出（格子可能遞補了，重讀倉庫或改用 --pet 找）')
+    if t.get('level') is not None and info.get('pre_level') is None and not info.get('level_unverified'):
+        lv = card_level_now(idx)
+        if lv is not None and lv != t['level']:
+            return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格 {nm} 卡片等級是 {lv}，不是 {t["level"]}；沒取出')
+        info['pre_level'] = lv
     ok, why = btn_ready('take')
     if not ok:
         uikit.snap('pet-take-btn')
         return bad(EXIT_DEPOT, f'取出鈕驗證失敗：{why}；不點')
-    if not click(DEPOT_BTN_XY[0], DEPOT_BTN_XY[1], f'pet take {role} 倉庫第 {idx + 1} 格 {nm or ""}'):
+    if not click(DEPOT_BTN_XY[0], DEPOT_BTN_XY[1], f'pet take {role} 倉庫第 {idx + 1} 格 {nm}'):
         return bad(EXIT_PANEL, '面板特徵不在，沒點取出鈕')
     info['clicked'] = True
     uikit.mark('take click')
-    ok, f2, d2 = wait_counts(depot, pets_empty - 1, depot_before - 1, info)
+    shift_cache(cache, idx)
+    ok, f2, d2 = wait_counts(depot, len(free_slots) - 1, depot_before - 1, info)
     if not ok:
         path = uikit.snap('pet-take-nochange')
         return bad(EXIT_VERIFY, f'點了取出但寵物欄 / 倉庫張數沒照預期變；不重點，請人看截圖{"：" + path if path else ""}')
@@ -1314,23 +1494,32 @@ def _take_body(role: str, depot: str, idx, want, ctx: dict, info: dict) -> int:
     idn2 = read_ident(ctx, 4, 1.0)
     nm2 = idn2['name'] or (f'?({idn2["growth"]})' if idn2['growth'] else None)
     info['name'] = nm2
+    want = t.get('name')
     if idn2['growth']:                                         # 沒名字：縮圖確認物種（取出的新寵物縮圖在寵物欄，倉庫分頁也看得到）
         sp = ident_species(new_slot - 1, idn2['growth'], ctx)
         info['species'] = sp
-        if sp and petmatch.learn_species(species_reg(ctx), sp, None, idn2['growth']):
+        if sp and petmatch.learn_species(reg, sp, None, idn2['growth']):
             ctx['rdirty'] = True
-        if want and sp != want and not (sp is None and card_is(idn2, want, species_reg(ctx))):
+        if want and sp != want and not (sp is None and card_is(idn2, want, reg)):
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格，物種 {sp}），不是預期的 {want}！停手交人處理，不自動存回')
-    elif want and nm2 != want:
-        return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {want}！停手交人處理，不自動存回')
-    el = info.get('_el')                                      # --expect-level：同名多隻（朵拉比斯 Lv126 / Lv1）取出後驗等級，不符停手交人（不自動存回）
-    if el is not None:
-        lv = read_slot(new_slot - 1, ctx).get('level')
+        if t.get('growth') and idn2['growth'] != t['growth']:
+            return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），成長字串不是 {t["growth"]}！停手交人處理，不自動存回')
+    elif (want and nm2 != want) or t.get('growth'):
+        return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {fmt_target(t)}！停手交人處理，不自動存回')
+    el = t.get('level')
+    if el is not None and info.get('pre_level') != el:        # 取前卡片等級沒讀到：切回寵物分頁讀新寵物等級（倉庫分頁中間沒有等級欄）
+        if not goto_pet_tab():
+            return bad(EXIT_VERIFY, '取出後切不回寵物分頁驗等級')
+        f3 = scan_frames()
+        rc = select_slot(new_slot - 1, f3 or {'sel': [False] * 5})
+        lv = None if rc else read_slot(new_slot - 1, ctx).get('level')
         info['level'] = lv
         if lv != el:
             return bad(EXIT_VERIFY, f'取出來的第 {new_slot} 格等級是 {lv}，不是預期的 {el}！停手交人處理（存回再取另一隻），不自動存回')
+    else:
+        info['level'] = info.get('pre_level')
     uikit.mark('take verified')
-    print(f'pet：{role} 倉庫第 {idx + 1} 格 → 寵物欄第 {new_slot} 格：{nm2 or nm or "?"}（取出的寵物預設「等待」）')
+    print(f'pet：{role} 倉庫第 {idx + 1} 格 → 寵物欄第 {new_slot} 格：{nm2 or nm}（取出的寵物預設「等待」）')
     return 0
 
 
@@ -1381,23 +1570,110 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
             return _out(s.rc, info, t0)
         try:
             for r in roles:
+                slots, predicted = None, False                         # 每個角色只完整讀一次寵物欄（每格約 3.5 s）；存走一隻後用 shift_slots 推算，_store_body 選格後會重讀核對
                 for nm in names:
                     op = {'role': r, 'pet': nm, 'depot': depot, 'clicked': False}
                     info['ops'].append(op)
                     _back_to_pet_tab()
-                    rc, slots = list_role(r, ctx)
-                    if not rc:
+                    for attempt in range(2):
+                        rc = 0
+                        if slots is None:
+                            rc, slots = list_role(r, ctx)
+                            predicted = False
+                        if rc:
+                            break
                         sl, why = find_slot(slots, nm, None, pick)
-                        if sl is None and skip_missing and not any(x.get('unnamed') and not x.get('species') for x in slots):
+                        if sl is None and skip_missing and not predicted and not any(x.get('unnamed') and not x.get('species') for x in slots):
                             op['skipped'] = why
                             print(f'pet：{r} 沒有 {nm}，略過')
+                            break
+                        if sl is None and predicted:                   # 推算的欄位找不到：重讀一次再判斷
+                            slots = None
                             continue
                         rc = _store_body(r, nm, depot, sl['slot'] if sl else None, allow_slot1, ctx, op, nm if nm in ams else None, pre=(0, slots))
+                        if rc in (EXIT_NAME, EXIT_FORBID) and not op['clicked'] and predicted and attempt == 0:
+                            log(f'{r}：推算的寵物欄與現場不符（{op.get("msg")}），重讀一次')
+                            uikit.mark('store-many relist')
+                            slots = None
+                            _back_to_pet_tab()
+                            op.pop('msg', None)
+                            continue
+                        break
+                    if op.get('skipped'):
+                        continue
                     op['rc'] = rc
                     if rc:
                         final = rc
                         break
+                    slots, predicted = shift_slots(slots, op['slot']), True
                 if final:
+                    break
+        finally:
+            save_ctx(ctx)
+            _back_to_pet_tab()
+    return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
+
+
+def parse_plan(text: str) -> list | None:
+    """'DKBO2:克邦凱斯,DKBO3:加克拉#35/7/3/8,DKBO:朵拉比斯@126' → [(角色, 目標 dict)]（純函式）；角色 / 目標不認得 → None"""
+    out = []
+    for part in [p.strip() for p in str(text or '').split(',') if p.strip()]:
+        if ':' not in part:
+            return None
+        r, tt = part.split(':', 1)
+        roles = role_list(r.strip())
+        t = parse_target(tt)
+        if not roles or len(roles) != 1 or t is None:
+            return None
+        out.append((roles[0], t))
+    return out or None
+
+
+def group_ops(ops: list) -> list:
+    """同角色的取出排在一起（依角色第一次出現的順序；同角色內保持原順序）→ 每個角色只點一次頭像（純函式）"""
+    order = []
+    for r, _ in ops:
+        if r not in order:
+            order.append(r)
+    return [(r, t) for o in order for r, t in ops if r == o]
+
+
+def take_plan(ops: list, depot: str = 'personal', skip_missing: bool = False, pause: bool = False, learn: bool = True, cmd: str = 'take-many') -> int:
+    """批次取出（2026-10-12 A）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 在倉庫分頁直接點左欄頭像換角色（實機：切頭像後分頁停在原子分頁）→
+    連續取完 → 切回寵物分頁 → 關一次。ops = [(角色, 目標 dict)]（parse_target）；同角色排在一起。
+    每隻都走 _take_in_depot 的核對（取前讀卡、取後驗新寵物）；公共倉庫的卡片身分快取跨角色共用（只決定先看哪張，取前一定重讀）。失敗立即停（不重點）"""
+    t0 = time.time()
+    info = {'cmd': cmd, 'depot': depot, 'ops': []}
+    if depot not in ('personal', 'public') or not ops or any(t is None for _, t in ops):
+        print(f'pet：{cmd} 參數不對（倉庫 {depot!r}、目標 {ops!r}）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    ops = group_ops(ops)
+    ctx = load_ctx(learn)
+    ctx['skip_missing'] = skip_missing
+    caches: dict = {}
+    final, cur = 0, None
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            for r, t in ops:
+                op = {'role': r, 'pet': fmt_target(t), 'depot': depot, 'clicked': False}
+                info['ops'].append(op)
+                if r != cur:
+                    rc = select_role(r, ctx)                       # 倉庫分頁開著也能點頭像（頭像欄在面板左側，寵物 / 倉庫分頁共用）
+                    if rc:
+                        op['rc'] = final = rc
+                        break
+                    cur = r
+                rc = _take_in_depot(r, depot, None, t, ctx, op, caches.setdefault('public' if depot == 'public' else r, {}))
+                op['rc'] = rc
+                if rc and op.get('missing') and skip_missing:
+                    op['skipped'] = op.pop('msg', '')
+                    op['rc'] = 0
+                    print(f'pet：{r} 的 {depot} 倉庫沒有 {fmt_target(t)}，略過')
+                    continue
+                if rc:
+                    final = rc
                     break
         finally:
             save_ctx(ctx)
@@ -1406,40 +1682,14 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
 
 
 def take_many(role_arg: str, pets_text: list, depot: str = 'personal', skip_missing: bool = False, pause: bool = False, learn: bool = True) -> int:
-    """多角色 × 多寵物連續取出（倉庫 → 寵物欄）：同 store_many，現場逐張找名字（沒名字的卡靠成長字串 → 登錄檔）、取出後驗新寵物"""
-    t0 = time.time()
-    prep, info = _many_prologue(role_arg, pets_text, depot, 'take-many', t0)
-    if prep is None:
-        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
-    roles, names = prep
-    ctx = load_ctx(learn)
-    ctx['skip_missing'] = skip_missing
-    final = 0
-    with Session(pause, need_calm=True) as s:
-        if s.rc:
-            return _out(s.rc, info, t0)
-        try:
-            for r in roles:
-                for nm in names:
-                    op = {'role': r, 'pet': nm, 'depot': depot, 'clicked': False}
-                    info['ops'].append(op)
-                    _back_to_pet_tab()
-                    rc = _take_body(r, depot, None, nm, ctx, op)
-                    op['rc'] = rc
-                    if rc and op.get('missing') and skip_missing:
-                        op['skipped'] = op.pop('msg', '')
-                        op['rc'] = 0
-                        print(f'pet：{r} 倉庫沒有 {nm}，略過')
-                        continue
-                    if rc:
-                        final = rc
-                        break
-                if final:
-                    break
-        finally:
-            save_ctx(ctx)
-            _back_to_pet_tab()
-    return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
+    """多角色 × 多寵物連續取出 = take_plan（每個角色取 pets_text 每一項；項目可帶 #成長字串 / @等級）"""
+    roles = roles_multi(role_arg)
+    tgts = [parse_target(x) for x in pets_text]
+    if not roles or not pets_text or None in tgts:
+        bad = [x for x, t in zip(pets_text, tgts) if t is None]
+        print(f'pet：take-many 參數不對（角色 {role_arg!r}、目標對不到：{bad}）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, {'cmd': 'take-many', 'depot': depot, 'ops': []}, time.time(), '參數不對')
+    return take_plan([(r, t) for r in roles for t in tgts], depot, skip_missing, pause, learn)
 
 
 def learn_species_cmd(role_arg: str, slot_no: int, species_text: str, confirm_growth: str, pause: bool = False) -> int:
@@ -1512,6 +1762,11 @@ def main() -> int:
     p.add_argument('state')
     p.add_argument('--slot', type=int, default=None, help='同名多隻時指定第幾格（1 起算）')
     p.add_argument('--allow-mount', action='store_true', help='允許動騎寵 / 設定騎乘（預設拒絕）')
+    p = sub.add_parser('set-state-many', help='多角色同一隻寵物改狀態（面板只開一次，左欄頭像換人）', parents=[cp])
+    p.add_argument('--role', default='all')
+    p.add_argument('pet')
+    p.add_argument('state')
+    p.add_argument('--allow-mount', action='store_true', help='允許動騎寵 / 設定騎乘（預設拒絕）')
     p = sub.add_parser('rest-all', help='交寵物任務前：除騎寵外「出戰」全改等待', parents=[cp])
     p.add_argument('--role', default='all')
     p.add_argument('--keep', default=None, help='不動的寵物名（逗號分隔；預設 瑪斯貝卡）')
@@ -1532,9 +1787,10 @@ def main() -> int:
     p.add_argument('--allow-mount-store', default=None, metavar='名,名', help='放行存倉的騎寵名單（名字完全相同、須已是等待）；只有使用者當次明講才用')
     p.add_argument('--skip-missing', action='store_true', help='角色沒有這隻就略過（預設 72 停手）')
     p.add_argument('--pick', default=None, choices=['first', 'last'], help='同物種有多隻時取最前 / 最後一格（預設 72 停手）')
-    p = sub.add_parser('take-many', help='多角色 × 多寵物連續取出（現場逐張找名字）', parents=[cp])
-    p.add_argument('--role', required=True)
-    p.add_argument('--pets', required=True)
+    p = sub.add_parser('take-many', help='批次取出：面板 / 倉庫分頁只開一次，左欄頭像換角色連續取（現場逐張找名字）', parents=[cp])
+    p.add_argument('--role', default=None, help='all 或逗號分隔（配 --pets：每人取同樣的目標）')
+    p.add_argument('--pets', default=None, help='目標（逗號分隔）：名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級')
+    p.add_argument('--plan', default=None, help='每人不同目標：DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126')
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
     p.add_argument('--skip-missing', action='store_true')
     p = sub.add_parser('learn-species', help='登錄「某格沒名字的寵物是什麼物種」（縮圖 + 成長字串）', parents=[cp])
@@ -1545,7 +1801,7 @@ def main() -> int:
     p = sub.add_parser('take', help='倉庫第 N 格 → 寵物欄（取出的寵物預設等待）', parents=[cp])
     p.add_argument('role')
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
-    p.add_argument('--index', type=int, default=None, help='倉庫格 1～20（列優先，每列 5 格）')
+    p.add_argument('--index', type=int, default=None, help='倉庫格 1～20（列優先，每列 5 格）；一定要和 --expect / --expect-growth / --expect-level 一起用（不准盲取）')
     p.add_argument('--pet', default=None, help='不給格號：現場逐張找這個名字（沒名字的卡靠成長字串登錄檔）')
     p.add_argument('--expect', default=None, help='預期的寵物名（取出前 / 後都驗，不符不自動存回）')
     p.add_argument('--expect-level', type=int, default=None, help='取出後驗新寵物等級（同名多隻、等級不同時用；不符 76 停手）')
@@ -1569,7 +1825,18 @@ def main() -> int:
     if a.cmd == 'store-many':
         return store_many(a.role, csv(a.pets), a.depot, a.allow_slot1, csv(a.allow_mount_store), a.skip_missing, a.pause_encounter, learn, a.pick)
     if a.cmd == 'take-many':
+        if a.plan:
+            ops = parse_plan(a.plan)
+            if ops is None:
+                print(f'pet：--plan {a.plan!r} 看不懂（角色:目標,角色:目標；目標 = 名字 / 名字@等級 / #成長字串）', file=sys.stderr)
+                return _out(uikit.EXIT_USAGE, {'cmd': 'take-many'}, time.time(), '--plan 不對')
+            return take_plan(ops, a.depot, a.skip_missing, a.pause_encounter, learn)
+        if not (a.role and a.pets):
+            print('pet：take-many 要 --plan，或 --role + --pets', file=sys.stderr)
+            return _out(uikit.EXIT_USAGE, {'cmd': 'take-many'}, time.time(), '參數不對')
         return take_many(a.role, csv(a.pets), a.depot, a.skip_missing, a.pause_encounter, learn)
+    if a.cmd == 'set-state-many':
+        return set_state_many(a.role, a.pet, a.state, a.allow_mount, a.pause_encounter, learn)
     if a.cmd == 'learn-species':
         return learn_species_cmd(a.role, a.slot, a.species, a.confirm_growth, a.pause_encounter)
     split = lambda t: None if t is None else [x.strip() for x in t.split(',') if x.strip()]    # noqa: E731

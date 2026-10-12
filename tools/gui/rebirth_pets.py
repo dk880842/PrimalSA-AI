@@ -141,12 +141,25 @@ def role_ident(slots: list, species: str, battle_pet: str, which: str) -> tuple 
     """鎖定下拉要選誰：騎寵 = 該角色寵物欄中物種 = species 的那隻（沒名字 → ('growth', 成長字串)；有名字 → ('name', 名)）；戰寵 = ('name', battle_pet)。
     找不到 / 有多隻 → None"""
     if which == '戰寵':
-        return ('name', battle_pet) if any(s.get('name') == battle_pet for s in slots if not s.get('empty')) else None
+        n = sum(1 for s in slots if not s.get('empty') and s.get('name') == battle_pet)
+        return ('name', battle_pet) if n == 1 else None             # 同名 2 隻（朵拉比斯 Lv126 / Lv1）下拉分不出來 → 不鎖、交人
     hits = [s for s in slots if not s.get('empty') and ((s.get('unnamed') and s.get('species') == species) or s.get('name') == species)]
     if len(hits) != 1:
         return None
     s = hits[0]
     return ('growth', s['unnamed']) if s.get('unnamed') else ('name', s['name'])
+
+
+def lock_items(pets: dict, roles: list, species: str, battle_pet: str, which=('騎寵', '戰寵')) -> tuple:
+    """鎖定清單（純函式）：pets = {角色: 寵物欄} → ([(角色, 項目, True, ident)], 錯誤訊息或 '')；任一人找不到唯一一隻 → ([], 訊息)"""
+    items = []
+    for r in roles:
+        for w in which:
+            ident = role_ident(pets.get(r) or [], species, battle_pet, w)
+            if ident is None:
+                return [], f'{r} 的{w}在寵物欄裡找不到唯一一隻（讀到 {[s.get("name") or s.get("raw_name") for s in (pets.get(r) or []) if not s.get("empty")]}）'
+            items.append((r, w, True, ident))
+    return items, ''
 
 
 def stores_for(slots: list, store_mount: str | None, keep: list | None = None) -> tuple:
@@ -307,6 +320,13 @@ class Tools:
         import pet
         return pet.set_state(role, name, state, None, allow_mount, True)
 
+    def pet_set_state_many(self, roles, name, state, allow_mount=False):
+        """→ (rc, 出錯的角色或 None)；寵物面板只開一次"""
+        import pet
+        rc = pet.set_state_many(','.join(roles), name, state, allow_mount, True)
+        bad = next((o['role'] for o in pet.LAST.get('ops', []) if o.get('rc')), None)
+        return rc, bad
+
     def pet_store_many(self, roles, pets, depot, allow_slot1=False, allow_mount_store=None, pick=None):
         import pet
         rc = pet.store_many(','.join(roles), pets, depot, allow_slot1, allow_mount_store or [], False, True, True, pick)
@@ -433,6 +453,7 @@ class Tools:
 
     # ---- 外掛（ass 面板；本類自己寫的部分）----
     def _ass_open(self, role, tab):
+        """單人：等戰鬥結束 → 開外掛 → 選角色 → 切分頁（呼叫端負責關面板）。多人一律用 ass_each（面板只開一次）"""
         import ass
         ok, why = ass.wait_not_battle(False)
         if not ok:
@@ -441,6 +462,10 @@ class Tools:
             return uikit.fail(SRC, 2, '外掛面板打不開')
         if not ass.select_role(role):
             return uikit.fail(SRC, 3, f'外掛選不到 {role}')
+        return self._ass_tab(role, tab)
+
+    def _ass_tab(self, role, tab):
+        """外掛面板開著、角色已選：點分頁並 OCR 驗證分頁標題（讀不到就停，不點任何勾選）"""
         x, y = ASS_TAB[tab]
         uikit.gui('seq', f'click {x} {y}; wait 600', note=f'rebirth_pets 外掛分頁 {tab}')
         box, need = (OCR_TAB_GENERAL, ('鎖定騎寵', '鎖定戰寵')) if tab == 'general' else (OCR_TAB_CATCH, ('抓寵',))
@@ -449,6 +474,21 @@ class Tools:
             uikit.snap(f'rebirth-ass-tab-{tab}')
             return uikit.fail(SRC, 4, f'外掛分頁 {tab} OCR {txt!r} 沒有 {need}（待實機量的 OCR 框；沒點任何勾選）')
         return 0
+
+    def ass_each(self, roles, tab, fn):
+        """多人外掛批次（2026-10-12 A）：面板開一次 → 逐人 ass.select_role（左上頭像）→ 切分頁 → fn(role) → 關一次（ass._many：等戰鬥、跑馬燈避讓、失敗必關面板）。
+        fn(role) → (rc, 值)。回 (rc, {角色: 值}, 出錯的角色或 None)；某人失敗立即停"""
+        import ass
+        def visit(role):
+            rc = self._ass_tab(role, tab)
+            if rc:
+                return rc, None, f'{role} 外掛分頁 {tab} 不對', []
+            rc, val = fn(role)
+            return rc, val, '' if not rc else f'{role} 失敗 rc {rc}', []
+        rc, out, msg, info = ass._many({r: None for r in roles}, visit)
+        if rc and msg and not info.get('role'):
+            uikit.fail(SRC, rc, msg)
+        return rc, out, info.get('role')
 
     def _checked(self, xy):
         import ass
@@ -471,34 +511,53 @@ class Tools:
         return 0
 
     def lock_get(self, role):
-        import ass
-        rc = self._ass_open(role, 'general')
-        if rc:
-            return rc, None
-        out = {w: self._checked(xy['check']) for w, xy in LOCK_XY.items()}
-        ass.close_panel()
-        return 0, out
+        rc, out, _ = self.lock_get_many([role])
+        return rc, (out or {}).get(role)
+
+    def lock_get_many(self, roles):
+        """→ (rc, {角色: {'騎寵': bool, '戰寵': bool}})；外掛面板只開一次"""
+        rc, out, _ = self.ass_each(roles, 'general', lambda r: (0, {w: self._checked(xy['check']) for w, xy in LOCK_XY.items()}))
+        return rc, out
 
     def lock_set(self, role, which, on, ident=None):
         """which = '騎寵' / '戰寵'。on=False：只取消勾選；on=True：先（需要時）選下拉再勾。ident 見 pick_row"""
+        rc, _ = self.lock_set_many([(role, which, on, ident)])
+        return rc
+
+    def lock_set_many(self, items):
+        """items = [(角色, '騎寵'|'戰寵', on, ident)]：同角色排在一起，外掛面板只開一次。→ (rc, 出錯的角色或 None)"""
+        by: dict = {}
+        for r, w, on, ident in items:
+            by.setdefault(r, []).append((w, on, ident))
+
+        def fn(role):
+            for w, on, ident in by[role]:
+                rc = self._lock_set_here(role, w, on, ident)
+                if rc:
+                    return rc, None
+            return 0, True
+        rc, _, bad = self.ass_each(list(by), 'general', fn)
+        return rc, bad
+
+    def _lock_set_here(self, role, which, on, ident=None):
+        """外掛一般設置分頁已開、角色已選：鎖定騎寵 / 戰寵。下拉選項一律 OCR 讀字找「剛好一列」吻合的（每人順序不同，errlog #257 盲選第 2 項鎖錯），
+        選完讀回欄位文字再勾，勾完讀回勾選框"""
         import ass
         xy = LOCK_XY[which]
-        rc = self._ass_open(role, 'general')
-        if rc:
-            return rc
-        try:
-            if not on:
-                return self._toggle(xy['check'], False, f'{role} 取消鎖定{which}')
-            if not ident:
-                return uikit.fail(SRC, 7, '鎖定要有 ident（要選哪一隻）')
-            dx, dy = xy['dd']
+        if not on:
+            return self._toggle(xy['check'], False, f'{role} 取消鎖定{which}')
+        if not ident:
+            return uikit.fail(SRC, 7, '鎖定要有 ident（要選哪一隻）')
+        dx, dy = xy['dd']
+        fld = ocr_lines((LOCK_LIST_X, dy - 17, LOCK_FIELD_W, 34), '-Zooms', '2,3,4')
+        if not pick_row(fld, ident)[0]:                                  # 欄位已經是目標就不開下拉
             uikit.gui('seq', f'click {dx} {dy}; wait 500', note=f'rebirth_pets {role} 鎖定{which} 下拉')
             lines = ocr_lines((LOCK_LIST_X, dy + 22, LOCK_LIST_W, LOCK_LIST_H), '-Zooms', '2,3,4')
             hit, why = pick_row(lines, ident)
             if not hit:
                 uikit.snap(f'rebirth-lock-{which}')
                 uikit.gui('seq', f'click {dx} {dy}; wait 400', note='rebirth_pets 收下拉（點回欄位）')
-                return uikit.fail(SRC, 7, f'{role} 鎖定{which}：{why}（OCR 框待實機量；沒選、沒勾）')
+                return uikit.fail(SRC, 7, f'{role} 鎖定{which}：{why}（沒選、沒勾）')
             if not ass.panel_open():
                 return uikit.fail(SRC, 6, '下拉選項點之前外掛面板消失')
             uikit.gui('seq', f'click {hit[1]} {hit[2]}; wait 500', note=f'rebirth_pets {role} 鎖定{which} 選 {hit[0]}')
@@ -507,9 +566,7 @@ class Tools:
             if not h2:
                 uikit.snap(f'rebirth-lock-{which}-field')
                 return uikit.fail(SRC, 7, f'{role} 鎖定{which}：選了「{hit[0]}」但欄位 OCR {[t for t, _, _ in fld]} 對不上 {ident}（不勾）')
-            return self._toggle(xy['check'], True, f'{role} 勾鎖定{which}')
-        finally:
-            ass.close_panel()
+        return self._toggle(xy['check'], True, f'{role} 勾鎖定{which}')
 
     def catch_setup(self, role, family, species, count):
         """捉寵設置：系別 → 物種 → 讀可抓捕數 = count。**不點「+」、不碰丟棄區**。留著面板開著給 catch_start（同一個 session）"""
@@ -521,6 +578,27 @@ class Tools:
             import ass
             ass.close_panel()
         return rc
+
+    def catch_setup_many(self, assign, count):
+        """多人捉寵設置 + 勾自動存倉庫 / 自動抓寵（外掛面板只開一次）。assign = [(角色, 系別, 物種)] → (rc, 出錯的角色或 None)"""
+        conf = {r: (f, sp) for r, f, sp in assign}
+
+        def fn(role):
+            fam, sp = conf[role]
+            rc = self._catch_setup_pick(role, fam, sp, count)
+            if not rc:
+                rc = self._catch_toggles(role)
+            return rc, None if rc else True
+        rc, _, bad = self.ass_each([r for r, _, _ in assign], 'catch', fn)
+        return rc, bad
+
+    def catch_poll_many(self, roles):
+        """多人讀捉寵進度（唯讀，面板只開一次）→ (rc, {角色: (可抓捕數或 None, 自動抓寵勾選)})"""
+        def fn(role):
+            left = parse_count(''.join(t for t, _, _ in ocr_lines(OCR_TAB_CATCH, '-Zooms', '2,3,4')))
+            return 0, (left, self._checked(CATCH_XY['auto']))
+        rc, out, _ = self.ass_each(roles, 'catch', fn)
+        return rc, out
 
     def _field_is(self, box, name):
         txt = ' '.join(t for t, _, _ in ocr_lines(box, '-Zooms', '2,3,4'))
@@ -591,12 +669,15 @@ class Tools:
         """面板已在捉寵設置（catch_setup 後）：自動存倉庫 → 自動抓寵 勾選，關面板"""
         import ass
         try:
-            rc = self._toggle(CATCH_XY['store'], True, f'{role} 勾自動存倉庫')
-            if rc:
-                return rc
-            return self._toggle(CATCH_XY['auto'], True, f'{role} 勾自動抓寵')
+            return self._catch_toggles(role)
         finally:
             ass.close_panel()
+
+    def _catch_toggles(self, role):
+        rc = self._toggle(CATCH_XY['store'], True, f'{role} 勾自動存倉庫')
+        if rc:
+            return rc
+        return self._toggle(CATCH_XY['auto'], True, f'{role} 勾自動抓寵')
 
     def catch_wait(self, role, timeout=CATCH_TIMEOUT_S):
         """每 CATCH_POLL_S 重開外掛讀可抓捕數 + 自動抓寵勾選；數 = 0 且自動抓寵已被遊戲取消 → (0, 0)；逾時 (rc, 剩幾隻)"""
@@ -658,15 +739,14 @@ class Run:
         rc = T.team_disband()
         if rc:
             return self.stop(EXIT_PRE, f'解散隊伍失敗（team rc {rc}）')
-        for r in ALL_ROLES:
-            rc, st = T.lock_get(r)
+        rc, sts = T.lock_get_many(ALL_ROLES)                    # 外掛面板只開一次讀 5 人（2026-10-12 批次化）
+        if rc:
+            return self.stop(EXIT_PRE, f'讀外掛鎖定狀態失敗（rc {rc}）')
+        todo = [(r, w, False, None) for r in ALL_ROLES for w in ('騎寵', '戰寵') if (sts.get(r) or {}).get(w)]
+        if todo:
+            rc, bad = T.lock_set_many(todo)
             if rc:
-                return self.stop(EXIT_PRE, f'{r} 讀外掛鎖定狀態失敗（rc {rc}）')
-            for w in ('騎寵', '戰寵'):
-                if st.get(w):
-                    rc = T.lock_set(r, w, False)
-                    if rc:
-                        return self.stop(EXIT_PRE, f'{r} 取消鎖定{w}失敗（rc {rc}）')
+                return self.stop(EXIT_PRE, f'{bad} 取消鎖定失敗（rc {rc}）')
         rc, pets = T.pets_list(ALL_ROLES)
         if rc:
             return self.stop(EXIT_PRE, f'讀 5 人寵物欄失敗（pet rc {rc}）')
@@ -799,10 +879,9 @@ class Run:
 
     def ride(self):
         T, sp = self.T, self.o['mount_species']
-        for r in ALL_ROLES:
-            rc = T.pet_set_state(r, sp, '騎乘', True)
-            if rc:
-                return self.stop(EXIT_RIDE, f'{r} 設 {sp} 騎乘失敗（pet rc {rc}）', pet_rc=rc, role=r)
+        rc, bad = T.pet_set_state_many(ALL_ROLES, sp, '騎乘', True)      # 寵物面板只開一次
+        if rc:
+            return self.stop(EXIT_RIDE, f'{bad} 設 {sp} 騎乘失敗（pet rc {rc}）', pet_rc=rc, role=bad)
         self.done('ride')
         return 0
 
@@ -811,10 +890,9 @@ class Run:
         rc, info = T.pet_take_many(ALL_ROLES, [bp], 'personal')
         if rc:
             return self.stop(EXIT_BATTLE, f'從個人倉庫取 {bp} 失敗（pet rc {rc}：{info.get("msg", "")}）', pet_rc=rc)
-        for r in ALL_ROLES:
-            rc = T.pet_set_state(r, bp, '出戰', False)
-            if rc:
-                return self.stop(EXIT_BATTLE, f'{r} 的 {bp} 設出戰失敗（pet rc {rc}）', pet_rc=rc, role=r)
+        rc, bad = T.pet_set_state_many(ALL_ROLES, bp, '出戰', False)
+        if rc:
+            return self.stop(EXIT_BATTLE, f'{bad} 的 {bp} 設出戰失敗（pet rc {rc}）', pet_rc=rc, role=bad)
         self.done('battle')
         return 0
 
@@ -823,14 +901,12 @@ class Run:
         rc, pets = T.pets_list(ALL_ROLES)
         if rc:
             return self.stop(EXIT_LOCK, f'讀寵物欄失敗（pet rc {rc}）', pet_rc=rc)
-        for r in ALL_ROLES:
-            for w in ('騎寵', '戰寵'):
-                ident = role_ident(pets[r], o['mount_species'], o['battle_pet'], w)
-                if ident is None:
-                    return self.stop(EXIT_LOCK, f'{r} 的{w}在寵物欄裡找不到唯一一隻（讀到 {[s.get("name") or s.get("raw_name") for s in pets[r] if not s.get("empty")]}）')
-                rc = T.lock_set(r, w, True, ident)
-                if rc:
-                    return self.stop(EXIT_LOCK, f'{r} 鎖定{w}（{ident}）失敗（rc {rc}）', role=r)
+        items, why = lock_items(pets, ALL_ROLES, o['mount_species'], o['battle_pet'])
+        if why:
+            return self.stop(EXIT_LOCK, why)
+        rc, bad = T.lock_set_many(items)                       # 外掛面板只開一次（2026-10-12 批次化）
+        if rc:
+            return self.stop(EXIT_LOCK, f'{bad} 鎖定失敗（rc {rc}）', role=bad)
         self.done('lock')
         return 0
 
