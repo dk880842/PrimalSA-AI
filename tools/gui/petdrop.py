@@ -31,6 +31,8 @@ SRC = 'petdrop'
 EXIT_GUARD, EXIT_VERIFY, EXIT_MULTI = 73, 76, 79
 TRASH_XY = (708, 565)
 CONFIRM_OK, CONFIRM_CANCEL = (615, 557), (813, 557)
+# 只框「確定要丟棄【名字】嗎?」那一行（2026-10-12 巴朵蘭恩：整個 CONFIRM_BOX 兩行一起 OCR 會漏掉黃字那行，單行框 -Dark 150 穩定讀到）
+NAME_LINE_BOX = (520, 335, 400, 60)
 LAST: dict = {}
 
 
@@ -109,11 +111,12 @@ def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_r
             return _fail(EXIT_VERIFY, '按了垃圾桶但提示窗沒出現（不重點）', 'petdrop-noconfirm')
         uikit.sleep(0.15)
     # 2026-10-12 實機：名字那行是黃字（【布克布克】）— -Dark 0 只讀得到「回收站保存48小時!」，-Dark 120 才讀得到「確定要丟棄【布克布克】嗎?」→ 兩組串起來
-    ct = ' '.join(uikit.ocr(pet.CONFIRM_BOX, '-Dark', 120, '-Zooms', '2,3') + uikit.ocr(pet.CONFIRM_BOX, '-Dark', 0, '-Zooms', '2,3,4'))
+    ct = ' '.join(uikit.ocr(NAME_LINE_BOX, '-Dark', 150, '-Zooms', '2,3') + uikit.ocr(pet.CONFIRM_BOX, '-Dark', 120, '-Zooms', '2,3') + uikit.ocr(pet.CONFIRM_BOX, '-Dark', 0, '-Zooms', '2,3,4'))
     mounts = [m for m in uikit.MOUNTS if bag.name_match(ct, m, 0.8) or m in ct]
     if not ct or not confirm_names_ok(ct, want) or mounts:
+        uikit.snap('petdrop-confirm-name')                         # 取消前先存圖（提示窗還在，才看得到實際文字）
         uikit.safe_click(CONFIRM_CANCEL[0], CONFIRM_CANCEL[1], pet.CONFIRM, note='petdrop 提示窗名稱不符 → 取消')
-        return _fail(EXIT_VERIFY, f'提示窗 OCR 是 {ct!r}（要含「{want}」、不含騎寵 {mounts}）→ 已取消', 'petdrop-confirm-name')
+        return _fail(EXIT_VERIFY, f'提示窗 OCR 是 {ct!r}（要含「{want}」、不含騎寵 {mounts}）→ 已取消')
     if not uikit.safe_click(CONFIRM_OK[0], CONFIRM_OK[1], pet.CONFIRM, note=f'petdrop 確定丟棄 {want}', wait_ms=700):
         return _fail(EXIT_VERIFY, '提示窗特徵消失，沒點確定')
     end = uikit.clock() + 3.0
