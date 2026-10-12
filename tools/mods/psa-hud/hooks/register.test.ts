@@ -317,7 +317,7 @@ test('hudText：帶人物名 / 寵物名；沒學過的寵物顯示 ?；只有�
 // ───────── 自動 session 標題 ─────────
 import { autoTitle, mayRetitle, questNames, titleFromLog } from './register'
 
-const NAMES = questNames("dict(id=2000, detail='琉璃洞窟', track='x'),\n dict(id=2019, detail='卡坦的願望(1.82)', track='y')")
+const NAMES = questNames("dict(id=3003, detail='猜謎三兄弟'),\n dict(id=2000, detail='琉璃洞窟', track='x'),\n dict(id=2019, detail='卡坦的願望(1.82)', track='y')")
 
 test('titleFromLog：進行中 / 已完成 / 失敗 / 四大洞窟前綴 / 長度', () => {
   const run = '2026-10-12 10:56:32 [questrun] 開始：任務 [2000]，選項 {}\n2026-10-12 10:57:11 [questrun] 任務 2000「琉璃洞窟」詳情結果：accepted\n追蹤 x\n'
@@ -330,6 +330,19 @@ test('titleFromLog：進行中 / 已完成 / 失敗 / 四大洞窟前綴 / 長�
   expect(titleFromLog('沒有紀錄\n', NAMES)).toBeUndefined()
   expect(titleFromLog('', NAMES)).toBeUndefined()
   expect((titleFromLog('[questrun] 任務 1「' + '很長'.repeat(30) + '」詳情結果：ok\n') ?? '').length).toBeLessThanOrEqual(40)
+})
+
+test('titleFromLog：不跨 run 抓名字；rc≠0 後有別的事件 → 接手中', () => {
+  const prev = '14:00:00 [questrun] 開始：任務 [2002]\n14:01:00 [questrun] 任務 2002「碧青洞窟」詳情結果：ok\n14:02:00 [questrun] 結束 rc=0，完成 [2002]\n'
+  const cur = '14:36:09 [questrun] 開始：任務 [3003]，選項 {}\n14:36:30 [questrun] 追蹤 x\n14:37:07 [questrun] 結束 rc=111，完成 []；失敗退出，不恢復掛機\n'
+  expect(titleFromLog(prev + cur, NAMES)).toBe('PSA｜猜謎三兄弟 失敗 rc=111')
+  expect(titleFromLog(prev + cur + '14:37:59 [quiztower] 811 → 800\n[petwatch] x\n', NAMES)).toBe('PSA｜猜謎三兄弟 接手中（questrun rc=111）')
+  expect(titleFromLog(prev + cur + '\n\n', NAMES)).toBe('PSA｜猜謎三兄弟 失敗 rc=111')
+  // 多 ID：取本 run 內最後出現的「任務 N」
+  const multi = '1 [questrun] 開始：任務 [2000, 2019]\n2 [questrun] 任務 2000「琉璃洞窟」詳情結果：ok\n3 [questrun] 任務 2019「卡坦的願望(1.82)」詳情結果：ok\n'
+  expect(titleFromLog(multi, NAMES)).toBe('PSA｜卡坦的願望 進行中')
+  // rc=0 後有別的事件仍是已完成
+  expect(titleFromLog(prev + '[quiztower] x\n', NAMES)).toBe('PSA｜四大洞窟：碧青洞窟 已完成')
 })
 
 test('mayRetitle：空與 PSA｜ 開頭才可改，使用者自取的不動', () => {

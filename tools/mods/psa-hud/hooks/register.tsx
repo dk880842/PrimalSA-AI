@@ -555,30 +555,36 @@ export function questNames(py: string): Map<number, string> {
   return m
 }
 
-// 找最後一筆 [questrun] 行：結束 → 完成 / 失敗，其他 → 進行中；任務名取該行往回最近一個「任務 N「名」」，
-// 沒有就用該行或「開始：任務 [..]」的 ID 查 questdefs。沒有 questrun 紀錄回 undefined
+// 找最後一筆 [questrun] 行：結束 → 完成 / 失敗（rc≠0 後還有別的事件行 → 接手中），其他 → 進行中；
+// 任務名只在本 run（最後一個「開始：任務」行起）內取最後一個「任務 N「名」」，沒有就用開始行第一個 ID 查 questdefs。沒有 questrun 紀錄回 undefined
 export function titleFromLog(log: string, names: Map<number, string> = new Map()): string | undefined {
   const lines = log.split(/\r?\n/).slice(-LOG_TAIL_LINES)
   let last = -1
   for (let i = lines.length - 1; i >= 0; i--) if (lines[i]!.includes('[questrun]')) { last = i; break }
   if (last < 0) return undefined
   const line = lines[last]!
+  // 本次 run 邊界 = 最後一個「開始：任務」行（含）；名字只在邊界之後找，不抓到前一次 run
+  let start = -1
+  for (let i = last; i >= 0; i--) if (/\[questrun\].*開始：任務/.test(lines[i]!)) { start = i; break }
   let id: number | undefined
   let name: string | undefined
-  for (let i = last; i >= 0 && !name; i--) {
-    const l = lines[i]!
-    const m = /\[questrun\].*?任務 (\d+)「([^」]+)」/.exec(l)
+  for (let i = last; i >= Math.max(start, 0) && !name; i--) {
+    const m = /\[questrun\].*?任務 (\d+)「([^」]+)」/.exec(lines[i]!)
     if (m) { id = Number(m[1]); name = cleanName(m[2]!) }
   }
   if (!name) {
-    const m = /任務 \[?(\d+)/.exec(line) ?? /任務 \[?(\d+)/.exec(lines.slice(0, last + 1).reverse().find(l => /\[questrun\].*開始：任務/.test(l)) ?? '')
+    const m = /任務 \[?(\d+)/.exec(line) ?? (start >= 0 ? /任務 \[?(\d+)/.exec(lines[start]!) : null)
     if (m) { id = Number(m[1]); name = names.get(id) }
   }
   if (!name) return undefined
   if (id !== undefined && CAVE_IDS.has(id)) name = `四大洞窟：${name}`
   let state = '進行中'
   const end = /結束 rc=(\d+)/.exec(line)
-  if (end) state = end[1] === '0' ? '已完成' : `失敗 rc=${end[1]}`
+  if (end) {
+    // rc≠0 之後還有別的事件行（quiztower / 手動…）→ 任務仍在處理，不是停了
+    const later = lines.slice(last + 1).some(l => l.trim() !== '')
+    state = end[1] === '0' ? '已完成' : later ? `接手中（questrun rc=${end[1]}）` : `失敗 rc=${end[1]}`
+  }
   else if (/已完成（/.test(line)) state = '已完成'
   const t = `${TITLE_PREFIX}${name} ${state}`
   return t.length > TITLE_MAX ? t.slice(0, TITLE_MAX) : t
