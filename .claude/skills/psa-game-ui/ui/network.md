@@ -30,7 +30,17 @@
 - `recover()`（P8 起）：`team_report()` 逐張卡片 OCR（整塊一起讀不準；單張標籤 450/730,272/357/442 寬 70 高 32，缺字會算 unknown）→ 有「單人」才 `fix_team()`（全部登錄 → 全員單人才 `team.form()`）→ **重登 / 人類登入回來時自動跑 `grind.py ensure` 一次**（`grind.run('ensure', ignore_watchers=True)`：當前角色 → 隊長、5 人快速 + 自動戰鬥只補不對的、開遇敵、確認 2 次 EXP 橫幅；約 25 秒）→ ensure 失敗才退回舊的「原地遇敵沒開就開」。ensure 失敗（退出碼非 0）只記 errlog + 印警告、**不重試、不 halt**；quest 的 battle.lock 有效時 grind 回 8（不搶畫面）；grind 已在執行（巢狀）時略過；SystemExit（停手）照常往外丟。純網路異常確定後 HUD 就回來（沒經過登入畫面）的重連不跑 ensure。`netwatch.py --no-grind` 關掉自動 ensure。
 - 重登（relogin 成功 / 人類登入回來）時一律先 `charstate.clear()`（重登後當前角色會變 DKBO5，旁路檔舊值作廢；之後 char.ensure 現場讀切換面板）。
 - 每次事件寫 errlog（來源 netwatch）與 actions.log。選擇角色面板特徵 `SIG_CHARSEL`（640,640 橘 / 500,250 米 / 1186,190 紅 X / 350,330 棕）。
-- 實測限制：登錄流程的畫面順序是人工驗證過一次（本次斷線後第一次登錄）；`relogin()` 的自動判斷（欄位非空、選角面板偵測、HUD 回來）分段驗過，整套自動跑尚未遇到第二次斷線，不能主動登出測（設置的全員登出是紅區）。
+- 實測限制：登錄流程的畫面順序是人工驗證過一次（本次斷線後第一次登錄）；`relogin()` 的自動判斷（欄位非空、選角面板偵測、HUD 回來）分段驗過，整套自動跑尚未遇到第二次斷線。**主動登出（2026-10-12 手動實測成功一次）**：設置 → 底部「全員登出」517,731 → 提示「是否登出全部角色?」（有確認框，確定 715,557）→ 回登入畫面 → 只點登錄 590,585 → 選角面板「一鍵全登」740,640 → 約 20 秒進遊戲；重登後隊伍沒散，netwatch 不介入所以沒有 grind ensure。已寫成腳本 `tools/gui/relogin.py --confirm`（見下節）。
 
 ## 斷線重登後快速戰鬥設定會被重設（2026-10-10 實測）
 重登後 5 個角色的外掛「快速戰鬥」（484,343）全部變回沒勾（自動戰鬥、鎖定騎寵 / 戰寵、全部遮罩仍保留），遇敵就變成完整戰鬥畫面。處理：開外掛逐一點頭像，`gui.sh pixel "484,343"` 255,255,255 = 沒勾才點、點完再讀確認 223,223,223（切換式，先讀再點）。P8 起 netwatch 的 `recover()` 在重登後自動跑 `grind.py ensure`（讀 5 人、只補不對的、確認 EXP）；它失敗時（errlog / 警告）請手動跑 `uv run --no-project python tools/gui/grind.py ensure`。這條自動路徑**只有離線測試**（`test_netwatch.py`，假 grind / team），不能故意斷線實測。
+
+## 主動全員重登：tools/gui/relogin.py（2026-10-12，離線測試；畫面判斷多半未實機驗證）
+用途：伺服器端卡死（全隊頭上 VS 牌、「戰鬥中禁止當前操作」、刷新無效）時，登出再登入洗乾淨狀態。
+```
+uv run --no-project python tools/gui/relogin.py --confirm [--leader DKBO] [--size 5] [--no-team]
+uv run --no-project python tools/gui/relogin.py --dry-run      # 唯讀前置檢查
+```
+登出不可逆（全員下線）：沒有 `--confirm` 不動（退出碼 1）。流程：preflight + 畫面必須是主畫面 → 開設置面板 → 驗「全員登出」鈕顏色（橘紅，樣本量得）才點 517,731 → 確認提示窗（像素同網路異常單鈕窗 + OCR 含「登 / 出 / 全」，OCR 讀不出信任像素，讀到別的字不點）→ 確定 715,557 → 等回登入畫面（≤ 60 s）→ `netwatch.relogin(grind_ensure=False, encounter=False, team=False)`（帳密欄空 / 登錄後提示窗 / 連 3 次失敗 → halt，規則同上）→ `team.check`（5 人、隊長 DKBO；全員單人才 `team.form`）→ `char.ensure DKBO` → 再 `team.check`。
+退出碼：0 成功；1 缺 --confirm；2 / 8 / 9 / 10 / 11 共用；100 設置打不開或登出鈕特徵不符；101 確認窗沒出現；102 訊息不是登出；103 沒回登入畫面 / 中途冒提示窗；104 登入階段沒成功（非 halt）；105 隊伍檢查 / 組隊失敗；106 當前角色切回失敗；107 起始畫面不是主畫面；108 netwatch 動作鎖被佔。
+**未實機驗證**：設置標題板 / ✕ 特徵與登出鈕顏色（取自既有截圖樣本）、確認提示窗的像素特徵與 OCR 框（假設為單鈕提示窗）、等回登入畫面的時序；不符時一律停手不點。登入畫面階段不存截圖（含帳號欄）。測試：`tools/gui/test_relogin.py`。

@@ -367,7 +367,7 @@ def recover(src: str, encounter: bool = True, team: bool = True, grind_ensure: b
     return info
 
 
-def relogin(src: str, grind_ensure: bool = True) -> dict:
+def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: bool = True) -> dict:
     """登入畫面 → 檢查帳密欄有內容 → 點「登錄」→ 處理選擇角色 / 載入 → 回到遊戲 → recover。
     失敗規則：欄位空 / 出現提示視窗（密碼錯誤、封停、維護、驗證）/ 看不懂的畫面逾時 / 連續 3 次 → halt（不重試）"""
     if not _take(ACT_LOCK, 300):
@@ -408,7 +408,7 @@ def relogin(src: str, grind_ensure: bool = True) -> dict:
                 log(f'netwatch：登錄成功，{int(time.time() - t0)} 秒回到遊戲')
                 _forget_char()
                 time.sleep(2)
-                return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, True, True, grind_ensure=grind_ensure)}
+                return {'status': 'reconnected', 'relogin': True, 'recover': recover(src, encounter, team, grind_ensure=grind_ensure)}
             if _match(SIG_CHARSEL) is True:
                 if picked >= 2:
                     break
