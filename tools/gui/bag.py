@@ -11,6 +11,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py hp DKBO|all                 # 唯讀：每人 HP（背包頁 HP 條上的「目前/最大」；回 [目前, 最大, %]）
   uv run --no-project python tools/gui/bag.py find DKBO 精靈王之弓 [名稱…]    # 唯讀：每個名稱在背包哪一格（空格用像素判；「顯示道具名」被關會點開一次）
   uv run --no-project python tools/gui/bag.py use DKBO 龍王的守護           # 背包 → 彈窗名稱核對 → 使用（隊長吃龍王的守護）
+  uv run --no-project python tools/gui/bag.py weapon all                  # 唯讀：逐人讀武器格名稱
   uv run --no-project python tools/gui/bag.py swap-weapon DKBO [--keep-old] # 穿精靈王之弓、丟舊武器（名稱防護）
   uv run --no-project python tools/gui/bag.py take DKBO 龍王的守護 [--depot public|personal]   # 倉庫取出（整疊）
   uv run --no-project python tools/gui/bag.py store DKBO 龍王的守護 [--depot public|personal]  # 倉庫存入
@@ -970,6 +971,27 @@ def drop_item(role: str, want: str, confirm_name: str) -> int:
         return discard_item(role, i, want)
 
 
+def weapons(roles) -> tuple:
+    """唯讀：開背包一次、逐人點左欄頭像讀武器格彈窗名稱（讀完 ESC 關，不按任何彈窗按鈕）→ (rc, {role: 名稱 | None})"""
+    out = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            rc = select_role(r)
+            if rc:
+                return rc, out
+            out[r] = equipped_name()
+            sp = uikit.snap(f'weapon-{r}')              # 留證：複製成 tools/.cache/weapon-<角色>.png
+            if sp:
+                try:
+                    import shutil
+                    shutil.copyfile(uikit.ROOT / sp, uikit.ROOT / 'tools' / '.cache' / f'weapon-{r}.png')
+                except OSError:
+                    pass
+    return 0, out
+
+
 def swap_weapon(role: str, bow: str = '精靈王之弓', keep_old: bool = False) -> int:
     """穿 bow、確認武器格是 bow、（預設）丟舊武器。舊武器名稱 = 穿之前武器格彈窗名稱；讀不到就不丟。結果 LAST"""
     LAST.clear()
@@ -1183,6 +1205,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('level'); p.add_argument('role')
     p = sub.add_parser('hp'); p.add_argument('role')
+    p = sub.add_parser('weapon'); p.add_argument('role')
     p = sub.add_parser('find'); p.add_argument('role'); p.add_argument('names', nargs='+')
     p = sub.add_parser('list'); p.add_argument('role')
     p = sub.add_parser('purge'); p.add_argument('role'); p.add_argument('--names', required=True); p.add_argument('--dry-run', action='store_true')
@@ -1206,6 +1229,9 @@ def main() -> int:
     if a.cmd == 'hp':
         rc, d = hps(roles)
         return _out(rc, {'hp': {k: (list(v) + [round(100 * v[0] / v[1])] if v else None) for k, v in d.items()}})
+    if a.cmd == 'weapon':
+        rc, d = weapons(roles)
+        return _out(rc, {'weapons': d})
     if a.cmd == 'find':
         rc, d = find_items(r, a.names)
         return _out(rc, {'slots': d})

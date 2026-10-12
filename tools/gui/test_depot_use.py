@@ -313,5 +313,13 @@ seen.clear()
 rc, d = bag.depot_many('store', ['DKBO', 'DKBO3', 'DKBO4'], '人龍隨機蛋')
 check('depot_many 沒 --skip-missing：沒有 → 92 停、後面不做', rc == bag.EXIT_ITEM and seen == ['DKBO', 'DKBO3'])
 check('_roles：逗號多人 / 不認得 → None', bag._roles('DKBO2,DKBO3') == ['DKBO2', 'DKBO3'] and bag._roles('DKBO,XYZ') is None)
+# bag.weapons：Session 開一次、逐人選角、讀武器格名稱（唯讀）
+opened.clear()
+sel, snaps = [], []
+bag.select_role = lambda r, ctx=None: (sel.append(r), 0)[1]
+bag.equipped_name = lambda: '精靈王之弓 (4~6) 攻擊'
+uikit.snap = lambda tag: (snaps.append(tag), None)[1]
+rc, d = bag.weapons(['DKBO', 'DKBO2', 'DKBO3'])
+check('bag.weapons：Session 1 次、3 人逐一讀名稱 rc 0', rc == 0 and len(opened) == 1 and sel == ['DKBO', 'DKBO2', 'DKBO3'] and all('精靈王之弓' in v for v in d.values()))
 print('失敗', fails)
 sys.exit(1 if fails else 0)
