@@ -61,6 +61,12 @@ Q182 = [
     dict(id=2012, detail='五兄弟之謎(1.82)', track='五兄弟之謎', accept_npc='吉諾 31701:29,44', steps_total=8,
          steps={}, bag_slots=5, boss=True, est_min=22, live=False,
          note='步 7 浦魯德任務戰（其餘為對話）；中間 5 張答案用紙佔背包（bag_slots 5）；10-10 完成未被認出 → 現在以「領獎後追蹤列表找不到 = 完成」判斷；獎勵人龍隨機蛋 → 存公共倉庫'),
+    dict(id=2013, detail='礦工的比賽(1.82)', track='礦工的比賽', accept_npc='帖尼姆 31805:19,21', steps_total=6,
+         steps={}, bag_slots=0, boss=True, est_min=4, live=True,
+         note='全自動（10-10 實測約 4 分）：巴巴洛 / 礦山 3F 原石任務戰 / 礦工巴卡斯任務戰 + 對話；完整戰鬥畫面自動戰鬥打完'),
+    dict(id=2021, detail='夢德洞窟(1.82)', track='夢德洞窟', accept_npc='村姑 1200:96,75', steps_total=6,
+         steps={}, bag_slots=0, boss=False, est_min=3, live=True,
+         note='純巡路 + 對話（卡坦 / 霍爾特 / 盜賊基地最底層夢德族長，10-10 實測約 3 分）'),
     dict(id=3003, detail='猜謎三兄弟(1.82)', track='猜謎三兄弟', accept_npc='受理A 811:30,20', steps_total=3,
          steps={1: dict(kind='manual')}, bag_slots=1, boss=False, est_min=50, live=False,
          note='步 1 爬塔（811→810 共 11 層，810 屬 noTaskNavigate 不能自動巡路）+ 金布伊 Lv77 要人 / 手動：每層點守衛 →「猜謎答題」→ 4 張寵物圖選一（玩家觸發的任務答題，准許查 quests/answers.md 作答；若不是此畫面一律當驗證停手）。'
