@@ -398,6 +398,7 @@ class FakeBag:
         self.page, self.role, self.popup, self.confirm = 'bag', 'DKBO', None, None
         self.clicks, self.discarded, self.used = [], [], 0
         self.open = True
+        self.confirm_style = 'pet'                         # 'pet' = pet.CONFIRM 版 / 'drop2' = 丟棄 613,543 版
         self.names_shown = True                           # 「顯示道具名」開關（False = 格子只有圖示，名稱 OCR 全空）
 
     def install(self):
@@ -419,7 +420,9 @@ class FakeBag:
 
     def is_open(self, p):
         if p.name == 'PETCONFIRM':
-            return self.confirm is not None
+            return self.confirm is not None and self.confirm_style == 'pet'
+        if p.name == 'BAGDROP2':
+            return self.confirm is not None and self.confirm_style == 'drop2'
         if self.confirm is not None:
             return False
         if p.name == 'BAGPOPUP':
@@ -455,7 +458,8 @@ class FakeBag:
     def click(self, x, y):
         self.clicks.append((x, y))
         if self.confirm is not None:
-            if abs(x - 612) < 8 and abs(y - 551) < 8:
+            ok = (abs(x - 613) < 8 and abs(y - 543) < 8) if self.confirm_style == 'drop2' else (abs(x - 612) < 8 and abs(y - 551) < 8)
+            if ok:
                 name = self.confirm
                 self.discarded.append(name)
                 if name in self.slots:
@@ -495,7 +499,7 @@ class FakeBag:
             return [self.popup[0]] if self.popup else []
         if box == bag.POPUP_BTN_BOX:
             return {'equip': ['穿戴', '丟棄'], 'stack': ['使用', '更多'], 'single': ['使用']}.get(self.popup[1], []) if self.popup else []
-        if box == pet.CONFIRM_BOX:
+        if box in (pet.CONFIRM_BOX, bag.DROP2_NAME_BOX) and box == (pet.CONFIRM_BOX if self.confirm_style == 'pet' else bag.DROP2_NAME_BOX):
             return [f'確定要丟棄 {self.confirm} ?'] if self.confirm else []
         if box == bag.NAME_BOX:
             return [self.role]
@@ -533,6 +537,26 @@ check('discard_item：彈窗實際是弓、預期是合成弓箭 → 96，沒按
 fb = FakeBag(['合成弓箭 9']).install()
 check('discard_item：名稱相符 → 丟掉', quiet(bag.discard_item, 'DKBO', 0, '合成弓箭 9') == 0 and fb.discarded == ['合成弓箭 9'])
 fb = FakeBag(['合成弓箭 9']).install()
+fb = FakeBag(['精靈王之弓', '合成弓箭 9']).install()
+fb.confirm_style = 'drop2'
+check('discard_item：drop2 版提示窗（丟棄 613,543）名稱相符 → 丟掉、點 613,543', quiet(bag.discard_item, 'DKBO', 1, '合成弓箭 9') == 0 and fb.discarded == ['合成弓箭 9'] and (613, 543) in fb.clicks and bag.LAST.get('drop_confirm') == 'drop2')
+fb = FakeBag(['精靈王之弓', '合成弓箭 9']).install()
+fb.confirm_style = 'drop2'
+_o = fb.ocr
+fb.ocr = lambda box, *o: ['精靈王之弓'] if tuple(box) == bag.DROP2_NAME_BOX else _o(box, *o)
+uikit.ocr = fb.ocr
+check('discard_item：drop2 版提示窗名稱對不上 → 96、點取消 820,543、沒丟', quiet(bag.discard_item, 'DKBO', 1, '合成弓箭 9') == 96 and (820, 543) in fb.clicks and (613, 543) not in fb.clicks and fb.discarded == [])
+# 真截圖 fixture：丟棄提示窗另一版型（2026-10-12 22:17 實機）：DROP2 特徵吻合、舊 pet.CONFIRM 不吻合；單鈕刪除提示窗也不吻合
+_drop_png = HERE.parent / '.cache' / 'ui-log' / '221743-bag-drop-noconfirm.png'
+if _drop_png.exists():
+    import questdetail as _qd
+    import screen_sigs as _ss
+    import pet as _pet
+    _im = _qd.Img.from_file(_drop_png)
+    _m = lambda sig: all(_ss.close(_im(x, y), (r, g, b), t) for x, y, r, g, b, t in sig)
+    check('fixture：221743 drop2 特徵吻合 / pet.CONFIRM 與單鈕刪除窗不吻合', _m(bag.DROP2_SIG) and not _m(_pet.CONFIRM_SIG) and not _m(bag.DELCONFIRM_SIG))
+else:
+    print('SKIP fixture 221743（缺檔）')
 check('discard_item：forbid 含該名 → 93', quiet(bag.discard_item, 'DKBO', 0, '合成弓箭 9', ['合成弓箭 9']) == 93 and fb.discarded == [])
 # 提示窗名稱不符（彈窗對、提示窗被換成弓）→ 取消
 fb = FakeBag(['合成弓箭 9']).install()

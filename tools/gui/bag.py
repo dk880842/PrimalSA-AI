@@ -70,6 +70,12 @@ LEVEL_BOX = (330, 203, 200, 28)                                     # 「0轉133
 HP_BOX = (260, 540, 150, 24)                                        # 背包頁左下 HP 條上的「440/571」白字（選中角色的；2026-10-12 實測 OCR 3 種門檻都讀得到）
 NAME_BOX = (330, 176, 200, 26)                                      # 名牌「DKBO」
 BUFF_BOX = (78, 150, 40, 40)                                        # 龍王的守護 buff 圖示（左上、任務欄上方，約 97,170）
+# 丟棄提示窗另一種版型（2026-10-12 實機 22:17 漆黑洞窟 16F 丟精靈王之弓，樣本 tools/.cache/ui-log/221743-bag-drop-noconfirm.png）：
+# 兩顆鈕「丟棄」613,543（藍）/「取消」820,543（橘）、名字黃字在圖示下方 y≈436；鈕上緣 y≈515（pet.CONFIRM 版鈕在 y 557 ±20，上緣 537）→ 取 y=523 兩點區分
+DROP2_OK, DROP2_CANCEL, DROP2_NAME_BOX = (613, 543), (820, 543), (540, 412, 360, 50)
+DROP2_SIG = [(946, 208, 198, 65, 41, 24), (645, 523, 81, 121, 177, 28), (870, 523, 195, 87, 56, 28), (645, 543, 57, 106, 163, 24),
+             (870, 543, 178, 75, 46, 24), (700, 460, 243, 213, 177, 24), (520, 300, 237, 213, 175, 24)]
+DROP2 = uikit.Panel('BAGDROP2', None, DROP2_SIG, (946, 208), esc_close=False)
 DISCARD_OK = (612, 551)                                             # 提示窗確定 / 丟棄（ui/bag.md 612,544；pet 提示窗 615,557 → 取中間）
 
 FORBID = {'delete_mgr': (700, 598, 540, 56), 'expand': (190, 646, 170, 74)}
@@ -937,15 +943,21 @@ def discard_item(role: str, slot: int, expect: str, forbid=None, allow_protected
         close_popup()
         return rc
     import pet
-    if not _wait(lambda: uikit.is_open(pet.CONFIRM), 2.0):
-        return _fail(EXIT_VERIFY, '按了丟棄但提示窗沒出現（不重點）', 'bag-drop-noconfirm')
-    ct = _ocr_join(pet.CONFIRM_BOX, [('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 120, '-Zooms', '2,3')])
+    # 兩種版型都認：DROP2（丟棄 613,543 / 取消 820,543）優先，其次 pet.CONFIRM（確定 612,551 / 取消 813,557）；名稱驗證兩版都要過才按
+    if not _wait(lambda: uikit.is_open(DROP2) or uikit.is_open(pet.CONFIRM), 2.0):
+        return _fail(EXIT_VERIFY, '按了丟棄但提示窗沒出現（兩種版型都不吻合；不重點）', 'bag-drop-noconfirm')
+    kind2 = 'drop2' if uikit.is_open(DROP2) else 'pet'
+    pan = DROP2 if kind2 == 'drop2' else pet.CONFIRM
+    box = DROP2_NAME_BOX if kind2 == 'drop2' else pet.CONFIRM_BOX
+    ok_xy, cancel_xy = (DROP2_OK, DROP2_CANCEL) if kind2 == 'drop2' else (DISCARD_OK, (813, 557))
+    ct = _ocr_join(box, [('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 120, '-Zooms', '2,3')])
     if not ct or not name_match(ct, expect) or any(name_match(ct, b, 0.8) for b in bad):
-        uikit.safe_click(813, 557, pet.CONFIRM, note='bag 丟棄提示窗名稱不符 → 取消')
+        uikit.safe_click(cancel_xy[0], cancel_xy[1], pan, note='bag 丟棄提示窗名稱不符 → 取消')
         return _fail(EXIT_NAME, f'提示窗名稱 OCR 是 {ct!r}，不是預期的「{expect}」→ 已取消', 'bag-drop-confirm-name')
-    if not uikit.safe_click(DISCARD_OK[0], DISCARD_OK[1], pet.CONFIRM, note=f'bag 丟棄「{expect}」確定', wait_ms=600):
+    LAST['drop_confirm'] = kind2
+    if not uikit.safe_click(ok_xy[0], ok_xy[1], pan, note=f'bag 丟棄「{expect}」確定（{kind2} 版提示窗）', wait_ms=600):
         return _fail(EXIT_VERIFY, '提示窗特徵消失，沒點確定', 'bag-drop-confirm-gone')
-    if not _wait(lambda: not uikit.is_open(pet.CONFIRM), 2.5):
+    if not _wait(lambda: not uikit.is_open(pan), 2.5):
         return _fail(EXIT_VERIFY, '按了確定但提示窗沒關（不重點）', 'bag-drop-verify')
     left = read_slot_name(slot)
     if left and name_match(left, expect):

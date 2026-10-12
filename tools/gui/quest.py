@@ -29,7 +29,7 @@
   --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後隊長紅標還在 → 不亂點，退出碼 26；已是單人（組隊分頁沒隊長紅標）→ 不點任何東西，退出碼 0
   --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
   --step N  --fight 用：明確指定任務第 N 步的 NPC（= --npc auto 但不 OCR 追蹤條目；需 --task）。--npc auto 不給 --step 時，改讀追蹤條目「標題正下方那行說明」
-           （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
+           （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 先用「目前所在地圖只對應唯一一個打 BOSS / 對話步驟」反查（事件 log 註明地圖反查），仍不行 → 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
   --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過；切換面板開啟後等卡片內容穩定再讀：連 2 次讀到相同標籤才算，最多 TEAM_STABLE_MAX_S=1.5 秒，全部「不在隊」時至少重讀才判失敗 = read_team_labels_stable）：只在必要時檢查（2026-10-11）：開始前、--fight 點 NPC 前、領獎後（一步結束要去下一步 / 交任務）點追蹤前、任務 / BOSS 戰打完後的下一次點之前；其他點擊（每次點追蹤 / 黃問號）不檢查。開切換面板（uikit.open_panel / close_panel，輪詢驗證；打不開原地重試 CHECK_TEAM_TRIES=3 次、間隔 1 秒、先確認是主畫面）763,760，
            讀 5 張卡片的隊伍標籤，要「1 隊長 + (N-1) 隊員」（N=5 即 5 人都要在隊）；面板上其他卡片是單人 / 不在隊（例如單人 DKB0）不算錯；隊員不夠 / 隊長不是 1 個 / 讀不到 → 不點、事件 log 寫出誰不在隊、關面板（✕ 1064,208）；--fight 開打前退出碼 30、執行中發現脫隊退出碼 32。
            --solo / --fight --no-click 不檢查。--team-fresh（questrun 用：它在 30 秒內剛驗過隊伍）→ 只略過「開始前」那一次。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
@@ -1358,6 +1358,17 @@ def npc_map_of_xy(task: str, xy: tuple[int, int]):
     return maps.pop() if len(maps) == 1 else None
 
 
+def step_by_map(ts: list, cur_map) -> tuple[dict | None, str]:
+    """純函式：追蹤文字讀不到 / 對不到時的備援——目前所在地圖 cur_map 剛好只對應任務的「一個」打 BOSS / 對話步驟（endNpc 在該圖，
+    打怪(人工) 步不算）才採用；對應 0 個或多個 → None（呼叫端回 31）。例：漆黑洞窟(二轉) 在 32020 → 步 4 帖拉所伊朵 20,9；32021 有步 5 / 6 → 不採用"""
+    if not cur_map:
+        return None, '讀不到目前所在地圖'
+    cand = [t for t in ts if _npc_map_of(t) == cur_map and walk.psa.classify_step(t)[0] in ('battle', 'talk')]
+    if len(cand) == 1:
+        return cand[0], f'地圖 {cur_map} 只對應第 {cand[0].get("step")} 步'
+    return None, (f'地圖 {cur_map} 沒有對應的打 BOSS / 對話步驟' if not cand else f'地圖 {cur_map} 對應多個步驟（{[t.get("step") for t in cand]}），無法判定')
+
+
 def resolve_npc(a) -> tuple[int, int] | None:
     """--fight 的 NPC 地圖座標：--npc X,Y，或 --npc auto = 「目前步驟」的 endNpc（--task 任務；--step N 明確指定，不給就 OCR 追蹤條目下方的說明行
     對照 Task 表 explandTn）。讀不到 / 對不到 → 不退回第一個戰鬥步（2026-10-10 抓錯 8 樓守護獸的事故），a.resolve_rc = EXIT_STEP_UNKNOWN，回 None"""
@@ -1376,6 +1387,14 @@ def resolve_npc(a) -> tuple[int, int] | None:
             why = f'--step {a.step}'
         else:
             row, why = match_step(ts, read_step_texts(a.task), None if a.at else (lambda: (read_pos() or (None,))[0]))
+            if row is None and not a.at and (why.startswith('追蹤條目說明文字讀不到') or '對不到任務表' in why):
+                # 備援：追蹤文字 OCR 失敗 → 用目前所在地圖反查（只對應唯一一個打 BOSS / 對話步驟才採用；2026-10-12 漆黑洞窟(二轉) 32020 實機）
+                row2, why2 = step_by_map(ts, (read_pos() or (None,))[0])
+                if row2 is not None:
+                    row, why = row2, f'追蹤文字失敗（{why}）→ 地圖反查：{why2}'
+                    event(f'--npc auto：{why}')
+                else:
+                    why = f'{why}；地圖反查也不行（{why2}）'
         if row is None:
             event(f'--npc auto 取不到目前步驟：{why} → 不點 NPC，退出碼 {EXIT_STEP_UNKNOWN}（請 shot 看追蹤條目，改用 --step N 或 --npc X,Y）')
             a.resolve_rc = EXIT_STEP_UNKNOWN

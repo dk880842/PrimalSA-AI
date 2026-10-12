@@ -18,6 +18,7 @@
   124 中間按鈕不是藍色「傳送」（例：進行中任務是金色「重置任務」，同一位置！）→ 不點
   125 按了傳送，逾時沒出現 NPC 對話框
   126 對話框防護：內文 / 按鈕讀不到、含不可逆關鍵字、左鈕不是「接受」→ 沒按，對話框維持開著，存 snap
+      （左鈕是「接…任務」或等於 / 含任務名（去括號後綴也算，例 漆黑洞窟(二轉) 的選單頁「漆黑洞窟 / 再見」）→ 視為翻頁，先點左鈕再找「接受」；右鈕「再見」不點）
   127 按了接受，但重開任務詳情讀到的狀態不是「進行中」（沒接成 / 讀不到）
   128 按了傳送後跳「提示」視窗（接取任務條件不達標：前置任務 / 等級 / 道具不足；2026-10-11 實測 2017 在 2999 未完成時）→ 已關視窗、沒接
 
@@ -866,6 +867,18 @@ def _dialog_wait(timeout: float = 20.0) -> str | None:
     return None
 
 
+def menu_button_matches(btn: str, name: str) -> bool:
+    """NPC 選單頁（左鈕 = 任務名、右鈕 = 再見；例：瑪麗娜絲村長「漆黑洞窟 / 再見」，2026-10-12 實機）：
+    左鈕文字（去空白）等於 / 包含任務名，或包含任務名去掉括號後綴（漆黑洞窟(二轉) → 漆黑洞窟，至少 2 字）→ True。
+    只用來決定「先點左鈕翻頁再找接受」；不放行任何其他文字"""
+    b = re.sub(r'\s+', '', btn or '')
+    n = re.sub(r'\s+', '', name or '')
+    if not b or not n:
+        return False
+    base = re.sub(r'[（(][^）)]*[）)]', '', n)
+    return b == n or n in b or (len(base) >= 2 and base in b)
+
+
 def _after_transfer(src: str, name: str, presses: int, verify: bool = True) -> int:
     got = _dialog_wait()
     if got == 'notice':
@@ -883,11 +896,16 @@ def _after_transfer(src: str, name: str, presses: int, verify: bool = True) -> i
         # 猜謎三兄弟（受理A）第一個對話框左鈕是「接藍暴任務」（2026-10-12 實機），按下後才是「接受」→ 左鈕 = 接…任務 也放行
         _first = (g.get('buttons') or [''])[0]
         _accept_like = '接受' in btns or bool(re.fullmatch(r'接[\u4e00-\u9fff]{1,4}任務', _first.strip()))
+        # 選單頁：左鈕 = 任務名（漆黑洞窟 / 再見）→ 先點左鈕翻頁（只點左鈕，右鈕「再見」不點），下一輪再找「接受」；其他文字照舊停
+        _menu = (not _accept_like) and menu_button_matches(_first, name)
+        if _menu:
+            _accept_like = True
+            print(f'{src}：對話框第 {i + 1} 頁是選單（左鈕「{_first}」= 任務名）→ 先點左鈕翻頁')
         if g['blocked'] or not _accept_like:
             shot = uikit.snap('questdetail-dialog')
             why = g['reason'] or f'左鈕不是「接受」（讀到 {g.get("buttons")}）'
             return uikit.fail(src, EXIT_DIALOG_GUARD, f'對話框防護：{why}；內文 {g.get("body")} → 沒按任何鈕 [{shot}]')
-        uikit.gui('seq', f'click {quest.DIALOG_NEXT[0]} {quest.DIALOG_NEXT[1]}; wait 1200', note=f'questdetail 對話框「接受」{name}')
+        uikit.gui('seq', f'click {quest.DIALOG_NEXT[0]} {quest.DIALOG_NEXT[1]}; wait 1200', note=f'questdetail 對話框「{_first if _menu else "接受"}」{name}')
         s = uikit.screen()
         if s.get('state') != 'dialog':
             break

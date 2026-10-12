@@ -232,6 +232,28 @@ if 'up_3.png' in have:
     install(shot, dialog={'blocked': False, 'reason': '', 'body': [], 'buttons': []})
     rc = qd.accept('恐龍博士(1.82)')
     check('對話框文字讀不到 → 126，沒按', rc == qd.EXIT_DIALOG_GUARD and not clicked((948, 461)), str(rc))
+    # g2. 選單頁（左鈕 = 任務名）：先點左鈕翻頁，第 2 頁左鈕「接受」再點一次；右鈕「再見」不點
+    mm = qd.menu_button_matches
+    check('menu_button_matches：漆黑洞窟 vs 漆黑洞窟(二轉) / 全名 / 空白 / 無關', mm('漆黑洞窟', '漆黑洞窟(二轉)') and mm('漆黑洞窟(二轉)', '漆黑洞窟(二轉)') and mm('漆 黑洞窟', '漆黑洞窟(二轉)') and not mm('再見', '漆黑洞窟(二轉)') and not mm('戰鬥', '恐龍博士(1.82)') and not mm('', '恐龍博士(1.82)') and not mm('接', '接(x)'))
+    install(shot, states=('dialog', 'dialog', 'idle'))
+    _seq = iter([{'blocked': False, 'reason': '', 'body': ['歡迎'], 'buttons': ['恐龍博士', '再見']},
+                 {'blocked': False, 'reason': '', 'body': ['x'], 'buttons': ['接受', '再見']}])
+    quest.check_dialog_irreversible = lambda: next(_seq)
+    rc = qd.accept('恐龍博士(1.82)')
+    n_left = sum(1 for a in clicks if a[0] == 'seq' and 'click 948 461' in a[1])
+    check('選單頁：左鈕=任務名 → 點左鈕翻頁 + 第 2 頁接受（共 2 次左鈕）、沒點右鈕「再見」→ 0', rc == 0 and n_left == 2 and not any('click 1220 461' in a[1] for a in clicks if a[0] == 'seq'), f'{rc} 左鈕 {n_left} 次')
+    install(shot, states=('dialog', 'dialog', 'idle'))
+    _seq = iter([{'blocked': False, 'reason': '', 'body': ['歡迎'], 'buttons': ['恐龍博士', '再見']},
+                 {'blocked': False, 'reason': '', 'body': ['x'], 'buttons': ['戰鬥', '再見']}])
+    quest.check_dialog_irreversible = lambda: next(_seq)
+    rc = qd.accept('恐龍博士(1.82)')
+    check('選單頁翻頁後第 2 頁左鈕不是接受 → 126（只點過翻頁那一次）', rc == qd.EXIT_DIALOG_GUARD and sum(1 for a in clicks if a[0] == 'seq' and 'click 948 461' in a[1]) == 1, str(rc))
+    install(shot, dialog={'blocked': False, 'reason': '', 'body': ['x'], 'buttons': ['卡坦的願望', '再見']})
+    rc = qd.accept('恐龍博士(1.82)')
+    check('左鈕是別的任務名（不吻合）→ 126，沒點', rc == qd.EXIT_DIALOG_GUARD and not clicked((948, 461)), str(rc))
+    install(shot, dialog={'blocked': True, 'reason': '含不可逆關鍵字', 'body': ['轉生'], 'buttons': ['恐龍博士', '再見']})
+    rc = qd.accept('恐龍博士(1.82)')
+    check('選單頁但含不可逆字 → 126，沒點', rc == qd.EXIT_DIALOG_GUARD and not clicked((948, 461)), str(rc))
     # h. 成功 / 驗證失敗
     install(shot, states=('dialog', 'idle'))
     rc = qd.accept('恐龍博士(1.82)')
