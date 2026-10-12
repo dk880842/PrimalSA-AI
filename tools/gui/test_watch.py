@@ -100,7 +100,7 @@ class Fake:
         return subprocess.CompletedProcess(['x'], rc, out, err)
 
 
-EXTRA = ['0,0,0'] * len(screen_sigs.annot_points())
+EXTRA = ['0,0,0'] * (len(screen_sigs.annot_points()) + len(screen_sigs.loading_points()))
 FX = json.loads((HERE / 'fixtures' / 'screen_px.json').read_text(encoding='utf-8'))
 PTS = [tuple(p) for p in FX['points']]
 
@@ -629,7 +629,7 @@ check('hud 只有時間戳變 → content_key 不變', watchstate.content_key(w.
 watch.OCR_ON = False
 
 # ---------------------------------------------------------------- 第 5 階段：警示（unknown_long / quest 轉述 / ack / annotate）
-ALLPTS = screen_sigs.points() + screen_sigs.annot_points()
+ALLPTS = screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()
 
 
 def px_with(*sigs, base='70,70,70'):

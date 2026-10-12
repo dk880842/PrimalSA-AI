@@ -185,9 +185,19 @@ class Fake:
         self.rec('grind_start', spot)
         return self.grind_rc
 
-    def boss_retry(self, track):
-        self.rec('boss_retry', track)
+    def boss_retry(self, track, who=None):
+        self.rec(*(('boss_retry', track) if who is None else ('boss_retry', track, tuple(who))))
         return self.boss_q.pop(0) if len(self.boss_q) > 1 else self.boss_q[0]
+
+    def status_all(self, detail, roles):
+        """all_q：每次取一個 {角色: 狀態 | None(讀不到)}（最後一個重複）；沒給 = 全員已完成"""
+        self.rec('status_all', detail, tuple(roles))
+        q = getattr(self, 'all_q', None)
+        if not q:
+            return 0, {r: {detail: '已完成'} for r in roles}
+        m = q.pop(0) if len(q) > 1 else q[0]
+        res = {r: (None if m.get(r, '已完成') is None else {detail: m.get(r, '已完成')}) for r in roles}
+        return (1 if any(v is None for v in res.values()) else 0), res
 
 
 D17 = '彌生和日美子(1.82)'
@@ -308,6 +318,46 @@ f = Fake(status={D17: [questrun.DOING]}, quest=[(38, [])], boss=[(0, {})])
 check('--no-boss-retry → 114、沒呼叫 bossretry', go(f, [2017], boss_retry=False) == questrun.EXIT_TEAM and 'boss_retry' not in f.names())
 f = Fake(status={D17: [questrun.DOING]}, quest=[(38, [])], boss=[(9, {})])
 check('bossretry 9 → 9 透傳', go(f, [2017]) == uikit.EXIT_UNKNOWN_SCREEN)
+
+# 6f) 逐人驗證（2026-10-12 四寶玉之謎：隊長完成、DKBO3 / DKBO5 沒完成）
+DONE_TAIL = (0, ['任務完成'])
+others = tuple(r for r in questrun.ALL_ROLES if r != questrun.LEADER)
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL])
+check('完成後逐人驗：其他 4 人都已完成 → 0、只讀 1 次、沒 bossretry', go(f, [2017]) == 0 and f.calls.count(('status_all', D17, others)) == 1
+      and 'boss_retry' not in f.names(), str([c for c in f.calls if c[0] == 'status_all']))
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL], boss=[(0, {})])
+f.all_q = [{'DKBO3': questrun.DOING, 'DKBO5': questrun.DOING}, {}]
+rc = go(f, [2017])
+check('有人進行中 → bossretry --who 落後者 → 只重讀那兩人 → 0', rc == 0 and ('boss_retry', questdefs.get(2017)['track'], ('DKBO3', 'DKBO5')) in f.calls
+      and ('status_all', D17, ('DKBO3', 'DKBO5')) in f.calls and 'grind_start' in f.names(), str(f.calls[-6:]))
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL], boss=[(0, {})])
+f.all_q = [{'DKBO5': questrun.DOING}]
+rc = go(f, [2017])
+check('bossretry 後仍進行中 → 108、不恢復掛機', rc == questrun.EXIT_LAGGARD and f.names().count('boss_retry') == 1 and 'grind_start' not in f.names()
+      and questrun.LAST['info'].get('laggards') == ['DKBO5'], str(questrun.LAST.get('info', {}).get('msg')))
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL], boss=[(144, {'msg': '假'})])
+f.all_q = [{'DKBO3': questrun.DOING}]
+check('bossretry 失敗 → 108（boss_retry_rc 記下）', go(f, [2017]) == questrun.EXIT_LAGGARD and questrun.LAST['info'].get('boss_retry_rc') == 144)
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL], boss=[(9, {})])
+f.all_q = [{'DKBO3': questrun.DOING}]
+check('bossretry 9 → 9 透傳', go(f, [2017]) == uikit.EXIT_UNKNOWN_SCREEN)
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL])
+f.all_q = [{'DKBO4': None}]
+check('某人讀不到 → 108、不盲打 bossretry', go(f, [2017]) == questrun.EXIT_LAGGARD and 'boss_retry' not in f.names())
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL])
+f.all_q = [{'DKBO2': questrun.PENDING}]
+check('某人待接取（沒接到）→ 108、不 bossretry', go(f, [2017]) == questrun.EXIT_LAGGARD and 'boss_retry' not in f.names())
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL])
+f.all_q = [{'DKBO3': questrun.DOING}]
+check('--no-boss-retry：有人沒完成 → 108', go(f, [2017], boss_retry=False) == questrun.EXIT_LAGGARD and 'boss_retry' not in f.names())
+f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL])
+f.all_q = [{'DKBO3': questrun.DOING}]
+check('--no-verify-all → 不讀、0', go(f, [2017], verify_all=False) == 0 and 'status_all' not in f.names())
+f = Fake(status={D17: [questrun.DONE]})
+check('詳情一開就已完成 → 預設不逐人驗', go(f, [2017]) == 0 and 'status_all' not in f.names())
+f = Fake(status={D17: [questrun.DONE]}, boss=[(0, {})])
+f.all_q = [{'DKBO3': questrun.DOING}, {}]
+check('--verify-skipped：已完成跳過的也驗 → 補人 → 0', go(f, [2017], verify_skipped=True) == 0 and f.names().count('boss_retry') == 1)
 
 # 7) 30 隊伍不符：team.form 一次再跑；連續兩次 → 111
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, [])])

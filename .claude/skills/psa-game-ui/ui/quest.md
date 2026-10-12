@@ -28,6 +28,7 @@
 - **點任務追蹤 205,325 = 自動巡路**：隊伍自己走（含跨樓層）到下一步的 NPC，到了會自動開對話框；畫面中央出現金黃色「**Auto Walking**」字樣、右上圓形小地圖鈕變成「傳送」字樣。走一趟約 5～10 秒。
 - 任務詳情裡進行中任務右邊的箭頭 361,299 點了沒有明顯效果（未用）。
 - **不是每一步都會巡路**：成人儀式第 2 步（接受後去 188,13 找差使）點追蹤原地不動 → 要手動 `walk.py 10204 188 13`（路線 14,6 → 188,13 約 25 段，途中遇敵會讓 walk.py 讀不到座標而中斷，重跑即可，它從目前位置重算）。走到 NPC 附近對話框反而會自己開。巡路用的是設定表 Task 的 taskNavigate 欄位；沒有路徑的步驟、`TeamCountLimit.noTaskNavigate` 列的地圖都不會巡路。
+- **載入畫面（2026-10-12）**：換圖時全螢幕插畫 + 下方「加載中...」+ 綠色轉圈，背景插畫會換；`screen_sigs.loading_text` 比「加載中」白字字形（x 665..735 每 2 px、y 718..736 每 3 px 遮罩，tools/.cache 1334 張截圖 0 誤判），`is_loading` = 舊三點或字形。quest.py 狀態 unknown 時先 `loading_screen()`：是載入畫面就等 1 秒、不計入「不認得的畫面」（原本會連 3 次退出碼 2 誤報驗證視窗）；watch 加讀 `loading_points()`，annotate 標 loading。樣本 `fixtures/loading_px.json`、測試 test_screen_sigs。
 - **畫面像素特徵 / 分類在 `tools/gui/screen_sigs.py`**（2026-10-10 從 quest.py / netwatch.py / heal.py 搬出；quest.read_screen = 取點 + `screen_sigs.classify`）。改特徵或容差要跑 `uv run --no-project python tools/gui/test_screen_sigs.py`（fixture `tools/gui/fixtures/screen_px.json` 是重構前對舊截圖凍結的像素 + 分類，必須 0 差異；每組特徵另有 tol / tol+1 邊界測試）。PNG 解碼在 `tools/gui/pngread.py`。
 - 對話框（都在右側）：棕底，左鈕 948,461（接受 / 成人勾玉 / 完成，推進用）、右鈕 1220,461（再見）。偵測 = 1360,300 與 1100,350 為 (107,70,44) 且 948,445 / 1220,445 為米色 (229,199,157)。
 - **盜賊式「戰鬥 / 再見」對話框（強盜的洞穴 2020，洞穴 1F / 3F / 5F 三個盜賊，左鈕「戰鬥」= 開打 1 場任務戰）**：2026-10-09 實測 quest.py 把它判成 idle 沒按（要手動 948,461）。截圖樣本已被清掉，**原因是推斷**（SIG_DIALOG 的鈕取樣點 y=445 離字中心 461 近，「戰鬥」深字筆畫可能壓到點；或內文棕底點不同）。修法（`quest.read_screen` 後備，不動 screen_sigs）：classify 判 idle / unknown 時，若兩顆鈕字旁 4 點（`DIALOG_BTN_PROBES`：880 / 1010 / 1150 / 1290, y=461）有 >= 3 點是米色 (229,197,155) 容差 40，再 OCR 按鈕區（`-Dark 140`），**左鈕是「戰鬥」（在「再見」之前）才當 dialog**（`fight_fallback=True`）；其他字樣一律不處理。後面照舊走不可逆防護（內文含轉生 / 封印等仍退出碼 39），再按左鈕。**未用樣本驗證，需實機確認**；若實機仍判 idle，存下盜賊對話框截圖再量。
@@ -214,6 +215,7 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
 - **標題辨識 = 圖樣板**（`tools/gui/fixtures/questdetail_tpl.json`，進 git；列標題圖 172×24、中間標題圖 250×26；二值化 + 膨脹 1 px 後的「局部缺漏」比對，因為同一標題在不同捲動位置有子像素差、IoU 只有 0.72～0.95，而「漆黑洞窟(三轉) / (五轉)」只差一個字、整體 IoU 也有 0.95，只有「16 欄視窗內缺漏墨點」能分開：同標題 ≤ 11、不同標題 ≥ 17，門檻 14 + 與次佳差 ≥ 4）。樣板沒命中才 OCR（`ocr.ps1 -Dark 150 -Zooms 2,3,4`，**每個倍數回一行，同標題重複好幾行，要逐行 snap 到 TaskExplan 名稱再投票，不能把幾行串起來**）→ 認出後自動存樣板。名稱表 = `knowledge/data/tables/TaskExplan.jsonl`（`is182Task` = 1.82 清單，另加 2999）。
 - **接取前置**：「提示：接取任務條件不達標」會在按傳送後跳出（實測：1轉後 2999 未完成就接 2017）；accept 偵測提示視窗（NET_DIALOG 特徵）→ 點 ✕ 946,208 關掉 → 退出 128。**1.82 每個任務都要先完成 2999 成人儀式**。
 - **accept 流程**：開詳情 → 切分頁（主線：1000、2999、2004～2008；其餘支線）→ 捲到頂逐頁找 → 狀態必須待接取 → 點列 → 驗中間標題 → 驗藍鈕 → 點傳送 → 等 NPC 對話框（或提示窗）→ `quest.check_dialog_irreversible` + 左鈕必須是「接受」→ 按左鈕 → 重開詳情驗證「進行中」。任何驗證不過都不往下點。
+- **逐人讀（2026-10-12）**：`questdetail.status_all(titles, roles=None)` / `questrun.py status --role all|DKBO3,DKBO5 [任務ID …]`。**任務詳情面板沒有左欄角色頭像**（實機截圖：只有主線 / 支線分頁 + 列表 + 中間描述），所以只能 `char.switch` 切當前角色、每人開關一次詳情；當前角色先讀（少切一次），每人只讀目標所在分頁、全部讀到就停止往下捲（`read_list(stop_at=…)`），最後 `char.ensure DKBO`。→ (rc, {角色: {標題: 狀態} | None})；某人切不到 / 讀不到 → 該人 None、rc 記第一個錯；9 / 10 立即停。`questdetail.laggards(res, 標題)` = 沒有「已完成」的人。注意已完成任務排在分頁最後面，讀已完成任務要捲到底。
 - 實測（2026-10-11 14:5x）：`status` 約 60～95 s（捲動等慣性為主），1.82 清單 19 項 + 其他 14 列全部讀出、與人工逐頁截圖 0 錯；`accept 成人儀式` 成功（傳送到 10204:14,6 儀式的審判，對話框按接受，詳情確認進行中，約 50 s）。
 
 ## questrun.py：1.82 任務驅動器（P2，2026-10-11；計畫 notes/plan-182-script.md）
@@ -243,18 +245,32 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
   - **接取後 team.form rc 40**：根因見 ui/team.md（`open_panel_ex` 第 2 下補點時間算錯，4 s 內永遠不補點），已修。
   - **解散認不出隊長「L」標**：見 ui/team.md「左側分頁像素」。**bag.py find 回全空**：見 ui/bag.md「顯示道具名」。
 
-### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12，**只有離線測試，實機未驗證**；questrun 38 / 21 已自動呼叫）
+### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12；`--who` 模式實機驗過 DKBO3 / DKBO5 補完四寶玉之謎；questrun 38 / 21 與逐人驗證自動呼叫）
 照 memory psa-team-check-after-boss（2026-10-12 使用者更正）：照 0 轉龍王任務（英雄島前傳 2031 步 6）的做法——**落後的人當隊長、組滿 5 人、按追蹤回 BOSS 處全隊一起打**，不是掉隊者單人去打。errlog #222 / #226 / #238（四寶玉之謎 38 手動處理）。
 ```
 uv run --no-project python tools/gui/bossretry.py plan --track 琉璃洞窟        # 不碰遊戲：印流程
 uv run --no-project python tools/gui/bossretry.py run --track 琉璃洞窟 [--max-tries 2] [--max-slices 6] [--slice-s 300] [--hp-min 60]
+uv run --no-project python tools/gui/bossretry.py run --track 四寶玉之謎 --who DKBO3,DKBO5 [--ref-step done|N]   # 指定落後者（隊伍滿的也照跑；逐人驗證用）
 uv run --no-project python tools/gui/bossretry.py status                         # 唯讀：隊長 / 不在隊的人
-uv run --no-project python tools/gui/test_bossretry.py                           # 離線測試（假 Tools，37 項）
+uv run --no-project python tools/gui/test_bossretry.py                           # 離線測試（假 Tools）
 ```
 - **流程**：`team.check(5)` = 0 → 其實沒缺人，不動。否則切換面板卡片找隊長（參考者）與不在隊的人 → 讀隊長的追蹤步號（`quest.read_step_no`）→ 隊長解散舊隊（之後要全員單人才能快速組隊）→ 每個掉隊者：`char.switch` → 讀步號：相同 = 遊戲有給進度，不重打；落後 → `team.form(leader=掉隊者)` 組滿 5 人 → 全隊 HP（`bag.hps`）任一 < 60% 就補血（小護士補整隊）→ `quest.py --task <追蹤> --team-size 5` 預設模式全隊打（點追蹤 = 自動傳送 / 巡路，BOSS 戰後停 37 / 38）；追蹤沒反應（3）改 `--fight --npc auto --team-size 5`（站在 BOSS 旁直接點 NPC）→ 讀掉隊者步號，追到與隊長相同 → 由他解散這隊。最後 `char.ensure DKBO` → `team.form` → `team.check(5)`。
 - **輸 / 隊伍散**：BOSS 戰後步號沒前進、被打飛（21）、`--fight` 35 = 輸一次 → 全隊補血檢查 → 再打（≤ `--max-tries`）；38 / 30 / 32 / 21 後 `team.check` 不滿 → 由掉隊者解散重組（≤ 3 次）。
 - **多人掉隊**：逐一以每個落後者為隊長重複（已完成該步的人陪打）。
 - **不盲打**：步號讀不到（隊長或掉隊者）→ 142；掉隊者步號超前 → 144；quest.py 39 / 33 / 29 / 25 / 19 / 31 / 22 / 23 / 34 / 36、或 3 之後 `--fight` 仍 3 → 146；9 / 10 立即透傳且不再點；其他失敗先解散臨時隊伍、`char.ensure DKBO` 再回碼。
 - 退出碼 140～149：140 隊伍讀不到 / 沒隊長 / 名字讀不出、141 切角色、142 步號讀不到、143 補血、144 重打失敗、145 組隊 / 解散失敗、146 quest.py 要人看。
+- **questrun 逐人驗證（2026-10-12，`verify_all`）**：根因 = questrun 只看隊長的追蹤列表 / 詳情就判任務完成，被打飛的隊員進度落後沒被發現（四寶玉之謎 DKBO3 / DKBO5 一直是進行中）。現在每個任務由隊長判完成後，其他 4 人逐一 `questdetail.status_all` 讀詳情（每人約 10～40 秒）；有人是進行中 → `bossretry --who 落後者`（落後者當隊長 5 人重打 → 切回 DKBO 重組）→ 只重讀那幾個人；仍沒完成 / bossretry 失敗 / 某人讀不到 / 某人是待接取（沒接到，bossretry 幫不上）→ **108** 停手（`info.laggards`、`info.verify`）。`--no-verify-all` 關；詳情一開就已完成而跳過的任務預設不驗（`--verify-skipped` 才驗，驗過記 `all_done` 不重驗）。9 / 10 透傳。唯讀查：`questrun.py status --role all [任務ID …]`。
 - **questrun 接線**：quest.py 38 / 21 → `Tools.boss_retry(track)` = `bossretry.run(track)`；每任務最多 `BOSS_RETRY_MAX` = 3 次；0 → `team_ok_at` = 現在 → `hp_gate` → 下一片（`--team-fresh`）；9 / 10 透傳；其他 → 114（`info.boss_retry_rc`）；`--no-boss-retry` 關（直接 114）。
-- **待實機確認**：①被打飛的人步號是否真的沒前進；②已完成該步的 4 人陪打，進度 / 對話 / BOSS 出不出現會不會怪；③掉隊者在村子、其他人在洞窟深處時快速組隊能否跨地圖、組成後按追蹤是否全隊傳回 BOSS 處（不行 → 145）；④DKBO 自己被打飛時的解散路徑；**掉隊者是 DKBO5（第 5 張卡）時 team.form 會 44**（快速組隊提示視窗上排只看得到前 4 欄，team.py 既有限制）；⑤非 DKBO 隊長觸發 heal_trip 是否正常。
+- **`--who` 模式**：不看 team.check / 掉隊卡片，落後者 = 名單、參考步號預設 GONE（其他人已完成）；有隊伍先由現任隊長解散，之後同上。questrun 每任務完成後的逐人驗證（`verify_all`）就是用這個。
+- **組完隊再驗**：`form_as` 組完重讀切換面板，隊長必須是落後者、其他 4 人都是隊員，否則 145（使用者 2026-10-12 要求）；組隊小錯（切換面板讀到 0 張卡 42）原地重試 3 次（`questrun.retry_form`，與 questrun.form 共用）。
+- **隊伍散了由現任隊長解散**（`disband_actual`）：落後者當隊長打輸、自己陣亡被踢，剩下的隊伍隊長會自動換人（實機：DKBO3 陣亡 → 隊長變 DKBO）；舊流程切到 DKBO3 解散 → team 46 → 145。現在讀卡片找真正的隊長再解散；失敗收尾也一樣。
+- **2026-10-12 實機（四寶玉之謎，DKBO3 步 4、DKBO5 步 2）**：
+  - 追蹤列表第 2 張卡只露標題、說明行被下緣裁掉 → `quest.read_step_no` 一直 None → 142。改：標題讀到但沒說明行時把追蹤列表往下捲一格再讀（`reveal=True`，只拖列表）。
+  - 快速組隊提示選 DKBO3（第 3 欄）當隊長，角帶第 3 點 (131,2,0) 被判沒亮 → 44；DKBO5（第 5 欄）上排看不到 → 舊版直接 44。都已修（見 ui/team.md「快速組隊」）。
+  - 第一次 DKBO3 隊打火雞（沙姆島）輸：DKBO2 / DKBO3 陣亡踢隊、38。**根因是 DKBO 外掛「人物首次動作」風的精靈Lv.5 沒勾**（使用者更正；不是血量），勾上後（見 ui/ass.md）重打 6 秒贏。重打前補血維持 HP 門檻（`--hp-min`），不強制每次回醫院。
+  - DKBO3：組隊 → 補血 → 1 片打火雞 37 → 1 片回學者交任務「任務完成」→ DKBO 重組 5 人 check 0，共 122 秒。
+  - DKBO5（步 2 起）：步 2 加格、步 3 恩摩摩都打贏但各有人陣亡（38，步號前進）→ 舊版重組後沒看 HP 就去下一場，路上又 14 場一般遇敵 → 步 4 火雞全滅（5 人 HP 0）→ 舊版「先補血、後重組」只補到隊長那 2 人，重組時切換面板讀成全 other → 誤判沒隊伍、form 41 ×3 → 145。
+    修：①每場 BOSS / 任務戰之後（贏輸都算）先重組、**重組後**才 `hp_gate`（HP 門檻，不強制每次回醫院）；②`disband_actual` 讀到全 other 先等 2 秒重讀，仍讀不準就 145 不亂動；③`--who` 續跑時隊伍已是「落後者帶滿 5 人」→ 沿用不拆。修後重跑：重組 → 補血（3 人 HP 0）→ 火雞 37 → 學者「任務完成」→ DKBO 重組 check 0，156 秒。
+  - quest.py 換圖載入畫面（新插畫 +「加載中...」）被當 unknown 連 3 次 → 退出碼 2 誤報驗證視窗（實際看圖確認是載入畫面）。已修：`screen_sigs.loading_text` 字形遮罩 + quest.py `loading_screen()` 遇到就等待、不計入（見 ui/README / watch 段）。
+  - 逐人驗證實測：`questrun.py status --role all 2010` 5 人都「已完成」，2 分 46 秒（已完成任務排在支線最後，每人都要捲到底）。
+- **待實機確認**：①被打飛的人步號是否真的沒前進；②已完成該步的 4 人陪打，進度 / 對話 / BOSS 出不出現會不會怪；③掉隊者在村子、其他人在洞窟深處時快速組隊能否跨地圖、組成後按追蹤是否全隊傳回 BOSS 處（不行 → 145）；④DKBO 自己被打飛時的解散路徑；⑤非 DKBO 隊長觸發 heal_trip 是否正常。

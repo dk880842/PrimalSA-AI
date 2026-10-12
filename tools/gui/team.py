@@ -348,7 +348,10 @@ QT_BTN = (520, 578)                  # 切換面板內「快速組隊」
 QT_LOGIN_ALL = (716, 578)            # 「全部登錄」（紅區：只在 --login-all）
 QT_GO = (720, 665)                   # 提示視窗「組隊」
 QT_LEADER_Y, QT_MEMBER_Y = 320, 520  # 上排（隊長）/ 下排（隊員）卡片中心 y
-QT_X0, QT_DX = 549, 133              # 卡片中心 x = 549 + 133 * 欄；上排只看得到 4 欄（第 5 位被切掉，不支援當隊長）
+QT_X0, QT_DX = 549, 133              # 卡片中心 x = 549 + 133 * 欄；上排只看得到 4 欄（第 5 位被切掉）
+QT_TOP_DRAG = (940, 300, 700, 300)   # 第 5 張當隊長：上排往左拖到底（2026-10-12 實機：拖完整排左移 QT_TOP_SHIFT，DKBO5 卡中心 962；下排不動）
+QT_TOP_SHIFT = 119
+QT_TOP_SETTLE_MS = 800
 QT_LEADER_BADGE = [(520, 243), (530, 243), (505, 255)]       # 上排第 0 欄「隊長」紅帶（233,4,3）/（245,4,0）/（185,3,0）
 QT_MEMBER_BADGE = [(505, 458), (520, 447), (530, 447)]       # 下排第 0 欄「隊員」藍帶（3,74,255）；未選 = 棕 (169,117,70)
 QT_NAME_BOX = (-40, 30, 80, 30)      # 上排卡片名字 OCR 框 = (x-40, 350, 80, 30)（黑字白邊；-Zooms 2,3,4 讀得到）
@@ -360,22 +363,24 @@ QT_POLL_S = 0.1
 
 
 def badge_state(c) -> str:
-    """提示視窗卡片角標像素 → 'red'（隊長）/ 'blue'（隊員）/ 'none'"""
+    """提示視窗卡片角標像素 → 'red'（隊長）/ 'blue'（隊員）/ 'none'。
+    紅：R > 110（2026-10-12 實機第 3 欄第 3 點 (771,255) 是角帶暗邊 (131,2,0)，舊門檻 R > 180 → 選了隊長也判沒亮 → 44；未選的棕 G ≈ 117 不會誤中）"""
     r, g, b = c
-    if r > 180 and g < 40 and b < 40:
+    if r > 110 and g < 40 and b < 40:
         return 'red'
     if b > 200 and r < 40 and g < 130:
         return 'blue'
     return 'none'
 
 
-def _badge_pts(pts, col: int) -> list:
-    return [(x + QT_DX * col, y) for x, y in pts]
+def _badge_pts(pts, col: int, shift: int = 0) -> list:
+    return [(x + QT_DX * col - shift, y) for x, y in pts]
 
 
-def read_badges(leader_col: int, member_cols: list):
-    """一次 pixel 讀 → (隊長角標狀態, [各隊員角標狀態])；三點都同色才算（任一點不同 = 'none'）；讀不到回 None"""
-    pts = _badge_pts(QT_LEADER_BADGE, leader_col)
+def read_badges(leader_col: int, member_cols: list, shift: int = 0):
+    """一次 pixel 讀 → (隊長角標狀態, [各隊員角標狀態])；三點都同色才算（任一點不同 = 'none'）；讀不到回 None。
+    shift = 上排拖動後的左移量（只影響隊長那排）"""
+    pts = _badge_pts(QT_LEADER_BADGE, leader_col, shift)
     for j in member_cols:
         pts += _badge_pts(QT_MEMBER_BADGE, j)
     cols = uikit.px(pts)
@@ -389,9 +394,9 @@ def read_badges(leader_col: int, member_cols: list):
     return out[0], out[1:]
 
 
-def prompt_name_ok(col: int, leader: str) -> bool:
+def prompt_name_ok(col: int, leader: str, shift: int = 0) -> bool:
     """上排第 col 欄名字 OCR 必須確認是 leader（cross_check ok）；讀不出 / 讀到別人都拒絕"""
-    x = QT_X0 + QT_DX * col
+    x = QT_X0 + QT_DX * col - shift
     texts = uikit.ocr((x + QT_NAME_BOX[0], QT_NAME_Y, QT_NAME_BOX[2], QT_NAME_BOX[3]), '-Zooms', QT_OCR_ZOOMS)
     return cross_check(leader, texts) == 'ok'
 
@@ -435,23 +440,29 @@ def _quick_team_prompt(leader: str, col: int, size: int) -> int:
             return _qt_abort('快速組隊提示視窗 1.5 s 內沒出現（沒再點任何東西）', 'team-form-noprompt')
         uikit.sleep(QT_POLL_S)
     uikit.mark('prompt')
-    if not prompt_name_ok(col, leader):
-        return _qt_abort(f'提示視窗上排第 {col + 1} 欄名字 OCR 無法確認是 {leader}，不點', 'team-form-leadername')
+    shift = 0
+    if col > 3:                                                # 第 5 張（DKBO5）：上排往左拖到底再找（2026-10-12 實機量）
+        if not uikit.is_open(uikit.QTEAM):
+            return _qt_abort('拖上排前提示視窗特徵不在，沒拖', 'team-form-drag-gone')
+        uikit.gui('seq', 'drag %d %d %d %d; wait %d' % (QT_TOP_DRAG + (QT_TOP_SETTLE_MS,)), note=f'team form 上排往左拖（{leader} 在第 {col + 1} 張）')
+        shift = QT_TOP_SHIFT
+    if not prompt_name_ok(col, leader, shift):
+        return _qt_abort(f'提示視窗上排第 {col + 1} 欄名字 OCR 無法確認是 {leader}（左移 {shift}），不點', 'team-form-leadername')
     uikit.mark('ocr-leader')
     # 隊長：先讀再點（切換式）；已經是紅帶就不點
-    b = read_badges(col, [])
+    b = read_badges(col, [], shift)
     if b is None:
         return _qt_abort('讀不到隊長角標像素', 'team-form-badge')
     if b[0] != 'red':
-        if not uikit.safe_click(QT_X0 + QT_DX * col, QT_LEADER_Y, uikit.QTEAM, note=f'team form 選隊長 {leader}', wait_ms=100):
+        if not uikit.safe_click(QT_X0 + QT_DX * col - shift, QT_LEADER_Y, uikit.QTEAM, note=f'team form 選隊長 {leader}', wait_ms=100):
             return _qt_abort('點隊長前提示視窗特徵不在，沒點', 'team-form-leader-gone')
-        b = read_badges(col, [])
+        b = read_badges(col, [], shift)
         if b is None or b[0] != 'red':
             return _qt_abort(f'點了隊長但紅「隊長」角標沒出現（{b}）', 'team-form-leader-nobadge')
     uikit.mark('leader')
     # 下排 size-1 張隊員：每張先讀（藍 = 已選，不點），沒選才點，點完再讀確認
     mcols = list(range(size - 1))
-    b = read_badges(col, mcols)
+    b = read_badges(col, mcols, shift)
     if b is None:
         return _qt_abort('讀不到隊員角標像素', 'team-form-badge')
     for j in mcols:
@@ -459,12 +470,12 @@ def _quick_team_prompt(leader: str, col: int, size: int) -> int:
             continue
         if not uikit.safe_click(QT_X0 + QT_DX * j, QT_MEMBER_Y, uikit.QTEAM, note=f'team form 選隊員（下排第 {j + 1} 張）', wait_ms=100):
             return _qt_abort('點隊員前提示視窗特徵不在，沒點', 'team-form-member-gone')
-        one = read_badges(col, [j])
+        one = read_badges(col, [j], shift)
         if one is None or one[1][0] != 'blue':
             return _qt_abort(f'點了下排第 {j + 1} 張但藍「隊員」角標沒出現（{one}），不按組隊', 'team-form-member-nobadge')
     uikit.mark('members')
     # 按組隊前最後一次全讀：提示還在、1 紅 + (size-1) 藍
-    b = read_badges(col, mcols)
+    b = read_badges(col, mcols, shift)
     if b is None or b[0] != 'red' or any(s != 'blue' for s in b[1]) or not uikit.is_open(uikit.QTEAM):
         return _qt_abort(f'按組隊前最後確認不符（{b}），不按組隊', 'team-form-final')
     uikit.mark('final-check')
@@ -552,9 +563,9 @@ def form(leader=None, size: int = 5, login_all: bool = False, regroup: bool = Fa
     if lc is None:
         uikit.close_panel(uikit.SWITCH, known_open=True)
         return uikit.fail(SRC, EXIT_QT, f'找不到名字確認過的 {leader} 卡片，不組隊')
-    if lc.slot > 3:
+    if lc.slot > 4:
         uikit.close_panel(uikit.SWITCH, known_open=True)
-        return uikit.fail(SRC, EXIT_QT, f'{leader} 在第 {lc.slot + 1} 張卡，提示視窗上排只看得到前 4 欄（未實測拖曳），不組隊')
+        return uikit.fail(SRC, EXIT_QT, f'{leader} 在第 {lc.slot + 1} 張卡，提示視窗上排最多 5 欄，不組隊')
     uikit.mark('read-done')
     rc = _quick_team_prompt(leader, lc.slot, size)
     if rc:

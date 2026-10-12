@@ -393,6 +393,15 @@ def find_row(rows: list, title: str) -> dict | None:
     return next((r for r in rows if r['title'] and norm_title(r['title']) == w), None)
 
 
+def all_found(rows: list, titles) -> bool:
+    """titles 每一個都在 rows 裡、而且狀態讀得出（不是 ?）"""
+    for t in titles:
+        r = find_row(rows, t)
+        if not r or r['status'] == UNKNOWN:
+            return False
+    return True
+
+
 def same_row(a: dict, b: dict) -> bool:
     """兩次讀到的是同一列：標題相同（認得時）或標題圖 IoU 幾乎一樣（不認得時）"""
     if a['title'] and b['title']:
@@ -549,9 +558,10 @@ def scroll_top(dy: int = TOP_DY) -> bool:
     return True
 
 
-def read_list(tab: str = '支線', dy: int | None = None, learn: bool = True) -> dict:
+def read_list(tab: str = '支線', dy: int | None = None, learn: bool = True, stop_at=None) -> dict:
     """面板已開著：切到 tab → 捲到最上 → 逐頁讀到底 → {'ok','rows','gaps','tab','pages'}。
-    rows = [{title, status, how}]（依列表順序）；title 為 None = 不認得（樣板與 OCR 都失敗）。gaps > 0 = 相鄰頁沒交集，可能漏列"""
+    rows = [{title, status, how}]（依列表順序）；title 為 None = 不認得（樣板與 OCR 都失敗）。gaps > 0 = 相鄰頁沒交集，可能漏列。
+    stop_at = 標題清單：全部都讀到（狀態不是 ?）就不再往下捲（逐人驗證用，省捲動）"""
     if not select_tab(tab):
         return {'ok': False, 'why': f'切不到 {tab} 分頁', 'rows': [], 'gaps': 0, 'tab': tab, 'pages': 0}
     tpl = load_tpl()
@@ -577,6 +587,8 @@ def read_list(tab: str = '支線', dy: int | None = None, learn: bool = True) ->
             break
         last = key
         pages.append(rows)
+        if stop_at and all_found(merge_pages(pages)[0], stop_at):
+            break
     merged, gaps = merge_pages(pages)
     return {'ok': bool(merged), 'rows': [{'title': r['title'], 'status': r['status'], 'how': r['how']} for r in merged],
             'gaps': gaps, 'tab': tab, 'pages': len(pages), 'fallbacks': fallbacks}
@@ -628,6 +640,106 @@ def task_status(title: str, dy: int | None = None) -> tuple:
         return uikit.fail(src, EXIT_NOT_FOUND, f'讀不到列表：{r.get("why")}'), None
     row = find_row(r['rows'], name)
     return 0, (row['status'] if row else None)
+
+
+def read_open(names: list, dy: int | None = None) -> tuple:
+    """面板已開著：讀 names 各自所在分頁（讀到全部就停止往下捲）→ (rc, {名稱: 狀態或 None})"""
+    by_tab: dict = {}
+    for n in names:
+        by_tab.setdefault(tab_of(n), []).append(n)
+    out = {}
+    for tab, ns in by_tab.items():
+        r = read_list(tab, dy, stop_at=ns)
+        if not r['ok']:
+            return EXIT_NOT_FOUND, out
+        for n in ns:
+            row = find_row(r['rows'], n)
+            out[n] = row['status'] if row else None
+    return 0, out
+
+
+class _CharTools:
+    """status_all 的真實工具（測試換成假的）：current / switch / ensure 走 char.py（同一行程只起一次 server）；read = 開詳情讀完就關"""
+
+    def current(self):
+        import char
+        rc = char.current()
+        return rc, (char.LAST or {}).get('current')
+
+    def switch(self, who):
+        import char
+        return char.switch(who)
+
+    def ensure(self, who):
+        import char
+        return char.ensure(who)
+
+    def read(self, names, dy=None):
+        rc = uikit.preflight('questdetail')
+        if rc:
+            return rc, {}
+        if not open_detail():
+            return uikit.fail('questdetail', EXIT_NO_PANEL, '任務詳情打不開'), {}
+        try:
+            return read_open(names, dy)
+        finally:
+            close_detail()
+
+
+ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+STOP_RC = (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)
+
+
+def status_all(titles, roles=None, leader: str = 'DKBO', tools=None, dy: int | None = None, back: bool = True) -> tuple:
+    """逐人讀任務詳情（2026-10-12：四寶玉之謎隊長完成、DKBO3 / DKBO5 被打飛沒完成，questrun 只看隊長沒發現）。
+    **任務詳情面板沒有左欄角色頭像**（2026-10-12 實機截圖：只有主線 / 支線分頁 + 列表），所以只能 char.switch 切當前角色、每人開關一次詳情；
+    當前是誰就先讀誰（少切一次），每人只讀 titles 所在分頁、讀到就停止捲動。結束 back=True → char.ensure(leader)。
+    → (rc, {角色: {標題: 狀態或 None}})；某人切換 / 讀取失敗 → 該人值為 None、rc 記第一個錯（9 / 10 立即停、不再點）"""
+    T = tools or _CharTools()
+    names = []
+    for t in titles:
+        n = snap_name(t, 0.9)
+        if not n:
+            return uikit.fail('questdetail', uikit.EXIT_USAGE, f'「{t}」不在任務表（TaskExplan）名稱裡'), {}
+        names.append(n)
+    roles = list(roles or ALL_ROLES)
+    rc0, cur = T.current()
+    if rc0 in STOP_RC:
+        return rc0, {}
+    if cur in roles:                                            # 當前角色先讀（少切一次）
+        roles.remove(cur)
+        roles.insert(0, cur)
+    out, first = {}, 0
+    for who in roles:
+        if who != cur:
+            rc = T.switch(who)
+            if rc in STOP_RC:
+                return rc, out
+            if rc:
+                out[who] = None
+                first = first or rc
+                continue
+            cur = who
+        rc, st = T.read(names, dy)
+        if rc in STOP_RC:
+            return rc, out
+        if rc:
+            out[who] = None
+            first = first or rc
+            continue
+        out[who] = st
+    if back and cur != leader:
+        rc = T.ensure(leader)
+        if rc in STOP_RC:
+            return rc, out
+        first = first or rc
+    return first, out
+
+
+def laggards(res: dict, title: str) -> list:
+    """status_all 結果 → 這個任務沒有「已完成」的角色（讀不到的也算，呼叫端決定要不要信）"""
+    n = snap_name(title, 0.9) or title
+    return [who for who, st in res.items() if not st or st.get(n) != DONE]
 
 
 def _read_head(img, tpl: dict) -> tuple:

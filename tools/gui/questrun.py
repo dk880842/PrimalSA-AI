@@ -4,8 +4,9 @@
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/questrun.py plan [任務ID …]            # 不碰遊戲：印交接 / 每任務步驟 / 指令 / 預估 / 退出碼（沒給 ID = questdefs 全部）
   uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--no-dragon] [--spot 地雷區]
-        [--max-slices 12] [--slice-s 300] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--no-boss-retry]
-  uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態
+        [--max-slices 12] [--slice-s 300] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--no-boss-retry] [--no-verify-all] [--verify-skipped]
+  uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態（當前角色）
+  uv run --no-project python tools/gui/questrun.py status --role all|DKBO3,DKBO5 [任務ID …]   # 逐人：每人 char.switch → 開一次詳情讀這些任務 → 最後切回 DKBO（詳情面板沒有頭像列，只能切角色）
   可 import：questrun.run(ids, dry_run=False, after='grind', tools=None, ...) → 退出碼；結果 dict 在 questrun.LAST
 
 任務資料在 questdefs.py（id / 詳情標題 / 追蹤標題 / 特殊步驟）。全部組隊模式（使用者 2026-10-11）；解任務靠遊戲自動巡路（quest.py 點追蹤、對話按確認、每場戰鬥刷新角色）。
@@ -23,7 +24,10 @@
                    → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）；
                      questrun 在 TEAM_FRESH_S 秒內驗過隊伍（接取後 form、quest.py 37 的 BOSS 後檢查、30 / 32 後 form）→ 加 --team-fresh，quest.py 開始前不再開切換面板
                      （領獎後 / 任務戰後的隊伍檢查、37 / 38 照舊）
-    4 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
+    4 逐人驗證     （2026-10-12，四寶玉之謎隊長完成、DKBO3 / DKBO5 被打飛沒完成卻沒發現）隊長判完成後，其他 4 人逐一 char.switch 讀任務詳情
+                   （questdetail.status_all，每人約 10～40 秒）；有人不是「已完成」→ bossretry --who 落後者（落後者當隊長組 5 人重打 → 切回 DKBO 重組）
+                   → 再讀一次那幾個人；仍沒完成 / 讀不到 / 待接取（沒接到）→ 108 停手。--no-verify-all 關；詳情一開就已完成而跳過的任務預設不驗（--verify-skipped 才驗）
+    5 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
 quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀一次詳情：已完成 = 結束、進行中 = 下一片；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
@@ -32,7 +36,8 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀�
   3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
   19 自動巡路卡住解卡 3 次仍卡 → 112；33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 同 38 走 bossretry；其他 → 112
 
-退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 20～107、120～129；questrun 自己 110～119）：
+退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 20～107、120～129；questrun 自己 108、110～119）：
+  108 逐人驗證：有人任務沒完成，bossretry 補人後仍沒完成 / 補人失敗 / 讀不到某人的詳情 / 某人是待接取（info.laggards、info.verify）
   110 preflight 失敗（任務不認得 / 讀不到狀態 / 背包空位不足 / 當前角色不是 DKBO）
   111 交接 / 組隊失敗（follow 停不掉、關遇敵、team.form、補血）
   112 步驟卡住（追蹤沒反應又沒 walk 步驟、walk 走不到、找不到任務但狀態不是已完成、quest.py 非預期退出碼）
@@ -66,6 +71,7 @@ PROGRESS = rebirth.logpaths.p(uikit.CACHE / 'questrun.json')
 
 (EXIT_PREFLIGHT, EXIT_HANDOVER, EXIT_STEP, EXIT_SLICES, EXIT_TEAM, EXIT_MANUAL,
  EXIT_IRREV, EXIT_STALL, EXIT_BATTLE, EXIT_ACCEPT) = range(110, 120)
+EXIT_LAGGARD = 108                                                   # 逐人驗證後仍有人沒完成（grep 過 108 沒被其他工具用）
 
 LEADER = rebirth.LEADER
 ALL_ROLES = rebirth.ALL_ROLES
@@ -174,11 +180,16 @@ class Tools(rebirth.Tools):
         import grind
         return grind.run('start', spot)
 
-    def boss_retry(self, track):
-        """BOSS 戰後不滿 5 人：落後者當隊長組 5 人重打 → 切回 DKBO 重組（bossretry.py）→ (rc, 結果 dict)"""
+    def boss_retry(self, track, who=None):
+        """BOSS 戰後不滿 5 人 / 逐人驗證有人沒完成（who = 落後者名單）：落後者當隊長組 5 人重打 → 切回 DKBO 重組（bossretry.py）→ (rc, 結果 dict)"""
         import bossretry
-        rc = bossretry.run(track)
+        rc = bossretry.run(track, who=who)
         return rc, dict(bossretry.LAST)
+
+    def status_all(self, detail, roles):
+        """逐人讀任務詳情（char.switch + 每人開一次詳情，最後切回 DKBO）→ (rc, {角色: {標題: 狀態} 或 None})"""
+        import questdetail
+        return questdetail.status_all([detail], roles=roles, leader=LEADER)
 
 
 # ---------------------------------------------------------------- 紀錄
@@ -206,6 +217,25 @@ def save_progress(d: dict) -> None:
         PROGRESS.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding='utf-8')
     except OSError:
         pass
+
+
+def retry_form(T, form_fn, what: str, tries: int = FORM_TRIES) -> int:
+    """team.form 原地重試（可恢復的小錯：切換面板偶爾讀到 0 張卡片 rc 42、誤開面板）：失敗 → 關誤開面板 → 等 2 秒 → 再組；
+    9（驗證視窗）/ 10（斷線）立即透傳；超過 tries 次才回最後一個失敗碼。questrun.Run.form 與 bossretry.form_as 共用"""
+    rc = 0
+    for i in range(tries):
+        rc = form_fn()
+        if not rc or rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        event(f'{what}：team.form 失敗 rc={rc}（{i + 1}/{tries}）→ 關誤開面板、2 秒後原地重試')
+        cs = getattr(T, 'close_stray', None)
+        if cs:
+            try:
+                cs()
+            except Exception as e:
+                event(f'close_stray 例外：{e}')
+        T.sleep(2)
+    return rc
 
 
 # ---------------------------------------------------------------- 純函式
@@ -296,24 +326,10 @@ class Run:
         return rc
 
     def form(self, what: str, tries: int = FORM_TRIES) -> int:
-        """team.form 原地重試（可恢復的小錯：切換面板偶爾讀到 0 張卡片 rc 42、誤開面板）：失敗 → 關誤開面板 → 等 2 秒 → 再組；
-        9（驗證視窗）/ 10（斷線）立即透傳；超過 tries 次才回最後一個失敗碼"""
-        rc = 0
-        for i in range(tries):
-            rc = self.T.team_form()
-            if not rc:
-                self.team_ok_at = time.time()
-                return rc
-            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
-                return rc
-            event(f'{what}：team.form 失敗 rc={rc}（{i + 1}/{tries}）→ 關誤開面板、2 秒後原地重試')
-            cs = getattr(self.T, 'close_stray', None)
-            if cs:
-                try:
-                    cs()
-                except Exception as e:
-                    event(f'close_stray 例外：{e}')
-            self.T.sleep(2)
+        """team.form 原地重試（見 retry_form）；成功記 team_ok_at"""
+        rc = retry_form(self.T, self.T.team_form, what, tries)
+        if not rc:
+            self.team_ok_at = time.time()
         return rc
 
     def team_fresh(self) -> bool:
@@ -483,6 +499,8 @@ class Run:
             ts.update(state='done', skipped=True, ended_ts=time.time())
             event(f'任務 {tid} 已完成，跳過')
             self.save()
+            if self.o.get('verify_skipped') and not ts.get('all_done'):
+                return self.verify_all(d, ts)
             return 0
         t0 = time.time()
         ts.update(state='running', started=time.strftime('%H:%M:%S'), slices=0)
@@ -578,7 +596,7 @@ class Run:
                     ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
                     self.save()
                     event(f'任務 {tid}「{d["detail"]}」已完成（quest.py 任務完成；{int(time.time() - t0)} 秒、{k + 1} 片）')
-                    return 0
+                    return self.verify_all(d, ts)
                 if act == 'check' and time_up(tail):                    # quest.py 只是 slice 時間到（任務還在追蹤欄、沒說完成）：不開詳情，直接下一片；
                     continue                                           # 真的完成會在下一片由 quest.py 回 5（追蹤欄沒有該任務）或「任務完成」→ 那時才讀詳情確認
                 rc, s2 = self.status_of(d)                              # 沒有「任務完成」字樣、也不是單純時間到 → 才有疑慮 → 才讀一次詳情
@@ -589,7 +607,7 @@ class Run:
                     ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
                     self.save()
                     event(f'任務 {tid}「{d["detail"]}」已完成（{int(time.time() - t0)} 秒、{k + 1} 片）')
-                    return 0
+                    return self.verify_all(d, ts)
                 if act == 'gone':
                     return self.fail(EXIT_STEP, f'任務 {tid}：quest.py 找不到追蹤列表上的任務，詳情狀態是 {s2}', quest_rc=rc, status=s2)
                 if s2 == PENDING:
@@ -599,6 +617,45 @@ class Run:
                 return self.fail(EXIT_STEP, f'任務 {tid}：自動巡路卡住，quest.py 自動點地面解卡 3 次仍卡（quest.py 19），請人看 snap walk-stuck', quest_rc=rc)
             return self.fail(EXIT_STEP, f'任務 {tid}：quest.py 非預期退出碼 {rc}', quest_rc=rc)
         return self.fail(EXIT_SLICES, f'任務 {tid}：{self.o["max_slices"]} 片後仍未完成')
+
+    def verify_all(self, d, ts) -> int:
+        """隊長判完成後逐人驗（隊長本人剛確認過，不再讀）：有人沒「已完成」→ bossretry --who 落後者 → 再讀那幾個人；仍不行 108"""
+        if not self.o.get('verify_all', True):
+            return 0
+        T, tid, detail = self.T, d['id'], d['detail']
+        roles = [r for r in ALL_ROLES if r != LEADER]
+        for attempt in range(2):                                    # 0 = 完成後第一次驗；1 = bossretry 補人後再驗
+            rc, res = T.status_all(detail, roles)
+            self.info.setdefault('verify', []).append({'roles': roles, 'rc': rc, 'res': res})
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            unread = [r for r in roles if not (res or {}).get(r)]
+            if unread:
+                return self.fail(EXIT_LAGGARD, f'任務 {tid}：逐人驗證讀不到 {unread} 的任務詳情（status_all rc={rc}），無法確認是否都完成；不盲打', laggards=unread)
+            sts = {r: res[r].get(detail) for r in roles}
+            lag = [r for r in roles if sts[r] != DONE]
+            event(f'任務 {tid}「{detail}」逐人驗證{"（補人後）" if attempt else ""}：{sts}')
+            if not lag:
+                ts['all_done'] = True
+                self.save()
+                return 0
+            self.info['laggards'] = lag
+            pend = [r for r in lag if sts[r] != DOING]
+            if pend:
+                return self.fail(EXIT_LAGGARD, f'任務 {tid}：{pend} 的狀態是 {[sts[r] for r in pend]}（不是進行中，bossretry 幫不上），停手交人', laggards=lag)
+            if attempt or not self.o.get('boss_retry', True):
+                why = '補人後仍沒完成' if attempt else '--no-boss-retry'
+                return self.fail(EXIT_LAGGARD, f'任務 {tid}：{lag} 仍是進行中（{why}），停手交人', laggards=lag)
+            event(f'任務 {tid}：{lag} 沒完成 → bossretry --who（落後者當隊長組 5 人重打 → 切回 DKBO 重組）')
+            brc, binfo = T.boss_retry(d['track'], who=lag)
+            self.info.setdefault('boss_retry', []).append(binfo)
+            if brc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return brc
+            if brc:
+                return self.fail(EXIT_LAGGARD, f'任務 {tid}：{lag} 沒完成，bossretry 退出碼 {brc}：{(binfo or {}).get("msg", "")}', laggards=lag, boss_retry_rc=brc)
+            self.team_ok_at = time.time()                              # bossretry 最後 team.check 滿 5 人
+            roles = lag
+        return EXIT_LAGGARD
 
     def write_log(self, d, t0: float):
         ts = self.st['tasks'].get(str(d['id']), {})
@@ -619,7 +676,7 @@ class Run:
 
 def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_dragon: bool = True, spot: str = DEFAULT_SPOT,
         max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True,
-        team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True) -> int:
+        team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False) -> int:
     LAST.clear()
     defs, bad = questdefs.resolve(ids)
     if bad:
@@ -629,7 +686,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         print('questrun：--after 要 grind 或 none', file=sys.stderr)
         return uikit.EXIT_USAGE
     opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress,
-                team_hp_min=team_hp_min, boss_retry=boss_retry)
+                team_hp_min=team_hp_min, boss_retry=boss_retry, verify_all=verify_all, verify_skipped=verify_skipped)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -662,12 +719,38 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     return rc
 
 
-def cmd_status(ids) -> int:
+def parse_roles(text: str):
+    """--role all / DKBO3,DKBO5 → 角色名單（真名）；不認得 → None"""
+    import charstate
+    if not text or text == 'all':
+        return list(ALL_ROLES)
+    out = []
+    for n in [x.strip() for x in text.split(',') if x.strip()]:
+        hit = charstate.norm_char(n)
+        if not hit:
+            return None
+        out.append(charstate.display(hit))
+    return out
+
+
+def cmd_status(ids, role: str = '') -> int:
     defs, bad = questdefs.resolve(ids)
     if bad:
         print(f'questrun：不認得的任務 ID {bad}', file=sys.stderr)
         return uikit.EXIT_USAGE
     import questdetail
+    if role:
+        roles = parse_roles(role)
+        if roles is None:
+            print(f'questrun：--role {role} 有不認得的角色', file=sys.stderr)
+            return uikit.EXIT_USAGE
+        rc, res = questdetail.status_all([d['detail'] for d in defs], roles=roles, leader=LEADER)
+        print('任務\t' + '\t'.join(roles))
+        for d in defs:
+            print(f'{d["id"]} {d["detail"]}\t' + '\t'.join(str((res.get(r) or {}).get(d['detail'], '讀不到')) for r in roles))
+        lag = {d['detail']: [r for r in roles if (res.get(r) or {}).get(d['detail']) != DONE] for d in defs}
+        print(json.dumps({'rc': rc, 'not_done': {k: v for k, v in lag.items() if v}}, ensure_ascii=False))
+        return rc
     res = questdetail.status([d['detail'] for d in defs])
     if not res.get('ok'):
         print(f'questrun：讀狀態失敗 {res}', file=sys.stderr)
@@ -691,6 +774,7 @@ def main() -> int:
     p.add_argument('--spot', default=DEFAULT_SPOT)
     p = sub.add_parser('status')
     p.add_argument('ids', nargs='*')
+    p.add_argument('--role', default='', help='逐人讀：all 或 DKBO3,DKBO5（每人 char.switch 一次，最後切回 DKBO）')
     p = sub.add_parser('run')
     p.add_argument('ids', nargs='*')
     p.add_argument('--dry-run', action='store_true')
@@ -704,13 +788,16 @@ def main() -> int:
     p.add_argument('--team-hp-min', type=int, default=TEAM_HP_MIN, help='全隊任一人 HP 低於這個 %% 就補血（任務開始前 / BOSS 戰後；0 = 不讀全隊，只看隊長）')
     p.add_argument('--no-boss-retry', action='store_true', help='BOSS 戰後不滿 5 人（38 / 21）不自動補人，直接 114 停手')
     p.add_argument('--no-trust-progress', action='store_true', help='不信進度檔的「已完成」（預設 2 小時內的完成記錄直接跳過）')
+    p.add_argument('--no-verify-all', action='store_true', help='任務完成後不逐人驗證（預設驗：其他 4 人逐一讀詳情，有人沒完成就 bossretry --who）')
+    p.add_argument('--verify-skipped', action='store_true', help='詳情一開就已完成而跳過的任務也逐人驗（預設只驗本次跑完的）')
     a = ap.parse_args()
     if a.cmd == 'status':
-        return cmd_status(a.ids)
+        return cmd_status(a.ids, a.role)
     dry = a.cmd == 'plan' or a.dry_run
     kw = dict(max_slices=getattr(a, 'max_slices', MAX_SLICES), slice_s=getattr(a, 'slice_s', SLICE_S),
               max_min=getattr(a, 'max_min', MAX_MIN), hp_min=getattr(a, 'hp_min', HP_MIN),
-              team_hp_min=getattr(a, 'team_hp_min', TEAM_HP_MIN), boss_retry=not getattr(a, 'no_boss_retry', False))
+              team_hp_min=getattr(a, 'team_hp_min', TEAM_HP_MIN), boss_retry=not getattr(a, 'no_boss_retry', False),
+              verify_all=not getattr(a, 'no_verify_all', False), verify_skipped=getattr(a, 'verify_skipped', False))
     rc = run(a.ids, dry, a.after, use_dragon=not a.no_dragon, spot=a.spot, trust_progress=not getattr(a, 'no_trust_progress', False), **kw)
     if not dry:
         print(json.dumps(LAST, ensure_ascii=False, default=str))

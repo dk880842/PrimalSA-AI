@@ -359,5 +359,19 @@ for kind in S.POPUP_SIGS:
 check('label：面板上已知彈窗顯示面板名 + 彈窗名', S.label({'state': 'unknown'}, ['popup_qty', 'over_bag']) == '面板：背包＋數量輸入視窗'
       and S.label({'state': 'unknown'}, ['popup_confirm', 'over_pet']) == '面板：寵物＋確定 / 取消提示窗')
 
+# ---- 載入畫面「加載中」字形（2026-10-12：新插畫載入圖 SIG_LOADING 落空 → quest.py 誤報驗證視窗退出碼 2）----
+import json as _json
+_fx = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'loading_px.json').read_text(encoding='utf-8'))
+_pts = [tuple(p) for p in _fx['pts']]
+_bad = [smp['file'] for smp in _fx['samples'] if S.loading_text(dict(zip(_pts, [tuple(c) for c in smp['px']]))) != smp['loading']]
+check(f'loading_text：{len(_fx["samples"])} 張樣本（2 張載入畫面、其餘不是）全對', not _bad, str(_bad))
+_new = next(smp for smp in _fx['samples'] if 'UNKNOWN' in smp['file'] and smp['loading'])
+_px = dict(zip(_pts, [tuple(c) for c in _new['px']]))
+_only_text = {k: v for k, v in _px.items() if k in {(x, y) for x, y, _ in S.LOADING_TEXT_PTS}}
+check('只有字形點（沒有舊三點）也認得載入畫面', S.is_loading(_only_text) and not S._match_safe(_only_text, S.SIG_LOADING))
+check('新插畫載入圖：is_loading 中、annotate = loading', S.is_loading(_px)
+      and S.annotate(_px, {'state': 'unknown'}) == ['loading'])
+check('loading_text 缺點 → False', not S.loading_text({}))
+
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

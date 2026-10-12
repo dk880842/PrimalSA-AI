@@ -226,7 +226,7 @@ class Watcher:
         self._cpu_t = (mono(), time.process_time())
         self.ppid = os.getppid()
         self.last_ppid_check = mono()
-        self.pts = screen_sigs.points() + screen_sigs.annot_points()    # classify 用 points()；annot_points() 是 annotate / enc_on 另外要的點
+        self.pts = screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()   # classify 用 points()；annot_points() 是 annotate / enc_on 另外要的點；loading_points() = 「加載中」字形（2026-10-12）
         self.pts_arg = ' '.join(f'{x},{y}' for x, y in self.pts)
         self.last_px = None
         self._flags_cache = None

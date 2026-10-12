@@ -56,6 +56,7 @@ class Fake:
         self.form_rc = kw.get('form_rc', {})
         self.disband_rc = kw.get('disband_rc', 0)
         self.pre_rc = kw.get('pre_rc', 0)
+        self.bad_lead = kw.get('bad_lead', ())
 
     def rec(self, *a):
         self.calls.append(a)
@@ -110,10 +111,16 @@ class Fake:
         rc = self.form_rc.get(leader, 0)
         if not rc:
             self.cur = leader
+            names = ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')
+            self.cards = cards(leader=leader, members=[n for n in names if n != leader], solo=())
+            if leader in self.bad_lead:                     # 組完隊長不是 leader（測驗證）
+                self.cards = cards(leader='DKBO', members=[n for n in names if n != 'DKBO'], solo=())
         return rc
 
     def team_disband(self):
         self.rec('disband', self.cur)
+        if not self.disband_rc:
+            self.cards = cards(leader=None, members=(), solo=('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'))
         return self.disband_rc
 
     def snap(self, tag):
@@ -164,6 +171,36 @@ check('順序：DKBO 解散 → 切 DKBO5 → 以 DKBO5 組隊 → 補血 → �
 T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 3, 4]}, quest=[37, 37], team_hp=[(0, {'DKBO': 90}), LOW], check_rcs=(41, 0, 0))
 rc = go(T, max_tries=2)
 check('輸 1 次 → 補血 → 再打追上 = 0', rc == 0 and T.names().count('heal') == 1 and T.names().count('quest') == 2 and br.LAST['tries'] == {'DKBO5': 1}, T.calls)
+
+# ---- 組完隊長不是落後者 → 145 ----
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3]}, quest=[37], bad_lead=('DKBO5',))
+rc = go(T)
+check('組完隊長不是 DKBO5 → 145、沒打', rc == br.EXIT_REGROUP and 'quest' not in T.names() and '隊長 DKBO' in br.LAST.get('msg', ''), br.LAST.get('msg'))
+# ---- 隊伍散掉後隊長自動換人（實機 09:49：DKBO3 陣亡，剩下的隊長變 DKBO）→ 由真正的隊長解散再以落後者重組 ----
+T = Fake(steps={'DKBO': ['GONE'], 'DKBO3': [4, 4, 'GONE']}, quest=[38, 0], check_rcs=(41, 0))
+orig_q = T.quest
+def q38(args, timeout, T=T, orig=orig_q):
+    r = orig(args, timeout)
+    if r[0] == 38:                                    # DKBO3 陣亡踢出，剩下的隊伍隊長變 DKBO
+        T.cards = cards(leader='DKBO', members=('DKBO4', 'DKBO5'), solo=('DKBO2', 'DKBO3'))
+    return r
+T.quest = q38
+rc = quiet(br.run, '四寶玉之謎', tools=T, who=['DKBO3'])
+dis = [c for c in T.calls if c[0] == 'disband']
+check('--who 隊散了 → 由現任隊長 DKBO 解散 → 以 DKBO3 重組 → 追上 0', rc == 0 and ('disband', 'DKBO') in dis[1:] and T.calls.count(('form', 'DKBO3')) == 2, T.calls)
+
+# ---- --who 續跑：隊伍已由落後者帶滿 5 人 → 不解散、不重組 ----
+T = Fake(steps={'DKBO5': [2, 'GONE'], 'DKBO3': ['GONE']}, quest=[0], cur='DKBO5', cards_=cards(leader='DKBO5', members=('DKBO', 'DKBO2', 'DKBO3', 'DKBO4'), solo=()), check_rcs=(0,))
+rc = quiet(br.run, '四寶玉之謎', tools=T, who=['DKBO3', 'DKBO5'])
+nm = [c for c in T.calls if c[0] in ('disband', 'form', 'switch')]
+check('--who 續跑：DKBO5 帶的 5 人隊沿用（先處理 DKBO5、第一個動作不是解散 / 組隊）', rc == 0 and nm[0] == ('disband', 'DKBO5') and ('form', 'DKBO5') not in T.calls, T.calls)
+
+# ---- BOSS 贏了但有人陣亡（38、步號前進）→ 先重組、再看全隊 HP 補血（2026-10-12 DKBO5 實機全滅）----
+T = Fake(steps={'DKBO': [4], 'DKBO5': [2, 3, 4]}, quest=[38, 37], team_hp=[(0, {'DKBO': 90}), LOW, (0, {'DKBO': 90})], check_rcs=(41, 41, 0))
+rc = go(T)
+seq = [c[:2] for c in T.calls if c[0] in ('form', 'heal', 'quest')]
+i_form2 = [k for k, c in enumerate(seq) if c == ('form', 'DKBO5')][1]
+check('38 但步號前進 → 重組 DKBO5 → 再補血 → 下一片', rc == 0 and ('heal', 'DKBO5') in seq[i_form2:] and seq.index(('heal', 'DKBO5'), i_form2) < len(seq) - 1, seq)
 
 # ---- 輸到上限 → 144；失敗收尾：DKBO5 臨時隊解散、切回 DKBO ----
 T = Fake(steps={'DKBO': [4], 'DKBO5': [3]}, quest=[37, 37, 37], check_rcs=(41, 0))

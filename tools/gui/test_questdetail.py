@@ -327,5 +327,53 @@ if all(f in have for f in ('scroll_2.png', 'scroll_3.png', 'scroll_4.png', 'up_1
     check('真實截圖：scroll_3 → scroll_4 有重疊（最後一列在新頁）', qd.overlaps(pg['scroll_3.png'], pg['scroll_4.png']))
     check('真實截圖：up_1 → up_2 沒有重疊 = 會觸發退回小步', not qd.overlaps(pg['up_1.png'], pg['up_2.png']))
 
+
+# ---- status_all：逐人讀（假 char / 假詳情；2026-10-12 四寶玉之謎 DKBO3 / DKBO5 沒完成）----
+class FakeAll:
+    def __init__(self, cur='DKBO', st=None, sw_rc=None, rd_rc=None):
+        self.cur, self.calls = cur, []
+        self.st, self.sw_rc, self.rd_rc = st or {}, sw_rc or {}, rd_rc or {}
+
+    def current(self):
+        return 0, self.cur
+
+    def switch(self, who):
+        self.calls.append(('switch', who))
+        rc = self.sw_rc.get(who, 0)
+        if not rc:
+            self.cur = who
+        return rc
+
+    def ensure(self, who):
+        self.calls.append(('ensure', who))
+        self.cur = who
+        return 0
+
+    def read(self, names, dy=None):
+        self.calls.append(('read', self.cur))
+        rc = self.rd_rc.get(self.cur, 0)
+        return rc, ({} if rc else {n: self.st.get(self.cur, qd.DONE) for n in names})
+
+
+T4 = '四寶玉之謎(1.82)'
+F = FakeAll(cur='DKBO3', st={'DKBO3': qd.DOING, 'DKBO5': qd.DOING})
+rc, res = qd.status_all([T4], tools=F)
+check('status_all：當前 DKBO3 先讀、切 4 次、最後 ensure DKBO', rc == 0 and F.calls[0] == ('read', 'DKBO3')
+      and sum(1 for c in F.calls if c[0] == 'switch') == 4 and F.calls[-1] == ('ensure', 'DKBO'), str(F.calls))
+check('laggards = DKBO3、DKBO5', sorted(qd.laggards(res, T4)) == ['DKBO3', 'DKBO5'], str(res))
+F = FakeAll(cur='DKBO')
+rc, res = qd.status_all([T4], roles=['DKBO', 'DKBO2'], tools=F)
+check('status_all：當前 DKBO 先讀、只切 DKBO2、讀完切回 DKBO', rc == 0 and F.calls == [('read', 'DKBO'), ('switch', 'DKBO2'), ('read', 'DKBO2'), ('ensure', 'DKBO')], str(F.calls))
+F = FakeAll(sw_rc={'DKBO4': 61})
+rc, res = qd.status_all([T4], tools=F)
+check('切不到 DKBO4 → 該人 None、其他照讀、rc 61', rc == 61 and res['DKBO4'] is None and res['DKBO5'] == {T4: qd.DONE} and 'DKBO4' in qd.laggards(res, T4))
+F = FakeAll(rd_rc={'DKBO2': 9})
+rc, res = qd.status_all([T4], tools=F)
+check('讀到驗證視窗 9 → 立即停（不再切人、不 ensure）', rc == 9 and ('switch', 'DKBO3') not in F.calls and not any(c[0] == 'ensure' for c in F.calls), str(F.calls))
+rc, res = qd.status_all(['不存在的任務名稱XYZ'], tools=FakeAll())
+check('任務名不在 TaskExplan → 用法錯、不碰', rc == 1 and res == {})
+rows = [{'title': T4, 'status': qd.DOING}, {'title': '黃金羚羊之謎(1.82)', 'status': qd.UNKNOWN}]
+check('all_found：狀態 ? 不算找到', qd.all_found(rows, [T4]) and not qd.all_found(rows, [T4, '黃金羚羊之謎(1.82)']))
+
 print('\n失敗 %d 項' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

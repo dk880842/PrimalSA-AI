@@ -112,6 +112,36 @@ BLACK_MAX = 24
 
 # 切換角色後的全螢幕「加載中」畫面（P-I3 實測，約 0.25～0.5 s；此時 SIG_HUD 不成立、classify = unknown；只給 char.py 等切換用，不進 classify）
 SIG_LOADING = _t([(1000, 40, 96, 183, 243), (30, 780, 231, 189, 76), (668, 727, 255, 255, 255)], TOL)
+# 載入畫面背景插畫會換（2026-10-12 實機看到恐龍騎士 / 長毛象新圖；舊三點剛好仍中，但只靠背景色不可靠）；quest.py 原本完全不認載入畫面
+# → 換圖轉場 6 秒被當 unknown 連 3 次、退出碼 2 誤報驗證視窗。下方「加載中...」白字的形狀兩張圖逐點相同 → 加字形遮罩：
+# '#' = 白字（min(rgb) > LOADING_WHITE）、'.' = 不是白字。x 665..735 每 2 px、y 718..736 每 3 px；tools/.cache 1334 張截圖只有 2 張載入畫面命中、0 誤判
+LOADING_TEXT_MASK = (
+    '..#............##...#.#.......##....',
+    '######.####.....#...#.....##########',
+    '..#.##.#..#.........#.....#...##...#',
+    '..#.#..#..#.....#...#.#...#...##...#',
+    '.#..#..#..#.......#.###...##########',
+    '.#..#..#..#..##.#.#.##........##....',
+    '##..#..####..#########.#......##....',
+)
+LOADING_WHITE = 220
+LOADING_ON_MIN, LOADING_OFF_MAX = 0.95, 0.10              # 白字點至少 95% 是白、非字點最多 10% 是白（背景亮的圖也不會全白）
+LOADING_TEXT_PTS = [(665 + 2 * i, 718 + 3 * j, ch == '#') for j, row in enumerate(LOADING_TEXT_MASK) for i, ch in enumerate(row)]
+
+
+def loading_text(px: dict) -> bool:
+    """「加載中...」字形遮罩比對（缺點 → False）"""
+    on = [px.get((x, y)) for x, y, w in LOADING_TEXT_PTS if w]
+    off = [px.get((x, y)) for x, y, w in LOADING_TEXT_PTS if not w]
+    if any(c is None for c in on + off):
+        return False
+    white = lambda c: min(c) > LOADING_WHITE
+    return sum(map(white, on)) >= LOADING_ON_MIN * len(on) and sum(map(white, off)) <= LOADING_OFF_MAX * len(off)
+
+
+def is_loading(px: dict) -> bool:
+    """載入畫面：舊三點特徵或「加載中」字形任一成立"""
+    return _match_safe(px, SIG_LOADING) or loading_text(px)
 # 「選擇對象」面板（點 NPC 後右側跳出的米色面板）
 SIG_SELECT = _t([(1112, 300, 104, 79, 48), (1112, 400, 104, 79, 48), (1112, 470, 104, 79, 48), (1416, 300, 93, 68, 36), (1416, 470, 93, 68, 36),
                  (1120, 470, 247, 216, 177), (1250, 490, 245, 229, 191), (1410, 470, 246, 219, 182)], TOL)
@@ -297,6 +327,12 @@ def annot_points() -> list:
     return out
 
 
+def loading_points() -> list:
+    """「加載中」字形遮罩的取樣點（不在 points() / annot_points()，那兩組被凍結 fixture 綁住；watch 另外加讀）"""
+    seen = set(points()) | set(annot_points())
+    return [(x, y) for x, y, _ in LOADING_TEXT_PTS if (x, y) not in seen]
+
+
 def _match_safe(px: dict, sig) -> bool:
     """像 match，但缺點（呼叫端沒讀這些點，例如只有 classify 用的 fixture）一律當不符合"""
     return all((x, y) in px and close(px[(x, y)], (r, g, b), tol) for x, y, r, g, b, tol in sig)
@@ -309,7 +345,7 @@ def annotate(px: dict, base: dict) -> list:
         if _match_safe(px, sig):
             return [name]
     if base.get('state') == 'unknown':          # 載入 / 全黑只在 classify 不認得時才附註（有 HUD 的畫面不可能是轉場）
-        if _match_safe(px, SIG_LOADING):
+        if is_loading(px):
             return ['loading']
         if is_black(px):
             return ['black']

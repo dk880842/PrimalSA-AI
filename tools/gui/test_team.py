@@ -296,6 +296,18 @@ rc, out = run(team.form, 'DKBO2')
 check('form --leader DKBO2：點上排第 2 欄 682,320、隊長 DKBO2 變當前、charstate = DKBO2', rc == 0 and (682, 320) in g.clicks and (549, 320) not in g.clicks
       and g.cards[1]['label'] == 'leader' and g.cards[1]['status'] == 'current' and (charstate.read() or {}).get('name') == 'DKBO2', f'{rc} {g.clicks}')
 
+g = install(Game(mk(SOLOS, current=0)))
+charstate.clear()
+rc, out = run(team.form, 'DKBO5')
+check('form --leader DKBO5（第 5 張）：先拖上排、點 962,320、DKBO5 當隊長', rc == 0 and g.q_shift == team.QT_TOP_SHIFT and (962, 320) in g.clicks
+      and g.cards[4]['label'] == 'leader' and [c['label'] for c in g.cards[:4]] == ['member'] * 4, f'{rc} {g.clicks} {out.strip().splitlines()[-1]}')
+
+g = install(Game(mk(SOLOS, current=0)))
+g.q_dark_edge = True
+rc, out = run(team.form, 'DKBO3')
+check('form 隊長角帶第 3 點暗紅 (131,2,0) 仍算亮（2026-10-12 實機 44）', rc == 0 and g.cards[2]['label'] == 'leader', f'{rc} {out.strip().splitlines()[-1]}')
+check('badge_state (131,2,0) = red、棕 (169,117,70) = none', team.badge_state((131, 2, 0)) == 'red' and team.badge_state((169, 117, 70)) == 'none')
+
 g = install(Game(mk(SOLOS)))
 rc, out = run(team.form, 'XYZ')
 check('form --leader 不在白名單 → 1', rc == 1 and g.clicks == [])

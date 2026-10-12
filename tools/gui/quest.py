@@ -202,6 +202,17 @@ def read_screen() -> dict:
     return r
 
 
+def loading_screen() -> bool:
+    """現場讀「加載中」字形點（+ 舊三點）→ 是不是地圖轉場的載入畫面（screen_sigs.is_loading）"""
+    pts = [(x, y) for x, y, _ in screen_sigs.LOADING_TEXT_PTS] + [(x, y) for x, y, *_ in screen_sigs.SIG_LOADING]
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
+        cols = [tuple(int(v) for v in c.split(',')) for c in out]
+    except Exception:
+        return False
+    return len(cols) == len(pts) and screen_sigs.is_loading(dict(zip(pts, cols)))
+
+
 def button_probe_ok(px: dict) -> bool:
     """兩顆鈕字旁 4 點至少 DIALOG_BTN_NEED 點是米色（純像素，便宜；主畫面沙地偶爾也像，所以還要 OCR 確認）"""
     n = sum(1 for p in DIALOG_BTN_PROBES if p in px and screen_sigs.close(px[p], DIALOG_BTN_BEIGE, DIALOG_BTN_BEIGE_TOL))
@@ -1326,8 +1337,9 @@ def stalled(rounds: int, same_marker: bool, limit: int = STALL_MAX) -> bool:
     return same_marker and rounds >= limit
 
 
-def read_step_no(task: str, cur_map_fn=None):
-    """OCR 追蹤列表判斷目前任務步驟編號：Task.step / GONE（標題不在第一頁區塊，但 OCR 有讀到別的字）/ None（讀不到、對不準）"""
+def read_step_no(task: str, cur_map_fn=None, reveal: bool = True):
+    """OCR 追蹤列表判斷目前任務步驟編號：Task.step / GONE（標題不在第一頁區塊，但 OCR 有讀到別的字）/ None（讀不到、對不準）。
+    reveal = 標題讀到但說明行被下緣裁掉時，把追蹤列表往下捲一格再讀（只拖列表）"""
     if not task:
         return None
     g, ts, _ = walk.psa.task_steps(task)
@@ -1338,6 +1350,16 @@ def read_step_no(task: str, cur_map_fn=None):
         return None
     if not found:
         return GONE
+    if not texts and reveal:
+        # 標題在追蹤列表下緣、說明行被裁掉（2026-10-12 bossretry 實機：DKBO3 的「四寶玉之謎」是第 2 張卡，只露標題 → 一直 None 142）
+        # → 列表往下捲一格讓整張露出再讀一次（只拖追蹤列表，不點任何卡片）
+        moved, _ = scroll_list(SCROLL_UP, f'「{task}」卡片說明行被裁掉 → 追蹤列表往下捲一格再讀步號', list_signature())
+        if moved:
+            found, texts = read_step_ocr(task)
+            if found is None:
+                return None
+            if not found:
+                return GONE
     row, _why = match_step(ts, texts, cur_map_fn)
     return row.get('step') if row else None
 
@@ -1920,6 +1942,11 @@ def _main() -> int:
                         shot = snap('task-not-found')
                         event(f'追蹤列表掃完（到頂 + 到底）都找不到「{a.task}」（連續 {task_miss} 次，沒領過獎勵）→ 沒點任何東西，退出', shot)
                         return 5
+        elif st == 'unknown' and loading_screen():
+            log('載入畫面（「加載中」字形，換圖轉場）→ 等待，不計入不認得畫面')   # 2026-10-12 新插畫載入圖誤判 unknown 連 3 次 → 退出碼 2
+            unknown = 0
+            time.sleep(1.0)
+            continue
         elif st == 'unknown' or st == 'error':
             if unknown == 0:
                 unknown_t0 = time.time()

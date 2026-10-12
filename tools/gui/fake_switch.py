@@ -43,6 +43,8 @@ class Game:
         self.q_noop = False           # 按組隊後提示關了但沒組成（全員仍單人）
         self.q_preselect = set()      # 提示視窗一開就已選好的下排欄
         self.prompt_ocr = None        # 提示視窗上排名字 OCR 覆寫（測矛盾）
+        self.q_shift = 0              # 上排被往左拖的量（拖到底 = team.QT_TOP_SHIFT；2026-10-12 實機）
+        self.q_dark_edge = False      # 隊長角帶第 3 點是暗紅 (131,2,0)（2026-10-12 實機第 3 欄）
 
     def _prompt_color(self, x, y):
         if (x, y) == (1052, 167):
@@ -51,11 +53,14 @@ class Game:
             return (66, 113, 171)
         if (x, y) == (448, 325):
             return (251, 223, 187)
-        for col in range(4):
-            d = 133 * col
+        for col in range(5):
+            d = 133 * col - self.q_shift
             if (x, y) in [(px + d, py) for px, py in ((520, 243), (530, 243), (505, 255))]:
+                if self.q_leader == col and self.q_dark_edge and y == 255:
+                    return (131, 2, 0)
                 return Q_RED if self.q_leader == col else Q_BROWN
-            if (x, y) in [(px + d, py) for px, py in ((505, 458), (520, 447), (530, 447))]:
+            d = 133 * col
+            if col < 4 and (x, y) in [(px + d, py) for px, py in ((505, 458), (520, 447), (530, 447))]:
                 return Q_BLUE if col in self.q_members else Q_BROWN
         return None
 
@@ -130,6 +135,8 @@ class Game:
                                         c['status'] = 'current' if k == i else 'online'
                                 self.loading = self.after_load
                                 self.hud_never = self.stuck
+                elif w and w[0] == 'drag' and self.prompt and 230 <= int(w[2]) <= 420 and int(w[3]) < int(w[1]):
+                    self.q_shift = team.QT_TOP_SHIFT                 # 上排往左拖：拖到底
                 elif w and w[0] == 'key':
                     self.keys.append(w[1])
                     if w[1] == '{ESC}':
@@ -144,8 +151,9 @@ class Game:
         if xy == (1052, 167):
             self.prompt = False
             return
-        col = round((x - 549) / 133) if abs((x - 549) % 133) <= 40 or abs((x - 549) % 133) >= 93 else None
-        if y == 320 and col in range(4) and len(self.cards) > col:
+        sx = x + (self.q_shift if y == 320 else 0)
+        col = round((sx - 549) / 133) if abs((sx - 549) % 133) <= 40 or abs((sx - 549) % 133) >= 93 else None
+        if y == 320 and col in range(5) and (col < 4 or self.q_shift) and len(self.cards) > col:
             if not self.q_leader_dead:
                 self.q_leader = None if self.q_leader == col else col
         elif y == 520 and col in range(4):
@@ -171,8 +179,8 @@ class Game:
         if self.prompt and box[1] == 350:
             if self.prompt_ocr is not None:
                 return list(self.prompt_ocr)
-            col = round((box[0] + 40 - 549) / 133)
-            if 0 <= col < len(self.cards):
+            col = round((box[0] + 40 - 549 + self.q_shift) / 133)
+            if 0 <= col < len(self.cards) and (col < 4 or self.q_shift):
                 return list(self.ocr_map.get(self.cards[col]['name'], []))
             return []
         for i, (x0, cy) in enumerate(team.SLOTS):
