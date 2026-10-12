@@ -249,13 +249,16 @@ check('quest 回 21 → 84', quiet(rebirth.run, trans=1, from_stage='boss10', to
 # ---- boss20：傳到 21F 後往回走備援 ----
 class FT20(FakeTools):
     """boss20：人在 32021:31,29；追蹤 quest 回 rc 不動；備援走 walk、--fight 贏 → 32021:29,57"""
-    def __init__(self, track_rc=3, walk_ok=(True, True), fight_rc=0, **kw):
+    def __init__(self, track_rc=3, walk_ok=(True, True), fight_rc=0, band=True, **kw):
         super().__init__(**kw)
-        self.track_rc, self.walk_ok, self.f_rc = track_rc, list(walk_ok), fight_rc
+        self.track_rc, self.walk_ok, self.f_rc, self.band = track_rc, list(walk_ok), fight_rc, band
         self.pos = kw.get('pos', (32021, 31, 29))
 
     def walk(self, m, x, y, exit_map=None):
         self.c('walk', m, x, y, exit_map)
+        if (m, x, y) == (32021, 31, 47):             # 傳送帶：同圖，座標變 31,53（band=False 不傳）
+            self.pos = (32021, 31, 53) if self.band else (32021, 31, 47)
+            return self.pos
         ok = self.walk_ok.pop(0) if self.walk_ok else True
         if not ok:
             return None
@@ -281,18 +284,25 @@ T, rc = b20()
 n = T.names()
 w = [c for c in T.calls if c[0] == 'walk']
 fq = [c[1] for c in T.calls if c[0] == 'quest' and '--fight' in c[1]]
-check('boss20：追蹤 rc 3 人在 32021 → walk 出口 28,59（換圖 32020）→ team.check → walk 20,11 → --fight → 0',
-      rc == 0 and w == [('walk', 32021, 28, 59, 32020), ('walk', 32020, 20, 11, None)] and len(fq) == 1 and '--npc' in fq[0] and 'auto' in fq[0]
+check('boss20：追蹤 rc 3 人在 32021:31,29 → walk 傳送帶 31,47（座標進 y>=50）→ 出口 28,59（換圖 32020）→ team.check → walk 20,11 → --fight → 0',
+      rc == 0 and w == [('walk', 32021, 31, 47, None), ('walk', 32021, 28, 59, 32020), ('walk', 32020, 20, 11, None)] and len(fq) == 1 and '--npc' in fq[0] and 'auto' in fq[0]
       and n.index('walk') < n.index('team_check') < len(n) - 1, str(n))
 check('boss20 備援：walk 前 preflight', [i for i, x in enumerate(n) if x == 'preflight'][0] < n.index('walk'))
 T, rc = b20(track_rc=19)
-check('boss20：追蹤卡住（19）同樣走備援', rc == 0 and len([c for c in T.calls if c[0] == 'walk']) == 2)
+check('boss20：追蹤卡住（19）同樣走備援', rc == 0 and len([c for c in T.calls if c[0] == 'walk']) == 3)
 T, rc = b20(walk_ok=(False,))
 check('boss20：出口走不過去 → 84（backtrack=exit）、不開打', rc == 84 and rebirth.LAST['info'].get('backtrack') == 'exit' and not any('--fight' in c[1] for c in T.calls if c[0] == 'quest'))
+T, rc = b20(pos=(32021, 31, 50))
+w = [c[1:] for c in T.calls if c[0] == 'walk']
+check('boss20：已在南區（y>=50 且非勝利落點）→ 跳過傳送帶，只走出口 + 20,11', rc == 0 and w == [(32021, 28, 59, 32020), (32020, 20, 11, None)], str(w))
+T, rc = b20(band=False)
+check('boss20：傳送帶沒傳（座標一直 y<50）→ 84（backtrack=band），不走出口、不開打',
+      rc == 84 and rebirth.LAST['info'].get('backtrack') == 'band' and [c[1:] for c in T.calls if c[0] == 'walk'] == [(32021, 31, 47, None)]
+      and not any('--fight' in c[1] for c in T.calls if c[0] == 'quest'))
 T, rc = b20(walk_ok=(True, False))
 check('boss20：走不到 20,11 → 84（backtrack=spot）', rc == 84 and rebirth.LAST['info'].get('backtrack') == 'spot')
 T, rc = b20(fight_rc=35)
-check('boss20：備援開打沒贏（35）→ 85，且備援只試一次', rc == 85 and len([c for c in T.calls if c[0] == 'walk']) == 2)
+check('boss20：備援開打沒贏（35）→ 85，且備援只試一次', rc == 85 and len([c for c in T.calls if c[0] == 'walk']) == 3)
 T, rc = b20(team_checks=[1, 0])
 check('boss20：換圖後隊伍散了 → team.form 再走', rc == 0 and 'team_form' in T.names())
 T, rc = b20(team_checks=[1], team_form_rc=41)
@@ -316,7 +326,7 @@ T.track = lambda task: (T.c('track', task), setattr(T, 'pos', (32021, 31, 29)), 
 rc = quiet(rebirth.run, trans=2, from_stage='boss20', to_stage='boss20', tools=T)
 n = T.names()
 check('boss20 refight：追蹤傳到 21F → walk 回 20F（不 team.check）→ --fight --team-size 1', rc == 0 and n.index('track') < n.index('walk')
-      and [c[1:] for c in T.calls if c[0] == 'walk'] == [(32021, 28, 59, 32020), (32020, 20, 11, None)] and ('char_ensure', 'DKBO') in T.calls, str(n))
+      and [c[1:] for c in T.calls if c[0] == 'walk'] == [(32021, 31, 47, None), (32021, 28, 59, 32020), (32020, 20, 11, None)] and ('char_ensure', 'DKBO') in T.calls, str(n))
 
 # ---- 39 轉生確認 ----
 fresh()

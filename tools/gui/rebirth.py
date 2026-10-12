@@ -27,8 +27,8 @@
   heal      heal.py --no-return → ass.py 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」→ team.form
   boss20    龍王的守護 → quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
             便捷傳送落在 32021:31,29（21 樓精靈王旁），BOSS 在上一層 32020:20,9。quest.py 退出碼不是 37 / 38 且人仍在 32021（追蹤沒走回去，如 3 / 19）→
-            備援一次：preflight → walk 32021 南出口 28,59（換圖 32020）→ team.check（散了 form）→ walk 32020 20,11 → quest.py --fight --npc auto → after_boss（37 / 38 同上）。
-            走不回 / 換圖失敗 → 84（info.backtrack = exit / spot）；被打飛者重打（refight）若追蹤把人傳到 21F 也先走回 20F（單人不 team.check）
+            備援一次：preflight → 在北區（y<50，便捷傳送落點 31,29）先 walk 32021 傳送帶 31,47（同圖傳到 31,53，看座標 y>=50 判斷，逾時 84 backtrack=band；已在南區跳過）→ walk 32021 南出口 28,59（換圖 32020）→ team.check（散了 form）→ walk 32020 20,11 → quest.py --fight --npc auto → after_boss（37 / 38 同上）。
+            走不回 / 換圖失敗 → 84（info.backtrack = band / exit / spot）；被打飛者重打（refight）若追蹤把人傳到 21F 也先走回 20F（單人不 team.check）
   rebirth   team.form → quest.py 預設模式（守門人 → 精靈王）→ 39 時 OCR 對話判斷：「角色轉生」才放行（點完成 + quest.py --allow-irreversible 收尾），
             「寵物轉生」/ 讀不到 / 位置不在精靈王旁 → 88；--confirm-rebirth → 89；放行後確認 5 人轉數 = N
   cleanup   丟 5 人烏力斯坦（petdrop）→ 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
@@ -80,7 +80,10 @@ DRAGON_REEAT_S = 540.0               # 效果約 10 分鐘（2026-10-11 實測�
 SLICE_S = 540                        # quest.py 單次最長秒數（到點回 0 = 逾時，吃新的龍王再繼續）
 MAP_1F, MAP_10F, MAP_11F, MAP_16F, MAP_20F, MAP_21F = 32001, 32010, 32011, 32016, 32020, 32021
 WIN_21F = (MAP_21F, 29, 57)          # 20F BOSS 贏了傳到 32021:29,57
-BOSS20_EXIT = (28, 59)               # 32021 南出口 → 32020:20,10
+BOSS20_EXIT = (28, 59)               # 32021 南出口 → 32020:20,10（要在南區 y >= SOUTH_Y 才走得到）
+BAND_SPOT = (31, 47)                 # 32021 同圖傳送帶（出口格 28～34,47～49 → 同圖 31,53）；便捷傳送落點 31,29 在北區，要先踩這裡
+SOUTH_Y = 50                         # 傳送後 y >= 50 算進南區（同一張地圖 ID，只能看座標）
+BAND_POLLS = 8                       # 踩傳送帶後輪詢座標次數（每次 sleep 1 秒）
 BOSS20_SPOT = (20, 11)               # 32020 帖拉所伊朵（20,9）旁
 KING_Y = 28                          # 精靈王 32021:31,28
 LAST: dict = {}
@@ -480,7 +483,20 @@ class Run:
         if self.backtracked:
             return self.fail(EXIT_QUEST, f'{name}：已備援過一次走回 32020，不再重試', pos=self.read_pos())
         self.backtracked = True
-        event(f'{name}：人在 32021，往回走 32021 南出口 {BOSS20_EXIT} → 32020 {BOSS20_SPOT}')
+        event(f'{name}：人在 32021，往回走：傳送帶 {BAND_SPOT}（→ 南區 y>={SOUTH_Y}）→ 南出口 {BOSS20_EXIT} → 32020 {BOSS20_SPOT}')
+        rc = self.T.preflight()
+        if rc:
+            return rc
+        pos = self.read_pos()
+        if not (pos and pos[0] == MAP_21F and pos[2] >= SOUTH_Y):      # 已在南區（BOSS 戰後落點 29,57 等）跳過第 1 段
+            r = self.T.walk(MAP_21F, BAND_SPOT[0], BAND_SPOT[1])
+            for _ in range(BAND_POLLS):
+                pos = self.read_pos()
+                if pos and pos[0] == MAP_21F and pos[2] >= SOUTH_Y:
+                    break
+                self.T.sleep(1)
+            else:
+                return self.fail(EXIT_QUEST, f'{name}：走到傳送帶 {BAND_SPOT}（{r}）後座標沒進南區 y>={SOUTH_Y}（{pos}）', backtrack='band', pos=pos)
         rc = self.T.preflight()
         if rc:
             return rc
@@ -725,7 +741,7 @@ DRY_PLAN = {
     'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016'],
     'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
     'heal': ['heal.heal_trip --no-return', 'ass.set_pet 5 人 normal={act}（rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
-    'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近', '人仍在 32021 追蹤沒動 → 備援一次：walk 32021 28,59（出口）→ 32020 → team.check → walk 20,11 → quest.py --fight --npc auto（84 / 85）'],
+    'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近', '人仍在 32021 追蹤沒動 → 備援一次：walk 傳送帶 31,47（北區才走）→ 32021 28,59（出口）→ 32020 → team.check → walk 20,11 → quest.py --fight --npc auto（84 / 85）'],
     'rebirth': ['team.form', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
                 '點完成 + quest.py --no-track --allow-irreversible 收尾 → bag.levels 確認 5 人轉數 = N'],
     'cleanup': ['petdrop 烏力斯坦（5 人；名稱完全相同才丟）', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
