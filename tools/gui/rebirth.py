@@ -26,6 +26,9 @@
   swap      5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器（名稱防護；--keep-old-weapon 跳過）
   heal      heal.py --no-return → ass.py 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」→ team.form
   boss20    龍王的守護 → quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
+            便捷傳送落在 32021:31,29（21 樓精靈王旁），BOSS 在上一層 32020:20,9。quest.py 退出碼不是 37 / 38 且人仍在 32021（追蹤沒走回去，如 3 / 19）→
+            備援一次：preflight → walk 32021 南出口 28,59（換圖 32020）→ team.check（散了 form）→ walk 32020 20,11 → quest.py --fight --npc auto → after_boss（37 / 38 同上）。
+            走不回 / 換圖失敗 → 84（info.backtrack = exit / spot）；被打飛者重打（refight）若追蹤把人傳到 21F 也先走回 20F（單人不 team.check）
   rebirth   team.form → quest.py 預設模式（守門人 → 精靈王）→ 39 時 OCR 對話判斷：「角色轉生」才放行（點完成 + quest.py --allow-irreversible 收尾），
             「寵物轉生」/ 讀不到 / 位置不在精靈王旁 → 88；--confirm-rebirth → 89；放行後確認 5 人轉數 = N
   cleanup   丟 5 人烏力斯坦（petdrop）→ 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
@@ -77,6 +80,8 @@ DRAGON_REEAT_S = 540.0               # 效果約 10 分鐘（2026-10-11 實測�
 SLICE_S = 540                        # quest.py 單次最長秒數（到點回 0 = 逾時，吃新的龍王再繼續）
 MAP_1F, MAP_10F, MAP_11F, MAP_16F, MAP_20F, MAP_21F = 32001, 32010, 32011, 32016, 32020, 32021
 WIN_21F = (MAP_21F, 29, 57)          # 20F BOSS 贏了傳到 32021:29,57
+BOSS20_EXIT = (28, 59)               # 32021 南出口 → 32020:20,10
+BOSS20_SPOT = (20, 11)               # 32020 帖拉所伊朵（20,9）旁
 KING_Y = 28                          # 精靈王 32021:31,28
 LAST: dict = {}
 
@@ -223,6 +228,15 @@ class Tools:
         import quest
         return quest.read_pos()
 
+    def walk(self, map_id, x, y, exit_map=None):
+        """walk.walk_to（有通行格自動找路）；成功回 (地圖, x, y)，丟例外 / 讀不到座標回 None"""
+        import walk
+        try:
+            return walk.walk_to(map_id, x, y, exit_map=exit_map)
+        except (RuntimeError, OSError) as e:
+            event(f'walk {map_id}:{x},{y} 失敗：{e}')
+            return None
+
     def track(self, task):
         import quest
         quest.ensure_task_tab()
@@ -305,6 +319,7 @@ class Run:
         self.st.setdefault('stages', {})
         self.info: dict = {}
         self.warnings: list = []
+        self.backtracked = False                        # 32021 走回 32020 的備援只試一次
 
     # -- 紀錄 --
     def save(self):
@@ -429,11 +444,12 @@ class Run:
         res = self.T.track(self.task)
         if not res:
             return self.fail(EXIT_BOSS, f'{name}：{who} 點任務追蹤沒成功（{res}）')
+        arrive_maps = {boss_map} | ({MAP_21F} if boss_map == MAP_20F else set())   # 20F BOSS：追蹤可能把人傳到 21F
         arrived, last = 0, None
         for _ in range(60):
             self.T.sleep(3)
             p = self.read_pos()
-            if p and p[0] == boss_map and p == last:
+            if p and p[0] in arrive_maps and p == last:
                 arrived += 1
                 if arrived >= 2:
                     break
@@ -442,6 +458,11 @@ class Run:
             last = p
         else:
             return self.fail(EXIT_BOSS, f'{name}：{who} 傳送 / 巡路後沒到 BOSS 地圖 {boss_map}（最後位置 {last}）')
+        if last and last[0] == MAP_21F and boss_map == MAP_20F:
+            self.backtracked = False                            # 每個被打飛者各自可備援一次
+            rc = self.walk_back_20f(f'{name}/{who}', team=False)
+            if rc:
+                return rc
         rc, _ = self.quest(['--fight', '--task', self.task, '--npc', 'auto', '--team-size', '1', '--max-seconds', '300'], 400)
         if rc == 2:
             return self.quest_stop(rc, f'{who} 重打')
@@ -453,14 +474,57 @@ class Run:
         event(f'{name}：{who} 重打贏了 {pos}')
         return 0
 
-    def boss_stage(self, name: str, won, boss_map: int, slices: int = 3) -> int:
+    def walk_back_20f(self, name: str, team: bool = True) -> int:
+        """人在 32021（便捷傳送 / 巡路落在精靈王旁）→ 往回走：南出口 28,59 換圖 32020 → 20,11（BOSS 旁）。
+        成功回 0；失敗回 84（info.backtrack 記哪一步）；preflight 非 0 原碼回傳。同一 Run 只試一次（self.backtracked）"""
+        if self.backtracked:
+            return self.fail(EXIT_QUEST, f'{name}：已備援過一次走回 32020，不再重試', pos=self.read_pos())
+        self.backtracked = True
+        event(f'{name}：人在 32021，往回走 32021 南出口 {BOSS20_EXIT} → 32020 {BOSS20_SPOT}')
+        rc = self.T.preflight()
+        if rc:
+            return rc
+        r = self.T.walk(MAP_21F, BOSS20_EXIT[0], BOSS20_EXIT[1], exit_map=MAP_20F)
+        if not r or r[0] != MAP_20F:
+            return self.fail(EXIT_QUEST, f'{name}：走 32021 南出口沒換到 32020（{r}）', backtrack='exit', pos=self.read_pos())
+        if team:
+            rc = self.T.team_check()
+            if rc:
+                event(f'{name}：換圖後 team.check rc={rc}，team.form')
+                rc = self.T.team_form()
+                if rc:
+                    return self.fail(EXIT_TEAM, f'{name}：走回 32020 後 team.form 失敗 rc={rc}', backtrack='team')
+        rc = self.T.preflight()
+        if rc:
+            return rc
+        r = self.T.walk(MAP_20F, BOSS20_SPOT[0], BOSS20_SPOT[1])
+        if not r or r[0] != MAP_20F:
+            return self.fail(EXIT_QUEST, f'{name}：走到 32020 {BOSS20_SPOT} 失敗（{r}）', backtrack='spot', pos=self.read_pos())
+        return 0
+
+    def backtrack_fight(self, name: str, won, boss_map: int) -> int:
+        """備援：走回 32020 → quest.py --fight 點帖拉所伊朵 → 照 37 / 38 處理（after_boss：滿 5 人 / 補人）"""
+        rc = self.walk_back_20f(name)
+        if rc:
+            return rc
+        rc, _ = self.quest(['--fight', '--task', self.task, '--npc', 'auto', '--max-seconds', SLICE_S], SLICE_S + 120)
+        if rc == 2:
+            return self.quest_stop(rc, f'{name} 備援開打')
+        if rc in (0, 37, 38):
+            return self.after_boss(name, won, boss_map)
+        return self.fail(EXIT_BOSS, f'{name}：備援 quest.py --fight 退出碼 {rc}', fight_rc=rc)
+
+    def boss_stage(self, name: str, won, boss_map: int, slices: int = 3, backtrack: bool = False) -> int:
         for k in range(slices):
             self.ensure_dragon()
             rc, _ = self.quest(['--task', self.task, '--max-seconds', SLICE_S], SLICE_S + 120)
             if rc in (37, 38):
                 return self.after_boss(name, won, boss_map)
+            pos = self.read_pos()
+            if backtrack and rc != 2 and not self.backtracked and pos and pos[0] == MAP_21F and not won(pos):
+                event(f'{name}：quest 退出碼 {rc} 但人仍在 32021 {pos}（追蹤沒走回 20F）→ 備援')
+                return self.backtrack_fight(name, won, boss_map)
             if rc == 0:
-                pos = self.read_pos()
                 if won(pos):                                   # 逾時回 0；10F 已到 11F = BOSS 贏了（偵測不到對話後開打的 BOSS）
                     event(f'{name}：quest 回 0 且位置 {pos} 已是勝利落點，視為 BOSS 已打贏')
                     return self.after_boss(name, won, boss_map)
@@ -583,7 +647,7 @@ class Run:
         return 0
 
     def s_boss20(self) -> int:
-        return self.boss_stage('boss20', lambda p: near(p, WIN_21F), MAP_20F)
+        return self.boss_stage('boss20', lambda p: near(p, WIN_21F), MAP_20F, backtrack=True)
 
     def s_rebirth(self) -> int:
         T = self.T
@@ -661,7 +725,7 @@ DRY_PLAN = {
     'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016'],
     'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
     'heal': ['heal.heal_trip --no-return', 'ass.set_pet 5 人 normal={act}（rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
-    'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近'],
+    'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近', '人仍在 32021 追蹤沒動 → 備援一次：walk 32021 28,59（出口）→ 32020 → team.check → walk 20,11 → quest.py --fight --npc auto（84 / 85）'],
     'rebirth': ['team.form', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
                 '點完成 + quest.py --no-track --allow-irreversible 收尾 → bag.levels 確認 5 人轉數 = N'],
     'cleanup': ['petdrop 烏力斯坦（5 人；名稱完全相同才丟）', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],

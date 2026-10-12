@@ -246,6 +246,78 @@ fresh()
 T = FakeTools(quest=[(21, None)])
 check('quest 回 21 → 84', quiet(rebirth.run, trans=1, from_stage='boss10', to_stage='boss10', tools=T) == 84)
 
+# ---- boss20：傳到 21F 後往回走備援 ----
+class FT20(FakeTools):
+    """boss20：人在 32021:31,29；追蹤 quest 回 rc 不動；備援走 walk、--fight 贏 → 32021:29,57"""
+    def __init__(self, track_rc=3, walk_ok=(True, True), fight_rc=0, **kw):
+        super().__init__(**kw)
+        self.track_rc, self.walk_ok, self.f_rc = track_rc, list(walk_ok), fight_rc
+        self.pos = kw.get('pos', (32021, 31, 29))
+
+    def walk(self, m, x, y, exit_map=None):
+        self.c('walk', m, x, y, exit_map)
+        ok = self.walk_ok.pop(0) if self.walk_ok else True
+        if not ok:
+            return None
+        self.pos = (exit_map or m, x, y)
+        return self.pos
+
+    def quest(self, args, timeout=0):
+        self.c('quest', tuple(args))
+        if '--fight' in args:
+            if self.f_rc == 0:
+                self.pos = (32021, 29, 57)
+            return self.f_rc, []
+        return self.track_rc, []
+
+
+def b20(**kw):
+    fresh()
+    T = FT20(**kw)
+    return T, quiet(rebirth.run, trans=2, from_stage='boss20', to_stage='boss20', tools=T)
+
+
+T, rc = b20()
+n = T.names()
+w = [c for c in T.calls if c[0] == 'walk']
+fq = [c[1] for c in T.calls if c[0] == 'quest' and '--fight' in c[1]]
+check('boss20：追蹤 rc 3 人在 32021 → walk 出口 28,59（換圖 32020）→ team.check → walk 20,11 → --fight → 0',
+      rc == 0 and w == [('walk', 32021, 28, 59, 32020), ('walk', 32020, 20, 11, None)] and len(fq) == 1 and '--npc' in fq[0] and 'auto' in fq[0]
+      and n.index('walk') < n.index('team_check') < len(n) - 1, str(n))
+check('boss20 備援：walk 前 preflight', [i for i, x in enumerate(n) if x == 'preflight'][0] < n.index('walk'))
+T, rc = b20(track_rc=19)
+check('boss20：追蹤卡住（19）同樣走備援', rc == 0 and len([c for c in T.calls if c[0] == 'walk']) == 2)
+T, rc = b20(walk_ok=(False,))
+check('boss20：出口走不過去 → 84（backtrack=exit）、不開打', rc == 84 and rebirth.LAST['info'].get('backtrack') == 'exit' and not any('--fight' in c[1] for c in T.calls if c[0] == 'quest'))
+T, rc = b20(walk_ok=(True, False))
+check('boss20：走不到 20,11 → 84（backtrack=spot）', rc == 84 and rebirth.LAST['info'].get('backtrack') == 'spot')
+T, rc = b20(fight_rc=35)
+check('boss20：備援開打沒贏（35）→ 85，且備援只試一次', rc == 85 and len([c for c in T.calls if c[0] == 'walk']) == 2)
+T, rc = b20(team_checks=[1, 0])
+check('boss20：換圖後隊伍散了 → team.form 再走', rc == 0 and 'team_form' in T.names())
+T, rc = b20(team_checks=[1], team_form_rc=41)
+check('boss20：換圖後 team.form 失敗 → 83', rc == 83)
+T, rc = b20(track_rc=2)
+check('boss20：quest 回 2（驗證視窗）→ 9，不走備援', rc == 9 and 'walk' not in T.names())
+T, rc = b20(pos=(32020, 20, 11))
+check('boss20：已在 32020 → 不走 walk（quest 預設模式自己處理，非 21F 不備援）', 'walk' not in T.names() and rc == 84)
+fresh()
+T = FT20(pos=(32020, 20, 11))
+T.quest = lambda args, timeout=0: (T.calls.append(('quest', tuple(args))), (37, None))[1]
+T.pos = (32021, 29, 57)
+check('boss20：quest 回 37 且落點對 → 不備援', quiet(rebirth.run, trans=2, from_stage='boss20', to_stage='boss20', tools=T) == 0 and 'walk' not in T.names())
+# refight：被打飛者追蹤把人傳到 21F → 先走回 20F 再重打
+CARDS20 = [Card('DKBO', 'leader'), Card('DKBO2', 'member'), Card('DKBO3', 'solo'), Card('DKBO4', 'member'), Card('DKBO5', 'member')]
+fresh()
+T = FT20(track_rc=38, team_checks=[1, 0], cards=CARDS20)
+T.pos = (32021, 29, 57)
+T.char_switch = lambda n: (T.c('char_switch', n), setattr(T, 'pos', (1000, 92, 99)), 0)[2]
+T.track = lambda task: (T.c('track', task), setattr(T, 'pos', (32021, 31, 29)), True)[2]
+rc = quiet(rebirth.run, trans=2, from_stage='boss20', to_stage='boss20', tools=T)
+n = T.names()
+check('boss20 refight：追蹤傳到 21F → walk 回 20F（不 team.check）→ --fight --team-size 1', rc == 0 and n.index('track') < n.index('walk')
+      and [c[1:] for c in T.calls if c[0] == 'walk'] == [(32021, 28, 59, 32020), (32020, 20, 11, None)] and ('char_ensure', 'DKBO') in T.calls, str(n))
+
 # ---- 39 轉生確認 ----
 fresh()
 T = FakeTools(quest=[(39, KING)], dialog={'body': ['來進行寵物轉生吧'], 'buttons': ['完成'], 'body_ok': True})
