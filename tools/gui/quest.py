@@ -37,6 +37,9 @@
   組隊預設模式（非 --solo / --fight）：**每一場戰鬥**（完整戰鬥或快速戰鬥、不分任務 / 路上）都刷新角色；完整戰鬥自動戰鬥鈕是關的 → 先按 1380,600；同一場按 4 次仍關（寵物指令視窗等）→ 退出碼 25
   刷新角色規則：--solo / --fight 只有任務 / BOSS 戰（點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）刷新，路上小怪直接逃、不刷新；預設模式每場都刷新（--no-refresh 全關）。「刷新成功」後同一場最多每 REFRESH_GAP=8 秒再按一次；沒成功 REFRESH_RETRY=1 秒後就重試（主迴圈睡到到期為止，不多等一整輪）。
            2026-10-13 改（使用者：進戰鬥十幾秒才刷新）：完整戰鬥偵測到後等 REFRESH_FIRST_DELAY=1.5 秒才按第一次（actions.log 實證：一偵測到就按切換 850,765，5 場面板都沒開、接著底部冒出「關閉 + 頭像」列，舊版再花 4 下 × 約 4.5 秒收列）；快速戰鬥不等。refresh_characters 每次只做一次嘗試、不阻塞：讀底部列（bottom_bar）→ 「關閉 + 頭像」列（綠字「如果遇到下指令出錯等問題…」）蓋著就只點一下左側「關閉」（輪流 510,745 / 745 / 725 / 765）、等 0.5 秒再讀，還在 → 回 row；切換鈕圖示（screen_sigs.SIG_SWITCH_FULL 850,765 / SIG_SWITCH_MAIN 763,760）沒露出 → 不點（回 notready；完整戰鬥剛結束時主畫面 850,765 是「組隊」，圖示不同所以不會點到）；露出才按切換 → waitpix 等面板 → 刷新角色 910,578，**看 waitpix 結果**：面板沒開回 nopanel（舊版不看結果，沒按到也記「按刷新角色」）。同一場連續 REFRESH_STUCK_SNAP=10 次沒成功存一張 close-row-stuck / refresh-fail 圖 + errlog。
+           2026-10-13 review §4.2（30 場有 14 場一直點關閉、十幾下都收不掉）：同一場「關閉」點 CLOSE_ROW_MAX_CLICKS=2 次列還在 → 之後只讀不點（回 row_wait），等列自己消失才刷新。
+           看 14 張 close-row-stuck 圖（推測，未實證）：列出現時 5 格頭像都打勾、上方是「播放中」或「N回合 剩餘時間 70」＝全員指令已送出、等回合結算 / 播放動畫時的指令狀態列，這段期間點「關閉」無效。
+  VS 牌卡死：快速戰鬥（頭上 VS 牌、沒有完整戰鬥畫面）開戰 VS_STUCK_S=90 秒還沒結束 → 存 snap vs-stuck、結束本片，退出碼 42（questrun 全員重登 relogin.py 後續片）。
   選擇對象面板（點 NPC 後右側跳出的米色面板：頭像卡片 + 名字，NPC 是黃 / 金字、隊友白字）：偵測到就依黃字位置點 NPC 那張卡片（不寫死第一格），再等對話框；--fight 點 NPC 後與對話步（--stop-after-dialog 點 NPC / 黃問號）都處理。
   模擬測試：uv run --no-project python tools/gui/test_quest_fight.py
   事件記錄：notes/quest-events.log（每行一筆，附截圖路徑 tools/.cache/quest-log/）；啟動時自動刪 tools/.cache/quest-log/ 內超過 3 天的圖檔（cleanup_old_shots）。
@@ -51,7 +54,7 @@
            2026-10-13 06:08 / 06:33 誤報 rc 9 的根因：ocr.ps1 -Zooms 2,3 同一顆鈕讀兩次，舊版整串接成「再見再見」≠「再見」
   殘留面板 不認得的畫面連 2 次時先 close_stray_panel：選人小窗 ESC、組隊 / 切換面板、uikit.known_panel 的已知面板（標題板字 + ✕ 都命中；背包另要外框兩顆鈕）→ 點 ✕，記事件
            （2026-10-13 07:59 / 08:04 背包 / 倉庫面板殘留誤報 rc 9）；clear_leftovers() 給 questrun 交接用（對話框 / 再見 / 選擇對象 ESC、獲得物品確認、已知面板 ✕，不認得不碰）
-  片內 HP --hp-check-min N（questrun 傳 --team-hp-min）：預設模式每打完 --hp-check-every 場（預設 1）、回主畫面閒置確認後讀全隊 HP（bag.team_hp_pct，開背包約 8 秒），
+  片內 HP --hp-check-min N（questrun 傳 --team-hp-min）：預設模式打完 1 場任務戰（--no-stop-after-boss 時；平常 BOSS 戰由 37 交 questrun 讀），或路上一般戰鬥每 --hp-check-every 場（預設 3；0 = 不讀，2026-10-13 起，舊版每場都讀 8 秒）、回主畫面閒置確認後讀全隊 HP（bag.team_hp_pct，開背包約 8 秒），
            任一人 < N% → 退出碼 41（questrun 補血後續片）。任務 BOSS 戰打完、閒置確認前 slice 時間到也延後收片（slice_defer boss_pending，最多 180 秒），
            確保回 37 讓 questrun 做 BOSS 後補血（2026-10-13 07:36 / 07:38 四寶玉之謎：守護獸打完領獎後下一輪就「時間到」回 0 → 沒補血連打 → DKBO3 / DKBO5 HP 0 被踢）
   戰鬥     完整戰鬥畫面（上方棕框標籤）或頭上綠色 VS 牌（快速戰鬥）→ 切換（完整 850,765 / 快速 763,760）→ 刷新角色 910,578（按完面板自己關；規則見上「刷新角色規則」）
@@ -66,7 +69,8 @@
            `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
-退出碼：40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+結束時印「走路不計時 N 秒」「本片戰鬥 N 場」兩行（questrun 解析：巡路不計時、沒打仗才沿用全隊 HP）。
+退出碼：42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -112,6 +116,8 @@ EXIT_BOSS_TEAM = 38                  # 預設模式：任務 BOSS 戰打完，�
 EXIT_IRREVERSIBLE = 39               # 對話框文字含不可逆關鍵字（轉生 / 封印 / 刪除 / 丟棄…）或讀不到對話文字 → 沒按、對話框維持開著，存 snap；人 / agent 看圖確認後用 --allow-irreversible 放行
 EXIT_BYE_ONLY = 40                   # 任務接不下去：任務 NPC 的對話框只有一顆「再見」鈕（OCR 確認）→ 已 ESC 關、不亂點，交給呼叫端（questrun 查背包滿 / 信箱，否則回報）
 EXIT_HP_LOW = 41                     # --hp-check-min：戰鬥後回主畫面讀全隊 HP（bag.team_hp_pct），有人低於門檻 → 結束本片，呼叫端補血後續片
+EXIT_VS_STUCK = 42                   # 快速戰鬥頭上 VS 牌 VS_STUCK_S 秒還沒結束（伺服器端卡死，刷新角色無效）→ 結束本片，呼叫端（questrun）全員重登 relogin.py
+VS_STUCK_S = 90.0                    # 快速戰鬥正常 1～3 秒、刷新後幾秒內結束；超過這麼久仍是 VS 牌（沒有完整戰鬥畫面）= 卡死（2026-10-12 碧青 12 樓）
 STALL_MAX = 4                        # 對話無進展幾輪就停
 STALL_MARKER_PX = 10                 # 兩次點的黃問號座標差超過這麼多 px = 不同標記（輪數歸零）
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
@@ -818,6 +824,7 @@ WALK_GRACE_READS = 2                 # 巡路中途連續 unknown 最多這麼�
 
 
 WALK: dict = {}                      # 本次執行的 WalkClock（main 結束時印「走路不計時 N 秒」給 questrun 扣總時限）
+STATS: dict = {}                     # 本次執行的統計：battles = 打完幾場戰鬥（main 結束時印「本片戰鬥 N 場」給 questrun 判斷全隊 HP 能不能沿用）
 
 
 SLICE_DEFER_STATES = ('battle', 'dialog', 'reward', 'select')
@@ -831,12 +838,18 @@ def slice_defer(st: str, over_s: float, boss_pending: bool = False) -> bool:
     return (st in SLICE_DEFER_STATES or boss_pending) and over_s < SLICE_DEFER_MAX_S
 
 
-HP_CHECK_EVERY = 1                     # --hp-check-every 預設：每打完幾場戰鬥（回主畫面閒置確認後）讀一次全隊 HP
+HP_CHECK_EVERY = 3                     # --hp-check-every 預設：路上一般戰鬥每打完幾場（回主畫面閒置確認後）讀一次全隊 HP；0 = 一般戰鬥不讀
 
 
-def hp_check_due(a, battles: int, idle_ok: bool) -> bool:
-    """純函式：--hp-check-min 開著、預設模式（非 --solo / --fight）、打完 >= --hp-check-every 場、主畫面閒置確認（不在巡路中，開背包才安全）"""
-    return bool(getattr(a, 'hp_check_min', 0)) and not (a.solo or a.fight) and battles >= max(1, getattr(a, 'hp_check_every', HP_CHECK_EVERY)) and idle_ok
+def hp_check_due(a, quest_n: int, road_n: int, idle_ok: bool) -> bool:
+    """純函式：--hp-check-min 開著、預設模式（非 --solo / --fight）、主畫面閒置確認（不在巡路中，開背包才安全），且
+    打完 >= 1 場任務戰（quest_n；預設模式 BOSS 戰通常已由 37 / 38 停手交給 questrun 讀，這裡管 --no-stop-after-boss 的情況），
+    或路上一般戰鬥打完 >= --hp-check-every 場（road_n；0 = 一般戰鬥不讀）。
+    2026-10-13 review §5.4：舊版每打完 1 場（含路上小怪）就開背包讀 8 秒，49 場 ≈ 6.5 分；連戰任務（questdefs hp_every=1）由 questrun 傳 1"""
+    if not (getattr(a, 'hp_check_min', 0) and not (a.solo or a.fight) and idle_ok):
+        return False
+    every = getattr(a, 'hp_check_every', HP_CHECK_EVERY)
+    return quest_n >= 1 or (every > 0 and road_n >= every)
 
 
 def hp_low_roles(pct, thr: int) -> dict:
@@ -1143,7 +1156,10 @@ def panel_visible() -> bool:
     return len(cols) == len(pts) and all(close(c, (r, g, b)) for c, (_, _, r, g, b, _t) in zip(cols, SIG_PANEL))
 
 
-def refresh_characters(full: bool = False, attempt: int = 0) -> str:
+CLOSE_ROW_MAX_CLICKS = 2             # 同一場戰鬥「關閉」點了這麼多次列還在 → 不再點，等列自己消失（review §4.2：一場連點十幾下都收不掉）
+
+
+def refresh_characters(full: bool = False, attempt: int = 0, click_row: bool = True) -> str:
     """戰鬥中按「刷新角色」加速，**只做一次嘗試、不阻塞**（2026-10-13 改；舊版收「關閉」列最多 4 下 × 約 4.5 秒，每場卡 15～20 秒）：
     1. 讀底部列（一次 gui pixel）：
        - 「關閉 + 頭像」列蓋住切換鈕 → 點一下「關閉」（CLOSE_ROW_CLICKS[attempt % 4]）、等 CLOSE_ROW_SETTLE_MS 再讀；還在 → 回 'row'（主迴圈 REFRESH_RETRY 秒後再試）
@@ -1151,8 +1167,11 @@ def refresh_characters(full: bool = False, attempt: int = 0) -> str:
        - 讀不到像素 → 照舊直接按（不卡住刷新）
     2. 切換（完整戰鬥 850,765 / 快速戰鬥 763,760）→ waitpix 等面板 → 刷新角色 910,578；**看 waitpix 結果**：面板沒出現 → 回 'nopanel'（沒點刷新，主迴圈很快重試）。
        面板還開著就點 ✕。按到了回 'ok'（seq 沒有 waitpix 結果時回 'unverified'，視同按到）。
+    click_row=False（本場已點 CLOSE_ROW_MAX_CLICKS 次收不掉）→ 列還在就只回 'row_wait'、不點（等它自己消失；推測是全員指令已送出、等回合結算 / 播放中時的狀態列，點「關閉」無效）。
     主迴圈只把 REFRESH_DONE 當成刷新成功（才開始算 REFRESH_GAP）"""
     b = bottom_bar(full)
+    if b == 'row' and not click_row:
+        return 'row_wait'
     if b == 'row':
         x, y = CLOSE_ROW_CLICKS[attempt % len(CLOSE_ROW_CLICKS)]
         gui('seq', f'click {x} {y}; wait {CLOSE_ROW_SETTLE_MS}', note='戰鬥底部列：點「關閉」收起頭像列')
@@ -1655,7 +1674,7 @@ def _main() -> int:
     ap.add_argument('--stop-after-rewards', type=int, default=0, help='領到第 N 次獲得物品視窗後停（0 = 不停）')
     ap.add_argument('--no-stop-after-boss', action='store_true', help='預設模式（非 --solo / --fight）：任務 BOSS 戰（對話 / 黃問號後 %d 秒內開打）打完閒置確認後預設會先驗隊伍再停（退出碼 %d 滿員 / %d 不滿）；加這個旗標 = 不停、照舊一路連跑（呼叫端自己負責驗隊伍與不可逆步驟）' % (QUEST_BATTLE_WINDOW, EXIT_BOSS_DONE, EXIT_BOSS_TEAM))
     ap.add_argument('--hp-check-min', type=int, default=0, help='預設模式：每打完 --hp-check-every 場戰鬥、回主畫面閒置確認後讀全隊 HP（開背包約 8 秒），任一人低於這個 %%%% → 結束本片，退出碼 %d（questrun 補血後續片）；0 = 不檢查' % EXIT_HP_LOW)
-    ap.add_argument('--hp-check-every', type=int, default=HP_CHECK_EVERY, help='--hp-check-min 每幾場戰鬥讀一次（預設 1）')
+    ap.add_argument('--hp-check-every', type=int, default=HP_CHECK_EVERY, help='--hp-check-min：路上一般戰鬥每幾場讀一次（預設 %d；0 = 只在任務戰後讀）' % HP_CHECK_EVERY)
     ap.add_argument('--allow-irreversible', action='store_true', help='不檢查對話框是否含不可逆關鍵字（%s）：預設遇到會不按、存 snap、退出碼 %d；人 / agent 看過截圖確認要做才加' % ('、'.join(IRREVERSIBLE_KEYWORDS), EXIT_IRREVERSIBLE))
     a = ap.parse_args()
     a.npc_map_arg = a.npc_map or None
@@ -1690,6 +1709,7 @@ def _main() -> int:
         event(f'清理 {n_old} 張 {SHOT_KEEP_DAYS} 天前截圖')
     wclock = WalkClock(a.max_seconds, time.time())       # 自動走路中不計時（只有連續非 walking 才耗 --max-seconds）
     WALK['clock'] = wclock
+    STATS.clear()
     wstuck = WalkStuck()                                 # Auto Walking 但座標不動 → 點地面解卡（WALK_STUCK_S）
     marker_fail = 0              # 連續點黃色問號沒反應的次數
     task_miss = 0
@@ -1728,7 +1748,8 @@ def _main() -> int:
     select_tries = 0             # 連續幾輪看到「選擇對象」面板（點了還在就別一直點）
     byes = 0                     # 已 ESC 關掉的「只有再見」閒聊對話次數（BYE_MAX）
     last_select_t = 0.0          # 最後一次點「選擇對象」卡片的時間（BYE_SELECT_WINDOW：之後出現的「只有再見」= 點到別人的閒聊）
-    battles_since_hp = 0         # --hp-check-min：上次讀全隊 HP 之後打完幾場（每場戰鬥結束 +1）
+    quest_since_hp = road_since_hp = 0   # --hp-check-min：上次讀全隊 HP 之後打完的任務戰 / 路上一般戰鬥場數（hp_check_due）
+    row_clicks = 0               # 本場戰鬥點「關閉」收列沒成功的次數（CLOSE_ROW_MAX_CLICKS 後只等不點）
     last_refresh_t = 0.0         # 本場戰鬥最後一次按刷新角色的時間（REFRESH_GAP）
     refresh_tries = 0            # 本場戰鬥連續幾次刷新沒成功（面板沒開 / 關閉列還在 / 切換鈕沒露出）
     if guard_ko:
@@ -1813,9 +1834,12 @@ def _main() -> int:
         if st in ('idle', 'walking', 'dialog', 'reward'):
             if in_battle:
                 battleguard.release()          # 戰鬥結束 → 刪鎖檔，ass.py 可以動了
-                battles_since_hp += 1
+                STATS['battles'] = STATS.get('battles', 0) + 1
                 if quest_battle:
+                    quest_since_hp += 1
                     team_dirty = True          # 任務戰打完：下次點之前驗隊伍
+                else:
+                    road_since_hp += 1
             in_battle = False
         in_battle_new = st == 'battle' and not in_battle
         if in_battle_new:
@@ -1988,6 +2012,13 @@ def _main() -> int:
                 auto_presses = 0
                 last_refresh_t = 0.0
                 refresh_tries = 0
+                row_clicks = 0
+            if not full and time.time() - battle_t0 >= VS_STUCK_S:
+                # 快速戰鬥（頭上 VS 牌）這麼久還沒打完 = 伺服器端卡死（刷新角色也沒用；2026-10-12 碧青 12 樓手動全員重登才解）→ 交給呼叫端重登
+                shot = snap('vs-stuck')
+                event(f'快速戰鬥 VS 牌 {time.time() - battle_t0:.0f} 秒還沒結束（刷新角色無效、沒有完整戰鬥畫面）→ 結束本片，退出碼 {EXIT_VS_STUCK}（呼叫端全員重登）', shot)
+                _errlog(f'quest 快速戰鬥 VS 牌卡死 {time.time() - battle_t0:.0f} 秒，退出碼 {EXIT_VS_STUCK}')
+                return EXIT_VS_STUCK
             if manual and not full:
                 if not boss_now and not warned_quick:
                     event(f'--{"solo" if a.solo else "fight"}：遇敵但沒有完整戰鬥畫面（只看到 VS 牌 = 快速戰鬥還開著？）→ 無法逃跑，只能等；請先關快速戰鬥')
@@ -2018,7 +2049,11 @@ def _main() -> int:
                     auto_presses += 1
                     event(f'組隊完整戰鬥：自動戰鬥鈕是關的 → 按 {AUTO_BTN}（本場第 {auto_presses} 次）')
             if should_refresh(a, boss_now, full, s.get('auto_off'), time.time() - last_refresh_t, time.time() - battle_t0):
-                rr = refresh_characters(full, refresh_tries)
+                rr = refresh_characters(full, refresh_tries, click_row=row_clicks < CLOSE_ROW_MAX_CLICKS)
+                if rr == 'row':
+                    row_clicks += 1
+                    if row_clicks == CLOSE_ROW_MAX_CLICKS:
+                        event(f'戰鬥底部「關閉 + 頭像」列點了 {row_clicks} 次收不掉 → 不再點，等它自己消失再刷新')
                 kind = "完整" if full else "快速"
                 if rr in REFRESH_DONE:
                     battles += 1
@@ -2029,12 +2064,13 @@ def _main() -> int:
                 else:
                     refresh_tries += 1
                     last_refresh_t = time.time() - REFRESH_GAP + REFRESH_RETRY     # 沒成功：REFRESH_RETRY 秒後重試，不等 REFRESH_GAP
-                    why = {'row': '底部「關閉 + 頭像」列還在', 'notready': '切換鈕沒露出（轉場 / 被蓋 / 戰鬥剛結束）→ 沒點',
+                    why = {'row': '底部「關閉 + 頭像」列還在', 'row_wait': '底部「關閉 + 頭像」列還在（已點過收不掉，只等不點）',
+                           'notready': '切換鈕沒露出（轉場 / 被蓋 / 戰鬥剛結束）→ 沒點',
                            'nopanel': '按了切換但面板沒出現 → 沒點刷新'}.get(rr, rr)
                     (event if rr == 'nopanel' or refresh_tries == 1 else log)(f'戰鬥中（{kind}戰鬥）刷新角色沒成功：{why}（本場第 {refresh_tries} 次，{REFRESH_RETRY:.0f} 秒後重試）')
                     if refresh_tries == REFRESH_STUCK_SNAP:
                         try:
-                            shot = snap('close-row-stuck' if rr == 'row' else 'refresh-fail')
+                            shot = snap('close-row-stuck' if rr in ('row', 'row_wait') else 'refresh-fail')
                         except Exception:
                             shot = None
                         event(f'本場刷新角色連續 {refresh_tries} 次沒成功（最後一次：{why}）', shot)
@@ -2103,9 +2139,9 @@ def _main() -> int:
             if idle_ok:
                 event(f'步驟結束（對話 {dialogs}、獎勵 {rewards}），連續閒置 {idle_streak} 次 → 停（--stop-after-dialog，未點追蹤 / 黃問號）')
                 return finish(a)
-        elif st == 'idle' and hp_check_due(a, battles_since_hp, idle_ok):
+        elif st == 'idle' and hp_check_due(a, quest_since_hp, road_since_hp, idle_ok):
             # 片內連戰 HP 檢查（2026-10-13 四寶玉之謎：同一片連打守護獸、片內沒驗 HP，DKBO3 / DKBO5 HP 0 被踢出隊伍）
-            battles_since_hp = 0
+            quest_since_hp = road_since_hp = 0
             rc_hp, pct = read_team_hp()
             if rc_hp in (EXIT_UNKNOWN, EXIT_HALT_CODE):
                 return rc_hp
@@ -2254,6 +2290,7 @@ def main() -> int:
         wc = WALK.get('clock')
         if wc is not None:
             print(f'走路不計時 {int(wc.walked)} 秒', flush=True)      # questrun 解析這行：slice / 總時限都不把巡路時間算進去
+            print(f'本片戰鬥 {STATS.get("battles", 0)} 場', flush=True)  # questrun 解析這行：沒打仗 → 全隊 HP 讀數可沿用（review §5.2）
         return rc
     finally:
         battleguard.release()

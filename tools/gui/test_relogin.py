@@ -49,7 +49,7 @@ class World:
     def install(self):
         o = self.o
         uikit.preflight = lambda src, fast=True: o['preflight']
-        uikit.screen = lambda full=False: {'state': o['state'], 'panel': 'setting' if o['state'] == 'panel' else None}
+        uikit.screen = lambda full=False: {'state': o['state'], 'panel': 'setting' if o['state'] == 'panel' else None, 'full': o.get('full', False)}
         uikit.open_panel = lambda p, timeout=4.0: o['panel_ok']
         uikit.close_panel = lambda p, known_open=False: True
         uikit.px = lambda pts: [(198, 85, 53)] * len(list(pts)) if o['btn_ok'] else [(0, 0, 0)] * len(list(pts))
@@ -89,8 +89,8 @@ class World:
 
 
 def run(**kw):
-    w = World(**{k: v for k, v in kw.items() if k not in ('confirm', 'dry', 'check_team')}).install()
-    rc = relogin.run(kw.get('confirm', True), kw.get('dry', False), 'DKBO', 5, kw.get('check_team', True))
+    w = World(**{k: v for k, v in kw.items() if k not in ('confirm', 'dry', 'check_team', 'stuck')}).install()
+    rc = relogin.run(kw.get('confirm', True), kw.get('dry', False), 'DKBO', 5, kw.get('check_team', True), kw.get('stuck', False))
     return rc, w
 
 
@@ -119,6 +119,16 @@ rc, w = run(check_team=False)
 check('--no-team 不檢查', rc == 0 and not any(c[0] in ('check', 'ensure') for c in w.calls))
 rc, w = run(state='battle')
 check('戰鬥中 → 107 不點', rc == 107 and not w.clicks)
+rc, w = run(state='walking')
+check('巡路中（沒 --stuck）→ 107 不點', rc == 107 and not w.clicks)
+rc, w = run(state='walking', stuck=True)
+check('--stuck：巡路卡住 → 照常登出重登 0', rc == 0 and clicked(w, relogin.LOGOUT_BTN), rc)
+rc, w = run(state='battle', stuck=True)
+check('--stuck：快速戰鬥 VS 牌卡死 → 照常登出重登 0', rc == 0 and clicked(w, relogin.LOGOUT_BTN), rc)
+rc, w = run(state='battle', full=True, stuck=True)
+check('--stuck：完整戰鬥畫面 → 仍 107 不點', rc == 107 and not w.clicks)
+rc, w = run(state='dialog', stuck=True)
+check('--stuck：對話框 → 仍 107 不點', rc == 107 and not w.clicks)
 rc, w = run(preflight=8)
 check('preflight 8 直接回傳', rc == 8 and not w.clicks)
 rc, w = run(panel_ok=False)

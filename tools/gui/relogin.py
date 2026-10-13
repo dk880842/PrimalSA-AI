@@ -7,10 +7,12 @@
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/relogin.py --confirm [--leader DKBO] [--size 5] [--no-team]
   uv run --no-project python tools/gui/relogin.py --dry-run     # 只做前置檢查（唯讀、不點任何東西），印會做的步驟
+  --stuck：起始畫面除了主畫面，也接受「自動巡路中」（Auto Walking 卡住）與「快速戰鬥 VS 牌」（伺服器端卡死）；完整戰鬥畫面一律不動（107）。
+           questrun 在 quest.py 19 / 42 / VS 牌卡住時用（relogin.run(confirm=True, stuck=True)）
 登出是**不可逆動作（所有角色下線，進行中的任務 / 戰鬥中斷）**：沒有 --confirm 一律不動（退出碼 1）。
 
 流程與畫面驗證（座標 = 截圖座標 1440x830）：
-  1 preflight（版面 / netwatch halt / battle.lock / 畫面不是 unknown）→ 畫面必須是主畫面（或設置面板已開）
+  1 preflight（版面 / netwatch halt / battle.lock / 畫面不是 unknown）→ 畫面必須是主畫面（或設置面板已開；--stuck 另收巡路中 / 快速戰鬥 VS 牌）
   2 開設置面板（1210,760，標題板特徵 + ✕）→ 讀「全員登出」鈕顏色（橘紅，樣本 p4/panel_setting.png 量得）才點 517,731
   3 「是否登出全部角色?」提示：像素特徵（米色單鈕提示窗，同網路異常）+ OCR 訊息含「登 / 出 / 全」（OCR 讀不出就信任像素；讀到別的字 → 不點）→ 確定 715,557
   4 等回登入畫面（≤ 60 s）→ netwatch.relogin：帳密欄有內容才點「登錄」590,585（帳密欄空 / 登錄後提示窗 / 連續 3 次失敗 = halt）→ 選角面板「一鍵全登」740,640 → 等進遊戲（約 20 s）
@@ -26,7 +28,7 @@
   104 登入畫面階段 netwatch.relogin 沒成功但不是 halt（忙碌中 / 讀不到畫面）；halt / fatal 分別是 10 / 11
   105 重登進遊戲了，但隊伍檢查 / 組隊失敗（team.py 的 41 / 42 / 43 …，訊息有詳情）
   106 重登進遊戲了，但當前角色切回隊長失敗（char.py 的退出碼，訊息有詳情）
-  107 起始畫面不是主畫面（戰鬥 / 其他面板 / 對話）→ 不動
+  107 起始畫面不是主畫面（戰鬥 / 其他面板 / 對話；--stuck 時只擋完整戰鬥 / 面板 / 對話）→ 不動
   108 netwatch 動作鎖被別的腳本佔用 → 不動
 未實機驗證（只有離線測試）：設置面板標題板 / ✕ 特徵（樣本有，沿用 screen_sigs）、全員登出鈕顏色、確認提示窗的像素特徵與 OCR 框（假設與網路異常提示同款單鈕窗；
 首次手動登出時使用者只給了座標 715,557）、「等回登入畫面」的時序。這些判斷都保守：不符就停手不點。
@@ -156,7 +158,16 @@ def team_stage(leader: str, size: int) -> int:
     return 0
 
 
-def run(confirm: bool = False, dry_run: bool = False, leader: str = charstate.LEAD, size: int = 5, check_team: bool = True) -> int:
+def start_ok(st: dict, stuck: bool = False) -> bool:
+    """純函式：起始畫面能不能開始登出。主畫面 / 設置面板已開 = 可以；stuck 另收自動巡路中、快速戰鬥（頭上 VS 牌，沒有完整戰鬥畫面）"""
+    state = st.get('state')
+    if state == 'idle' or (state == 'panel' and st.get('panel') == 'setting'):
+        return True
+    return bool(stuck) and (state == 'walking' or (state == 'battle' and not st.get('full')))
+
+
+def run(confirm: bool = False, dry_run: bool = False, leader: str = charstate.LEAD, size: int = 5, check_team: bool = True,
+        stuck: bool = False) -> int:
     if not confirm and not dry_run:
         print(f'{SRC}：登出會讓全部角色下線（不可逆），沒有 --confirm 不動；只想看前置檢查用 --dry-run', file=sys.stderr)
         return uikit.EXIT_USAGE
@@ -164,8 +175,9 @@ def run(confirm: bool = False, dry_run: bool = False, leader: str = charstate.LE
     if rc:
         return rc
     st = uikit.screen(full=True)
-    if not (st.get('state') == 'idle' or (st.get('state') == 'panel' and st.get('panel') == 'setting')):
-        return uikit.fail(SRC, EXIT_NOT_IDLE, f'起始畫面不是主畫面（state={st.get("state")} panel={st.get("panel")}），不動')
+    if not start_ok(st, stuck):
+        return uikit.fail(SRC, EXIT_NOT_IDLE, f'起始畫面不是主畫面（state={st.get("state")} panel={st.get("panel")} full={st.get("full")}'
+                          + ('；--stuck 也只收巡路中 / 快速戰鬥 VS 牌' if stuck else '') + '），不動')
     if dry_run:
         log('--dry-run：前置檢查通過。會做：開設置 → 全員登出 → 確認 → 登錄 → 一鍵全登'
             + (f' → team.check（{size} 人、隊長 {leader}）→ char.ensure {leader}' if check_team else ''))
@@ -202,8 +214,9 @@ def main() -> int:
     ap.add_argument('--leader', default=charstate.LEAD)
     ap.add_argument('--size', type=int, default=5)
     ap.add_argument('--no-team', action='store_true', help='重登後不檢查隊伍 / 當前角色')
+    ap.add_argument('--stuck', action='store_true', help='卡死時用：起始畫面也接受自動巡路中 / 快速戰鬥 VS 牌（完整戰鬥仍不動）')
     a = ap.parse_args()
-    return run(a.confirm, a.dry_run, a.leader, a.size, not a.no_team)
+    return run(a.confirm, a.dry_run, a.leader, a.size, not a.no_team, a.stuck)
 
 
 if __name__ == '__main__':

@@ -911,6 +911,36 @@ s = Script([IDLE] * 20 + [QUICK, QUICK, IDLE, IDLE, IDLE])
 rc = run2(['--fight', '--no-click', '--max-seconds', '25'], s)
 ok &= check('--fight --no-click 20 秒後的路上小怪（快速戰鬥）→ 不刷新', not has(s, 'click 763 760') and not has(s, 'click 850 765'), str(s.clicks))
 
+print('(t4) 關閉列收不掉：同一場只點 CLOSE_ROW_MAX_CLICKS 次，之後只等不點（review §4.2）/ VS 牌卡死 → 42')
+g = RowGame(True, stuck=True)
+quest.gui = g.gui
+ok &= check('click_row=False：列還在 → row_wait、零點擊', quest.refresh_characters(True, 5, click_row=False) == 'row_wait' and not g.clicks, str(g.clicks))
+g = RowGame(False)
+quest.gui = g.gui
+ok &= check('click_row=False 但列已消失 → 照常按切換刷新', quest.refresh_characters(True, 5, click_row=False) == 'ok' and n_switch(g) == 1, str(g.clicks))
+_rg = RowGame(True, stuck=True)
+
+
+class RowScript(Script):
+    def gui(self, *args, note=''):
+        r = _rg.gui(*args, note=note)
+        if args[0] == 'seq':
+            self.clicks.append((round(self.t - 1000, 1), args[1]))
+        return r
+
+
+s = RowScript([IDLE] + [FULL_ON] * 25 + [IDLE] * 6)
+rc = run2(['--no-track', '--max-seconds', '30'], s)
+_nc = len([c for c in s.clicks if c[1].startswith('click 510 ')])
+ok &= check(f'整合：完整戰鬥 25 秒列一直收不掉 → 關閉只點 {quest.CLOSE_ROW_MAX_CLICKS} 下（舊版每秒點一下）、不點切換', _nc == quest.CLOSE_ROW_MAX_CLICKS
+            and not [c for c in s.clicks if c[1].startswith('click 850 765')], f'close={_nc} {s.clicks[:6]}')
+s = Script([IDLE] + [QUICK] * 300)
+rc = run2(['--no-track', '--max-seconds', '400'], s)
+ok &= check(f'快速戰鬥 VS 牌 {quest.VS_STUCK_S:.0f} 秒沒結束 → 退出碼 42（呼叫端重登）', rc == quest.EXIT_VS_STUCK == 42 and quest.VS_STUCK_S <= s.t - 1000 <= quest.VS_STUCK_S + 3, f'rc={rc} t={s.t - 1000:.1f}')
+s = Script([IDLE, FULL_ON] + [FULL_ON] * 120 + [IDLE] * 6)
+rc = run2(['--no-track', '--max-seconds', '200', '--no-refresh'], s)
+ok &= check('完整戰鬥打很久（120 秒）不算 VS 卡死', rc != quest.EXIT_VS_STUCK, f'rc={rc}')
+
 
 print('(A) BOSS 戰判斷輸贏（errlog #25）：judge_boss_result 純函式')
 J = quest.judge_boss_result
@@ -1273,11 +1303,16 @@ rc = run2(['--no-track', '--max-seconds', '14'], g)
 sw = [t for t, k in g.log if k == 'switch']
 ok &= check('面板前 2 次沒開 → 約 1～2.5 秒後重試（不等 8 秒），第 3 次成功仍在開戰 ≤ 8 秒內',
             len(sw) >= 3 and all(0.9 <= b - a <= 3.2 for a, b in zip(sw, sw[1:3])) and first_refresh(g) is not None and first_refresh(g) - g.bs <= 8.0, f'{g.log}')
+g = Timed(row=True, eat=1)
+rc = run2(['--no-track', '--max-seconds', '14'], g)
+cl = [t for t, k in g.log if k == 'close']
+ok &= check('開戰就有關閉列、第 1 下被吃 → 每輪只點 1 下，第 2 下收起後立刻刷新（開戰 ≤ 6 秒；舊版 4 下 × 4.5 秒 ≈ 18 秒）',
+            len(cl) == 2 and first_refresh(g) is not None and first_refresh(g) - g.bs <= 6.0 and first_refresh(g) - cl[-1] < 1.5, f'{g.log}')
 g = Timed(row=True, eat=2)
 rc = run2(['--no-track', '--max-seconds', '14'], g)
 cl = [t for t, k in g.log if k == 'close']
-ok &= check('開戰就有關閉列、前 2 下被吃 → 每輪只點 1 下，第 3 下收起後立刻刷新（開戰 ≤ 6 秒；舊版 4 下 × 4.5 秒 ≈ 18 秒）',
-            len(cl) == 3 and first_refresh(g) is not None and first_refresh(g) - g.bs <= 6.0 and first_refresh(g) - cl[-1] < 1.5, f'{g.log}')
+ok &= check(f'前 2 下都被吃（收不掉）→ 點滿 CLOSE_ROW_MAX_CLICKS={quest.CLOSE_ROW_MAX_CLICKS} 下就停、不再點（2026-10-13 review §4.2：等列自己消失）',
+            len(cl) == quest.CLOSE_ROW_MAX_CLICKS == 2 and first_refresh(g) is None, f'{g.log}')
 g = Timed(row=True, stuck=True, row_until=10.0)
 rc = run2(['--no-track', '--max-seconds', '16'], g)
 ok &= check('關閉列點不掉、第 10 秒自己消失 → 消失後 ≤ 2 秒內刷新（舊版要等收列 4 下 + REFRESH_GAP）',
@@ -1559,23 +1594,34 @@ print('(HP) 片內連戰 HP 檢查 / BOSS 戰後時間到延後（2026-10-13 四
 ok &= check('slice_defer：主畫面 + BOSS 待確認 → 延後；超過上限不延後；沒 BOSS 照舊', quest.slice_defer('idle', 5, True) and not quest.slice_defer('idle', 5, False)
             and not quest.slice_defer('idle', quest.SLICE_DEFER_MAX_S + 1, True) and quest.slice_defer('battle', 5))
 _A = lambda **k: type('A', (), dict(dict(hp_check_min=60, hp_check_every=1, solo=False, fight=False), **k))()
-ok &= check('hp_check_due：打完 1 場 + 閒置確認 → True；沒打 / 沒閒置確認 / 沒開 / --solo / --fight → False',
-            quest.hp_check_due(_A(), 1, True) and not quest.hp_check_due(_A(), 0, True) and not quest.hp_check_due(_A(), 1, False)
-            and not quest.hp_check_due(_A(hp_check_min=0), 3, True) and not quest.hp_check_due(_A(solo=True), 1, True) and not quest.hp_check_due(_A(fight=True), 1, True)
-            and not quest.hp_check_due(_A(hp_check_every=2), 1, True) and quest.hp_check_due(_A(hp_check_every=2), 2, True))
+ok &= check('hp_check_due：任務戰 1 場 + 閒置確認 → True；沒打 / 沒閒置確認 / 沒開 / --solo / --fight → False',
+            quest.hp_check_due(_A(), 1, 0, True) and not quest.hp_check_due(_A(), 0, 0, True) and not quest.hp_check_due(_A(), 1, 0, False)
+            and not quest.hp_check_due(_A(hp_check_min=0), 3, 3, True) and not quest.hp_check_due(_A(solo=True), 1, 1, True) and not quest.hp_check_due(_A(fight=True), 1, 1, True))
+_A3 = lambda **k: type('A', (), dict(dict(hp_check_min=60, solo=False, fight=False), **k))()
+ok &= check('hp_check_due：路上一般戰鬥預設每 3 場才讀（review §5.4）；--hp-check-every 1 每場；0 = 一般戰鬥不讀',
+            quest.HP_CHECK_EVERY == 3 and not quest.hp_check_due(_A3(), 0, 2, True) and quest.hp_check_due(_A3(), 0, 3, True)
+            and quest.hp_check_due(_A(hp_check_every=1), 0, 1, True) and not quest.hp_check_due(_A(hp_check_every=0), 0, 9, True) and quest.hp_check_due(_A(hp_check_every=0), 1, 0, True))
 ok &= check('hp_low_roles：低於門檻才算、讀不出不算', quest.hp_low_roles({'DKBO': 100, 'DKBO3': 0, 'DKBO5': None, 'DKBO4': 59}, 60) == {'DKBO3': 0, 'DKBO4': 59})
 FULL_ON = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': False, 'auto_off': False}
 _hp_calls = []
 _keep_hp = quest.read_team_hp
 quest.read_team_hp = lambda: (_hp_calls.append(1), (0, {'DKBO': 90, 'DKBO2': 80, 'DKBO3': 0, 'DKBO4': 100, 'DKBO5': 30}))[1]
 s = Script([FULL_ON, FULL_ON, IDLE, IDLE, IDLE, IDLE, IDLE])
-rc = run2(['--no-track', '--max-seconds', '120', '--no-refresh', '--no-stop-after-boss', '--hp-check-min', '60'], s)
+rc = run2(['--no-track', '--max-seconds', '120', '--no-refresh', '--no-stop-after-boss', '--hp-check-min', '60', '--hp-check-every', '1'], s)
 ok &= check('打完一場、閒置確認 → 讀全隊 HP → DKBO3 0 / DKBO5 30 < 60 → 退出碼 41', rc == quest.EXIT_HP_LOW and len(_hp_calls) == 1, f'rc={rc} n={len(_hp_calls)}')
 quest.read_team_hp = lambda: (_hp_calls.append(1), (0, {r: 100 for r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')}))[1]
 del _hp_calls[:]
 s = Script([FULL_ON, IDLE, IDLE, IDLE, IDLE, FULL_ON, IDLE, IDLE, IDLE, IDLE] + [IDLE] * 4)
+rc = run2(['--no-track', '--max-seconds', '14', '--no-refresh', '--no-stop-after-boss', '--hp-check-min', '60', '--hp-check-every', '1'], s)
+ok &= check('HP 都夠 → 不停；--hp-check-every 1 每打完一場讀一次（2 場 = 2 次）', rc == 0 and len(_hp_calls) == 2, f'rc={rc} n={len(_hp_calls)}')
+del _hp_calls[:]
+s = Script([FULL_ON, IDLE, IDLE, IDLE, IDLE, FULL_ON, IDLE, IDLE, IDLE, IDLE] + [IDLE] * 4)
 rc = run2(['--no-track', '--max-seconds', '14', '--no-refresh', '--no-stop-after-boss', '--hp-check-min', '60'], s)
-ok &= check('HP 都夠 → 不停；每打完一場讀一次（2 場 = 2 次）', rc == 0 and len(_hp_calls) == 2, f'rc={rc} n={len(_hp_calls)}')
+ok &= check('預設（每 3 場一般戰鬥）：路上 2 場 → 不讀 HP（舊版 2 次 × 8 秒）', rc == 0 and not _hp_calls, f'rc={rc} n={len(_hp_calls)}')
+del _hp_calls[:]
+s = Script([DIALOG, FULL_ON, FULL_ON, REWARD] + [IDLE] * 10)
+rc = run2(['--no-track', '--max-seconds', '14', '--no-refresh', '--no-stop-after-boss', '--hp-check-min', '60'], s)
+ok &= check('預設：任務戰（對話後開打）打完 → 讀 1 次', len(_hp_calls) == 1, f'rc={rc} n={len(_hp_calls)}')
 del _hp_calls[:]
 s = Script([FULL_ON, IDLE, IDLE, IDLE, IDLE, IDLE])
 rc = run2(['--no-track', '--max-seconds', '8', '--no-refresh', '--no-stop-after-boss'], s)

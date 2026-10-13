@@ -38,9 +38,10 @@
 ## 主動全員重登：tools/gui/relogin.py（2026-10-12，離線測試；畫面判斷多半未實機驗證）
 用途：伺服器端卡死（全隊頭上 VS 牌、「戰鬥中禁止當前操作」、刷新無效）時，登出再登入洗乾淨狀態。
 ```
-uv run --no-project python tools/gui/relogin.py --confirm [--leader DKBO] [--size 5] [--no-team]
+uv run --no-project python tools/gui/relogin.py --confirm [--leader DKBO] [--size 5] [--no-team] [--stuck]
 uv run --no-project python tools/gui/relogin.py --dry-run      # 唯讀前置檢查
 ```
 登出不可逆（全員下線）：沒有 `--confirm` 不動（退出碼 1）。流程：preflight + 畫面必須是主畫面 → 開設置面板 → 驗「全員登出」鈕顏色（橘紅，樣本量得）才點 517,731 → 確認提示窗（像素同網路異常單鈕窗 + OCR 含「登 / 出 / 全」，OCR 讀不出信任像素，讀到別的字不點）→ 確定 715,557 → 等回登入畫面（≤ 60 s）→ `netwatch.relogin(grind_ensure=False, encounter=False, team=False)`（帳密欄空 / 登錄後提示窗 / 連 3 次失敗 → halt，規則同上）→ `team.check`（5 人、隊長 DKBO；全員單人才 `team.form`）→ `char.ensure DKBO` → 再 `team.check`。
+`--stuck`（2026-10-13）：起始畫面除了主畫面 / 設置面板，也收「自動巡路中」與「快速戰鬥 VS 牌」（純函式 `start_ok`；完整戰鬥 / 對話框 / 其他面板仍 107）。questrun 在 quest.py 42（VS 牌卡死 90 秒）、19（巡路卡住解不開）、3 + 全隊 VS 牌卡住時自動呼叫 `relogin.run(confirm=True, stuck=True)`，每任務最多 2 次；之後 105 → `team.form --regroup`、關原地遇敵、重查戰鬥設定再續片（見 ui/quest.md）。**實機要確認**：VS 牌 / 巡路畫面時設置鈕點得開。
 退出碼：0 成功；1 缺 --confirm；2 / 8 / 9 / 10 / 11 共用；100 設置打不開或登出鈕特徵不符；101 確認窗沒出現；102 訊息不是登出；103 沒回登入畫面 / 中途冒提示窗；104 登入階段沒成功（非 halt）；105 隊伍檢查 / 組隊失敗；106 當前角色切回失敗；107 起始畫面不是主畫面；108 netwatch 動作鎖被佔。
 **未實機驗證**：設置標題板 / ✕ 特徵與登出鈕顏色（取自既有截圖樣本）、確認提示窗的像素特徵與 OCR 框（假設為單鈕提示窗）、等回登入畫面的時序；不符時一律停手不點。登入畫面階段不存截圖（含帳號欄）。測試：`tools/gui/test_relogin.py`。
