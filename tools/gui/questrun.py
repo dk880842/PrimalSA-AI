@@ -60,7 +60,7 @@
     5 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；2026-10-14 起**完成判斷一律不開任務詳情**：quest.py 印「任務完成」或回 5（追蹤欄找不到該任務）= 完成；時間到 / 提前結束 / 模糊結束 = 下一片（下一個任務的接取本來就開一次詳情）→ 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交寵物（--pet-turnin，預設關 = manual 步照舊 115；**未實機**）
                  defs.turnin（目前只有恐龍博士 2016：步 1 魯尼帖斯 / 步 2 貝魯卡，逐人「選擇」視窗）：pet.py rest-all（任務寵改等待）→ team.disband
-                 → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 讀詳情；失敗 150。
+                 → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 不開詳情（2026-10-14），下一片 quest.py「任務完成」/ 回 5 = 完成；失敗 150。
                  defs.rest_pets（卡坦的願望 2019：隊長交一次 5 人完成，quest.py 預設流程交）：接取後第一片前先 pet.py rest-all。每任務只試一次
                  --rested（petquest 練完已 rest-all --candidates 且退出碼 0 才帶）：接取後 / 交寵物前都不再 rest-all（2026-10-13 review 1013b §2.2，每次交件省 30～90 秒）
   紅暴 2031（2026-10-13 起納入；使用者：有龍王效果就組隊打到底；**未實機**）：前置 check_prereq（5 人 ≥80 級、背包各有耐久力回複藥，bag.team_read 開一次；不符 110）
@@ -1235,16 +1235,10 @@ class Run:
                 rc = self.do_turnin(d, step)
                 if rc:
                     return rc
-                rc, s2 = self.status_of(d)
-                self.opens(ts)
-                if rc:
-                    return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 交寵物後讀狀態失敗 rc={rc}')
-                if s2 == DONE:
-                    ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
-                    self.save()
-                    event(f'任務 {tid}「{d["detail"]}」交寵物後已完成')
-                    self.mark_risk('交寵物（解散逐人交）')                 # 5 人各自交，有人沒交到要當場抓
-                    return self.task_done(d, ts)
+                # 2026-10-14 使用者定：交完不開詳情；交寵物是風險事件（5 人各自交，完成時當場逐人驗）。
+                # 下一片：步號讀到 GONE / 非 manual → quest.py「任務完成」或回 5 = 完成；還停在 manual → 115（每任務只試一次）
+                self.mark_risk('交寵物（解散逐人交）')
+                self.pending = (None, 'default', None)                 # 下一片直接跑 quest.py（步號讀不到 / manual 不再判 115）：完成 → 「任務完成」/ 5；沒交成 → quest.py 29 / 33 → 117
                 continue
             if kind == 'manual':
                 return self.fail(EXIT_MANUAL, f'任務 {tid} 步 {step} kind=manual：停下交人' + (('；' + questdefs.pet_prep_hint(d, step)) if questdefs.pet_prep_hint(d, step) else ''), step=step)
