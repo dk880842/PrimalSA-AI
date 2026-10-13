@@ -131,3 +131,12 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 547 200; wait 600
   1. 彈窗剛出現約 1 秒內按鈕會落空（彈窗關了但道具沒動）→ 所有彈窗按鈕（取出 / 存入 / 使用等）點前先 `uikit.sleep(bag.POPUP_SETTLE_S = 1.0)`。另外切回背包頁後格子要 1～3 秒才更新，取出 / 存入後改輪詢最多 4 秒（取出等出現、存入等消失），不再立刻找而誤判失敗並回滾。
   2. 龍王圖示樣板取自被選取框圍住的格子，未選取的格只吻合約 0.56 → 嚴格（≥0.85）全不中。修法：`icon_match_slots` 嚴格無中時放寬到 `ICON_RATIO_LOOSE = 0.45`（依命中率排序），後面仍有彈窗標題 + 按鈕列核對，名稱不符就 ESC 不按。**樣板尚未改**：要實機截圖才能擷取，下次實機用 `make_item_icons.py` 補「未選取」樣板（在格子沒被選取框圍住時擷取），讓嚴格比對本身就能命中。
   - `depot_use.run`：倉庫沒有但背包有 → 直接用背包那份（note）；取出動作後驗證失敗（背包找不到）也一定 `depot_store` 試著存回（背包沒有只回 92，無害）。
+
+## 道具格縮圖比對 `itemimg_match.py`（2026-10-14 離線；**尚未接線**，bag.py 仍走上面的 item_icons.json + 格名 OCR）
+- 計畫：`notes/plan-item-icon-match.md`（做了階段 1 抽圖、階段 2 比對核心；階段 3 起接到 bag.py 唯讀路徑，要另外實機驗證）。
+- 圖示來源：`uv run --no-project --with UnityPy python tools/extract/item_images.py`（約 15 秒）→ `tools/.cache/item-images/<imageId>.png` + `index.tsv`（imageId ↔ 道具名）+ `missing.tsv`（沒圖的道具）。Sprite 3,225 張；Item imageId 2,299 種中有圖 2,246、缺 53（81 個道具）；不屬於道具的 979 張比對時排除。`--find 龍王的守護` 只查索引。
+- 版面：背包格心 (+2,+2)、倉庫格心 (+1,+1)，倍率都是 0.90，位移搜 ±2；名字 / 數量白字與深色描邊不比；空格沿用 `bag.slot_occupied`（倉庫格同一個棕色，離線實測可用）。
+- 判定：樣板去掉接近空格棕的點；分數 ≥ 0.50 且贏第二名 ≥ 0.06 才認；`match_slots` 自動把要找的圖的換色版 / 相似圖加進候選；背包格左右內緣變暗（EXP 橫幅 / 半透明遮罩）→ `occluded`、不認（**不認 ≠ 沒有**，要重拍或走 OCR / 彈窗）。倉庫格沒有遮擋偵測（格太窄，沒有樣本）。
+- 只認得到 imageId：同圖多名（龍王的守護 = 合成石 7 / 壞石 / 不明的石頭；2倍智慧果（綁定）與 10 種橡樹果類同圖）→ `ambiguous`，有動作前仍要開彈窗核對名稱。
+- 離線結果（`test_itemimg_match.py`，fixtures 是 57 格裁片，不依賴 tools/.cache 截圖）：計畫 39 格 + 名字關掉 4 格 + 倉庫畫面背包 3 格閉集 46/46，最小分差 0.205；要找的不在格裡 424 組 0 誤判；空格 6/6；bag0 橫幅蓋住的 3 格回 None、0 錯判。速度：閉集 30 候選約 17 ms/格；`match_slots` 1 名稱掃整個背包約 0.1 秒（冷啟動含解碼 0.27 秒）；開集（全部道具圖）約 0.5 秒/格且只當猜測。
+- CLI：`uv run --no-project python tools/gui/itemimg_match.py shot <截圖.png> --kind bag|depot|both [--names 名稱,…]`、`... ids 名稱`。

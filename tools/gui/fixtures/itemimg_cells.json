@@ -1,0 +1,521 @@
+{
+"note": "道具格回歸樣本：每格以格心為準裁 [-41,43]、8 欄拼圖（test_itemimg_match.py --make-fixtures 產生，2026-10-14）",
+"tile": 85,
+"cols": 8,
+"pad0": -41,
+"cells": [
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 0,
+"cx": 752,
+"cy": 245,
+"expect": "22026",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 1,
+"cx": 860,
+"cy": 245,
+"expect": "22011",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 2,
+"cx": 966,
+"cy": 245,
+"expect": "22016",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 3,
+"cx": 1072,
+"cy": 245,
+"expect": "22124",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 4,
+"cx": 1180,
+"cy": 245,
+"expect": "24314",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 5,
+"cx": 752,
+"cy": 352,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 6,
+"cx": 860,
+"cy": 352,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 7,
+"cx": 966,
+"cy": 352,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 8,
+"cx": 1072,
+"cy": 352,
+"expect": "24049",
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 9,
+"cx": 1180,
+"cy": 352,
+"expect": null,
+"group": "plan"
+},
+{
+"src": "b5.png",
+"kind": "bag",
+"slot": 14,
+"cx": 1180,
+"cy": 460,
+"expect": null,
+"group": "plan"
+},
+{
+"src": "bag2.png",
+"kind": "bag",
+"slot": 0,
+"cx": 752,
+"cy": 245,
+"expect": "22026",
+"group": "plan"
+},
+{
+"src": "bag2.png",
+"kind": "bag",
+"slot": 1,
+"cx": 860,
+"cy": 245,
+"expect": "22011",
+"group": "plan"
+},
+{
+"src": "bag2.png",
+"kind": "bag",
+"slot": 2,
+"cx": 966,
+"cy": 245,
+"expect": "22016",
+"group": "plan"
+},
+{
+"src": "bag2.png",
+"kind": "bag",
+"slot": 3,
+"cx": 1072,
+"cy": 245,
+"expect": "22124",
+"group": "plan"
+},
+{
+"src": "bag2.png",
+"kind": "bag",
+"slot": 4,
+"cx": 1180,
+"cy": 245,
+"expect": "24314",
+"group": "plan"
+},
+{
+"src": "bag2.png",
+"kind": "bag",
+"slot": 5,
+"cx": 752,
+"cy": 352,
+"expect": "24049",
+"group": "plan"
+},
+{
+"src": "b6.png",
+"kind": "bag",
+"slot": 5,
+"cx": 752,
+"cy": 352,
+"expect": "50055",
+"group": "plan"
+},
+{
+"src": "b6.png",
+"kind": "bag",
+"slot": 0,
+"cx": 752,
+"cy": 245,
+"expect": null,
+"group": "plan"
+},
+{
+"src": "d_pers450.png",
+"kind": "depot",
+"slot": 0,
+"cx": 237,
+"cy": 290,
+"expect": "50055",
+"group": "plan"
+},
+{
+"src": "d_pers450.png",
+"kind": "depot",
+"slot": 1,
+"cx": 331,
+"cy": 290,
+"expect": "24053",
+"group": "plan"
+},
+{
+"src": "d_pers450.png",
+"kind": "depot",
+"slot": 2,
+"cx": 425,
+"cy": 290,
+"expect": null,
+"group": "plan"
+},
+{
+"src": "dep0.png",
+"kind": "depot",
+"slot": 0,
+"cx": 237,
+"cy": 290,
+"expect": "24054",
+"group": "plan"
+},
+{
+"src": "dep0.png",
+"kind": "depot",
+"slot": 1,
+"cx": 331,
+"cy": 290,
+"expect": "22356",
+"group": "plan"
+},
+{
+"src": "dep0.png",
+"kind": "depot",
+"slot": 3,
+"cx": 520,
+"cy": 290,
+"expect": "24154",
+"group": "plan"
+},
+{
+"src": "dep0.png",
+"kind": "depot",
+"slot": 10,
+"cx": 237,
+"cy": 480,
+"expect": "50220",
+"group": "plan"
+},
+{
+"src": "dep0.png",
+"kind": "depot",
+"slot": 14,
+"cx": 614,
+"cy": 480,
+"expect": "24236",
+"group": "plan"
+},
+{
+"src": "dep0.png",
+"kind": "depot",
+"slot": 2,
+"cx": 425,
+"cy": 290,
+"expect": null,
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 0,
+"cx": 237,
+"cy": 290,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 1,
+"cx": 331,
+"cy": 290,
+"expect": "22356",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 2,
+"cx": 425,
+"cy": 290,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 3,
+"cx": 520,
+"cy": 290,
+"expect": "24154",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 4,
+"cx": 614,
+"cy": 290,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 5,
+"cx": 237,
+"cy": 385,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 6,
+"cx": 331,
+"cy": 385,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 7,
+"cx": 425,
+"cy": 385,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 8,
+"cx": 520,
+"cy": 385,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 9,
+"cx": 614,
+"cy": 385,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 10,
+"cx": 237,
+"cy": 480,
+"expect": "50220",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 11,
+"cx": 331,
+"cy": 480,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 12,
+"cx": 425,
+"cy": 480,
+"expect": "24054",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 13,
+"cx": 520,
+"cy": 480,
+"expect": "23907",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 14,
+"cx": 614,
+"cy": 480,
+"expect": "24236",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 15,
+"cx": 237,
+"cy": 575,
+"expect": "24049",
+"group": "plan"
+},
+{
+"src": "d_pub450.png",
+"kind": "depot",
+"slot": 19,
+"cx": 614,
+"cy": 575,
+"expect": null,
+"group": "plan"
+},
+{
+"src": "bag-names-off.png",
+"kind": "bag",
+"slot": 0,
+"cx": 752,
+"cy": 245,
+"expect": "24169",
+"group": "names_off"
+},
+{
+"src": "bag-names-off.png",
+"kind": "bag",
+"slot": 1,
+"cx": 860,
+"cy": 245,
+"expect": "22013",
+"group": "names_off"
+},
+{
+"src": "bag-names-off.png",
+"kind": "bag",
+"slot": 2,
+"cx": 966,
+"cy": 245,
+"expect": "22050",
+"group": "names_off"
+},
+{
+"src": "bag-names-off.png",
+"kind": "bag",
+"slot": 3,
+"cx": 1072,
+"cy": 245,
+"expect": "22082",
+"group": "names_off"
+},
+{
+"src": "dep0.png",
+"kind": "bag",
+"slot": 4,
+"cx": 1180,
+"cy": 245,
+"expect": "23907",
+"group": "extra"
+},
+{
+"src": "dep0.png",
+"kind": "bag",
+"slot": 5,
+"cx": 752,
+"cy": 352,
+"expect": "23907",
+"group": "extra"
+},
+{
+"src": "dep0.png",
+"kind": "bag",
+"slot": 6,
+"cx": 860,
+"cy": 352,
+"expect": "23907",
+"group": "extra"
+},
+{
+"src": "bag0.png",
+"kind": "bag",
+"slot": 0,
+"cx": 752,
+"cy": 245,
+"expect": "?",
+"group": "banner"
+},
+{
+"src": "bag0.png",
+"kind": "bag",
+"slot": 1,
+"cx": 860,
+"cy": 245,
+"expect": "22026",
+"group": "banner"
+},
+{
+"src": "bag0.png",
+"kind": "bag",
+"slot": 2,
+"cx": 966,
+"cy": 245,
+"expect": "22011",
+"group": "banner"
+},
+{
+"src": "bag0.png",
+"kind": "bag",
+"slot": 3,
+"cx": 1072,
+"cy": 245,
+"expect": "22016",
+"group": "banner"
+},
+{
+"src": "bag0.png",
+"kind": "bag",
+"slot": 4,
+"cx": 1180,
+"cy": 245,
+"expect": "22124",
+"group": "banner"
+}
+]
+}
