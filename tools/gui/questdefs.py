@@ -10,6 +10,8 @@
   steps       {步號: dict(kind=...)}；沒列的步驟 = 預設（quest.py 預設模式：點追蹤 → 巡路 → 對話 → 戰鬥）
               kind：walk（備援：預設先讓遊戲自動巡路，quest.py 回 3 = 原地不動才用 walk.py 走到 map / xy；handler 在 questhandlers.py）
                     manual（停下交人，退出碼 115）
+                    fight（BOSS 步不巡路：全隊 HP 檢查〔門檻 hp_min，低就補血〕→ 不在 map / xy 附近就便捷傳送 warp=(分頁內座標) / warp_name
+                           → team.form → quest.py --fight --task 追蹤標題 --step N；贏 + 滿 5 人 = 37、不滿 = 38（bossretry）、輸 35 → 補血重打 1 次；紅暴步 6）
   bag_slots   開始前每人背包至少要有幾格空位（0 = 不檢查）。2026-10-13 起 >= bag_need(id)（Task 表各步獎勵道具、扣掉交出去的條件道具，
               同時佔用的最多格數；強盜的洞穴 = 衣服 / 斧頭 / 頭盔 / 足跡 4 格 —— 當天頭盔因背包滿進了信箱）；test_questdefs 核對。
               questrun preflight 不足 → 先自動刪 bag.AUTO_PURGE 白名單道具，仍不足才 110
@@ -20,6 +22,12 @@
   turnin      （選填）交寵物步驟：dict(kind=pet_turnin 的種類, steps={任務步號: (pet_turnin 步…)})；questrun --pet-turnin 時 manual 步改跑 pet_turnin 5 人逐人交
   rest_pets   （選填）True = 交寵物前任務寵要先「等待」：questrun --pet-turnin 時接取後第一片前 pet.py rest-all
   reward_pets （選填）任務獎勵寵物名（只給 plan 顯示；要丟由使用者下 --drop-reward / --confirm-drop，questrun 只丟 1 級）
+  stop_after_rewards（選填）每片 quest.py 加 --stop-after-rewards N：每步領完獎就收片（下一片前 questrun 讀步號，好在 fight 步之前停下補血 / 傳送）
+  dragon_required（選填）True = 這任務一定要有龍王的守護 buff 才組隊跑（不看 --dragon）：開始前沒 buff 就吃；背包 / 公共倉庫都沒有 → 156（改走單人逃跑 psa-quest-solo）
+  min_level   （選填）5 人等級下限（bag.read_level；任一人不到 / 讀不到 → 110）
+  need_items  （選填）開始前 5 人背包都要有的道具名稱（缺 → 110，提示去哪買）
+  post        （選填）任務完成後自動處理獎勵（questrun --no-post 關）：store_personal=[道具…] 5 人存個人倉庫、store_public=[道具…] 5 人存公共倉庫（同名多格全存）
+  drop_items  （選填）可丟的獎勵道具（只給 plan 顯示；要丟由使用者下 --drop-items / --confirm-drop-items，questrun 用 bag.purge 只刪名單內、背包內的，穿著的不動）
   hp_every    （選填）片內全隊 HP 每幾場一般戰鬥讀一次（quest.py --hp-check-every；沒填 = questrun --hp-check-every 預設 3）；連戰任務填 1
   walk_s      （自動）2026-10-13 二轉後實跑 quest.py 自報的巡路秒數合計（WALK_S；沒量到 = None）
   dragon      （自動）不在 NO_DRAGON 才 True：questrun --dragon 對這些任務吃龍王的守護（buff 還在就跳過）
@@ -113,19 +121,33 @@ QCAVE = [
          note='5 場戰鬥；10-10 在戰鬥中開外掛「自動逃跑」→ DKBO 脫隊（現已廢除，跑洞窟期間任何 agent 不准開外掛面板）；BOSS 後照 37 / 38 查滿 5 人；建議 --max-min 45'),
 ]
 
+# 其他每轉必做的任務（不進 DEFAULT_ORDER；指定 ID 才用）
+QOTHER = [
+    dict(id=2031, detail='英雄島前傳（必做）', track='英雄島前傳', accept_npc='走失孫女的老爺爺 5500:12,18', steps_total=8,
+         steps={6: dict(kind='fight', map=5510, xy=(50, 17), warp=(1160, 646), warp_name='龍王守衛', npc='龍王的守衛 5510:53,17', hp_min=80)},
+         bag_slots=6, boss=True, est_min=20, live=False, dragon_required=True, stop_after_rewards=1, min_level=80, need_items=['耐久力回複藥'],
+         reward_pets=['巴朵蘭恩'], post=dict(store_personal=['英雄的祝福'], store_public=['龍王的守護']), drop_items=['薩姆吉爾的首飾'],
+         note='紅暴（每轉必解）。使用者 2026-10-13：有龍王效果就組隊打到底（dragon_required，不看 --dragon；完全沒龍王可吃 → 156 改走單人逃跑 psa-quest-solo）。'
+              '前置：成人儀式、5 人 ≥80 級、背包各有耐久力回複藥 ×1（步 1 交掉）。接取標題「英雄島前傳（必做）」。'
+              '每步 --stop-after-rewards 1（步 1～5 對話 + 勾玉；步 1 點到同 NPC 閒聊只有再見 → quest.py ESC 回原流程）；'
+              '步 6 kind=fight：HP 檢查（<80% 補血）→ 便捷傳送「龍王守衛」5510:50,17 → quest.py --fight --step 6（贏了地圖換 5511）；'
+              '步 7 龍王對話每人得龍王的守護 ×2 + 巴朵蘭恩 Lv1（寵物欄滿會卡）；步 8 老爺爺的孫女 1013:14,16，獎勵窗（英雄的祝福 ×5 + 薩姆吉爾的首飾）石幣動畫多，quest.py settle_reward 補關。'
+              '完成後 post：英雄的祝福存個人、龍王的守護存公共；巴朵蘭恩 --drop-reward、首飾 --drop-items 要明確旗標'),
+]
+
 # 2026-10-13 二轉後重做實測：每任務 quest.py 自報「走路不計時」秒數合計（notes/review-redundancy-1013.md §1）
 WALK_S = {2999: 43, 2017: 2, 2015: 7, 2027: 79, 2018: 316, 2011: 9, 2024: 63, 2020: 93, 2023: 43, 2028: 81, 2025: 589,
           2010: 136, 2014: 141, 2012: 35, 2013: 18, 2021: 70, 2000: 320, 2003: 220, 2001: 374, 2002: 678}
 DRAGON_WALK_MIN = 120           # （僅參考，不再決定吃不吃）長巡路門檻
 NO_DRAGON = {2017, 3003, 2016, 2019}   # 不吃龍王的任務：彌生和日美子、猜謎三兄弟、恐龍博士、卡坦的願望（使用者 2026-10-13）
 
-ALL = Q182 + QCAVE
+ALL = Q182 + QCAVE + QOTHER
 for _d in ALL:
     _d['walk_s'] = WALK_S.get(_d['id'])
     _d['dragon'] = _d['id'] not in NO_DRAGON
 BY_ID = {d['id']: d for d in ALL}
 DEFAULT_ORDER = [d['id'] for d in Q182]
-STEP_KINDS = ('walk', 'manual')
+STEP_KINDS = ('walk', 'manual', 'fight')
 
 
 def pet_prep_hint(d: dict, step) -> str | None:

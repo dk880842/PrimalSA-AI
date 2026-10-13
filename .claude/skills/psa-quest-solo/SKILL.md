@@ -1,11 +1,14 @@
 ---
 name: psa-quest-solo
-description: Use when the PrimalSA (精靈王石器) quest chain must be solved the "單人逃跑" way — DKB0 runs alone to each NPC fleeing every fight, then the party is quick-teamed only for the dialogue or the quest battle (e.g. 紅暴 / 英雄島前傳 2031), or the user asks 逃跑解任務 / 單人跑任務 / 紅暴任務.
+description: Use when the PrimalSA (精靈王石器) quest chain must be solved the "單人逃跑" way — DKB0 runs alone to each NPC fleeing every fight, then the party is quick-teamed only for the dialogue or the quest battle (e.g. 紅暴 / 英雄島前傳 2031 when questrun returns 156 = no 龍王的守護), or the user asks 逃跑解任務 / 單人跑任務 / 紅暴任務.
 ---
 
 # 單人逃跑解任務（跑路 → 到 NPC 停 → 組隊 → 對話 / 打 → 再解散）
 
-**何時用（使用者 2026-10-10 規定）**：只有紅暴任務（2031 英雄島前傳）固定用本流程；其他任務預設走一般組隊流程（5 人組隊 + quest.py 預設模式），規劃時先問使用者這次要「逃跑」還是「組隊跑」，選逃跑才用本 skill。
+**何時用**：其他任務預設走一般組隊流程（5 人組隊 + quest.py 預設模式），規劃時先問使用者這次要「逃跑」還是「組隊跑」，選逃跑才用本 skill。
+**紅暴（2031 英雄島前傳）2026-10-13 起改組隊打到底**（使用者：有龍王效果就不用逃跑）：先跑 `uv run --no-project python tools/gui/questrun.py run 2031 --after none --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾`
+（接取前沒龍王 buff 就吃、步 6 便捷傳送 + `--fight`、獎勵存倉 / 丟棄都在裡面，見 `../psa-game-ui/ui/quest.md`「紅暴組隊打到底」；未實機）。
+**只有 questrun 回 156（背包與公共倉庫都沒有龍王的守護）才用本 skill 的第 4 節單人逃跑**；156 但訊息是「吃不到（一時失敗）」→ 先處理再重跑 questrun，不要直接改逃跑。
 
 **REQUIRED BACKGROUND:** 先載入 psa-game-ui（紅區、驗證視窗立刻停手）。會用到 `/psa-disband-team`、`/psa-quick-team`、`/psa-grind-start`。
 座標是截圖座標（客戶區 2880×1659）。`G="bash tools/gui/gui.sh"`、`Q="uv run --no-project python tools/gui/quest.py"`，在專案根目錄執行。
@@ -75,7 +78,7 @@ $A pet DKB0 first 防禦 normal 攻擊            # 設定並讀回確認（約 
 - **戰鬥步被打飛**（步 4 的 `--fight`）→ 補完血就**停下回報使用者**（打不過，要評估等級 / 隊伍配置，不要無腦重打）。
 - 隊員是單人狀態時被打飛的是各自的角色；補血只補「當前角色」所在隊伍，組隊後再補一次。
 
-## 4. 紅暴任務（2031 英雄島前傳，每轉必解）專屬
+## 4. 紅暴任務（2031 英雄島前傳，每轉必解）專屬 —— 2026-10-13 起只當「沒有龍王的守護」時的退路（平常用 questrun 組隊，見開頭）
 步 1～5：照第 2 節的通用流程（NPC：避難洞窟 5500 老爺爺接任務 → 薩姆吉爾 5501 / 5503 / 5505 / 5506 / 5508，座標以 `psa.py steps 2031` 為準，每步對話步）。
 **步 6（戰鬥）不巡路，直接傳送**：
 1. **第 5 步拿到第 5 顆勾玉後不解散隊伍**（全隊直接過去）。BOSS 戰不能逃：`--fight` 會判斷任務戰鬥並自動戰鬥，不會按逃跑。
@@ -88,8 +91,8 @@ $A pet DKB0 first 防禦 normal 攻擊            # 設定並讀回確認（約 
    - **少於 5 人** → 有人脫隊（戰鬥掉線 / 被踢 / 打飛後各自回村）。處理：點切換面板該角色卡片（DKB02 930,300 / DKB03 620,385 / DKB04 930,385 / DKB05 620,470 / DKB0 620,300）把它換成當前角色 → 先看它是不是已在 5510（不在就自己便捷傳送 → 龍王守衛）→ `/psa-quick-team` 時**隊長選脫隊角色**（上排「隊長」格要截圖看哪一格是它，座標不一定是 549,320）→ 對話開打、自動戰鬥，打完再確認 5 人；逐一處理到每人都完成步 6（每個人要有「打敗龍王守衛」的完成）。**脫隊重組這條流程未實測**。
 6. **（使用者 2026-10-10）步 7 龍王對話卡住＝有人寵物欄滿 → 停下回報；對話順利完成就直接進步 8，不用逐人確認巴朵蘭恩。**
    步 7：和龍王對話（龍穴 5511:16,13）：`$Q --task 英雄島前傳 --stop-after-rewards 1`；確認 5 人各得寵物「巴朵蘭恩」（日誌「獲得寵物」＋寵物面板 / 背包左欄頭像逐一看，不要只看隊長）。
-7. 步 8：回薩姆吉爾村老爺爺的家 1013:14,16 交勾玉（找老爺爺的孫女 NPC 3700）：組隊狀態下 `$Q --task 英雄島前傳 --stop-after-rewards 1`（巡路跨圖若不行：城鎮傳送薩姆吉爾 750,507 → 走到 1013）。
-8. 收尾：5 人各自把「英雄的祝福」×5 存進**個人倉庫**（背包 → 倉庫 1318,467 → 確認是「個人」分頁 → dclick；左欄頭像切角色逐一做；使用者 2026-10-10 指定，見 `ui/bag.md` 保留表）。
+7. 步 8：回薩姆吉爾村老爺爺的家 1013:14,16 交勾玉（找老爺爺的孫女 NPC 3700）：組隊狀態下 `$Q --task 英雄島前傳 --stop-after-rewards 1`（巡路跨圖若不行：城鎮傳送薩姆吉爾 750,507 → 走到 1013）。獎勵窗石幣動畫多，2026-10-13 起 quest.py 停手前 `settle_reward` 再看 2 秒、又出現就再按確認（不用手點 720,572；未實機）。
+8. 收尾（腳本：`bag.py store all 英雄的祝福 --depot personal --skip-missing`、`bag.py store all 龍王的守護 --depot public --skip-missing`、`petdrop.py all 巴朵蘭恩 --confirm-name 巴朵蘭恩 --max-level 1`、`bag.py purge all --names 薩姆吉爾的首飾`（先 --dry-run）；使用者 10-13 定：首飾丟、龍王剩的存公共）：5 人各自把「英雄的祝福」×5 存進**個人倉庫**（背包 → 倉庫 1318,467 → 確認是「個人」分頁 → dclick；左欄頭像切角色逐一做；使用者 2026-10-10 指定，見 `ui/bag.md` 保留表）。
 9. 完成：**先把 DKB0 戰寵動作改回**（`$A pet DKB0 first 攻擊 first off normal 攻擊`，§1），寫 `notes/quest-log.md`（每個任務都要記錄）、`notes/quests-plan.md` 標「紅暴任務，每轉必解」；`/psa-grind-start` 恢復掛機（5 人快速戰鬥 + 自動戰鬥 + 隊長原地遇敵），最後 `$G end`。
 
 ## 檢查點與失敗對照

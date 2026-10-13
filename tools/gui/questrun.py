@@ -7,8 +7,10 @@
         [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--hp-check-every 3] [--no-boss-retry]
         [--verify risk|each|off] [--no-verify-all] [--verify-skipped] [--no-battle-check] [--battle-check-always]
         [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
+        [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post]
   龍王的守護（2026-10-12 起）預設**不吃**，要吃加 --dragon；--no-dragon 保留相容（= 預設，no-op）。
-  --dragon（2026-10-13 起）只對 questdefs 標 dragon（巡路 ≥ 120 秒：馬祖快遞 / 伐木證書 / 四寶玉 / 黃金羚羊 / 四大洞窟）的任務吃，--dragon-all 全吃；
+  --dragon（2026-10-13 使用者定）對 questdefs 標 dragon（NO_DRAGON = 彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 以外）的任務吃，--dragon-all 全吃；
+  questdefs dragon_required（紅暴 2031）不看 --dragon 一定吃，背包 / 公共倉庫都沒有 → 156（改走單人逃跑）；
   第一次從公共倉庫整疊取出，剩的**留在 DKBO 背包**，run 結束（成功或失敗；9 / 10 / 116 / 152 等畫面要留給人看的除外）才整疊存回公共倉庫；
   中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 開頭（不吃時）/ 結束補存。depot_use 判 buff 已在（skip）不計「已吃」
   uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態（當前角色）
@@ -54,6 +56,11 @@
                  defs.turnin（目前只有恐龍博士 2016：步 1 魯尼帖斯 / 步 2 貝魯卡，逐人「選擇」視窗）：pet.py rest-all（任務寵改等待）→ team.disband
                  → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 讀詳情；失敗 150。
                  defs.rest_pets（卡坦的願望 2019：隊長交一次 5 人完成，quest.py 預設流程交）：接取後第一片前先 pet.py rest-all。每任務只試一次
+  紅暴 2031（2026-10-13 起納入；使用者：有龍王效果就組隊打到底；**未實機**）：前置 check_prereq（5 人 ≥80 級、背包各有耐久力回複藥，bag.team_read 開一次；不符 110）
+                 → require_dragon（接取前沒 buff 就吃；都沒有 → 156）→ 接取「英雄島前傳（必做）」→ 每片 quest.py --stop-after-rewards 1（每步收片）
+                 → 步 6 kind=fight（do_fight：全隊 HP < 80% 補血 → 便捷傳送「龍王守衛」5510:50,17 → team.form → quest.py --fight --step 6 → team.check；
+                   贏 + 滿 5 人 = 37 續片、不滿 = 38 bossretry、輸 35 補血重打共 2 次）→ 步 7 / 8 預設 → 完成後 post：英雄的祝福 5 人存個人、龍王的守護 5 人存公共（失敗 157）
+                 → 全部成功後 --drop-reward 巴朵蘭恩（petdrop 只丟 1 級）/ --drop-items 薩姆吉爾的首飾（bag.purge 只刪背包內、穿著的不動；只准 questdefs drop_items 列的名稱）
   丟獎勵寵（--drop-reward 名字,… 且 --confirm-drop 同一串，缺一不做；**不可逆、未實機**）全部任務成功後、恢復掛機前：
                  每個名字 petdrop.drop('all', 名字, max_level=1)（只丟名字完全相同、等級讀得到且 = 1 的；騎寵 / 第 1 格 / 出戰 / 騎乘一律擋）；失敗 151、不恢復掛機
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
@@ -85,7 +92,9 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；「時間�
   118 完整戰鬥自動戰鬥卡住（quest.py 25）
   119 接取失敗（info.accept_rc 是 questdetail 的 120～128）
   150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～125 / 切回 DKBO / 重組；info.turnin）
-  151 丟獎勵寵失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；info.drop）
+  151 丟獎勵寵 / 道具失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；--drop-items：bag.purge 93 / 96；info.drop）
+  156 dragon_required 任務（紅暴）沒有龍王的守護 buff 也吃不到（背包 / 公共倉庫都沒有 → 改走單人逃跑 psa-quest-solo §4；一時失敗 → 處理後重跑）
+  157 任務完成後獎勵處理失敗（questdefs post：bag.depot_many 存個人 / 公共倉庫；info.post）
   153 任務接不下去：quest.py 40（任務 NPC 只有「再見」）且背包有空、信箱沒有丟失的物品（或處理 2 次後 NPC 仍只有再見）→ 停手回報（條件不符？請人看）
   154 背包滿自動處理失敗：讀空格 / 刪白名單失敗、刪完仍滿、mail.py 領取失敗（114 = 領了沒消失）
   155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep：卡坦 2019 步 1 鯊 / 步 2 雞、恐龍博士、猜謎三兄弟步 2 金布伊）：不刷新重試，訊息直接寫下一步 pet_catch.py / petwatch.py 指令；manual 步（115）也附同一提示；步號讀不到照舊 112
@@ -124,6 +133,11 @@ REWARD_RETRY_MAX = 3                                                 # 每個任
 EXIT_TURNIN, EXIT_DROP = 150, 151                                    # 交寵物 / 丟獎勵寵失敗（150～151 grep 過沒被用）
 EXIT_NEEDPETS = 155                                                   # 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep；155 grep 過沒被用）
 EXIT_BYE, EXIT_BAGMAIL = 153, 154                                    # 任務 NPC 只有再見（背包 / 信箱都不是原因）/ 背包滿自動處理失敗（153～154 grep 過沒被用）
+EXIT_NODRAGON = 156                                                   # dragon_required 任務（紅暴 2031）沒有龍王的守護 buff 也吃不到 → 改走單人逃跑（156 grep 過沒被用）
+EXIT_POST = 157                                                       # 任務完成後的獎勵處理（questdefs post：存個人 / 公共倉庫）失敗（157 grep 過沒被用）
+FIGHT_TRIES = 2                 # kind=fight 步（紅暴步 6）：沒點到 NPC / 沒開打 / 輸了（35，先補血）最多打幾次
+FIGHT_S = 300                   # kind=fight 步 quest.py --fight --max-seconds
+FIGHT_NEAR = 3                  # 已在 fight 步 map / xy 這麼多格內 → 不再便捷傳送
 BYE_RECOVER_MAX = 2             # 每個任務 quest.py 40（NPC 只有再見）時最多做幾次「背包 / 信箱」處理
 HP_LOW_MAX = 5                  # 每個任務 quest.py 41（片內 HP 偏低）最多補血幾次，超過 111
 DROP_MAX_LEVEL = 1                                                   # --drop-reward 只丟這個等級以下（剛拿到的獎勵寵是 1 級）
@@ -348,6 +362,33 @@ class Tools(rebirth.Tools):
         rc = petdrop.drop('all', name, name, max_level=max_level)
         return rc, dict(petdrop.LAST)
 
+    def team_check(self):
+        """team.check(5)：唯讀驗 1 隊長 + 4 隊員（0 = 滿 5 人）"""
+        import team
+        return team.check(5)
+
+    def warp(self, dest, want_map, name, want_xy):
+        """便捷傳送（地圖傳送 → 便捷傳送分頁 259,432 → dest）到 want_map:want_xy；失敗丟 RuntimeError（heal.teleport；戰鬥中會等）"""
+        import heal
+        tab = (259, 432)
+        heal.SIG_TAB.setdefault(tab, '185,411,243,174,63')       # 便捷傳送分頁選中橘色（rebirth.teleport20 同款）
+        return heal.teleport(tab, tuple(dest), want_map, name, want_xy=tuple(want_xy) if want_xy else None)
+
+    def team_read(self, roles, names):
+        """開背包一次逐人讀等級 + 背包有沒有 names（bag.team_read）→ (rc, {角色: {'level', 'have', 'free'}})"""
+        import bag
+        return bag.team_read(list(roles), list(names), level=True)
+
+    def store_many(self, roles, name, depot):
+        """多人存同一道具到倉庫（bag.depot_many store，沒有的人略過）→ (rc, {角色: rc})"""
+        import bag
+        return bag.depot_many('store', list(roles), name, depot, skip_missing=True)
+
+    def bag_drop(self, roles, names):
+        """背包刪除管理批次刪（bag.purge：只勾名單內、背包內的；穿著的裝備不在背包格、不會動）→ (rc, {角色: info})"""
+        import bag
+        return bag.purge(list(roles), list(names))
+
     def status_all(self, details, roles):
         """逐人讀任務詳情（char.switch + 每人開一次詳情、一趟捲動讀完 details 全部，最後切回 DKBO）→ (rc, {角色: {標題: 狀態} 或 None})"""
         import questdetail
@@ -409,8 +450,9 @@ def classify(rc: int, tail=()) -> str:
 
 
 def early_end(tail) -> bool:
-    """quest.py 是「步驟結束 …，提前結束」（做完對話 / 領獎後連續閒置）：任務多半還有下一步 → questrun 直接下一片，不開詳情（review §6.1）"""
-    return any('提前結束' in str(x) for x in (tail or []))
+    """quest.py 是「步驟結束 …，提前結束」（做完對話 / 領獎後連續閒置）或「…停止（--stop-after-rewards）」（questdefs stop_after_rewards 每步收片）：
+    任務多半還有下一步 → questrun 直接下一片，不開詳情（review §6.1；真的完成時下一片 quest.py 回 5 / 任務完成）"""
+    return any('提前結束' in str(x) or '停止（--stop-after-rewards）' in str(x) for x in (tail or []))
 
 
 def battles_in(tail):
@@ -464,9 +506,18 @@ def print_plan(defs, opts: dict) -> None:
         print(f'  - team.form（{TEAM_FRESH_S:.0f} 秒內剛確認過就略過）→ questdetail.accept（只開一次詳情）：已完成 → 跳過；待接取 → 接受（不重開詳情）；進行中 → 續跑')
         if d.get('bag_slots'):
             print(f'  - 背包空位：5 人各 ≥ {d["bag_slots"]} 格（bag.find_items；不足先刪 bag.AUTO_PURGE 白名單，仍不足 110）')
+        if d.get('min_level') or d.get('need_items'):
+            print(f'  - 前置：5 人 ≥{d.get("min_level") or "?"} 級' + (f'、背包都有 {d["need_items"]}' if d.get('need_items') else '')
+                  + '（bag.team_read 開背包一次逐人讀；不符 / 讀不到 110）')
+        if d.get('dragon_required'):
+            print(f'  - 龍王的守護必要（dragon_required，不看 --dragon）：接取前沒 buff 就吃；背包與公共倉庫都沒有 / 一直吃不到 → {EXIT_NODRAGON}（改走單人逃跑 psa-quest-solo §4）')
         print(f'  - 補血檢查（任務開始前、每次 BOSS 戰後）：隊長 HUD HP < {opts["hp_min"]}% 或全隊（bag.hps）任一人 < {opts.get("team_hp_min", TEAM_HP_MIN)}% → heal.heal_trip --no-return（小護士補整隊）+ team.form')
         for st, sd in sorted((d.get('steps') or {}).items()):
-            if sd['kind'] == 'walk':
+            if sd['kind'] == 'fight':
+                print(f'  - 步 {st}：kind=fight：全隊 HP < {sd.get("hp_min") or opts.get("team_hp_min", TEAM_HP_MIN)}% 先補血 → 不在 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]} 附近就便捷傳送「{sd.get("warp_name")}」'
+                      f' → team.form → quest.py --fight --task {d["track"]} --step {st}（{sd.get("npc", "")}）；贏 + team.check 滿 5 人 → 下一片、不滿 → bossretry；'
+                      f'輸 35 補血重打（共 {FIGHT_TRIES} 次）')
+            elif sd['kind'] == 'walk':
                 print(f'  - 步 {st}：kind=walk（備援）：先讓遊戲自動巡路，quest.py 回 3 才走到 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]}'
                       f'（{sd.get("npc", "")}；walk.py 中斷外層重試）')
             elif d.get('turnin') and opts.get('pet_turnin'):
@@ -477,11 +528,20 @@ def print_plan(defs, opts: dict) -> None:
         if d.get('rest_pets'):
             print('  - 交寵物前：' + ('--pet-turnin：接取後第一片前 pet.py rest-all（任務寵改等待）' if opts.get('pet_turnin') else
                                       '任務寵要先改等待（手動 pet.py rest-all，或加 --pet-turnin 自動）'))
+        if d.get('stop_after_rewards'):
+            print(f'  - 每片 quest.py 加 --stop-after-rewards {d["stop_after_rewards"]}（每步領完獎就收片、下一片前讀步號；停手前 settle_reward 補關領獎窗）')
         if d.get('reward_pets'):
             print(f'  - 獎勵寵：{"、".join(d["reward_pets"])}（要丟用 --drop-reward / --confirm-drop，只丟 1 級）')
+        if d.get('post'):
+            pp = d['post']
+            print('  - 完成後獎勵處理' + ('（--no-post：不做）' if not opts.get('post', True) else '') + '：'
+                  + '；'.join([f'{n} 5 人存個人倉庫' for n in pp.get('store_personal') or []] + [f'{n} 5 人存公共倉庫' for n in pp.get('store_public') or []])
+                  + f'（bag.depot_many，沒有的人略過；失敗 {EXIT_POST}）')
+        if d.get('drop_items'):
+            print(f'  - 可丟獎勵道具：{"、".join(d["drop_items"])}（要丟用 --drop-items / --confirm-drop-items；bag.purge 只刪背包內，穿著的不動）')
         if d.get('boss'):
             print(f'  - 有任務戰 / BOSS 戰：quest.py 預設模式打完回 37（滿 5 人 → 繼續）/ 38（不滿 → bossretry.py 落後者當隊長 5 人重打 + 重組，每任務最多 {BOSS_RETRY_MAX} 次；失敗 114）')
-        if opts.get('dragon', False) and (opts.get('dragon_all') or d.get('dragon')):
+        if d.get('dragon_required') or (opts.get('dragon', False) and (opts.get('dragon_all') or d.get('dragon'))):
             print(f'  - 每片前：龍王的守護（巡路 {d.get("walk_s")} 秒；buff 列看不到人形圖示才吃；第一次公共倉庫整疊取出，剩的留在 {LEADER} 背包，run 結束存回）')
         elif opts.get('dragon', False):
             print(f'  - 龍王的守護：不吃（使用者指定不吃的任務 questdefs.NO_DRAGON；--dragon-all 才吃）')
@@ -501,13 +561,15 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[龍王的守護] 剩的整疊留在 {LEADER} 背包，run 結束（含失敗）存回公共倉庫；中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 補存')
     if opts.get('verify', 'risk') == 'risk':
         print('[逐人驗證] 沒風險事件的任務延後：全部任務結束後其他 4 人每人開一次詳情批次讀（失敗退出留進度檔，下次 run 結束再驗）')
+    if opts.get('drop_items'):
+        print(f'[丟獎勵道具] 全部成功後：{"、".join(opts["drop_items"])} 5 人 bag.purge（只勾名單內、提示窗清單核對；穿著的不動；失敗 151）')
     if opts.get('drop_reward'):
         print(f'[丟獎勵寵] 全部成功後：{"、".join(opts["drop_reward"])} 各 petdrop.drop all（名字完全相同、等級 ≤ {DROP_MAX_LEVEL}、非騎寵 / 第 1 格 / 出戰；失敗 151）')
     if opts['after'] == 'grind':
         print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 / 道具 156 紅暴沒龍王（改走單人逃跑）157 完成後獎勵存倉失敗 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -596,20 +658,24 @@ class Run:
         return bool(self.hp_ok_at) and time.time() - self.hp_ok_at <= HP_FRESH_S
 
     def dragon_wanted(self, d) -> bool:
-        """--dragon 且（--dragon-all 或 questdefs 標 dragon = NO_DRAGON 以外）"""
+        """--dragon 且（--dragon-all 或 questdefs 標 dragon = NO_DRAGON 以外）；questdefs dragon_required（紅暴）不看 --dragon 一定吃"""
+        if (d or {}).get('dragon_required'):
+            return True
         return bool(self.o.get('dragon')) and (bool(self.o.get('dragon_all')) or bool((d or {}).get('dragon')))
 
     def ensure_dragon(self, d=None, force: bool = False):
         """隊長吃龍王的守護（第一次公共倉庫整疊取出 → 吃 1 顆 → 剩的留在 DKBO 背包，之後直接從背包吃；run 結束 dragon_return 才存回）；
-        失敗只警告（沒有也能跑，只是會遇敵）；buff 列看到人形圖示就不吃、看不到就吃一顆（不看時間）。只對 dragon_wanted 的任務吃"""
+        失敗只警告（沒有也能跑，只是會遇敵）；buff 列看到人形圖示就不吃、看不到就吃一顆（不看時間）。只對 dragon_wanted 的任務吃。
+        → 狀態字串（require_dragon 用，其他呼叫端不看）：off 不需要 / active buff 已在 / walking 巡路中先不吃 / ate 吃了 / skip depot_use 判已在 /
+          none 背包與公共倉庫都沒有（92）/ fail 其他失敗"""
         if not self.dragon_wanted(d):
-            return
+            return 'off'
         active = self.T.dragon_active()                                # bag.buff_state：人形圖示在 = 還有效（不看時間）；2倍智慧果的 EXP 圖示不會誤判
         if not force and active:
-            return
+            return 'active'
         if self.T.screen_state() == 'walking':                         # 2026-10-13 08:04：片「時間到」時遊戲還在自動巡路，開背包吃龍王途中抵達 NPC → 對話框蓋住背包（depot_use 90）
             event('龍王的守護：遊戲還在自動巡路（開背包途中抵達 NPC 會被對話框打斷）→ 這片先不吃，下一片再看')
-            return
+            return 'walking'
         have = bool(self.st.get('dragon_in_bag'))
         rc, info = self.T.dragon(have)
         info = info or {}
@@ -624,10 +690,10 @@ class Run:
                 self.st['dragon_in_bag'] = True                        # 取出後才失敗：龍王在 DKBO 背包，下次跳過取出、run 結束存回
             self.warn(f'龍王的守護失敗 rc={rc} {info}；這段不用龍王（會遇敵）')
             self.save()
-            return
+            return 'none' if rc == BAG_ITEM and info.get('step') == 'take' else 'fail'
         if info.get('step') == 'skip':                                 # depot_use 關遇敵、等戰鬥結束後再讀 buff 列已有圖示（review §3.4：舊版照算「已吃」）
             event('龍王的守護：depot_use 讀到 buff 列已有人形圖示（questrun 剛才讀時多半在戰鬥 / 轉場）→ 沒吃，不計數')
-            return
+            return 'skip'
         self.st['dragon_in_bag'] = True                                # 剩的整疊留在 DKBO 背包（最後一顆吃完也無妨：存回時 92 = 背包沒有）
         self.st['last_eat'] = time.time()
         self.st['dragon_used'] = self.st.get('dragon_used', 0) + 1      # 進度檔累計（跨 run）
@@ -635,6 +701,26 @@ class Run:
         self.task_dragons += 1                                          # 本任務
         event(f'已吃龍王的守護（本次第 {self.run_dragons} 顆，累計 {self.st["dragon_used"]} 顆；剩的留在 {LEADER} 背包，run 結束存回公共倉庫）')
         self.save()
+        return 'ate'
+
+    def require_dragon(self, d) -> int:
+        """questdefs dragon_required（紅暴 2031，使用者 2026-10-13：有龍王效果就組隊打到底）：開始前一定要有 buff。
+        沒 buff → 吃（同 ensure_dragon）；巡路中 / 一時失敗 → 等 3 秒再試，共 3 次；背包與公共倉庫都沒有（92）或一直吃不到 → 156（改走單人逃跑 psa-quest-solo）"""
+        if not (d or {}).get('dragon_required'):
+            return 0
+        st = None
+        for i in range(3):
+            st = self.ensure_dragon(d)
+            if st in ('active', 'ate', 'skip'):
+                event(f'任務 {d["id"]}：龍王的守護 buff 確認（{st}）→ 組隊打到底')
+                return 0
+            if st == 'none':
+                break
+            self.T.sleep(3)
+        why = ('背包與公共倉庫都沒有龍王的守護' if st == 'none' else f'龍王的守護吃不到（{st}，rc={self.info.get("dragon_rc")}）')
+        return self.fail(EXIT_NODRAGON, f'任務 {d["id"]}「{d["detail"]}」要有龍王的守護 buff 才組隊跑：{why} → 改走單人逃跑（psa-quest-solo SKILL.md §4 紅暴專屬：'
+                         f'questdetail.py accept → ass.py pet DKBO first 防禦 normal 攻擊 → team.py disband → 每步 quest.py --solo …）；'
+                         '確認倉庫真的沒有再走逃跑，一時失敗就處理後重跑', dragon=st)
 
     def dragon_return(self, where: str) -> int:
         """進度檔記龍王在 DKBO 背包 → 整疊存回公共倉庫（借出的道具要還）。成功 / 背包已沒有（92）→ 清旗標；失敗只警告、旗標留著（下次 questrun 再存）"""
@@ -846,18 +932,19 @@ class Run:
             return 0
         return self.fail(EXIT_BAGMAIL, f'任務 {tid}：信箱領取失敗 mail rc={mrc}（114 = 領了沒消失，背包還滿？）', mail_rc=mrc)
 
-    def hp_gate(self, where: str, boss: bool = False, pre=None) -> int:
+    def hp_gate(self, where: str, boss: bool = False, pre=None, team_min=None) -> int:
         """補血檢查（任務開始前、BOSS 戰後下一片之前）：隊長 HUD HP < --hp-min，或全隊（bag.hps）任一人 < --team-hp-min → heal 全隊（小護士補整隊）+ team.form。
         全隊讀不到（背包打不開 / 選不到角色）→ 只看隊長並記事件；某人 HP 讀不出 = 不知道，不單獨觸發補血。
         pre = (rc, {角色: %}) 呼叫端已讀好（team_scan）；非 BOSS 後且 HP_FRESH_S 內確認過、之間沒戰鬥 → 沿用不讀。
-        boss=True（BOSS 戰後）有人 HP 0 或讀不出 → 記風險事件（任務完成時當場逐人驗）"""
+        boss=True（BOSS 戰後）有人 HP 0 或讀不出 → 記風險事件（任務完成時當場逐人驗）；team_min = 這次的全隊門檻（kind=fight 步 BOSS 前用 hp_min，預設 --team-hp-min）"""
+        thr = team_min if team_min else self.o.get('team_hp_min', TEAM_HP_MIN)
         hp = self.T.hp_pct()
         self.info['hp_pct'] = hp
         low = {}
         if hp is not None and hp < self.o['hp_min']:
             low[LEADER] = hp
         read_ok = False
-        if self.o.get('team_hp_min', TEAM_HP_MIN) > 0:
+        if thr > 0:
             if pre is None and not boss and self.hp_fresh():
                 event(f'{where}：全隊 HP {time.time() - self.hp_ok_at:.0f} 秒前確認過、之間沒有戰鬥 → 沿用（不開背包）')
                 rc, pct = 0, None                                      # 沿用不刷新 hp_ok_at（不然會一直沿用下去）
@@ -874,7 +961,7 @@ class Run:
                 else:
                     read_ok = True
                     unread = [r for r, v in pct.items() if v is None]
-                    low.update({r: v for r, v in pct.items() if v is not None and v < self.o['team_hp_min']})
+                    low.update({r: v for r, v in pct.items() if v is not None and v < thr})
                     event(f'{where}：全隊 HP {pct}' + (f'（讀不出 {unread}）' if unread else ''))
                     if boss and (unread or any(v == 0 for v in pct.values())):
                         self.mark_risk(f'BOSS 戰後 HP 0 / 讀不出 {[r for r, v in pct.items() if not v]}')
@@ -882,7 +969,7 @@ class Run:
             if read_ok:
                 self.hp_ok_at = time.time()
             return 0
-        event(f'{where}：HP 偏低 {low}（隊長門檻 {self.o["hp_min"]}%、全隊門檻 {self.o.get("team_hp_min", TEAM_HP_MIN)}%）→ 補血（小護士補整隊）')
+        event(f'{where}：HP 偏低 {low}（隊長門檻 {self.o["hp_min"]}%、全隊門檻 {thr}%）→ 補血（小護士補整隊）')
         return self.heal_form()
 
     def heal_form(self) -> int:
@@ -915,6 +1002,119 @@ class Run:
             return 0, 'manual', {'kind': 'manual'}
         return None, 'default', None
 
+    def do_fight(self, d, step, sd) -> tuple:
+        """kind=fight（紅暴步 6）：全隊 HP 檢查（sd.hp_min，低就補血）→ 不在 map / xy 附近就便捷傳送 warp → team.form → quest.py --fight --task --step N。
+        → (ret, qrc)：ret 非 None = 直接回傳的退出碼；否則 qrc 交給主迴圈分類：贏 + team.check 滿 5 人 = 37、贏但不滿 = 38（bossretry）、
+        21 / 30 / 32 / 2 / 9 / 10 照 quest.py 原意（32 → 38）；35 輸了 / 22 沒點到 / 23 沒開打 / 34 不同圖 → 補血 / 重傳送再打，共 FIGHT_TRIES 次"""
+        T, tid, track = self.T, d['id'], d['track']
+        want = (sd['map'], sd['xy'][0], sd['xy'][1])
+        last = None
+        for attempt in range(FIGHT_TRIES):
+            rc = self.hp_gate(f'任務 {tid} 步 {step} BOSS 前', boss=True, team_min=sd.get('hp_min'))   # 一定讀全隊（不沿用快取）
+            if rc:
+                return rc, None
+            pos = T.read_pos()
+            if not questhandlers.arrived(pos, want, FIGHT_NEAR):
+                event(f'任務 {tid} 步 {step}：目前 {pos}，便捷傳送「{sd.get("warp_name")}」→ {want[0]}:{want[1]},{want[2]}')
+                try:
+                    T.warp(sd['warp'], want[0], sd.get('warp_name', ''), sd['xy'])
+                except RuntimeError as e:
+                    return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：便捷傳送「{sd.get("warp_name")}」失敗：{e}'), None
+                self.team_ok_at = 0.0
+            if not self.team_fresh():
+                rc = self.form(f'任務 {tid} 步 {step} BOSS 前')
+                if rc:
+                    return (rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else
+                            self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step} BOSS 前 team.form 失敗 rc={rc}')), None
+            qrc, tail = T.quest(['--fight', '--task', track, '--step', step, '--max-seconds', sd.get('max_s', FIGHT_S)], sd.get('max_s', FIGHT_S) + 180)
+            last = qrc
+            self.team_ok_at = 0.0
+            event(f'任務 {tid} 步 {step}：quest.py --fight 退出碼 {qrc}（第 {attempt + 1}/{FIGHT_TRIES} 次）')
+            if qrc == 0:                                               # --fight 只有判定打贏才回 0 → 驗滿 5 人（psa-team-check-after-boss）
+                crc = T.team_check()
+                if crc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                    return crc, None
+                if crc == 0:
+                    self.team_ok_at = time.time()
+                    return None, 37
+                event(f'任務 {tid} 步 {step}：BOSS 贏了但 team.check rc={crc}（不滿 5 人）→ 當 38 處理（bossretry）')
+                return None, 38
+            if qrc in (2, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT, 21, 30):
+                return None, qrc
+            if qrc == 32:
+                return None, 38
+            if qrc in (35, 22, 23, 34) and attempt + 1 < FIGHT_TRIES:
+                if qrc == 35:
+                    self.mark_risk('BOSS 沒打贏（quest.py 35）')
+                    event(f'任務 {tid} 步 {step}：BOSS 沒打贏（35）→ 補血 + 重組後再打一次')
+                    rc = self.heal_form()
+                    if rc:
+                        return rc, None
+                else:
+                    event(f'任務 {tid} 步 {step}：--fight {qrc}（22 沒點到 NPC / 23 對話後沒開打 / 34 不在 NPC 地圖）→ 重新傳送 / 站位再試')
+                continue
+            break
+        if last == 35:
+            return self.fail(EXIT_TEAM, f'任務 {tid} 步 {step}：BOSS 打 {FIGHT_TRIES} 次都沒贏（quest.py 35），停手交人（評估等級 / 隊伍）', quest_rc=last), None
+        return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：quest.py --fight 退出碼 {last}（36 = 判斷不了輸贏，請看畫面）', quest_rc=last), None
+
+    def check_prereq(self, d) -> int:
+        """questdefs min_level / need_items（紅暴：5 人 ≥80 級、背包各有耐久力回複藥）：開背包一次逐人讀；不符 / 讀不到 → 110"""
+        lv, names = d.get('min_level'), list(d.get('need_items') or [])
+        if not lv and not names:
+            return 0
+        rc, res = self.T.team_read(ALL_ROLES, names)
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 前置檢查讀背包失敗 bag rc={rc}', bag_rc=rc)
+        self.info['prereq'] = res
+        low = {r: (v or {}).get('level') for r, v in res.items() if lv and not ((v or {}).get('level') and v['level'][1] >= lv)}
+        miss = {r: [n for n in names if not ((v or {}).get('have') or {}).get(n)] for r, v in res.items()}
+        miss = {r: v for r, v in miss.items() if v}
+        if low:
+            return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 要 5 人 ≥{lv} 級：不到 / 讀不到 {low}', prereq_level=low)
+        if miss:
+            return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 開始前背包要有 {names}：缺 / 讀不到 {miss}'
+                             f'（去哪買：uv run --no-project python tools/query/psa.py item {names[0]}；薩姆吉爾的醫院 1005 藥劑師等）', prereq_missing=miss)
+        event(f'{d["detail"]} 前置 OK：等級 {[(r, (v or {}).get("level")) for r, v in res.items()]}' + (f'、背包都有 {names}' if names else ''))
+        return 0
+
+    def post_task(self, d) -> int:
+        """questdefs post（任務完成後的獎勵處理；--no-post 關）：store_personal 5 人存個人倉庫、store_public 5 人存公共倉庫（沒有的人略過）。
+        龍王的守護存回公共後清 dragon_in_bag。失敗 157（9 / 10 透傳）"""
+        post = d.get('post') or {}
+        if not post or not self.o.get('post', True):
+            return 0
+        for key, depot in (('store_personal', 'personal'), ('store_public', 'public')):
+            for name in post.get(key) or []:
+                rc, res = self.T.store_many(ALL_ROLES, name, depot)
+                self.info.setdefault('post', {})[f'{depot}:{name}'] = {'rc': rc, 'roles': res}
+                if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                    return rc
+                if rc:
+                    return self.fail(EXIT_POST, f'任務 {d["id"]} 完成後「{name}」存{"個人" if depot == "personal" else "公共"}倉庫失敗 bag rc={rc}（{res}）', post=self.info['post'])
+                if name == DRAGON and depot == 'public':
+                    self.st['dragon_in_bag'] = False                   # DKBO 那疊也存回了
+                event(f'任務 {d["id"]} 完成後：「{name}」5 人存{"個人" if depot == "personal" else "公共"}倉庫 {res}')
+        self.save()
+        return 0
+
+    def drop_items(self) -> int:
+        """--drop-items（全部任務成功後、恢復掛機前）：bag.purge 5 人只刪名單內的背包道具（穿著的裝備不在背包格，不會動）。失敗 151"""
+        names = self.o.get('drop_items') or []
+        if not names:
+            return 0
+        event(f'丟獎勵道具：{names}（5 人背包刪除管理，只勾名單內；穿著的不動）')
+        rc, res = self.T.bag_drop(ALL_ROLES, names)
+        self.info.setdefault('drop', {})['items'] = {'rc': rc, 'roles': {r: (i or {}).get('deleted') for r, i in (res or {}).items()}}
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.fail(EXIT_DROP, f'丟獎勵道具 {names} 失敗 bag rc={rc}（93 = 防護擋下 / 96 = 提示窗清單對不上）', drop=self.info['drop'])
+        event(f'丟獎勵道具完成：{self.info["drop"]["items"]["roles"]}')
+        return 0
+
     def do_walk(self, d, step, sd) -> int:
         event(f'步 {step} kind=walk → 走到 {sd["map"]}:{sd["xy"]}')
         rc, info = questhandlers.walk_step(self.T, d['track'], sd, log=event, on_loop=self.ensure_dragon)
@@ -943,6 +1143,12 @@ class Run:
             if rc:
                 return rc
         rc = self.preflight_task(d)
+        if rc:
+            return rc
+        rc = self.check_prereq(d)                                      # 紅暴：5 人 ≥80 級、背包各有耐久力回複藥
+        if rc:
+            return rc
+        rc = self.require_dragon(d)                                    # 紅暴：沒龍王 buff 就吃，都沒有 → 156（改走單人逃跑）
         if rc:
             return rc
         if self.team_fresh():                                          # 交接剛組完（同一秒內連開 2 次切換面板，2026-10-12）→ 沿用
@@ -1020,14 +1226,22 @@ class Run:
                 rc = self.do_walk(d, step, sd)
                 if rc:
                     return rc
-            qargs = ['--task', track, '--max-seconds', self.o['slice_s']]
-            if self.team_fresh():
-                qargs.append('--team-fresh')                           # 剛驗過隊伍：quest.py 開始前不再開切換面板（之後的領獎後 / 任務戰後檢查照舊）
-            if self.o.get('team_hp_min', TEAM_HP_MIN) > 0:
-                qargs += ['--hp-check-min', self.o.get('team_hp_min', TEAM_HP_MIN),   # 片內戰鬥後驗全隊 HP（四寶玉之謎連戰被打死踢隊）
-                          '--hp-check-every', d.get('hp_every', self.o.get('hp_every', HP_EVERY))]   # 路上一般戰鬥每 N 場才讀（review §5.4）
-            rc, tail = T.quest(qargs, self.o['slice_s'] + WALK_CAP_S + 120)
-            self.team_ok_at = time.time() if rc == 37 else 0.0         # 37 = quest.py 剛驗過滿 5 人；其他結束方式隊伍狀態未知
+            if kind == 'fight':                                        # BOSS 步（紅暴步 6）：HP 檢查 → 便捷傳送 → --fight；結果換成 37 / 38 / … 走下面同一套分支
+                ret, rc = self.do_fight(d, step, sd)
+                if ret is not None:
+                    return ret
+                tail = []
+            else:
+                qargs = ['--task', track, '--max-seconds', self.o['slice_s']]
+                if self.team_fresh():
+                    qargs.append('--team-fresh')                       # 剛驗過隊伍：quest.py 開始前不再開切換面板（之後的領獎後 / 任務戰後檢查照舊）
+                if self.o.get('team_hp_min', TEAM_HP_MIN) > 0:
+                    qargs += ['--hp-check-min', self.o.get('team_hp_min', TEAM_HP_MIN),   # 片內戰鬥後驗全隊 HP（四寶玉之謎連戰被打死踢隊）
+                              '--hp-check-every', d.get('hp_every', self.o.get('hp_every', HP_EVERY))]   # 路上一般戰鬥每 N 場才讀（review §5.4）
+                if d.get('stop_after_rewards'):
+                    qargs += ['--stop-after-rewards', d['stop_after_rewards']]   # 每步領完獎就收片（紅暴：下一片前讀步號，步 6 改走 fight）
+                rc, tail = T.quest(qargs, self.o['slice_s'] + WALK_CAP_S + 120)
+                self.team_ok_at = time.time() if rc == 37 else 0.0     # 37 = quest.py 剛驗過滿 5 人；其他結束方式隊伍狀態未知
             if battles_in(tail) != 0:                                  # 打過仗（或 quest.py 沒說）→ 全隊 HP 不能沿用
                 self.hp_ok_at = 0.0
             walked = walk_secs(tail)
@@ -1239,6 +1453,9 @@ class Run:
     def task_done(self, d, ts) -> int:
         """任務完成後的逐人驗證（review §2-B）：--verify each = 當場驗；risk（預設）= 本任務有風險事件（30 / 32 / 38 / 21 / 41 / bossretry / 重登 /
         BOSS 後 HP 0 / 交寵物）才當場驗，否則記進 verify_pending（進度檔），run 結束 / 依賴它的任務接取前批次驗；off = 不驗"""
+        rc = self.post_task(d)                                          # 獎勵處理（紅暴：英雄的祝福存個人、龍王的守護存公共）
+        if rc:
+            return rc
         mode = self.o.get('verify', 'risk')
         if mode == 'off':
             return 0
@@ -1353,7 +1570,8 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True,
         team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False,
         battle_check: bool = True, pet_turnin: bool = False, drop_reward=None, confirm_drop=None,
-        verify: str = 'risk', dragon_all: bool = False, hp_every: int = HP_EVERY, battle_cache: bool = True) -> int:
+        verify: str = 'risk', dragon_all: bool = False, hp_every: int = HP_EVERY, battle_cache: bool = True,
+        post: bool = True, drop_items=None, confirm_drop_items=None) -> int:
     """use_dragon 預設 False（2026-10-12 起不吃龍王的守護；--dragon 對 questdefs 標 dragon 的任務吃（NO_DRAGON 以外全部），dragon_all 全吃）。
     verify = risk（預設：風險事件才當場逐人驗，其餘 run 結束批次驗）/ each（舊行為：每任務完成當場驗）/ off；verify_all=False 相容舊參數 = off。
     drop_reward 要和 confirm_drop 名單完全相同才會丟（不可逆）"""
@@ -1371,6 +1589,14 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     if bad_drop:
         print(f'questrun：--drop-reward 不能是騎寵 {bad_drop}', file=sys.stderr)
         return uikit.EXIT_USAGE
+    ditems, dconfirms = parse_names(drop_items), parse_names(confirm_drop_items)
+    if ditems and sorted(ditems) != sorted(dconfirms):
+        print(f'questrun：--drop-items {ditems} 要配同樣的 --confirm-drop-items（現在是 {dconfirms}）；不可逆動作，名單不一致就不跑', file=sys.stderr)
+        return uikit.EXIT_USAGE
+    allowed = {n for d0 in questdefs.ALL for n in d0.get('drop_items') or []}
+    if [n for n in ditems if n not in allowed]:
+        print(f'questrun：--drop-items 只能是 questdefs drop_items 列的獎勵道具 {sorted(allowed)}（現在有 {[n for n in ditems if n not in allowed]}）', file=sys.stderr)
+        return uikit.EXIT_USAGE
     defs, bad = questdefs.resolve(ids)
     if bad:
         print(f'questrun：不認得的任務 ID {bad}（questdefs 有：{questdefs.DEFAULT_ORDER}）', file=sys.stderr)
@@ -1381,7 +1607,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress,
                 team_hp_min=team_hp_min, boss_retry=boss_retry, verify=verify, verify_skipped=verify_skipped,
                 battle_check=battle_check, pet_turnin=pet_turnin, drop_reward=drops, dragon_all=dragon_all, hp_every=hp_every,
-                battle_cache=battle_cache)
+                battle_cache=battle_cache, post=post, drop_items=ditems)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -1413,6 +1639,8 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         r.dragon_return('結束')                                         # 借出的道具要還（失敗也存；畫面要留給人看的失敗碼不碰）
     if not rc and drops:
         rc = r.drop_rewards()
+    if not rc and ditems:
+        rc = r.drop_items()
     if not rc and after == 'grind':
         event(f'全部完成 → 恢復掛機：grind.py start --spot {spot}')
         rc = T.grind_start(spot)
@@ -1484,6 +1712,9 @@ def main() -> int:
         p.add_argument('--pet-turnin', action='store_true', help='交寵物步驟自動做（恐龍博士 pet_turnin 逐人交、卡坦交前 rest-all；未實機）；預設 manual 步停 115')
         p.add_argument('--drop-reward', default='', help='全部成功後丟這些獎勵寵（逗號分隔；只丟 1 級；要配 --confirm-drop 同一串）')
         p.add_argument('--confirm-drop', default='', help='--drop-reward 的確認（名單要完全相同）')
+        p.add_argument('--drop-items', default='', help='全部成功後 5 人刪掉這些背包獎勵道具（bag.purge；只限 questdefs drop_items，例：薩姆吉爾的首飾；要配 --confirm-drop-items）')
+        p.add_argument('--confirm-drop-items', default='', help='--drop-items 的確認（名單要完全相同）')
+        p.add_argument('--no-post', action='store_true', help='任務完成後不做 questdefs post 的獎勵存倉（紅暴：英雄的祝福存個人、龍王的守護存公共）')
     p = sub.add_parser('plan')
     common(p)
     p = sub.add_parser('status')
@@ -1515,7 +1746,8 @@ def main() -> int:
               verify_all=not getattr(a, 'no_verify_all', False), verify_skipped=getattr(a, 'verify_skipped', False),
               battle_check=not a.no_battle_check, pet_turnin=a.pet_turnin, drop_reward=a.drop_reward, confirm_drop=a.confirm_drop,
               verify=getattr(a, 'verify', 'risk'), dragon_all=a.dragon_all, hp_every=getattr(a, 'hp_check_every', HP_EVERY),
-              battle_cache=not getattr(a, 'battle_check_always', False))
+              battle_cache=not getattr(a, 'battle_check_always', False), post=not a.no_post, drop_items=a.drop_items,
+              confirm_drop_items=a.confirm_drop_items)
     if a.dragon and a.no_dragon:
         print('questrun：--dragon 和 --no-dragon 不能同時給', file=sys.stderr)
         return uikit.EXIT_USAGE

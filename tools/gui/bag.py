@@ -20,7 +20,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py list all|DKBO,DKBO3                                  # 唯讀：每人背包每格名稱 + 空格數（面板開一次逐人切頭像）
   uv run --no-project python tools/gui/bag.py purge all|DKBO2,DKBO3 --names 名稱,名稱 [--dry-run]   # 刪除管理批次刪：只勾名單內道具 → 提示窗清單必須是名單子集且條數 = 像素勾選數才按確定，否則 X 停手
   uv run --no-project python tools/gui/bag.py store all 千年龜的殼 --depot public --all-copies --skip-missing   # 同名多格（不疊加）全部存
-最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
+最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
 背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
 AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的兩項）。
 
@@ -451,6 +451,30 @@ def team_scan(roles=None, free: bool = True, hp: bool = True) -> tuple:
                 v = read_hp()
                 d['hp_raw'] = v
                 d['hp'] = round(100 * v[0] / v[1]) if v and v[1] else None
+            out[r] = d
+    return 0, out
+
+
+def team_read(roles=None, names=(), level: bool = True) -> tuple:
+    """唯讀：開背包一次、逐人點左欄頭像讀「N轉M級」+ 背包有沒有 names 裡的道具（名稱 OCR 模糊比對）+ 空格
+    → (rc, {角色: {'level': (轉, 級) | None, 'have': {名稱: bool}, 'free': 空格 | None}})。
+    questrun 任務前置（紅暴 2031：5 人 ≥80 級、背包各有耐久力回複藥）用；讀不到的道具名稱算 False（呼叫端當「沒有 / 讀不到」停手）"""
+    out = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in list(roles or uikit.CHARS):
+            rc = select_role(r)
+            if rc:
+                return rc, out
+            d = {}
+            if level:
+                d['level'] = read_level(r)
+            if names:
+                occ, texts = read_bag_names()
+                vals = [dedup_text(t) for t in texts.values() if t.strip()]
+                d['have'] = {n: any(name_match(t, n) for t in vals) for n in names}
+                d['free'] = occ.count(False) if occ else None
             out[r] = d
     return 0, out
 

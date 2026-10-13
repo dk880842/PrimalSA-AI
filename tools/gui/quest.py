@@ -47,7 +47,9 @@
 狀態判斷（都是背景截圖讀像素，座標為 2880×1659 → 截圖 1440×830；細節與實測見 .claude/skills/psa-game-ui/ui/quest.md）：
   對話框   右側棕底 + 兩顆米色鈕 → 點左鈕 948,461（接受 / 完成 / 成人勾玉 等推進鈕；右鈕 1220,461 是「再見」不點）
   獲得物品 藍色「確認」鈕 720,572 + 米色底 → 點它，並輪詢確認視窗消失（每次最多 1.5 秒；沒消失再按，最多 3 次 → 仍在 = 退出碼 18）。
-           2026-10-10 / 10-12 紅暴步 8 按一次沒關、--stop-after-rewards 隨即結束 → 都要手動補點，所以領獎一定要驗證關閉才算數
+           2026-10-10 / 10-12 紅暴步 8 按一次沒關、--stop-after-rewards 隨即結束 → 都要手動補點，所以領獎一定要驗證關閉才算數；
+           2026-10-13 根因補充：步 8 開窗時石幣動畫飛過視窗，close_reward 單次讀成「不是領獎窗」就當已關、--stop-after-rewards 立刻結束 →
+           停手前再看 REWARD_SETTLE_S=2 秒（settle_reward），領獎窗又出現（沒真的關 / 任務完成的第 2 個窗）就再關，仍關不掉 = 18
   只有再見 只有一顆「再見」鈕的對話框（SIG_BYE 9 點 + OCR 按鈕區每個倍率的字都剛好是「再見」，bye_lines_only）→ ESC 關閉（不回答）：
            - 點「選擇對象」卡片後 BYE_SELECT_WINDOW=15 秒內出現 = 點到別人的閒聊（2026-10-12 紅暴步 1）→ 回原流程（最多 BYE_MAX=3 次，第 3 次退出碼 40）；
            - 其他（點追蹤 / 黃問號 / 巡路抵達）= 任務 NPC 只剩再見（2026-10-13 老人薩頓：頭盔因背包滿進了信箱）→ 退出碼 40（任務接不下去，questrun 查背包 / 信箱）。
@@ -204,6 +206,9 @@ BYE_SELECT_WINDOW = 15.0                   # 點「選擇對象」卡片後這�
 REWARD_GONE_S = 1.5                        # 按確認後最多等這麼久看視窗消失（期間只要有一次不是 reward 就算關了）
 REWARD_POLL_S = 0.3
 REWARD_CLICK_MAX = 3                       # 最多按幾次確認（第 1 次 + 重試 2 次）
+REWARD_SETTLE_S = 2.0                      # --stop-after-rewards 停手前再看這麼久：獲得物品視窗又出現 → 再 close_reward（2026-10-13 紅暴步 8：
+                                           # 開窗時大量石幣動畫飛過視窗，close_reward 單次讀成「不是 reward」就當已關 → 腳本立刻結束、視窗留著要人點 720,572。
+                                           # 不把 close_reward 改成「連續 2 次才算關」：會把緊接著出現的第 2 個領獎窗當同一個，--stop-after-rewards 2 少算）
 # 對話框：棕底 2 點 + 兩顆米色鈕（heal.py 同款）。主畫面沙地很像米色，所以一定要配棕底
 # SIG_DIALOG / SIG_REWARD / SIG_PANEL / SIG_HUD（容差 40）在 screen_sigs.py
 # 完整戰鬥畫面（2026-10-10 實測，下指令 / 播放中兩種都量過）：上方中央棕框標籤（播放中 → 米色字；下指令 → 「N回合」+ 下方「剩餘時間 90」倒數），
@@ -1036,7 +1041,8 @@ def check_dialog_irreversible() -> dict:
 def close_reward() -> tuple[bool, int]:
     """按「獲得物品」確認並驗證視窗消失 → (已關, 按了幾次)。
     每按一次後輪詢最多 REWARD_GONE_S 秒，期間只要讀到一次不是 reward（主畫面 / 對話 / 下一個領獎窗之前的空檔）就算關了；
-    整段都還是 reward（開窗動畫中點擊被吃掉，2026-10-10 / 10-12 紅暴步 8）→ 再按，最多 REWARD_CLICK_MAX 次"""
+    整段都還是 reward（開窗動畫中點擊被吃掉，2026-10-10 / 10-12 紅暴步 8）→ 再按，最多 REWARD_CLICK_MAX 次。
+    單次讀錯（石幣動畫蓋住特徵點）會誤判已關 → 主迴圈下一輪會再看到 reward 再關；--stop-after-rewards 停手前由 settle_reward 補看"""
     for n in range(1, REWARD_CLICK_MAX + 1):
         gui('seq', f'click {REWARD_OK[0]} {REWARD_OK[1]}')
         t_end = time.time() + REWARD_GONE_S
@@ -1048,6 +1054,25 @@ def close_reward() -> tuple[bool, int]:
                 break
         log(f'獲得物品視窗按確認後 {REWARD_GONE_S}s 仍在（第 {n} 次）' + ('→ 再按一次' if n < REWARD_CLICK_MAX else ''))
     return False, REWARD_CLICK_MAX
+
+
+def settle_reward(secs: float = REWARD_SETTLE_S) -> tuple[bool, int]:
+    """--stop-after-rewards 停手前：再看 secs 秒，獲得物品視窗又出現（上一次其實沒關 / 任務完成的第 2 個領獎窗）→ close_reward。
+    → (畫面上已沒有領獎窗, 額外關了幾個)；關不掉 → (False, n)。只有畫面是 reward 才點確認（不認得的畫面不碰）"""
+    extra = 0
+    t_end = time.time() + secs
+    while time.time() < t_end:
+        if read_screen()['state'] == 'reward':
+            gone, _n = close_reward()
+            if not gone:
+                return False, extra
+            extra += 1
+            t_end = time.time() + secs                     # 關了一個再看一輪（第 2 個窗通常緊接著出現）
+            if extra >= REWARD_CLICK_MAX:
+                break
+            continue
+        time.sleep(REWARD_POLL_S)
+    return True, extra
 
 
 def snap(tag: str) -> str:
@@ -1999,7 +2024,11 @@ def _main() -> int:
                 return EXIT_REWARD_STUCK
             event(f'獲得物品視窗 #{rewards}：按確認' + (f'（按了 {n_click} 次才關）' if n_click > 1 else '') + '，已確認視窗關閉', shot)
             if a.stop_after_rewards and rewards >= a.stop_after_rewards:
-                event(f'已領 {rewards} 次獎勵視窗，停止（--stop-after-rewards）')
+                ok_, extra = settle_reward()                   # 停手前確認領獎窗真的沒了（紅暴步 8 按完又在 / 第 2 個領獎窗）→ 留著會擋下一步
+                if not ok_:
+                    event(f'獲得物品視窗 #{rewards}：停手前又看到領獎窗、按確認仍關不掉 → 退出碼 {EXIT_REWARD_STUCK}', snap('reward-stuck'))
+                    return EXIT_REWARD_STUCK
+                event(f'已領 {rewards} 次獎勵視窗，停止（--stop-after-rewards）' + (f'；停手前又關了 {extra} 個領獎窗' if extra else ''))
                 return finish(a)
         elif st == 'battle':
             # 手動逃跑模式（--solo / --fight）：路上小怪只逃、不刷新；任務 / BOSS 戰（--fight 且點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）開自動戰鬥 + 刷新角色。

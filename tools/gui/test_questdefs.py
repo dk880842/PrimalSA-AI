@@ -39,8 +39,11 @@ for d in questdefs.ALL:
           str(ts and (ts[0].get('nameTn'), ts[0].get('name'))))
     for st, sd in (d.get('steps') or {}).items():
         check(f'{tid} 步 {st} 在步數範圍內、kind 合法', 1 <= st <= d['steps_total'] and sd['kind'] in questdefs.STEP_KINDS)
-        if sd['kind'] == 'walk':
-            check(f'{tid} 步 {st} walk 有 map / xy', isinstance(sd.get('map'), int) and len(sd.get('xy', ())) == 2)
+        if sd['kind'] in ('walk', 'fight'):
+            check(f'{tid} 步 {st} {sd["kind"]} 有 map / xy', isinstance(sd.get('map'), int) and len(sd.get('xy', ())) == 2)
+        if sd['kind'] == 'fight':
+            check(f'{tid} 步 {st} fight 有便捷傳送 warp / warp_name，且 Task 表該步是戰鬥（type 4）', len(sd.get('warp', ())) == 2 and sd.get('warp_name')
+                  and ts[st - 1].get('type') == 4)
 # 2999 步 1 的終點 NPC 座標必須與 walk 目標一致（Npc 表 map / x / y）
 npcs = {n['ID']: n for n in rows('Npc')}
 t2999 = sorted((t for t in tasks if t.get('group') == 2999), key=lambda t: t.get('step', 0))
@@ -92,6 +95,22 @@ for _tid, _st in ((2019, 1), (2019, 2), (2016, 1), (2016, 2), (3003, 2)):
 check('2019 步 2 提示 = pet_catch 火雞系', 'pet_catch.py' in questdefs.pet_prep_hint(questdefs.get(2019), 2) and '火雞系' in questdefs.pet_prep_hint(questdefs.get(2019), 2))
 check('3003 步 2 提示 = petwatch --exp-fruit', 'petwatch.py' in questdefs.pet_prep_hint(questdefs.get(3003), 2) and '--exp-fruit' in questdefs.pet_prep_hint(questdefs.get(3003), 2))
 check('沒設 pet_prep 的任務 / 步 → None', questdefs.pet_prep_hint(questdefs.get(2017), 1) is None and questdefs.pet_prep_hint(questdefs.get(2019), 3) is None)
+
+# 紅暴 2031（2026-10-13 納入）
+d31 = questdefs.get(2031)
+check('2031 在 questdefs、不進預設順序、dragon_required、步 6 fight、每步收片', d31 and 2031 not in questdefs.DEFAULT_ORDER and d31.get('dragon_required')
+      and questdefs.step_kind(d31, 6) == 'fight' and d31.get('stop_after_rewards') == 1)
+n31 = npcs.get(sorted((t for t in tasks if t.get('group') == 2031), key=lambda t: t.get('step', 0))[5].get('endNpc'))
+check('2031 步 6 BOSS NPC（龍王的守衛）在 fight map、距落點 ≤ 3 格', bool(n31) and n31.get('map') == d31['steps'][6]['map']
+      and abs(n31.get('x') - d31['steps'][6]['xy'][0]) <= 3 and abs(n31.get('y') - d31['steps'][6]['xy'][1]) <= 3, str(n31 and (n31.get('map'), n31.get('x'), n31.get('y'))))
+check('2031 前置：成人儀式 / 80 級 / 耐久力回複藥（Task 表步 1 條件）', questdefs.prereqs(2031, tasks) == [2999] and d31.get('min_level') == 80
+      and '耐久力回複藥' in d31.get('need_items', []))
+check('2031 獎勵：步 7 龍王的守護 / 步 8 英雄的祝福、薩姆吉爾的首飾 都在 Task 表獎勵', {'龍王的守護', '英雄的祝福', '薩姆吉爾的首飾'}
+      <= {items.get(r.get('itemId')) for t in tasks if t.get('group') == 2031 for r in (t.get('reward') or []) if r and r.get('itemId')})
+alld = {n for d in questdefs.ALL for n in d.get('drop_items') or []}
+check('drop_items 不在 AUTO_PURGE（要明確旗標）、不是保護名稱、在 bag.md 白名單表', not (alld & set(bag.AUTO_PURGE)) and not [n for n in alld if bag.purge_guard(n)]
+      and alld <= white, str(alld - white))
+check('post 存倉的道具都是保護 / 保留類（不會被 purge）：龍王的守護在 PURGE_FORBID', bag.purge_guard('龍王的守護'))
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

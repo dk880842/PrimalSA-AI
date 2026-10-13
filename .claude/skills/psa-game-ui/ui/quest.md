@@ -291,6 +291,23 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
     恐龍博士 `--pet-turnin` 接取後已 rest-all，交寵物前不重做；`pet.plan_rest` 名字讀不出但縮圖認得物種（img_species，非騎寵）→ 照改等待（S5 剛抓的貝魯卡沒名字、rest-all 拒絕）。
   - **實機要確認**：①批次驗證的支線捲動能一次讀到多個任務（status_all 多標題）；②DKBO 背包整疊留著時 use_item 找得到、run 結束 depot_store 整疊存回；③relogin `--stuck` 在 VS 牌 / 巡路畫面時設置鈕（1210,760）點得開；④關閉列只點 2 次後，等列消失的時間是否比舊版連點短。
 
+### 紅暴（英雄島前傳 2031）組隊打到底：questrun 納入（2026-10-13，**只有離線測試，實機未驗證**）
+使用者 2026-10-13：有龍王效果就不用逃跑 → 改組隊跑；完全沒龍王可吃才退回單人逃跑（`/psa-quest-solo` §4）。questdefs `QOTHER`（不進預設順序，指定 ID 才跑）。
+```
+uv run --no-project python tools/gui/questrun.py run 2031 --after none \
+    --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾
+```
+- **前置**（`check_prereq`，背包開一次逐人讀，`bag.team_read`）：5 人 ≥80 級、背包各有耐久力回複藥（步 1 交掉；缺 → 110，訊息附 `psa.py item 耐久力回複藥`）；成人儀式由接取 / 逐人驗證把關；背包每人 ≥ 6 格（questdefs.bag_need）。
+- **龍王必要**（`dragon_required`，不看 `--dragon`）：接取前 `require_dragon` → 人形 buff 在就跑；沒有就吃（DKBO 背包 → 公共倉庫）；兩邊都沒有（depot 92）→ **156**「改走單人逃跑」；一時失敗（90 等）重試 3 次仍不行也 156（訊息不同：處理後重跑）。每片前照舊 `ensure_dragon` 補吃。
+- **每步收片**：每片 quest.py 加 `--stop-after-rewards 1`（步 1～5 勾玉、步 7、步 8 都有獲得物品窗），收片字樣「停止（--stop-after-rewards）」當提前結束、不開詳情；下一片前讀步號。步 1 點到同 NPC 閒聊（只有再見）→ quest.py ESC 回原流程（10-12 是 rc 2 誤報，已修未實機）。
+- **步 6 kind=fight**（`do_fight`）：全隊 HP 一定重讀（門檻 `hp_min` 80%，低就小護士補整隊 + team.form）→ 不在 5510:50,17 三格內就便捷傳送「龍王守衛」（地圖傳送 → 便捷傳送分頁 259,432 → 1160,646，`heal.teleport`）→ team.form → `quest.py --fight --task 英雄島前傳 --step 6`；
+  0（判定打贏）→ `team.check` 滿 5 人 = 當 37 續片、不滿 = 當 38（bossretry）；35 輸 → 補血重組再打（共 `FIGHT_TRIES` 2 次，仍輸 114）；22 / 23 / 34 → 重新傳送 / 站位再試；21 / 30 / 32 / 2 / 9 / 10 照原意。
+- **步 8 獎勵窗**（英雄的祝福 ×5 + 薩姆吉爾的首飾，石幣動畫多）：根因 = `close_reward` 只要讀到一次「不是領獎窗」就當已關，開窗時石幣飛過特徵點 → 誤判 → `--stop-after-rewards` 立刻結束，窗留著（10-10 / 10-12 手動點 720,572；10-13 「按了 2 次才關」）。修：quest.py `settle_reward`：`--stop-after-rewards` 停手前再看 2 秒，領獎窗又出現就再 `close_reward`，仍關不掉 = 18（questrun 再 reward_retry → 152）。沒把 close_reward 改成「連 2 次才算關」：會把緊接著出現的第 2 個領獎窗當同一個、`--stop-after-rewards 2` 少算（離線測試 test_quest_fight (RW) 3 例）。
+- **完成後**（`post_task`，`--no-post` 關；失敗 157）：英雄的祝福 5 人存個人倉庫、龍王的守護 5 人存公共倉庫（`bag.depot_many store`，沒有的人略過；DKBO 那疊也存回 → 清 dragon_in_bag）。
+- **全部成功後**（不可逆，要明確旗標）：`--drop-reward 巴朵蘭恩`（petdrop 只丟 1 級、驗名）、`--drop-items 薩姆吉爾的首飾`（`bag.purge` 只勾背包內名單道具、提示窗清單核對；穿著的不在背包格、不會動；只准 questdefs `drop_items` 列的名稱，ui/bag.md 白名單有、不進 AUTO_PURGE）。失敗 151。
+- 寵物欄滿時步 7 會卡（龍王給巴朵蘭恩）：開始前每人寵物欄留 1 格（腳本沒查，推測 quest.py 會 33 / 29 停）。
+- 離線測試：test_questrun（紅暴 17 例）、test_questdefs（2031 資料核對）、test_quest_fight（settle_reward 3 例）。**待實機**：①便捷傳送龍王守衛落點 + team.form；②`--stop-after-rewards 1` 每步收片後下一片點追蹤續巡；③步 8 settle_reward 是否補關成功；④bag.team_read 讀耐久力回複藥名稱；⑤post 存倉 / purge 首飾。
+
 ### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12；`--who` 模式實機驗過 DKBO3 / DKBO5 補完四寶玉之謎；questrun 38 / 21 與逐人驗證自動呼叫）
 照 memory psa-team-check-after-boss（2026-10-12 使用者更正）：照 0 轉龍王任務（英雄島前傳 2031 步 6）的做法——**落後的人當隊長、組滿 5 人、按追蹤回 BOSS 處全隊一起打**，不是掉隊者單人去打。errlog #222 / #226 / #238（四寶玉之謎 38 手動處理）。
 ```

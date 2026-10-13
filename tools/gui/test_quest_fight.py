@@ -1472,6 +1472,18 @@ ok &= check(f'按 {quest.REWARD_CLICK_MAX} 次都還在 → 退出碼 {quest.EXI
 s = Script([DIALOG, REWARD, IDLE, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE])   # 兩個連續領獎窗（中間有空檔）→ 各算 1 次
 rc = run2(['--stop-after-rewards', '2', '--no-track', '--max-seconds', '60'], s)
 ok &= check('連續兩個領獎窗（中間讀到主畫面）→ 各按 1 次、算 2 次獎勵', rc == 0 and len([c for c in s.clicks if c[1] == 'click 720 572']) == 2, f'rc={rc} {s.clicks}')
+# 2026-10-13 紅暴步 8：石幣動畫讓 close_reward 單次讀成「不是 reward」→ 當成已關；--stop-after-rewards 停手前 settle_reward 再看 2 秒
+s = Script([DIALOG, REWARD, IDLE, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--stop-after-rewards', '1', '--no-track', '--max-seconds', '60'], s)
+ok &= check('步 8 誤判已關：停手前又看到領獎窗 → 再按確認一次、rc 0（不留給人手點 720,572）',
+            rc == 0 and len([c for c in s.clicks if c[1] == 'click 720 572']) == 2, f'rc={rc} {s.clicks}')
+s = Script([DIALOG, REWARD, IDLE, REWARD])                           # 誤判已關後窗一直在
+rc = run2(['--stop-after-rewards', '1', '--no-track', '--max-seconds', '60'], s)
+ok &= check(f'停手前領獎窗又出現且一直關不掉 → 退出碼 {quest.EXIT_REWARD_STUCK}、只點確認鈕', rc == quest.EXIT_REWARD_STUCK
+            and set(c[1] for c in s.clicks) == {'click 948 461', 'click 720 572'}, f'rc={rc} {s.clicks}')
+s = Script([DIALOG, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--stop-after-rewards', '1', '--no-track', '--max-seconds', '60'], s)
+ok &= check('真的關了：settle 2 秒內沒再出現 → 只按 1 次、rc 0', rc == 0 and len([c for c in s.clicks if c[1] == 'click 720 572']) == 1, f'rc={rc} {s.clicks}')
 
 print('(BYE) 只有「再見」一顆鈕的閒聊對話（2026-10-12 紅暴步 1 誤報 rc 2）')
 # 實機像素（quest-log/140941-UNKNOWN.png、140927-dialog.png、battle-samples/vs_1.png、141940-reward.png；SIG_BYE 9 點的順序）
