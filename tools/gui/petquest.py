@@ -18,7 +18,7 @@
                 卡坦接取後讀追蹤步號：已在步 2 → 跳過第 1 輪
     prep        關原地遇敵 + 等戰鬥結束 → 解散隊伍 → pet.py list 記 5 人原戰寵（朵拉比斯，出戰）等級 → 取消鎖定戰寵 → 朵拉比斯 5 人存個人倉庫
                 （寵物欄只剩騎寵 + 4 空格；抓寵 / 練寵都不帶原戰寵）
-    catch[N]    每輪每人可抓 = 寵物欄空格（4）：分批抓到 5 隻，滿了會自動進個人倉庫（沒縮圖、成長字串沒登錄就取不出來）→ 所以一批 ≤ 空格數：
+    catch[N]    每輪每批可抓 = 抓寵者寵物欄空格（最少那人；正常 4）：分批抓到 5 隻，滿了會自動進個人倉庫（沒縮圖、成長字串沒登錄就取不出來）→ 所以一批 ≤ 空格數：
                 pet_catch.py --stages bait（公共倉庫誘餌取 k 拆 k）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 外掛「+」買 k 次（見上）→
                 pet_catch.py --stages setup,wait,register --count k（register = 依抓寵者登錄成長字串）→ 抓寵者把這批存公共（最後一批留 1 隻）
                 pet.py store-many --pick last --skip-missing --candidates 本輪物種 → pet.py list 驗數量
@@ -153,6 +153,11 @@ def slot_species(sl: dict) -> str | None:
     if not sl or sl.get('empty'):
         return None
     return sl.get('name') or sl.get('species') or sl.get('img_species')
+
+
+def free_slots(slots, size: int = 5) -> int:
+    """寵物欄空格數（pet.py list 的格：empty 或沒列到的都算空）"""
+    return size - sum(1 for s in slots or [] if s and not s.get('empty'))
 
 
 def count_species(slots, sp: str) -> int:
@@ -509,11 +514,19 @@ class Run:
         assign, cand = rd['assign'], species_csv(rd['assign'])
         key = f'caught_{stage}'
         caught = self.p.setdefault(key, 0)                             # 這一輪每人已抓（並存好）幾隻
-        plan = batches(count - caught, 4)
-        if plan:
-            rc = self.solo(EXIT_CATCH)                                 # 抓寵前一定關遇敵 + 解散（卡坦第 2 輪前 questrun 交完是組隊狀態）
-            if rc:
-                return rc
+        if caught >= count:
+            return 0
+        rc = self.solo(EXIT_CATCH)                                     # 抓寵前一定關遇敵 + 解散（卡坦第 2 輪前 questrun 交完是組隊狀態）
+        if rc:
+            return rc
+        rc, rs = self.pet_list([r for r, _, _ in assign], cand)        # 每批 ≤ 抓寵者寵物欄空格（最少的那人；例：獎勵寵沒丟 → 3 格）
+        if rc:
+            return self.pass_or(rc, EXIT_CATCH, f'抓前讀寵物欄失敗 pet rc={rc}')
+        free = min(free_slots(rs.get(r)) for r, _, _ in assign)
+        plan = batches(count - caught, free)
+        if not plan:
+            return self.fail(EXIT_CATCH, f'抓寵者寵物欄沒有空格（{ {r: free_slots(rs.get(r)) for r, _, _ in assign} }）→ 先存 / 丟寵物', 'uv run --no-project python tools/gui/pet.py list --role all')
+        event(f'{stage}：抓寵者寵物欄空格 {free} → 分批 {plan}')
         for bi, k in enumerate(plan):
             last = bi == len(plan) - 1
             rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', k, '--stages', 'bait'], 1800)

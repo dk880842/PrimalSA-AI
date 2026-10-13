@@ -282,6 +282,15 @@ check('交寵物用 questrun --pet-turnin', ('run', '2016', '--after', 'none', '
 check('原朵拉比斯先存個人、最後 @原等級 取回', any(a[0] == 'take-many' and '朵拉比斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py')))
 check('完成後進度檔清空（下一轉從頭）', json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']['done'] == [])
 
+# ---------------- 寵物欄只有 3 空格（獎勵寵沒丟）→ 分批 [3, 2]
+s = grow(Sim(2016))
+for r in pq.ALL_ROLES:
+    s.bar[r].append(P('巴朵蘭恩'))
+rc = go(2016, s, confirm_drop=True)
+counts = [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait']
+check('抓寵者寵物欄空格 3 → 分批 [3, 2]（不讓寵物溢到個人倉庫）', rc == 0 and counts == ['3', '2'], f'rc={rc} {counts} {pq.LAST.get("info")}')
+check('free_slots：empty 格 / 沒列到的都算空', pq.free_slots([P('a'), {'empty': True}, P('b')]) == 3 and pq.free_slots(None) == 5)
+
 # ---------------- 沒 --confirm-drop → 168 停在 drop
 s = grow(Sim(2016))
 rc = go(2016, s)

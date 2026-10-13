@@ -304,10 +304,21 @@ uv run --no-project python tools/gui/questrun.py run 2031 --after none \
 - **步 6 kind=fight**（`do_fight`）：全隊 HP 一定重讀（門檻 `hp_min` 80%，低就小護士補整隊 + team.form）→ 不在 5510:50,17 三格內就便捷傳送「龍王守衛」（地圖傳送 → 便捷傳送分頁 259,432 → 1160,646，`heal.teleport`）→ team.form → `quest.py --fight --task 英雄島前傳 --step 6`；
   0（判定打贏）→ `team.check` 滿 5 人 = 當 37 續片、不滿 = 當 38（bossretry）；35 輸 → 補血重組再打（共 `FIGHT_TRIES` 2 次，仍輸 114）；22 / 23 / 34 → 重新傳送 / 站位再試；21 / 30 / 32 / 2 / 9 / 10 照原意。
 - **步 8 獎勵窗**（英雄的祝福 ×5 + 薩姆吉爾的首飾，石幣動畫多）：根因 = `close_reward` 只要讀到一次「不是領獎窗」就當已關，開窗時石幣飛過特徵點 → 誤判 → `--stop-after-rewards` 立刻結束，窗留著（10-10 / 10-12 手動點 720,572；10-13 「按了 2 次才關」）。修：quest.py `settle_reward`：`--stop-after-rewards` 停手前再看 2 秒，領獎窗又出現就再 `close_reward`，仍關不掉 = 18（questrun 再 reward_retry → 152）。沒把 close_reward 改成「連 2 次才算關」：會把緊接著出現的第 2 個領獎窗當同一個、`--stop-after-rewards 2` 少算（離線測試 test_quest_fight (RW) 3 例）。
-- **完成後**（`post_task`，`--no-post` 關；失敗 157）：英雄的祝福 5 人存個人倉庫、龍王的守護 5 人存公共倉庫（`bag.depot_many store`，沒有的人略過；DKBO 那疊也存回 → 清 dragon_in_bag）。
+- **完成後**（`post_task`，`--no-post` 關；失敗 157）：英雄的祝福 5 人存個人倉庫、龍王的守護 5 人存公共倉庫（`bag.depot_many store`，沒有的人略過；DKBO 那疊也存回 → 清 dragon_in_bag）。同一機制另用在黃金羚羊之謎 2014（摩娜西普 5 人存個人寵物倉庫，`pet.store_many --skip-missing`）、五兄弟之謎 2012（人龍隨機蛋存公共）。
 - **全部成功後**（不可逆，要明確旗標）：`--drop-reward 巴朵蘭恩`（petdrop 只丟 1 級、驗名）、`--drop-items 薩姆吉爾的首飾`（`bag.purge` 只勾背包內名單道具、提示窗清單核對；穿著的不在背包格、不會動；只准 questdefs `drop_items` 列的名稱，ui/bag.md 白名單有、不進 AUTO_PURGE）。失敗 151。
 - 寵物欄滿時步 7 會卡（龍王給巴朵蘭恩）：開始前每人寵物欄留 1 格（腳本沒查，推測 quest.py 會 33 / 29 停）。
 - 離線測試：test_questrun（紅暴 17 例）、test_questdefs（2031 資料核對）、test_quest_fight（settle_reward 3 例）。**待實機**：①便捷傳送龍王守衛落點 + team.form；②`--stop-after-rewards 1` 每步收片後下一片點追蹤續巡；③步 8 settle_reward 是否補關成功；④bag.team_read 讀耐久力回複藥名稱；⑤post 存倉 / purge 首飾。
+
+### 轉生後任務重做總控：`postrebirth.py`（2026-10-13，**只有離線測試，整支未實機**）
+順序 = 使用者 2026-10-13 定案（notes/plan-post2-quests.md「使用者決定」9～12），每段呼叫既有腳本（子程序），失敗停在該段、印指令，進度檔 `tools/.cache/postrebirth.json`（24 小時）續跑：
+```
+uv run --no-project python tools/gui/postrebirth.py plan [--confirm-drop]                     # 印 13 段完整順序與每段指令
+uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--confirm-buy-bait] [--from 段] [--to 段] [--fresh]
+```
+- 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 → **173** 改單人逃跑）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
+- questrun 一律 `--after none`（中段不回練功）、`--dragon`（NO_DRAGON 的任務 questrun 自己不吃；紅暴必吃）。
+- 清背包：bag list 讀空格，**只有空格 < 門檻（① 6、② 8）的人才刪**；名單 = ui/bag.md 白名單（① PURGE1、② 加杉的手環 / 月光的手鐲 / 巴巴洛的許可證），龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪；先 `purge --dry-run`，有 `--confirm-drop` 才實刪；刪完仍不足 → 174（名單外不刪）。四大洞窟產物在 bag.PURGE_FORBID 永不刪。
+- 退出碼 170 參數 / 172 任務段（questrun 非 0）/ 173 紅暴沒龍王 / 174 清背包 / 175 寵物任務段（petquest 非 0）/ 176 收尾；9 / 10 透傳。離線測試 `test_postrebirth.py`。
 
 ### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12；`--who` 模式實機驗過 DKBO3 / DKBO5 補完四寶玉之謎；questrun 38 / 21 與逐人驗證自動呼叫）
 照 memory psa-team-check-after-boss（2026-10-12 使用者更正）：照 0 轉龍王任務（英雄島前傳 2031 步 6）的做法——**落後的人當隊長、組滿 5 人、按追蹤回 BOSS 處全隊一起打**，不是掉隊者單人去打。errlog #222 / #226 / #238（四寶玉之謎 38 手動處理）。

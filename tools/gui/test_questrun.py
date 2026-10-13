@@ -1356,6 +1356,10 @@ class Hero(Fake):
         self.rec('store_many', name, depot)
         return self.store_rc, {r: self.store_rc for r in roles}
 
+    def pet_store(self, name, depot):
+        self.rec('pet_store', name, depot)
+        return 0
+
     def bag_drop(self, roles, names):
         self.rec('bag_drop', tuple(names))
         return self.drop_rc, {r: {'deleted': list(names)} for r in roles}
@@ -1443,6 +1447,13 @@ f = hero(HAPPY_Q, HAPPY_S)
 f.drop_rc = 96
 rc = go(f, [2031], after='none', drop_items='薩姆吉爾的首飾', confirm_drop_items='薩姆吉爾的首飾')
 check('丟首飾提示窗對不上（96）→ 151', rc == questrun.EXIT_DROP)
+D14, D12 = questdefs.get(2014)['detail'], questdefs.get(2012)['detail']
+f = Hero(status={D14: [questrun.DOING]}, quest=[(0, ['任務完成：x'])], bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2014], after='none')
+check('黃金羚羊之謎完成 → post 摩娜西普 5 人存個人寵物倉庫', rc == 0 and ('pet_store', '摩娜西普', 'personal') in f.calls, str([c for c in f.calls if c[0] == 'pet_store']))
+f = Hero(status={D12: [questrun.DOING]}, quest=[(0, ['任務完成：x'])], bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2012], after='none')
+check('五兄弟之謎完成 → post 人龍隨機蛋 5 人存公共倉庫', rc == 0 and ('store_many', '人龍隨機蛋', 'public') in f.calls)
 check('early_end 認得 --stop-after-rewards 收片', questrun.early_end(STOP) and not questrun.early_end(['時間到，結束']))
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):

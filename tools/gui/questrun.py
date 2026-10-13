@@ -94,7 +94,8 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；「時間�
   150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～125 / 切回 DKBO / 重組；info.turnin）
   151 丟獎勵寵 / 道具失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；--drop-items：bag.purge 93 / 96；info.drop）
   156 dragon_required 任務（紅暴）沒有龍王的守護 buff 也吃不到（背包 / 公共倉庫都沒有 → 改走單人逃跑 psa-quest-solo §4；一時失敗 → 處理後重跑）
-  157 任務完成後獎勵處理失敗（questdefs post：bag.depot_many 存個人 / 公共倉庫；info.post）
+  157 任務完成後獎勵處理失敗（questdefs post：bag.depot_many 存個人 / 公共倉庫、pet.store_many 寵物存個人；info.post）
+      post 目前：紅暴 2031 英雄的祝福 → 個人、龍王的守護 → 公共；黃金羚羊之謎 2014 摩娜西普 → 個人寵物倉庫；五兄弟之謎 2012 人龍隨機蛋 → 公共（使用者 2026-10-13；--no-post 關）
   153 任務接不下去：quest.py 40（任務 NPC 只有「再見」）且背包有空、信箱沒有丟失的物品（或處理 2 次後 NPC 仍只有再見）→ 停手回報（條件不符？請人看）
   154 背包滿自動處理失敗：讀空格 / 刪白名單失敗、刪完仍滿、mail.py 領取失敗（114 = 領了沒消失）
   155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep：卡坦 2019 步 1 鯊 / 步 2 雞、恐龍博士、猜謎三兄弟步 2 金布伊）：不刷新重試，訊息直接寫下一步 pet_catch.py / petwatch.py 指令；manual 步（115）也附同一提示；步號讀不到照舊 112
@@ -384,6 +385,11 @@ class Tools(rebirth.Tools):
         import bag
         return bag.depot_many('store', list(roles), name, depot, skip_missing=True)
 
+    def pet_store(self, name, depot):
+        """5 人同一隻寵物存倉（pet.store_many，沒有的人略過；騎寵 / 第 1 格照 pet.py 防護擋）→ 退出碼"""
+        import pet
+        return pet.store_many('all', [name], depot, skip_missing=True)
+
     def bag_drop(self, roles, names):
         """背包刪除管理批次刪（bag.purge：只勾名單內、背包內的；穿著的裝備不在背包格、不會動）→ (rc, {角色: info})"""
         import bag
@@ -535,7 +541,8 @@ def print_plan(defs, opts: dict) -> None:
         if d.get('post'):
             pp = d['post']
             print('  - 完成後獎勵處理' + ('（--no-post：不做）' if not opts.get('post', True) else '') + '：'
-                  + '；'.join([f'{n} 5 人存個人倉庫' for n in pp.get('store_personal') or []] + [f'{n} 5 人存公共倉庫' for n in pp.get('store_public') or []])
+                  + '；'.join([f'{n} 5 人存個人倉庫' for n in pp.get('store_personal') or []] + [f'{n} 5 人存公共倉庫' for n in pp.get('store_public') or []]
+                             + [f'寵物 {n} 5 人存個人寵物倉庫' for n in pp.get('pets_personal') or []])
                   + f'（bag.depot_many，沒有的人略過；失敗 {EXIT_POST}）')
         if d.get('drop_items'):
             print(f'  - 可丟獎勵道具：{"、".join(d["drop_items"])}（要丟用 --drop-items / --confirm-drop-items；bag.purge 只刪背包內，穿著的不動）')
@@ -1081,8 +1088,8 @@ class Run:
         return 0
 
     def post_task(self, d) -> int:
-        """questdefs post（任務完成後的獎勵處理；--no-post 關）：store_personal 5 人存個人倉庫、store_public 5 人存公共倉庫（沒有的人略過）。
-        龍王的守護存回公共後清 dragon_in_bag。失敗 157（9 / 10 透傳）"""
+        """questdefs post（任務完成後的獎勵處理；--no-post 關）：store_personal 5 人存個人倉庫、store_public 5 人存公共倉庫（沒有的人略過）、
+        pets_personal 寵物 5 人存個人寵物倉庫（黃金羚羊之謎 摩娜西普）。龍王的守護存回公共後清 dragon_in_bag。失敗 157（9 / 10 透傳）"""
         post = d.get('post') or {}
         if not post or not self.o.get('post', True):
             return 0
@@ -1097,6 +1104,14 @@ class Run:
                 if name == DRAGON and depot == 'public':
                     self.st['dragon_in_bag'] = False                   # DKBO 那疊也存回了
                 event(f'任務 {d["id"]} 完成後：「{name}」5 人存{"個人" if depot == "personal" else "公共"}倉庫 {res}')
+        for name in post.get('pets_personal') or []:
+            rc = self.T.pet_store(name, 'personal')
+            self.info.setdefault('post', {})[f'pet:{name}'] = {'rc': rc}
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            if rc:
+                return self.fail(EXIT_POST, f'任務 {d["id"]} 完成後寵物「{name}」存個人倉庫失敗 pet rc={rc}', post=self.info['post'])
+            event(f'任務 {d["id"]} 完成後：寵物「{name}」5 人存個人倉庫')
         self.save()
         return 0
 

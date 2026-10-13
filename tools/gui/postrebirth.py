@@ -1,0 +1,401 @@
+#!/usr/bin/env python3
+"""轉生後任務重做總控（2 轉 → 3 轉之間等）：盤點 → 成人儀式 → 彌生和日美子 → 紅暴 → 1.82 前段 → 清背包① → 1.82 後段 → 清背包② → 四大洞窟
+→ 恐龍博士 → 卡坦的願望 → 猜謎三兄弟 → 收尾（回地雷區掛機）。只用標準函式庫。順序是使用者 2026-10-13 定案（notes/plan-post2-quests.md「使用者決定」9～12）。
+**只有離線測試（test_postrebirth.py），整支未實機**；每段呼叫的 questrun / petquest / bag / grind 各自的實機狀態見各檔。
+
+用法（專案根目錄；WSL / Windows 原生相同）：
+  uv run --no-project python tools/gui/postrebirth.py plan                                  # 不碰遊戲：印完整順序與每段指令
+  uv run --no-project python tools/gui/postrebirth.py run [--from 段] [--to 段] [--confirm-drop] [--confirm-buy-bait] [--spot 地雷區] [--fresh] [--dry-run]
+    --confirm-drop      准做不可逆的丟 / 刪：紅暴的巴朵蘭恩（petdrop 1 級）+ 薩姆吉爾的首飾（bag.purge）、清背包（bag.purge 白名單）、
+                        寵物任務的獎勵寵（布克布克 / 修寶 / 左迪洛斯）。沒給 → 紅暴不丟、清背包只 --dry-run 列出要刪的（空格不夠就 174 停）、寵物任務到丟寵段 168 停
+    --confirm-buy-bait  傳給 petquest：誘餌不夠時准用外掛「+」買（每次 50,000 石幣，按前後驗石幣）
+    --from / --to       只跑某幾段（段名見 plan）；進度檔 tools/.cache/postrebirth.json 記完成的段（24 小時內），重跑 = 續跑；--fresh 從頭
+  可 import：postrebirth.run(tools=…, …) → 退出碼；結果在 postrebirth.LAST
+
+規則：龍王的守護依 questdefs.NO_DRAGON（questrun 一律帶 --dragon，彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 不吃；紅暴 dragon_required 必吃）；
+  每段 questrun 都 --after none（中段不回練功），只有收尾 grind.py start。任一段失敗就停在該段、印該段指令（修好後 `run --from 該段` 續跑）。
+  驗證視窗 9 / 斷線 10 一律透傳。
+
+段（SEGMENTS）與退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；postrebirth 自己 170～179）：
+  inventory  唯讀盤點：exp.py read、bag.py list all、pet.py list --role all（失敗只警告；9 / 10 停）
+  adult      questrun.py run 2999 --after none --dragon                                       失敗 172
+  yayoi      questrun.py run 2017 --after none --dragon（NO_DRAGON：實際不吃）                  失敗 172
+  hero       questrun.py run 2031 --after none [--drop-reward 巴朵蘭恩 … --drop-items 薩姆吉爾的首飾 …]   156（沒龍王）→ 173 改單人逃跑；其他 172
+  q182a      questrun.py run 2015 2027 2018 2011 2024 2023 2020 2028 --after none --dragon    失敗 172
+  bag1       清背包①：bag.py list all → 有人空格 < 6（1.82 後段最大 bag_slots 5 + 龍王 1）才刪 PURGE1 白名單（龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪）
+             → 先 purge --dry-run、再實刪（要 --confirm-drop）→ 重讀仍不足 174
+  q182b      questrun.py run 2025 2010 2014 2012 2013 2021 --after none --dragon（摩娜西普存個人 / 人龍隨機蛋存公共由 questdefs post 自動做）  失敗 172
+  bag2       清背包②：同上，門檻 8 格（四大洞窟中間品 + 四件產物），名單 PURGE2 = PURGE1 + 杉的手環 / 月光的手鐲 / 巴巴洛的許可證；四大洞窟產物 bag.PURGE_FORBID 永不刪
+  caves      questrun.py run 2000 2003 2001 2002 --after none --dragon --max-min 45           失敗 172
+  dino       petquest.py run 2016 [--confirm-drop] [--confirm-buy-bait]                       失敗 175
+  katan      petquest.py run 2019 …                                                            失敗 175
+  quiz       petquest.py run 3003 …（練金布伊前 petwatch --exp-fruit 吃 2倍智慧果）            失敗 175
+  finish     questrun.py status --role all <全部任務>（JSON not_done 要空）→ pet.py list（5 人朵拉比斯出戰 + 騎寵騎乘）→ grind.py start --spot 地雷區（原地遇敵 + 5 人快戰確認）
+             失敗 176
+  170 參數 / 段名不認得；171 保留不用（盤點失敗只警告）
+"""
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import uikit  # noqa: E402
+
+SRC = 'postrebirth'
+ROOT = uikit.ROOT
+import logpaths  # noqa: E402
+EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
+PROGRESS = logpaths.p(uikit.CACHE / 'postrebirth.json')
+
+EXIT_ARGS, EXIT_INV, EXIT_QUEST, EXIT_HERO, EXIT_BAG, EXIT_PET, EXIT_FINISH = 170, 171, 172, 173, 174, 175, 176
+PASS = (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)
+ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+PROGRESS_TRUST_S = 24 * 3600
+NODRAGON_RC = 156                  # questrun.EXIT_NODRAGON
+LAST: dict = {}
+
+Q182A = [2015, 2027, 2018, 2011, 2024, 2023, 2020, 2028]
+Q182B = [2025, 2010, 2014, 2012, 2013, 2021]
+CAVES = [2000, 2003, 2001, 2002]
+ALL_TASKS = [2999, 2017, 2031] + Q182A + Q182B + CAVES + [2016, 2019, 3003]
+# 清背包名單（ui/bag.md 白名單；使用者 10-12 / 10-13 核准；notes/plan-post2-quests.md 第 7 / 8 / 12 點）
+PURGE1 = ['儀之兜', '龍之槍', '龍之鎧', '龍之衣', '薩頓家的秘藥', '山賊的羽飾', '亞姆亞姆的斧頭', '空想的衣服', '老爺爺的護身符']
+PURGE2 = PURGE1 + ['杉的手環', '月光的手鐲', '巴巴洛的許可證']
+FLUTE, DRAGON_GEAR = '龍的魅力之笛', ('龍之槍', '龍之鎧', '龍之衣')
+NEED1, NEED2 = 6, 8                # 清背包①（1.82 後段最大 bag_slots 5 + 龍王 1）/ ②（四大洞窟，使用者建議 ≥ 8）
+HERO_DROP = ['--drop-reward', '巴朵蘭恩', '--confirm-drop', '巴朵蘭恩', '--drop-items', '薩姆吉爾的首飾', '--confirm-drop-items', '薩姆吉爾的首飾']
+
+SEGMENTS = ['inventory', 'adult', 'yayoi', 'hero', 'q182a', 'bag1', 'q182b', 'bag2', 'caves', 'dino', 'katan', 'quiz', 'finish']
+TITLES = {'inventory': '盤點交接', 'adult': '成人儀式', 'yayoi': '彌生和日美子', 'hero': '紅暴（英雄島前傳）', 'q182a': '1.82 前段',
+          'bag1': '清背包①', 'q182b': '1.82 後段', 'bag2': '清背包②', 'caves': '四大洞窟', 'dino': '恐龍博士', 'katan': '卡坦的願望',
+          'quiz': '猜謎三兄弟', 'finish': '收尾'}
+
+
+# ---------------------------------------------------------------- 純函式
+def last_json(lines) -> dict:
+    for ln in reversed(list(lines or [])):
+        ln = str(ln).strip()
+        if ln.startswith('{') and ln.endswith('}'):
+            try:
+                return json.loads(ln)
+            except ValueError:
+                continue
+    return {}
+
+
+def purge_plan(bags: dict, need: int, names: list) -> tuple:
+    """bag.py list 的 {角色: {'slots': {格: 名稱}, 'free': n}} → (要刪的 {角色: [名稱…]}, 空格不足的 {角色: free})。
+    只對空格 < need 的人刪；龍的魅力之笛只在該人背包有龍之槍 / 鎧 / 衣時一起刪（ui/bag.md 條件）；名稱比對交給 bag.purge（這裡只決定名單）"""
+    import bag
+    plan, short = {}, {}
+    for r, d in (bags or {}).items():
+        free = (d or {}).get('free')
+        if free is None or free >= need:
+            continue
+        short[r] = free
+        items = [str(t) for t in ((d or {}).get('slots') or {}).values()]
+        have = [n for n in names if any(bag.name_match(t, n) for t in items)]
+        if any(any(bag.name_match(t, g) for t in items) for g in DRAGON_GEAR):
+            have.append(FLUTE)
+        plan[r] = have
+    return plan, short
+
+
+def group_by_names(plan: dict) -> list:
+    """{角色: [名稱]} → [(角色清單, 名稱清單)]（名單相同的人一起刪，背包面板開一次）；名單空的人略過"""
+    groups = {}
+    for r, ns in plan.items():
+        if ns:
+            groups.setdefault(tuple(ns), []).append(r)
+    return [(rs, list(ns)) for ns, rs in groups.items()]
+
+
+def seg_cmds(seg: str, o: dict) -> list:
+    """段 → [(腳本, 參數)]（plan 顯示與 run 共用）"""
+    pq = (['--confirm-drop'] if o.get('confirm_drop') else []) + (['--confirm-buy-bait'] if o.get('confirm_buy') else [])
+    return {
+        'inventory': [('exp.py', ['read']), ('bag.py', ['list', 'all']), ('pet.py', ['list', '--role', 'all', '--json'])],
+        'adult': [('questrun.py', ['run', 2999, '--after', 'none', '--dragon'])],
+        'yayoi': [('questrun.py', ['run', 2017, '--after', 'none', '--dragon'])],
+        'hero': [('questrun.py', ['run', 2031, '--after', 'none'] + (HERO_DROP if o.get('confirm_drop') else []))],
+        'q182a': [('questrun.py', ['run'] + Q182A + ['--after', 'none', '--dragon'])],
+        'bag1': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE1) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
+        'q182b': [('questrun.py', ['run'] + Q182B + ['--after', 'none', '--dragon'])],
+        'bag2': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE2) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
+        'caves': [('questrun.py', ['run'] + CAVES + ['--after', 'none', '--dragon', '--max-min', 45])],
+        'dino': [('petquest.py', ['run', 2016] + pq)],
+        'katan': [('petquest.py', ['run', 2019] + pq)],
+        'quiz': [('petquest.py', ['run', 3003] + pq)],
+        'finish': [('questrun.py', ['status', '--role', 'all'] + ALL_TASKS), ('pet.py', ['list', '--role', 'all', '--json']),
+                   ('grind.py', ['start', '--spot', o.get('spot', '地雷區')])],
+    }[seg]
+
+
+def fmt(script, args) -> str:
+    return f'uv run --no-project python tools/gui/{script} ' + ' '.join(map(str, args))
+
+
+def pets_ok(roles_slots: dict, battle: str = '朵拉比斯') -> dict:
+    """收尾：每人 battle 出戰剛好 1 隻 + 有一隻騎乘 → 不對的 {角色: 原因}"""
+    bad = {}
+    for r in ALL_ROLES:
+        slots = [s for s in (roles_slots or {}).get(r) or [] if s and not s.get('empty')]
+        b = [s for s in slots if (s.get('name') or s.get('species')) == battle and s.get('state') == '出戰']
+        ride = [s for s in slots if s.get('state') == '騎乘']
+        why = []
+        if len(b) != 1:
+            why.append(f'{battle}出戰 {len(b)} 隻')
+        if not ride:
+            why.append('沒有騎乘中的騎寵')
+        if why:
+            bad[r] = '、'.join(why)
+    return bad
+
+
+# ---------------------------------------------------------------- 紀錄 / 進度
+def event(msg: str) -> None:
+    line = f'{time.strftime("%Y-%m-%d %H:%M:%S")} [postrebirth] {msg}'
+    print(line, flush=True)
+    try:
+        EVENT_LOG.parent.mkdir(exist_ok=True)
+        with open(EVENT_LOG, 'a', encoding='utf-8') as f:
+            f.write(line + '\n')
+    except OSError:
+        pass
+
+
+def load_progress() -> dict:
+    try:
+        return json.loads(PROGRESS.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+
+
+def save_progress(d: dict) -> None:
+    try:
+        PROGRESS.parent.mkdir(parents=True, exist_ok=True)
+        PROGRESS.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding='utf-8')
+    except OSError:
+        pass
+
+
+class Tools:
+    def sub(self, script: str, args, timeout: float = 6 * 3600) -> tuple:
+        """子程序跑 tools/gui/<script>（輸出即時印出）→ (退出碼, 最後 80 行)"""
+        cmd = [sys.executable, str(HERE / script)] + [str(x) for x in args]
+        env = dict(os.environ, PYTHONIOENCODING='utf-8')
+        tail = []
+        p = subprocess.Popen(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, text=True, encoding='utf-8', errors='replace')
+        t0 = time.time()
+        try:
+            for ln in p.stdout:
+                ln = ln.rstrip()
+                print(ln, flush=True)
+                tail.append(ln)
+                del tail[:-80]
+                if time.time() - t0 > timeout:
+                    p.kill()
+                    break
+        finally:
+            p.wait()
+        return p.returncode, tail
+
+
+class Run:
+    def __init__(self, T, o: dict):
+        self.T, self.o = T, o
+        p = load_progress()
+        if o.get('fresh') or time.time() - (p.get('ts') or 0) > PROGRESS_TRUST_S:
+            p = {}
+        p.setdefault('done', [])
+        self.p = p
+        self.info: dict = {}
+        self.warnings: list = []
+
+    def save(self):
+        self.p['ts'] = time.time()
+        save_progress(self.p)
+
+    def fail(self, rc: int, msg: str, manual: str = '') -> int:
+        self.info.update(msg=msg, manual=manual)
+        event(f'失敗 rc={rc}：{msg}' + (f'｜手動 / 續跑：{manual}' if manual else ''))
+        try:
+            import errlog
+            errlog.add(f'postrebirth：{msg}', source='postrebirth')
+        except Exception:                                              # noqa: BLE001
+            pass
+        return rc
+
+    def sub(self, script, args, timeout=6 * 3600):
+        event(f'→ {fmt(script, args)}')
+        rc, lines = self.T.sub(script, list(args), timeout)
+        event(f'← {script} rc={rc}')
+        return rc, lines
+
+    def s_inventory(self) -> int:
+        for script, args in seg_cmds('inventory', self.o):
+            rc, lines = self.sub(script, args, 1800)
+            if rc in PASS:
+                return rc
+            if rc:
+                self.warnings.append(f'盤點 {script} rc={rc}')
+                event(f'盤點：{script} rc={rc}（只警告，照跑）')
+            elif script == 'bag.py':
+                self.p['bags_start'] = {r: (d or {}).get('free') for r, d in (last_json(lines).get('bags') or {}).items()}
+        return 0
+
+    def s_quest(self, seg) -> int:
+        (script, args), = seg_cmds(seg, self.o)
+        rc, _ = self.sub(script, args)
+        if not rc:
+            return 0
+        if seg == 'hero' and rc == NODRAGON_RC:
+            return self.fail(EXIT_HERO, '紅暴：questrun 156 = 沒有龍王的守護 buff 也吃不到 → 改走單人逃跑（psa-quest-solo SKILL.md §4）；做完後 `run --from q182a` 續跑',
+                             'psa-quest-solo §4（questdetail.py accept「英雄島前傳（必做）」→ ass.py pet DKBO first 防禦 normal 攻擊 → team.py disband → 每步 quest.py --solo …）')
+        code = EXIT_PET if script == 'petquest.py' else EXIT_QUEST
+        return rc if rc in PASS else self.fail(code, f'{TITLES[seg]}：{script} 退出碼 {rc}（意義見該腳本檔頭）', f'{fmt(script, args)}；修好後 postrebirth.py run --from {seg}')
+
+    def s_bag(self, seg) -> int:
+        need, names = (NEED1, PURGE1) if seg == 'bag1' else (NEED2, PURGE2)
+        rc, lines = self.sub('bag.py', ['list', 'all'], 1200)
+        if rc:
+            return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：bag.py list rc={rc}', fmt('bag.py', ['list', 'all']))
+        bags = last_json(lines).get('bags') or {}
+        plan, short = purge_plan(bags, need, names)
+        if not short:
+            event(f'{TITLES[seg]}：每人空格都 ≥ {need}（{ {r: (d or {}).get("free") for r, d in bags.items()} }）→ 不刪')
+            return 0
+        groups = group_by_names(plan)
+        event(f'{TITLES[seg]}：空格不足 {need} 的人 {short}；可刪 {plan}')
+        for roles, ns in groups:
+            args = ['purge', ','.join(roles), '--names', ','.join(ns)]
+            rc, _ = self.sub('bag.py', args + ['--dry-run'], 1200)
+            if rc:
+                return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：purge --dry-run rc={rc}', fmt('bag.py', args + ['--dry-run']))
+            if not self.o.get('confirm_drop'):
+                continue
+            rc, _ = self.sub('bag.py', args, 1200)
+            if rc:
+                return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：purge rc={rc}（93 防護 / 96 提示窗清單對不上）', fmt('bag.py', args))
+        if not self.o.get('confirm_drop'):
+            return self.fail(EXIT_BAG, f'{TITLES[seg]}：空格不足 {short}（要 ≥ {need}），刪道具要 --confirm-drop（只 --dry-run 列了 {plan}）',
+                             '; '.join(fmt('bag.py', ['purge', ','.join(rs), '--names', ','.join(ns)]) for rs, ns in groups) or '人工清背包')
+        rc, lines = self.sub('bag.py', ['list', 'all'], 1200)
+        if rc:
+            return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：刪完重讀 rc={rc}')
+        _, short2 = purge_plan(last_json(lines).get('bags') or {}, need, names)
+        if short2:
+            return self.fail(EXIT_BAG, f'{TITLES[seg]}：刪完白名單仍有人空格 < {need}：{short2} → 名單外的不刪，請人看（存倉 / 決定丟什麼）', fmt('bag.py', ['list', 'all']))
+        return 0
+
+    def s_finish(self) -> int:
+        cmds = seg_cmds('finish', self.o)
+        script, args = cmds[0]
+        rc, lines = self.sub(script, args, 3600)
+        nd = last_json(lines).get('not_done')
+        if rc in PASS:
+            return rc
+        if rc or nd is None:
+            return self.fail(EXIT_FINISH, f'收尾逐人讀任務狀態失敗 rc={rc}', fmt(script, args))
+        if nd:
+            return self.fail(EXIT_FINISH, f'收尾：還有任務沒全員完成 {nd}', fmt(script, args))
+        script, args = cmds[1]
+        rc, lines = self.sub(script, args, 900)
+        if rc:
+            return rc if rc in PASS else self.fail(EXIT_FINISH, f'收尾讀寵物欄 rc={rc}', fmt(script, args))
+        bad = pets_ok(last_json(lines).get('roles') or {})
+        if bad:
+            return self.fail(EXIT_FINISH, f'收尾寵物狀態不對：{bad}', '看 pet.py list；朵拉比斯出戰、騎寵騎乘後 --from finish 續跑')
+        script, args = cmds[2]
+        rc, _ = self.sub(script, args, 1800)
+        if rc:
+            return rc if rc in PASS else self.fail(EXIT_FINISH, f'grind start 失敗 rc={rc}（50～58 見 grind.py）', fmt(script, args))
+        return 0
+
+    def do(self, seg) -> int:
+        if seg == 'inventory':
+            return self.s_inventory()
+        if seg in ('bag1', 'bag2'):
+            return self.s_bag(seg)
+        if seg == 'finish':
+            return self.s_finish()
+        return self.s_quest(seg)
+
+
+def print_plan(o: dict) -> None:
+    print(f'postrebirth 計畫：{len(SEGMENTS)} 段（--confirm-drop {bool(o.get("confirm_drop"))}、--confirm-buy-bait {bool(o.get("confirm_buy"))}）')
+    for seg in SEGMENTS:
+        print(f'[{seg}] {TITLES[seg]}')
+        for script, args in seg_cmds(seg, o):
+            print('  ' + fmt(script, args))
+        if seg in ('bag1', 'bag2'):
+            print(f'  （空格 < {NEED1 if seg == "bag1" else NEED2} 的人才刪；龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時；四大洞窟產物 / 龍王 / 誘餌等 bag.PURGE_FORBID 永不刪）')
+        if seg == 'hero':
+            print('  （156 沒龍王 → 173 停，改單人逃跑 psa-quest-solo §4）' + ('' if o.get('confirm_drop') else '；沒 --confirm-drop：巴朵蘭恩 / 首飾不丟（之後寵物欄少 1 格，petquest 分批會變小）'))
+    print('退出碼：170 參數（171 保留：盤點只警告）172 任務段 173 紅暴沒龍王 174 清背包 175 寵物任務段 176 收尾；9 驗證視窗 10 斷線')
+
+
+def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, confirm_drop: bool = False, confirm_buy: bool = False,
+        spot: str = '地雷區', fresh: bool = False, dry_run: bool = False) -> int:
+    LAST.clear()
+    for s in (from_seg, to_seg):
+        if s and s not in SEGMENTS:
+            print(f'postrebirth：段名 {s!r} 不在 {SEGMENTS}', file=sys.stderr)
+            return EXIT_ARGS
+    o = dict(confirm_drop=confirm_drop, confirm_buy=confirm_buy, spot=spot, fresh=fresh)
+    if dry_run:
+        print_plan(o)
+        return 0
+    T = tools or Tools()
+    r = Run(T, o)
+    i0 = SEGMENTS.index(from_seg) if from_seg else 0
+    i1 = SEGMENTS.index(to_seg) if to_seg else len(SEGMENTS) - 1
+    event(f'開始：段 {SEGMENTS[i0:i1 + 1]}（進度檔已完成 {r.p["done"]}）')
+    rc, ran = 0, []
+    for seg in SEGMENTS[i0:i1 + 1]:
+        if seg in r.p['done'] and not from_seg:
+            event(f'[{seg}] {TITLES[seg]}：進度檔記已完成 → 跳過')
+            continue
+        event(f'== [{seg}] {TITLES[seg]} ==')
+        rc = r.do(seg)
+        if rc:
+            break
+        ran.append(seg)
+        if seg not in r.p['done']:
+            r.p['done'].append(seg)
+        r.save()
+    if not rc and SEGMENTS[i1] == SEGMENTS[-1]:
+        r.p = {'done': [], 'finished': time.time()}                   # 全部做完：清進度（下一轉從頭）
+        r.save()
+    LAST.update(ok=rc == 0, rc=rc, ran=ran, info=r.info, warnings=r.warnings)
+    event(f'結束 rc={rc}，跑了 {ran}' + (f'；停在 [{seg}] {TITLES[seg]}，修好後 postrebirth.py run --from {seg}' if rc else ''))
+    return rc
+
+
+def main(argv=None) -> int:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('cmd', choices=['plan', 'run'])
+    ap.add_argument('--from', dest='from_seg', default=None)
+    ap.add_argument('--to', dest='to_seg', default=None)
+    ap.add_argument('--confirm-drop', action='store_true', help='准丟 / 刪（紅暴巴朵蘭恩 + 首飾、清背包白名單、寵物任務獎勵寵）')
+    ap.add_argument('--confirm-buy-bait', action='store_true', help='傳給 petquest：誘餌不夠准用外掛「+」買')
+    ap.add_argument('--spot', default='地雷區')
+    ap.add_argument('--fresh', action='store_true')
+    ap.add_argument('--dry-run', action='store_true')
+    a = ap.parse_args(argv)
+    rc = run(from_seg=a.from_seg, to_seg=a.to_seg, confirm_drop=a.confirm_drop, confirm_buy=a.confirm_buy_bait, spot=a.spot,
+             fresh=a.fresh, dry_run=a.cmd == 'plan' or a.dry_run)
+    if a.cmd == 'run' and not a.dry_run:
+        print(json.dumps(LAST, ensure_ascii=False, default=str))
+    return rc
+
+
+if __name__ == '__main__':
+    sys.exit(main())

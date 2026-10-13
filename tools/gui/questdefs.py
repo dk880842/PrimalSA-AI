@@ -26,7 +26,8 @@
   dragon_required（選填）True = 這任務一定要有龍王的守護 buff 才組隊跑（不看 --dragon）：開始前沒 buff 就吃；背包 / 公共倉庫都沒有 → 156（改走單人逃跑 psa-quest-solo）
   min_level   （選填）5 人等級下限（bag.read_level；任一人不到 / 讀不到 → 110）
   need_items  （選填）開始前 5 人背包都要有的道具名稱（缺 → 110，提示去哪買）
-  post        （選填）任務完成後自動處理獎勵（questrun --no-post 關）：store_personal=[道具…] 5 人存個人倉庫、store_public=[道具…] 5 人存公共倉庫（同名多格全存）
+  post        （選填）任務完成後自動處理獎勵（questrun --no-post 關）：store_personal=[道具…] 5 人存個人倉庫、store_public=[道具…] 5 人存公共倉庫、
+              pets_personal=[寵物…] 5 人存個人寵物倉庫（使用者 2026-10-13：英雄的祝福存個人、龍王剩的 / 人龍隨機蛋存公共、摩娜西普存個人）
   drop_items  （選填）可丟的獎勵道具（只給 plan 顯示；要丟由使用者下 --drop-items / --confirm-drop-items，questrun 用 bag.purge 只刪名單內、背包內的，穿著的不動）
   hp_every    （選填）片內全隊 HP 每幾場一般戰鬥讀一次（quest.py --hp-check-every；沒填 = questrun --hp-check-every 預設 3）；連戰任務填 1
   walk_s      （自動）2026-10-13 二轉後實跑 quest.py 自報的巡路秒數合計（WALK_S；沒量到 = None）
@@ -75,10 +76,10 @@ Q182 = [
          steps={}, bag_slots=5, boss=True, est_min=18, live=False, hp_every=1,
          note='4 場守護獸任務戰（薩伊那斯 / 加魯卡 / 吉魯島 / 沙姆島，完整戰鬥畫面，5 人自動戰鬥要開）；步 5 回奇努伊村學者；接取前先關原地遇敵較穩；獎勵月光的手鐲（可丟）'),
     dict(id=2014, detail='黃金羚羊之謎(1.82)', track='黃金羚羊之謎', accept_npc='採石所管理人 31902:9,7', steps_total=11,
-         steps={}, bag_slots=3, boss=False, est_min=14, live=False,
+         steps={}, bag_slots=3, boss=False, est_min=14, live=False, post=dict(pets_personal=['摩娜西普']),
          note='純巡路 + 對話（採石場 → 達那 / 福爾德長老 → 庫伊老爺爺）；精靈之木（大樹）點不到 → 走追蹤列表；頭上黃「!」不是任務目標；獎勵寵物摩娜西普（佔寵物欄 → 存個人倉庫）'),
     dict(id=2012, detail='五兄弟之謎(1.82)', track='五兄弟之謎', accept_npc='吉諾 31701:29,44', steps_total=8,
-         steps={}, bag_slots=5, boss=True, est_min=22, live=False,
+         steps={}, bag_slots=5, boss=True, est_min=22, live=False, post=dict(store_public=['人龍隨機蛋']),
          note='步 7 浦魯德任務戰（其餘為對話）；中間 5 張答案用紙佔背包（bag_slots 5）；10-10 完成未被認出 → 現在以「領獎後追蹤列表找不到 = 完成」判斷；獎勵人龍隨機蛋 → 存公共倉庫'),
     dict(id=2013, detail='礦工的比賽(1.82)', track='礦工的比賽', accept_npc='帖尼姆 31805:19,21', steps_total=6,
          steps={}, bag_slots=2, boss=True, est_min=4, live=True,

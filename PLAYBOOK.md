@@ -173,7 +173,7 @@ Windows PowerShell 用 Win32 API（WSL 的 bash 用 `gui.sh` 包一層；Python 
 ---
 
 ## 6.1 固定流程先跑腳本、失敗才手動（P1～P8 腳本化的心得）
-重複做的畫面流程（組隊、切角色、開始練功、寵物出戰 / 存取）已經收成腳本（`team.py` / `char.py` / `grind.py` / `pet.py`，共用 `uikit.py` 等；整段任務也有 `rebirth.py`，漆黑洞窟轉生一行跑完，見 ui/rebirth.md），做法與規則：
+重複做的畫面流程（組隊、切角色、開始練功、寵物出戰 / 存取）已經收成腳本（`team.py` / `char.py` / `grind.py` / `pet.py`，共用 `uikit.py` 等；整段任務也有 `rebirth.py`，漆黑洞窟轉生一行跑完，見 ui/rebirth.md；轉生後全部任務重做 `postrebirth.py plan|run`、寵物任務 `petquest.py`，見 ui/quest.md），做法與規則：
 - **先跑腳本，非 0 才退回手動 skill**。腳本的退出碼分段（team 40～47、grind 50～58、char 60～65、pet 70～78，共用 8 戰鬥中 / 9 疑似驗證停手 / 10 netwatch halt），最後一行是 JSON，可給上層解析。
 - **判斷靠像素 / 圖樣板，不靠 OCR 單打**：面板開著用特徵點、名字 / 數字用「學出來的整塊樣板」（OCR 只當標籤來源與備援）；樣板對不上就回 None、**不猜**。
 - **每次點擊前驗證、每個動作最多點 1 次**：面板特徵不在 / 禁區 / 名字不符就不點；點了沒變化不補點（切換式按鈕會切回去），回失敗碼把畫面存到 `tools/.cache/ui-log/` 給人看。
