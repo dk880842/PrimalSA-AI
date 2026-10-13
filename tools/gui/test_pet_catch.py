@@ -13,9 +13,9 @@ import petmatch  # noqa: E402
 fails = 0
 
 
-def check(name, ok):
+def check(name, ok, extra=''):
     global fails
-    print(('PASS ' if ok else 'FAIL ') + name)
+    print(('PASS ' if ok else 'FAIL ') + name + (f' {extra}' if extra and not ok else ''))
     fails += 0 if ok else 1
 
 
@@ -244,5 +244,46 @@ bag._click = lambda *a, **k: clicks.append(a) or True
 bag._ocr_join = lambda *a, **k: 'DKBO2'
 check('select_role：頭像已選著 → 不點頭像、回 0', bag.select_role('DKBO2') == 0 and not clicks)
 bag._avatar_sel, bag._click, bag._ocr_join = sv2
+
+# ---- 2026-10-13 register：抓寵來源當主鍵（卡坦 4 鯊 / 4 雞縮圖會混）----
+SH = [('DKBO2', '鯊魚系', '克邦凱斯'), ('DKBO3', '鯊魚系', '加克拉'), ('DKBO4', '鯊魚系', '加格'), ('DKBO5', '鯊魚系', '邦恩吉')]
+u = lambda n, g, **k: dict({'slot': n, 'empty': False, 'name': None, 'unnamed': g, 'state': '等待'}, **k)    # noqa: E731
+mount = {'slot': 1, 'empty': False, 'name': None, 'unnamed': '49/9/8/2', 'species': '布拉奇多斯', 'species_src': 'reg', 'state': '騎乘'}
+pets = {'DKBO2': [mount, u(2, '35/7/3/8'), u(3, '36/7/3/8', img_species='克邦凱斯'), u(4, '34/7/4/8')],
+        'DKBO3': [mount, u(2, '33/7/3/8'), u(3, '32/7/3/8', img_species='邦恩吉')],            # 縮圖有把握認成別的 → 矛盾
+        'DKBO4': [mount, u(2, '30/8/3/8', species='加格', species_src='img')],
+        'DKBO5': [mount, u(2, '35/7/3/8'), u(3, '31/8/2/8')]}                                   # 35/7/3/8 跟 DKBO2 撞號
+todo, bad = pet_catch.plan_register(SH, pets, {'49/9/8/2': '布拉奇多斯'})
+check('plan_register：依抓寵者登錄（騎寵已登錄別種略過）',
+      todo == {'36/7/3/8': ('克邦凱斯', 'DKBO2'), '34/7/4/8': ('克邦凱斯', 'DKBO2'), '33/7/3/8': ('加克拉', 'DKBO3'),
+               '30/8/3/8': ('加格', 'DKBO4'), '31/8/2/8': ('邦恩吉', 'DKBO5')}, str(todo))
+check('plan_register：縮圖有把握是別種 → 矛盾不登錄；兩人同字串不同種 → 都不登錄',
+      ('DKBO3', 3, '32/7/3/8', '邦恩吉', '加克拉') in bad and any(b[0] == 'DKBO5' and b[2] == '35/7/3/8' for b in bad) and '35/7/3/8' not in todo, str(bad))
+todo, bad = pet_catch.plan_register(SH[:1], {'DKBO2': [u(2, '1/2/3/4')]}, {'1/2/3/4': '加格'})
+check('plan_register：字串已登錄成別種（以前分來的）→ 不是這次抓的，略過', todo == {} and bad == [])
+
+
+class FR:
+    def __init__(self, pets):
+        self.pets, self.args = pets, None
+
+    def pets_list(self, roles, img_only=None):
+        self.args = (list(roles), img_only)
+        return 0, {r: self.pets.get(r, []) for r in roles}
+
+
+reg = {'thumb': {}, 'growth': {'49/9/8/2': '布拉奇多斯'}}
+petmatch.load_species = lambda: reg
+petmatch.TPL_DIR = Path(tempfile.mkdtemp())
+fr = FR(pets)
+rc = pet_catch.register_catches(SH, fr)
+check('register_catches：有矛盾 → 15，其餘照登錄（登錄檔 + 來源檔）', rc == pet_catch.EXIT_CATCH_SPECIES and reg['growth'].get('33/7/3/8') == '加克拉'
+      and reg['growth'].get('31/8/2/8') == '邦恩吉' and '32/7/3/8' not in reg['growth'] and pet_catch.load_src()['33/7/3/8']['catcher'] == 'DKBO3', str(reg['growth']))
+check('register_catches：寵物面板只讀一次、候選 = 本次 4 種', fr.args == (['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'], ['克邦凱斯', '加克拉', '加格', '邦恩吉']))
+fr = FR({'DKBO2': [u(2, '40/7/3/8')]})
+check('register_catches：沒有矛盾 → 0', pet_catch.register_catches(SH[:1], fr) == 0 and reg['growth']['40/7/3/8'] == '克邦凱斯')
+f3 = FT3({}, polls=[{'DKBO2': (0, False)}])
+f3.pets_list = lambda roles, img_only=None: (0, {'DKBO2': [u(2, '41/7/3/8')]})
+check('run 預設階段含 register（wait 完接著登錄）', pet_catch.run(A[:1], stages=('wait', 'register'), tools=f3) == 0 and reg['growth']['41/7/3/8'] == '克邦凱斯')
 print('\n失敗 %d' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

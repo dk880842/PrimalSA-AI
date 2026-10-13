@@ -14,7 +14,8 @@
   uv run --no-project python tools/gui/pet.py set-state-many --role all 朵拉比斯 出戰 [--allow-mount]   # 多人同一隻寵物改狀態（面板只開一次）
   批次（2026-10-12）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 左欄頭像換角色連續做 → 關一次。目標字串 = 名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級
   uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
-  共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、--timing
+  共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、--timing、
+    --candidates 物種,物種（任務候選：沒名字的寵物 / 倉庫卡只在這些之間比縮圖，inlier + 主色都同意才算；有把握且登錄檔不矛盾 → 當 species，2026-10-13 卡坦 4 鯊 / 4 雞）
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
 
 做法（P-I5 實測 2026-10-11，數據見 notes/plan-scriptify.md）：
@@ -22,7 +23,8 @@
   - 選角色：點左欄頭像 → 黃框（頭像上緣 x=83）必須「剛好只有該角色」；頭像下名字有樣板就要吻合（沒有樣板就學一次）。
   - 空格：爪印 4 點顏色；選中：格子左邊框黃色；**點空格不會改變選取**（畫面仍停在上一隻寵物，所以不能靠名字判斷空格）。
   - 名字：petmatch 整塊圖樣板（同名 IoU = 1.000）→ 沒樣板才 OCR（-Dark 0 -Zooms 2,3,4 精確命中 Monster 表才學）；
-    等級：黃字切字 + 單字樣板 → 沒樣板才 OCR（三組設定共識才學）。名字 / 等級都讀不出來 → None，**不猜**。
+    等級：黃字切字 + 單字樣板 → 沒樣板才 OCR（三組設定共識、且跟樣板認得的字不矛盾才採用 / 學；level_from_rows）。名字 / 等級都讀不出來 → None，**不猜**。
+    2026-10-13：實機等級樣板被 OCR 錯值污染（'1' 混進 3 / 9、'轉' 混進 2）→ load_ctx 讀檔時 petmatch.prune_digits 自動清、有清就寫回。
   - 狀態：下方三顆鈕（出戰 / 騎乘 / 休息）亮的（棕底）就是目前狀態。
   - 騎寵（uikit.MOUNTS = 瑪斯貝卡 / 布拉奇多斯）：名字「像」騎寵（is_mount_like，鬆）或狀態 = 騎乘 → set-state / rest-all 不動（73），要動需 --allow-mount。
 
@@ -321,6 +323,29 @@ def ocr_level_consensus():
     return rk[0][0] if rk and rk[0][1] >= 2 and (len(rk) == 1 or rk[0][1] > rk[1][1]) else None
 
 
+def level_from_rows(lvl_rows, ctx: dict) -> tuple:
+    """選中寵物「0轉N」黃字點陣 → (等級或 None, 來源)。來源：'tpl'（單字樣板）/ 'ocr'（三組 OCR 共識、且不跟樣板認得的字矛盾）/
+    None（沒墨點或讀不到）/ 'ocr-conflict:N'（OCR 共識 N 跟畫面上認得的字矛盾 → 不採用，回 None）。讀不準一律 None，不回錯值。
+    OCR 值要學樣板時再截一次確認畫面沒變（learn_level 本身也會拒絕可疑標籤）。petwatch 也用這支（同一套規則）"""
+    tpl = ctx['tpl']
+    lv = petmatch.read_level(lvl_rows, tpl)
+    if lv is not None:
+        return lv, 'tpl'
+    if petmatch.ink(lvl_rows) < petmatch.MIN_INK['lvl']:
+        return None, None
+    v = ocr_level_consensus()
+    if v is None:
+        return None, None
+    if not petmatch.level_consistent(lvl_rows, v, tpl):
+        log(f'等級 OCR 共識 {v} 跟樣板認得的字矛盾 → 不採用（回 None）')
+        return None, f'ocr-conflict:{v}'
+    if ctx.get('learn'):
+        again, _ = petmatch.grab([petmatch.BOX_LVL + ('lvl',)])
+        if again and again[0] == lvl_rows and petmatch.learn_level(lvl_rows, v, tpl):
+            ctx['dirty'] = True
+    return v, 'ocr'
+
+
 def resolve_name(name_rows, ctx: dict) -> tuple:
     """名字框的點陣 → (名字或 None, 'tpl' / 'ocr' / None, OCR 原文清單)。樣板優先；沒樣板才 OCR（精確命中 Monster 表才學）。
     名字框是「成長字串」（沒名字的新寵物）→ (None, 'growth', 原文)，字串用 resolve_ident 取"""
@@ -361,15 +386,28 @@ def species_reg(ctx: dict) -> dict:
 
 
 def ident_species(i: int, growth: str | None, ctx: dict) -> str | None:
-    """沒名字的寵物（在寵物欄第 i 格，0 起算）→ 物種：縮圖簽名 + 成長字串登錄檔多重確認；沒登錄 = None（不猜）"""
+    """沒名字的寵物（在寵物欄第 i 格，0 起算）→ 物種：縮圖簽名 + 成長字串登錄檔多重確認；沒登錄 = None（不猜）。
+    有任務候選（ctx['img_only']，--candidates / pet_catch register）時改成：候選內相對比較（petimg_match.rank_among，inlier + 主色）
+    有把握 → 登錄檔沒記這個字串、或記的是同一隻 → 採用；登錄檔記的是別隻 → 矛盾 None。沒把握 → 退回舊規則。
+    （2026-10-13 卡坦 4 鯊 / 4 雞是換色版：16 點縮圖簽名分不開 → 舊規則常 None，只好人工比腹部顏色）"""
+    reg = species_reg(ctx)
+    if ctx.get('img_only'):
+        im = img_ident('slot', i, ctx)
+        if im:
+            ctx.setdefault('img_cache', {})[i] = im
+            sp = im.get('img_species')
+            sg = (reg.get('growth') or {}).get(growth) if growth else None
+            if sp:
+                return sp if sg in (None, sp) else None
     cols = uikit.px(thumb_pts(i))
-    return petmatch.identify_species(cols, growth, species_reg(ctx))
+    return petmatch.identify_species(cols, growth, reg)
 
 
 # ---- 縮圖 ↔ 知識庫頭像（petimg_match，2026-10-12 接線）：名字 / 成長字串登錄檔都認不出時的物種備援 ----
 # 結果只放 img_species / img_score / species_src='img'，**不寫進 species**：species 是 store / set-state / take / rebirth_pets 的身分依據，
 # img 只當顯示與「更嚴」的騎寵判斷（img 認成騎寵 → mountlike），不放寬任何不可逆動作的驗名。
 IMG_ON = True                                  # --no-img 關；fake_pet.install 也關（假面板沒畫頭像）
+IMG_ONLY: list | None = None                   # --candidates：任務候選物種（縮圖只在這些之間相對比較；load_ctx 預設帶入）
 IMG_EXTRA = ['朵拉比斯', '迪基格斯', '金布伊']    # 一定放進候選的常用物種（另加騎寵、名字樣板、物種登錄檔裡的）
 
 
@@ -390,6 +428,10 @@ def img_match(cells, kind: str, cx: int, cy: int, ctx: dict) -> dict:
     第 1 輪已知物種；過門檻 → 第 2 輪加上第一名的同系別（換色版）再比一次，以第 2 輪為準（避免只有兄弟在候選時誤認）；
     第 1 輪連門檻都沒過（真物種不在已知清單）→ 放寬到全部 Monster（每格多約 1.3 s）。都不 ok → None，不猜"""
     import petimg_match as M
+    if ctx.get('img_only'):                                  # 任務候選：只在候選之間相對比較（+ 主色），不擴到同系 / 全部 Monster
+        r = M.rank_among(cells, kind, cx, cy, ctx['img_only'])
+        return {'img_species': r['species'] if r['ok'] else None, 'img_score': r['score'], 'img_best': r['best_species'],
+                'img_second': [r['second_species'], r['second']], 'img_hist': [r['hist'], r['hist_second']], 'img_stage': 'task'}
     known = img_candidates(ctx)
     r, stage = M.match(cells, kind, cx, cy, known), 'known'
     if r['score'] >= M.MIN_SCORE[kind]:
@@ -420,7 +462,13 @@ def img_ident(kind: str, idx: int, ctx: dict) -> dict | None:
     cells = M.read_cell(kind, cx, cy)
     if cells is None:
         return None
-    r = img_match(cells, kind, cx, cy, ctx)
+    try:
+        r = img_match(cells, kind, cx, cy, ctx)
+    except KeyError as e:                                   # --candidates 給了知識庫頭像沒有的名字
+        if not ctx.get('img_warned'):
+            log(f'縮圖認物種：{e}')
+            ctx['img_warned'] = True
+        return None
     r['img_ms'] = int((time.time() - t) * 1000)
     uikit.mark(f'img {kind} {idx + 1}')
     return r
@@ -452,6 +500,7 @@ def read_slot(i: int, ctx: dict) -> dict:
         uikit.sleep(BANNER_WAIT_S)              # 樣板都有卻對不上：多半是 EXP 橫幅 / 浮字蓋住（掛機中常見），等它消失再讀
         uikit.mark('banner-retry')
     d = {'slot': i + 1, 'empty': False, 'name': None, 'via': None, 'state': None, 'level': None}
+    ctx.pop('img_cache', None)                             # 縮圖結果只給「這一格」用（ident_species → 下面的補充顯示）
     if rows is None:
         d['err'] = '讀不到像素'
         return d
@@ -465,21 +514,18 @@ def read_slot(i: int, ctx: dict) -> dict:
         d['unnamed'] = ident['growth']
         d['raw_name'] = f'?({ident["growth"]})'
         d['species'] = ident_species(i, ident['growth'], ctx)
-    lv = petmatch.read_level(lvl_rows, tpl)
+    lv, via = level_from_rows(lvl_rows, ctx)
     if lv is not None:
-        d['level'], d['lv_via'] = lv, 'tpl'
-    elif petmatch.ink(lvl_rows) >= petmatch.MIN_INK['lvl']:
-        v = ocr_level_consensus()
-        if v is not None:
-            d['level'], d['lv_via'] = v, 'ocr'
-            if ctx['learn']:
-                again, _ = petmatch.grab([petmatch.BOX_LVL + ('lvl',)])
-                if again and again[0] == lvl_rows and petmatch.learn_level(lvl_rows, v, tpl):
-                    ctx['dirty'] = True
+        d['level'], d['lv_via'] = lv, via
+    elif via:
+        d['lv_reject'] = via
     if d.get('species'):
         d['species_src'] = 'reg'
+    if d.get('species') and (ctx.get('img_cache') or {}).get(i, {}).get('img_species') == d['species']:
+        d.update(ctx['img_cache'][i])
+        d['species_src'] = 'img+reg' if species_reg(ctx).get('growth', {}).get(d.get('unnamed')) else 'img'
     if not d['name'] and not d.get('species'):              # 名字樣板 / OCR / 物種登錄檔都認不出 → 縮圖比知識庫頭像（只當補充，見 img_ident）
-        im = img_ident('slot', i, ctx)
+        im = (ctx.get('img_cache') or {}).get(i) or img_ident('slot', i, ctx)
         if im:
             d.update(im)
             if im['img_species']:
@@ -577,8 +623,18 @@ class Session:
         return False
 
 
-def load_ctx(learn: bool) -> dict:
-    return {'tpl': petmatch.load_tpl(), 'learn': learn, 'dirty': False}
+def load_ctx(learn: bool, img_only=None) -> dict:
+    """讀樣板（順手清掉被錯標籤污染的等級單字樣板，有清就標 dirty、save_ctx 時寫回）。
+    img_only = 縮圖認物種只在這些物種之間做相對比較（任務候選，例：卡坦 4 鯊 / 4 雞；見 img_match）"""
+    tpl = petmatch.load_tpl()
+    pruned = petmatch.prune_digits(tpl)
+    if pruned:
+        log(f'等級單字樣板清掉 {len(pruned)} 個可疑變體：{pruned}')
+    ctx = {'tpl': tpl, 'learn': learn, 'dirty': bool(pruned)}
+    img_only = img_only or IMG_ONLY
+    if img_only:
+        ctx['img_only'] = list(img_only)
+    return ctx
 
 
 def save_ctx(ctx: dict) -> None:
@@ -1854,6 +1910,7 @@ def main() -> int:
     cp.add_argument('--no-learn', action='store_true', help='不學 / 不存名字與等級樣板')
     cp.add_argument('--timing', action='store_true', help='最後一行 JSON 多一個 t 欄位：各階段毫秒')
     cp.add_argument('--no-img', action='store_true', help='不用縮圖比知識庫頭像認物種（名字認不出時的備援，petimg_match）')
+    cp.add_argument('--candidates', default=None, metavar='名,名', help='任務候選物種：沒名字的寵物只在這些之間比縮圖（相對比較 + 主色；例 卡坦 4 鯊）')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('list', help='唯讀：每格 名字 / 狀態 / 等級', parents=[cp])
     p.add_argument('--role', default='all')
@@ -1915,9 +1972,11 @@ def main() -> int:
         uikit.gui('pixel', '1,1')
         uikit.mark('server-start')
     learn = not a.no_learn
+    global IMG_ON, IMG_ONLY
     if a.no_img:
-        global IMG_ON
         IMG_ON = False
+    if a.candidates:
+        IMG_ONLY = [uikit.snap_pet(x.strip()) or x.strip() for x in a.candidates.split(',') if x.strip()]
     if a.cmd == 'list':
         return list_roles(a.role, a.json, a.pause_encounter, learn)
     if a.cmd == 'set-state':

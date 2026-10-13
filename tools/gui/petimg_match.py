@@ -20,16 +20,19 @@
   3. 同 imageId 的多筆 Monster（例：火雞 190～193、346、685…）視為同一物種，只比一次。
   4. 最佳分數 < MIN_SCORE[kind] 或與第二名（**不同物種**；「2D」版頭像算同物種）差 < MARGIN → 回 None，不猜。
   5. 前兩名分差不夠但都過門檻 → 第二關 _tiebreak：只看兩樣板顏色明顯不同的點投票（≥ TIE_MIN_PTS 點、贏家 ≥ TIE_RATIO）才判定，否則 None。
-  6. 候選集：呼叫端給這次任務需要的物種名 + --family（同系別換色版，避免「只給一隻」時兄弟物種也過門檻）；
+  6. 任務候選相對比較 rank_among（2026-10-13）：只在任務候選（例：卡坦 4 鯊 / 4 雞）之間比，逐點 inlier 分差 ≥ REL_MARGIN
+     且「主色直方圖」（color_score）第一名同一隻、分差 ≥ HIST_MARGIN 才判定；pet.py 有 ctx['img_only']（--candidates / pet_catch register）時改用它。
+  7. 候選集：呼叫端給這次任務需要的物種名 + --family（同系別換色版，避免「只給一隻」時兄弟物種也過門檻）；
      不給就是全部 Monster。候選 > SHORTLIST 時先粗比對留 SHORTLIST 個再細比。
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/petimg_match.py shot <截圖.png> [--names 火雞,奇寶,...] [--family] [--json]   # 離線：截圖裡每個非空格 / 倉庫卡
+  uv run --no-project python tools/gui/petimg_match.py shot <截圖.png> --names 火雞,克克洛斯,霍爾克,奇寶 --among         # 任務候選相對比較（+ 主色）
   uv run --no-project python tools/gui/petimg_match.py live slot 3 [--names ...]                         # 唯讀：經 uikit.px 讀現場（寵物格 4537 點約 0.2 s）
 程式介面：
   match(get, kind, cx, cy, names=None) → {'species', 'imageId', 'score', 'second', 'second_species', 'ok', 'tie', 'ranked'}；
     get(x, y) → (r,g,b)（截圖座標）；ok=False 時 species=None（不猜）。
-  match_rows(rows, bpp, kind, cx, cy, names) → 同上（PNG 解碼列）。read_cell(kind, cx, cy) → dict（經 uikit.px，一次讀整格）。
+  rank_among(get, kind, cx, cy, names) → 任務候選相對比較（多 'hist' / 'hist_second'）。match_rows(rows, bpp, kind, cx, cy, names) → 同上（PNG 解碼列）。read_cell(kind, cx, cy) → dict（經 uikit.px，一次讀整格）。
   family(names) → 同系別（Monster.petType）全部有頭像的物種名。cells_of(kind) → [(格號, cx, cy)]。is_empty(get, cx, cy) → 空格（爪印）。
 """
 import argparse
@@ -270,12 +273,17 @@ def _best_pos(tpl, cells, kind, cx, cy):
     return fine
 
 
+def _cells(get, kind: str, cx: int, cy: int) -> dict:
+    """一格的可比像素 {(x,y): rgb}（可見範圍、去遮罩、去倉庫卡字）"""
+    pts = cell_points(kind, cx, cy)
+    cells = get if isinstance(get, dict) else {p: tuple(get(*p)) for p in pts}
+    return {p: cells[p] for p in pts if p in cells and not _text_px(kind, p[0] - cx, p[1] - cy, cells[p])}
+
+
 def match(get, kind: str, cx: int, cy: int, names=None) -> dict:
     """get(x, y) → (r,g,b) 截圖座標（或 dict）；names = 候選物種名（None = 全部 Monster，先直方圖粗篩）。
     → {'species', 'imageId', 'score', 'second', 'second_species', 'ok', 'ranked'}；ok=False 時 species / imageId = None"""
-    pts = cell_points(kind, cx, cy)
-    cells = get if isinstance(get, dict) else {p: tuple(get(*p)) for p in pts}
-    cells = {p: cells[p] for p in pts if p in cells and not _text_px(kind, p[0] - cx, p[1] - cy, cells[p])}
+    cells = _cells(get, kind, cx, cy)
     ids = ids_for(names) if names else list(index())
     if len(ids) > SHORTLIST:
         co = coarse_templates(kind) if not names else {i: template(i, kind)[::COARSE_STRIDE] for i in ids}
@@ -298,6 +306,59 @@ def match(get, kind: str, cx: int, cy: int, names=None) -> dict:
             'best_species': species_name(top_i), 'score': round(top_s, 3), 'second': round(sec_s, 3),
             'second_species': species_name(sec_i) if sec_i else None, 'ok': ok, 'tie': tie,
             'ranked': [(species_name(i), round(s, 3)) for s, i in ranked[:5]]}
+
+
+# ---- 任務候選內的相對比較（2026-10-13 卡坦 4 鯊 / 4 雞：同系換色版，全 Monster / --family 會混進長得像的別系）----
+REL_MARGIN = 0.06   # 候選內第一、第二名（不同物種）inlier 分差至少這麼多（離線實測最小 0.089：倉庫卡 克克洛斯 vs 奇寶）
+HIST_LEVELS = 4     # 主色直方圖：每通道量化成 4 級（64 格）
+HIST_MARGIN = 0.05  # 主色直方圖交集分數，第一、第二名至少差這麼多（離線實測最小 0.082）
+
+
+def _q(c) -> tuple:
+    return tuple(min(HIST_LEVELS - 1, v * HIST_LEVELS // 256) for v in c)
+
+
+def color_score(cells: dict, kind: str, iid: str, pos) -> float:
+    """頭像主色特徵：樣板放在最佳位置 pos，比「樣板不透明點的顏色分布」與「畫面同位置的顏色分布」（量化直方圖交集，0～1）。
+    對換色版（鯊魚系 4 隻、火雞系 4 隻：同輪廓不同配色）比逐點 inlier 更分得開（鯊魚實測分差 0.27～0.68）"""
+    from collections import Counter
+    _, ox, oy = pos
+    ht, hc = Counter(), Counter()
+    for dx, dy, r, g, b in template(iid, kind):
+        c = cells.get((ox + dx, oy + dy))
+        if c is None:
+            continue
+        ht[_q((r, g, b))] += 1
+        hc[_q(c)] += 1
+    n = sum(ht.values())
+    return sum(min(ht[k], hc[k]) for k in ht) / n if n else 0.0
+
+
+def rank_among(get, kind: str, cx: int, cy: int, names) -> dict:
+    """只在 names（這次任務的候選物種，例：pet_catch --assign 的物種）之間做相對比較，不擴到同系 / 全部 Monster。
+    兩個特徵都要同意才 ok：① 逐點 inlier（match 同一套）第一名 ≥ MIN_SCORE[kind] 且與第二名（不同物種）差 ≥ REL_MARGIN；
+    ② 主色直方圖（color_score）第一名是同一隻、且與第二名差 ≥ HIST_MARGIN。任一不成立 → ok=False、species=None（不猜）。
+    → {'species', 'imageId', 'best_species', 'score', 'second', 'second_species', 'hist', 'hist_second', 'ok', 'ranked'}"""
+    cells = _cells(get, kind, cx, cy)
+    ids = ids_for(names)
+    sc = {}
+    for i in ids:
+        pos = _best_pos(template(i, kind), cells, kind, cx, cy)
+        sc[i] = (pos[0], color_score(cells, kind, i, pos))
+    ranked = sorted(((v[0], i) for i, v in sc.items()), reverse=True)
+    top_s, top_i = ranked[0]
+    top_k = species_key(species_name(top_i))
+    sec_s, sec_i = next(((s_, i) for s_, i in ranked[1:] if species_key(species_name(i)) != top_k), (0.0, None))
+    hr = sorted(((v[1], i) for i, v in sc.items()), reverse=True)
+    h_top_i = hr[0][1]
+    h_sec = next((h for h, i in hr[1:] if species_key(species_name(i)) != species_key(species_name(h_top_i))), 0.0)
+    ok = (top_s >= MIN_SCORE[kind] and top_s - sec_s >= REL_MARGIN
+          and species_key(species_name(h_top_i)) == top_k and sc[top_i][1] - h_sec >= HIST_MARGIN)
+    return {'species': species_name(top_i) if ok else None, 'imageId': top_i if ok else None,
+            'best_species': species_name(top_i), 'score': round(top_s, 3), 'second': round(sec_s, 3),
+            'second_species': species_name(sec_i) if sec_i else None,
+            'hist': round(sc[top_i][1], 3), 'hist_second': round(h_sec, 3), 'hist_best': species_name(h_top_i), 'ok': ok,
+            'ranked': [(species_name(i), round(s_, 3), round(sc[i][1], 3)) for s_, i in ranked[:5]]}
 
 
 def _tiebreak(cells, kind, a, b) -> dict:
@@ -363,8 +424,8 @@ def is_depot(get) -> bool:
                [(1195, 690, (68, 112, 167)), (1215, 720, (72, 120, 179))])
 
 
-def scan_shot(path, names=None) -> list:
-    """離線：一張 1440×830 截圖裡全部非空寵物格（+ 倉庫分頁時的倉庫卡）→ [{kind, index, ...match}]"""
+def scan_shot(path, names=None, among: bool = False) -> list:
+    """離線：一張 1440×830 截圖裡全部非空寵物格（+ 倉庫分頁時的倉庫卡）→ [{kind, index, ...match}]；among=True 用 rank_among"""
     w, h, bpp, rows = pngread.decode(Path(path).read_bytes())
     get = rows_getter(rows, bpp)
     kinds = ['slot'] + (['card'] if is_depot(get) else [])
@@ -374,7 +435,7 @@ def scan_shot(path, names=None) -> list:
             if is_empty(get, cx, cy):
                 continue
             t = time.time()
-            r = match(get, kind, cx, cy, names)
+            r = rank_among(get, kind, cx, cy, names) if among else match(get, kind, cx, cy, names)
             r.update(kind=kind, index=i, ms=round((time.time() - t) * 1000))
             out.append(r)
     return out
@@ -391,20 +452,24 @@ def main(argv=None) -> int:
     for p in (a, b):
         p.add_argument('--names', default='', help='候選物種（逗號分隔）；不給 = 全部 Monster（慢，每格約 3 s）')
         p.add_argument('--family', action='store_true', help='候選擴大到同系別（petType）全部物種')
+        p.add_argument('--among', action='store_true', help='改用任務候選相對比較 rank_among（要給 --names；inlier + 主色直方圖都同意才判定）')
         p.add_argument('--json', action='store_true')
     args = ap.parse_args(argv)
     names = [n for n in args.names.split(',') if n] or None
     if names and args.family:
         names = family(names)
+    if args.among and not names:
+        ap.error('--among 要配 --names')
     if args.cmd == 'shot':
-        res = scan_shot(args.png, names)
+        res = scan_shot(args.png, names, among=args.among)
     else:
         _, cx, cy = cells_of(args.kind)[args.index - 1]
         cells = read_cell(args.kind, cx, cy)
         if cells is None:
             print(json.dumps({'ok': False, 'rc': 1, 'msg': '讀不到像素'}, ensure_ascii=False))
             return 1
-        res = [dict(match(cells, args.kind, cx, cy, names), kind=args.kind, index=args.index)]
+        fn = rank_among if args.among else match
+        res = [dict(fn(cells, args.kind, cx, cy, names), kind=args.kind, index=args.index)]
     if not args.json:
         for r in res:
             print(f"{r['kind']}{r['index']:>3}  {r['species'] or '?(' + r['best_species'] + ')'}  "

@@ -177,9 +177,12 @@ def level_matcher(tpl: dict) -> digitmatch.Matcher:
     return digitmatch.Matcher(tpl.get('digit') or {})
 
 
+DIGIT_GAP_MAX = 6                        # 「轉」與數字、數字之間的字距（實機 pet_real.json 1～3 px；少一個字會空出約 10 px）
+
+
 def read_level(rows, tpl: dict):
     """黃字「0轉N」→ 等級 int；任何一步不確定 → None（呼叫端退回 OCR 共識）。
-    由右往左收數字，遇到「轉」（轉 字右半）才算完整；沒學過的字 / 超過 3 位 / 值不在 1～200 → None"""
+    由右往左收數字，遇到「轉」（轉 字右半）才算完整；沒學過的字 / 字距 > DIGIT_GAP_MAX / 超過 3 位 / 值不在 1～200 → None"""
     if not rows or ink(rows) < MIN_INK['lvl'] or not tpl.get('digit'):
         return None
     segs = digitmatch.segment(rows)
@@ -187,7 +190,11 @@ def read_level(rows, tpl: dict):
         return None
     m = level_matcher(tpl)
     digits = ''
-    for _, _, g in reversed(segs):
+    right = None                                       # 上一個（右邊）字的左緣 x
+    for x0, _, g in reversed(segs):
+        if right is not None and right - (x0 + len(g[0])) > DIGIT_GAP_MAX:
+            return None                                # 字距太大 = 中間有字被蓋掉 / 沒切出來（33 只剩一個 3 → 會讀成 3）
+        right = x0
         ch, _, _ = m.classify(g)
         if ch is None:
             return None
@@ -201,8 +208,92 @@ def read_level(rows, tpl: dict):
     return int(digits) if digits and 1 <= int(digits) <= 200 else None
 
 
+def level_consistent(rows, value: int, tpl: dict) -> bool:
+    """OCR 共識讀到的等級 value 跟畫面上「認得出來的字」矛不矛盾（純函式）：
+    最右 len(value) 個字裡，樣板有把握認出的字一定要等於 value 對應位數；再左一個字樣板有把握認成數字（不是「轉」）
+    = 畫面上的數字比 value 多一位 → 矛盾。完全認不出的字不算矛盾（沒樣板時照舊信 OCR 共識）。
+    2026-10-13 卡坦練雞：等級 33 被讀成 10 / 17（OCR 共識錯 + 樣板被錯標籤污染），所以 OCR 的值要先過這關才採用 / 學樣板"""
+    if not rows or not tpl.get('digit'):
+        return True
+    segs = digitmatch.segment(rows)
+    s = str(int(value))
+    if len(segs) < len(s) + 1:
+        return False                                   # 字數不夠（轉 + 數字）→ 畫面跟 value 對不起來
+    tail = segs[-len(s) - 1:]
+    if any(b[0] - (a[0] + len(a[2][0])) > DIGIT_GAP_MAX for a, b in zip(tail, tail[1:])):
+        return False                                   # 「轉」到數字之間有空缺 = 少一個字（value 位數跟畫面對不起來）
+    m = level_matcher(tpl)
+    for ch, (_, _, g) in zip(s, segs[-len(s):]):
+        got, _, _ = m.classify(g)
+        if got is not None and got != ch:
+            return False
+    got, _, _ = m.classify(segs[-len(s) - 1][2])
+    return got is None or got == '轉'
+
+
+# 樣板污染清理（2026-10-13 實機樣板：'1' 混進 3 / 9 的字形、'轉' 混進一個 2 —— OCR 共識錯值被拿去學）
+CONFLICT_IOU = digitmatch.HIT_MIN      # 不同標籤的兩個變體 IoU 到這裡 = classify 會互相打架
+OUTLIER_IOU = 0.70                     # 同標籤、同尺寸的變體之間至少要這麼像（同字型實測 0.83～0.88；錯標籤 ≤ 0.6）
+
+
+def _same_size(a, b) -> bool:
+    return abs(a[1] - b[1]) <= 3 and abs(a[2] - b[2]) <= 3
+
+
+def prune_digits(tpl: dict) -> list:
+    """清掉被錯標籤污染的單字樣板（就地改 tpl['digit']）→ 被刪的 [(標籤, 變體序號, 原因)]（序號是原清單位置）。
+    規則：① 某變體跟「同尺寸的同標籤變體」都不像（< OUTLIER_IOU）、而同標籤另有 ≥ 2 個同尺寸變體彼此很像 → 離群，刪；
+    ② 不同標籤兩變體 IoU ≥ CONFLICT_IOU：刪掉「同標籤裡沒有相像的同尺寸變體」那個（另一個有同標籤變體支持）；
+       兩個都有 / 都沒有支持 → 兩個都刪（分不出誰對，留著只會讓 classify 打架；之後 OCR 共識 + level_consistent 會再學回來）。
+    尺寸差 > 3 px 的變體是不同字形（「轉」整字 / 右半），不互相比"""
+    book = tpl.get('digit') or {}
+    items = [(ch, i, digitmatch.glyph_int(g)) for ch, vs in book.items() for i, g in enumerate(vs)]
+    gi = {(ch, i): (v, w, h, n) for ch, i, (v, w, h, n) in items}
+
+    def sib(key):
+        ch, i = key
+        a = gi[key]
+        return [digitmatch.iou(a[0], a[3], b[0], b[3]) for (c2, j), b in gi.items() if c2 == ch and j != i and _same_size((0, a[1], a[2]), (0, b[1], b[2]))]
+
+    def supported(key):
+        s = sib(key)
+        return bool(s) and max(s) >= OUTLIER_IOU
+
+    drop = {}
+    for key in gi:                                                    # ① 離群（同標籤其他同尺寸變體彼此很像，只有它不像）
+        ch, i = key
+        s = sib(key)
+        others = [k for k in gi if k[0] == ch and k != key and _same_size((0, gi[k][1], gi[k][2]), (0, gi[key][1], gi[key][2]))]
+        if len(others) >= 2 and max(s) < OUTLIER_IOU:
+            ok_pairs = [digitmatch.iou(gi[a][0], gi[a][3], gi[b][0], gi[b][3]) for a in others for b in others if a < b]
+            if ok_pairs and max(ok_pairs) >= OUTLIER_IOU:
+                drop[key] = '同標籤離群'
+    keys = sorted(gi)
+    for x, ka in enumerate(keys):                                     # ② 不同標籤互相打架
+        for kb in keys[x + 1:]:
+            if ka[0] == kb[0] or ka in drop or kb in drop:
+                continue
+            a, b = gi[ka], gi[kb]
+            if not _same_size((0, a[1], a[2]), (0, b[1], b[2])) or digitmatch.iou(a[0], a[3], b[0], b[3]) < CONFLICT_IOU:
+                continue
+            sa, sb = supported(ka), supported(kb)
+            if sb and not sa:
+                drop[ka] = f'與 {kb[0]} 打架、同標籤沒有相像的變體'
+            elif sa and not sb:
+                drop[kb] = f'與 {ka[0]} 打架、同標籤沒有相像的變體'
+            else:
+                drop[ka] = drop[kb] = f'{ka[0]} / {kb[0]} 互相打架、分不出誰對'
+    for ch in list(book):
+        book[ch] = [g for i, g in enumerate(book[ch]) if (ch, i) not in drop]
+        if not book[ch]:
+            del book[ch]
+    return [(ch, i, why) for (ch, i), why in sorted(drop.items())]
+
+
 def learn_level(rows, value: int, tpl: dict) -> int:
-    """用可信的等級值學單字樣板：最右 len(value) 個字 = 數字、再左一個 = 「轉」。已能高分認出的字不重複存。回新增數"""
+    """用可信的等級值學單字樣板：最右 len(value) 個字 = 數字、再左一個 = 「轉」。已能高分認出的字不重複存。回新增數。
+    標籤可疑就整次不學（回 0；比照 learn_whole）：某個字已被別的標籤樣板認出（classify 有把握且不同）、
+    或該標籤已有同尺寸變體但新字跟它們都不像（< OUTLIER_IOU）—— 2026-10-13 樣板 '1' 混進 3 / 9 字形就是 OCR 錯值學進去的"""
     if not rows or ink(rows) < MIN_INK['lvl']:
         return 0
     segs = digitmatch.segment(rows)
@@ -214,8 +305,18 @@ def learn_level(rows, value: int, tpl: dict) -> int:
     zhuan = segs[-len(s) - 1]
     book = tpl.setdefault('digit', {})
     m = level_matcher(tpl)
+    pairs = list(zip(labels, glyphs)) + [('轉', (0, 0, zhuan[2]))]
+    for ch, (_, _, g) in pairs:                                      # 先整批檢查標籤，任何一個可疑就全部不學
+        got, sc, _ = m.classify(g)
+        if got is not None and got != ch:
+            return 0
+        v, w, h, nv = digitmatch.glyph_int(g)
+        same = [digitmatch.iou(v, nv, bv, bn) for bv, bw, bh, bn in (digitmatch.glyph_int(x) for x in book.get(ch, []))
+                if abs(bw - w) <= 3 and abs(bh - h) <= 3]
+        if same and max(same) < OUTLIER_IOU:
+            return 0
     n = 0
-    for ch, (_, _, g) in list(zip(labels, glyphs)) + [('轉', (0, 0, zhuan[2]))]:
+    for ch, (_, _, g) in pairs:
         got, sc, _ = m.classify(g)
         if got == ch and sc >= digitmatch.KNOWN_IOU:
             continue

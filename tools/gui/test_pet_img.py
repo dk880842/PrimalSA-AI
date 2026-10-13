@@ -148,8 +148,60 @@ def main() -> int:
     s = pet.fmt_slot({'slot': 1, 'raw_name': '?(49/9/8/2)', 'img_species': '布拉奇多斯', 'img_score': 0.9, 'state': '騎乘', 'level': 126})
     check('fmt_slot 顯示 ≈物種(圖分數)', '≈布拉奇多斯(圖0.90)' in s, s)
 
+    task_candidates()
     print('全部通過' if not fails else f'{fails} 項失敗')
     return 1 if fails else 0
+
+
+SHARKS = ['克邦凱斯', '加克拉', '加格', '邦恩吉']
+TURKEYS = ['火雞', '克克洛斯', '霍爾克', '奇寶']
+
+
+def task_candidates():
+    """--candidates（ctx['img_only']）：卡坦 4 鯊 / 4 雞實機截圖（2026-10-13 卡坦分配時；每人寵物欄 4 隻各一種、任務已交成功）"""
+    shots = {'s3.png': (TURKEYS, {1: '火雞', 2: '霍爾克', 3: '奇寶', 4: '克克洛斯'}),
+             's5.png': (TURKEYS, {1: '奇寶', 2: '火雞', 3: '克克洛斯', 4: '霍爾克'}),
+             'z.png': (SHARKS, {1: '克邦凱斯', 2: '加克拉', 3: '邦恩吉', 4: '加格'})}
+    real_ri = pet.resolve_ident
+    for fn, (cand, want) in shots.items():
+        if not (CACHE / fn).exists():
+            print('SKIP 截圖不在', fn)
+            continue
+        use_shot(CACHE / fn)
+        got = {}
+        for i in want:
+            pet.resolve_ident = lambda rows, c, i=i: {'name': None, 'via': 'growth', 'raw': None, 'growth': f'9/9/9/{i}'}
+            c = {**ctx0(), 'img_only': cand}
+            got[i] = pet.read_slot(i, c).get('species')
+        check(f'--candidates {fn}：沒名字的新寵物在候選內相對比較認出物種（進 species）', got == want, str(got))
+        # 登錄檔記的是別隻（成長字串撞號 / 錯標）→ 矛盾 → None（不亂分）
+        pet.resolve_ident = lambda rows, c: {'name': None, 'via': 'growth', 'raw': None, 'growth': '1/2/3/4'}
+        c = {**ctx0(), 'img_only': cand, 'reg': {'thumb': {}, 'growth': {'1/2/3/4': [n for n in cand if n != want[1]][0]}}}
+        d = pet.read_slot(1, c)
+        check(f'--candidates {fn}：登錄檔跟縮圖矛盾 → species None', d.get('species') is None, str({k: d.get(k) for k in ('species', 'img_species')}))
+        c = {**ctx0(), 'img_only': cand, 'reg': {'thumb': {}, 'growth': {'1/2/3/4': want[1]}}}
+        d = pet.read_slot(1, c)
+        check(f'--candidates {fn}：登錄檔與縮圖一致 → species_src img+reg', d.get('species') == want[1] and d.get('species_src') == 'img+reg', str(d.get('species_src')))
+    pet.resolve_ident = real_ri
+    p = CACHE / 'z.png'
+    if p.exists():                                            # 候選裡沒有這隻（拿雞的候選看鯊魚）→ 不猜
+        use_shot(p)
+        pet.resolve_ident = lambda rows, c: {'name': None, 'via': 'growth', 'raw': None, 'growth': '9/9/9/9'}
+        d = pet.read_slot(1, {**ctx0(), 'img_only': TURKEYS})
+        check('--candidates 候選裡沒有 → species / img_species 都 None', d.get('species') is None and d.get('img_species') is None, str(d.get('img_best')))
+        pet.resolve_ident = real_ri
+    p = CACHE / 'dep2.png'
+    if p.exists():                                            # 倉庫卡（公共）：火雞 / 霍爾克 / 克克洛斯
+        use_shot(p)
+        c = {**ctx0(), 'img_only': TURKEYS}
+        unk = {'name': None, 'growth': '33/7/3/8'}
+        got = [pet.img_target('card', k, unk, {'name': n}, c) for k, n in ((0, '火雞'), (1, '霍爾克'), (3, '克克洛斯'), (0, '奇寶'))]
+        check('--candidates 倉庫卡 img_target：火雞 / 霍爾克 / 克克洛斯 對、火雞卡不是奇寶', got == [True, True, True, False], str(got))
+    # rank_among 主色特徵：鯊魚換色版分差明顯
+    if (CACHE / 'z.png').exists():
+        w, h, bpp, rows = pngread.decode((CACHE / 'z.png').read_bytes())
+        r = M.rank_among(M.rows_getter(rows, bpp), 'slot', M.SLOT_X, M.SLOT_Y[2], SHARKS)
+        check('rank_among：加克拉 inlier + 主色都第一（主色分差 ≥ 0.3）', r['species'] == '加克拉' and r['hist'] - r['hist_second'] >= 0.3, str(r['ranked']))
 
 
 if __name__ == '__main__':

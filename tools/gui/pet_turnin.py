@@ -16,7 +16,9 @@
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；自己 120～125）：
   120 切換角色失敗（char 的退出碼在 roles[角色].char_rc）
-  121 追蹤列表找不到「恐龍博士」（任務已完成 / 沒接 / 被擋）
+  121 追蹤列表找不到「恐龍博士」（任務已完成 / 沒接 / 被擋）。2026-10-13 起：剛切換角色時追蹤列表還沒載入（讀到 0 列）不算沒找到，
+      等 TRACK_RETRY_S 秒重掃、最多等 TRACK_LOAD_MAX_S 秒；列表有內容但沒有該任務要連續 TRACK_MISS_MAX 次才判 121
+      （實機：DKBO2～5 第一次跑都 121、重跑就過 —— 追蹤列表沒載入）
   122 一直等不到對話框 / 選擇視窗
   123 選擇視窗裡找不到指定名字的寵物卡（OCR 讀不到 / 寵物不在寵物欄）→ 零點擊確定
   124 點了卡片但沒變黃底（不按確定）
@@ -53,6 +55,9 @@ CARD_PROBE_X = 900                      # 卡片底色探點 x（y = 點卡 y）
 CONFIRM_BTN = (706, 614)                # 確定
 LIST_DRAG = (700, 520, 700, 400)        # 卡片清單往下捲
 RECOGNIZE_CUTOFF = 0.6
+TRACK_RETRY_S = 4.0                     # 追蹤列表沒找到 → 隔這麼久重掃（舊版 12 秒才掃一次、第一次沒找到就 121）
+TRACK_MISS_MAX = 3                      # 列表有內容但沒有該任務：連續這麼多次才判 121
+TRACK_LOAD_MAX_S = 40.0                 # 列表一直讀到 0 列（還沒載入）最多等這麼久，之後也判 121
 
 
 def norm(t: str) -> str:
@@ -144,11 +149,23 @@ def pick_in_window(want: str, dry_run: bool = False) -> int:
     return 0
 
 
+def track_miss_action(misses: int, rows_n, waited_s: float) -> str:
+    """追蹤列表掃完沒找到任務時怎麼辦（純函式）：rows_n = 最後一頁讀到幾列標題（quest._PAGE_ROWS_N；0 / None = 列表還沒載入）。
+    → 'wait'（還沒載入、不計次）/ 'retry'（有內容但沒找到，計次未滿）/ 'fail'（連續 TRACK_MISS_MAX 次、或等載入超過 TRACK_LOAD_MAX_S）"""
+    if not rows_n:
+        return 'fail' if waited_s >= TRACK_LOAD_MAX_S else 'wait'
+    return 'fail' if misses >= TRACK_MISS_MAX else 'retry'
+
+
 def turnin_step(want: str, dry_run: bool = False) -> int:
-    """一步：點追蹤 → 對話 → 選擇視窗交 want。0 = 交出"""
+    """一步：點追蹤 → 對話 → 選擇視窗交 want。0 = 交出。
+    追蹤列表剛切完角色可能還沒載入：沒找到不馬上判 121，見 track_miss_action"""
     import quest
-    t_end = time.time() + 90
+    t0 = time.time()
+    t_end = t0 + 90
     tracked_at = 0.0
+    retry_at = 0.0
+    misses = 0
     while time.time() < t_end:
         if select_window_open():
             return pick_in_window(want, dry_run)
@@ -160,12 +177,22 @@ def turnin_step(want: str, dry_run: bool = False) -> int:
             uikit.gui('click', str(DIALOG_LEFT_BTN[0]), str(DIALOG_LEFT_BTN[1]), note='對話框左鈕（恐龍博士 / 完成）')
             uikit.sleep(1.2)
             continue
-        if st == 'idle' and time.time() - tracked_at > 12:
+        if st == 'idle' and time.time() - tracked_at > 12 and time.time() >= retry_at:
             found = quest.track_task(TASK_TITLE, click=not dry_run)
             tracked_at = time.time()
             if found is False:
-                log(f'追蹤列表沒有「{TASK_TITLE}」')
-                return EXIT_TRACK
+                rows_n = getattr(quest, '_PAGE_ROWS_N', None)
+                misses += 1 if rows_n else 0
+                act = track_miss_action(misses, rows_n, time.time() - t0)
+                if act == 'fail':
+                    log(f'追蹤列表沒有「{TASK_TITLE}」（{"連續 %d 次" % misses if rows_n else "列表一直是空的 / 沒載入"}）')
+                    uikit.snap('pet-turnin-notrack')
+                    return EXIT_TRACK
+                log(f'追蹤列表沒找到「{TASK_TITLE}」（讀到 {rows_n or 0} 列，{"列表還沒載入" if act == "wait" else f"第 {misses} 次"}）→ {TRACK_RETRY_S:.0f} 秒後重掃')
+                tracked_at = 0.0
+                retry_at = time.time() + TRACK_RETRY_S
+                continue
+            misses = 0
             if dry_run:
                 return 0
             uikit.sleep(2.0)

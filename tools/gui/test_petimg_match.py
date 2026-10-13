@@ -131,6 +131,34 @@ def main() -> int:
         check('m7.png --family 倉庫卡火雞系', got == want, got)
     else:
         print('SKIP 截圖不在 m7.png')
+    # ---- 任務候選相對比較 rank_among（inlier + 主色）：2026-10-13 卡坦分配實機截圖（每人 4 隻各一種、任務已交成功）----
+    among = {
+        's0.png': (turkeys, {('slot', 2): '火雞', ('slot', 3): '克克洛斯', ('slot', 4): '霍爾克', ('slot', 5): '奇寶'}),
+        's3.png': (turkeys, {('slot', 2): '火雞', ('slot', 3): '霍爾克', ('slot', 4): '奇寶', ('slot', 5): '克克洛斯'}),
+        's4.png': (turkeys, {('slot', 2): '霍爾克', ('slot', 3): '火雞', ('slot', 4): '克克洛斯', ('slot', 5): '奇寶'}),
+        's5.png': (turkeys, {('slot', 2): '奇寶', ('slot', 3): '火雞', ('slot', 4): '克克洛斯', ('slot', 5): '霍爾克'}),
+        'dep2.png': (turkeys, {('slot', 2): '奇寶', ('card', 1): '火雞', ('card', 2): '霍爾克', ('card', 4): '克克洛斯',
+                               ('card', 3): None, ('card', 5): None, ('card', 6): None}),          # 左迪洛斯 / 巴朵蘭恩 / 摩娜西普 不在候選
+        'z.png': (sharks, {('slot', 2): '克邦凱斯', ('slot', 3): '加克拉', ('slot', 4): '邦恩吉', ('slot', 5): '加格'}),
+        'dep.png': (sharks, {('slot', 2): '克邦凱斯', ('slot', 4): '邦恩吉', ('card', 1): '加格', ('card', 2): '邦恩吉',
+                             ('card', 3): None, ('card', 4): None, ('card', 5): None}),
+    }
+    for fn, (cand, want) in among.items():
+        p = CACHE / fn
+        if not p.exists():
+            print('SKIP 截圖不在', fn)
+            continue
+        res = {(r['kind'], r['index']): r for r in M.scan_shot(p, cand, among=True)}
+        miss = [(k, w, res[k]['species'] if k in res else '空格?') for k, w in want.items() if k not in res or res[k]['species'] != w]
+        check(f'rank_among {fn} 全部認對（不在候選 → None）', not miss, str(miss))
+    # 合成：換色版只差顏色（同輪廓）→ 主色直方圖分得開
+    a = M.ids_for(['加克拉'])[0]
+    r = M.rank_among(fake_cell(a, 'slot', cx, cy, shift=(2, -1)), 'slot', cx, cy, sharks)
+    check('rank_among 合成 加克拉', r['species'] == '加克拉' and r['hist'] > r['hist_second'], str(r['ranked']))
+    r = M.rank_among(fake_cell(a, 'slot', cx, cy), 'slot', cx, cy, ['加克拉'])
+    check('rank_among 單一候選也要過門檻', r['species'] == '加克拉')
+    r = M.rank_among(fake_cell(M.ids_for(['朵拉比斯'])[0], 'slot', cx, cy), 'slot', cx, cy, sharks)
+    check('rank_among 候選裡沒有 → None', r['species'] is None and not r['ok'])
     print('全部通過' if not fails else f'{fails} 項失敗')
     return 1 if fails else 0
 

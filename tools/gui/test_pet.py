@@ -125,6 +125,62 @@ check('少一位不會讀錯：學過 1 2 8 3 0；遮掉最左邊的字（只剩
 check('單字樣板已能高分認出就不重複存', petmatch.learn_level(lvl_rows(128), 128, tpl) == 0)
 check('空畫面 → None', petmatch.read_level(['0' * 110] * 34, tpl) is None)
 
+# ---------------- 等級樣板污染（2026-10-13 卡坦練雞：33 讀成 10 / 17）----------------
+import copy  # noqa: E402
+POISON = json.load(open(HERE / 'fixtures' / 'pet_digit_poisoned.json', encoding='utf-8'))['digit']
+
+
+def compose(glyphs, h=34, gap=3):
+    """實機單字樣板（fixture）排成「0轉NN」一列點陣（BOX_LVL 寬 110）"""
+    grid = [['0'] * petmatch.BOX_LVL[2] for _ in range(h)]
+    x = 8
+    for g in glyphs:
+        y0 = h - 4 - len(g)
+        for yy, r in enumerate(g):
+            for xx, c in enumerate(r):
+                if c == '1':
+                    grid[y0 + yy][x + xx] = '1'
+        x += len(g[0]) + gap
+    return [''.join(r) for r in grid]
+
+
+rows33 = compose([POISON['0'][0], POISON['轉'][2], POISON['3'][0], POISON['3'][0]])
+t = {'digit': copy.deepcopy(POISON)}
+pr = petmatch.prune_digits(t)
+check('prune_digits：實機樣板清掉 1 的 9 / 3 字形、轉 裡的 2（共 3 個），其他不動',
+      sorted((c, i) for c, i, _ in pr) == [('1', 1), ('1', 3), ('轉', 1)] and len(t['digit']['2']) == 2 and len(t['digit']['轉']) == 3, str(pr))
+check('prune_digits：清完再跑一次沒東西可清', petmatch.prune_digits(t) == [])
+check('清完讀 33 仍是 33', petmatch.read_level(rows33, t) == 33)
+check('level_consistent：33 對、10 / 17 / 3 / 133 都矛盾', petmatch.level_consistent(rows33, 33, t)
+      and not any(petmatch.level_consistent(rows33, v, t) for v in (10, 17, 3, 133)))
+check('learn_level：OCR 錯值 17 學不進去（字已被 3 認出 → 標籤可疑，整次不學）', petmatch.learn_level(rows33, 17, t) == 0 and len(t['digit']['1']) == 2)
+t0 = {'digit': {'1': copy.deepcopy(POISON['1'][:1]) + [POISON['1'][2]], '轉': [POISON['轉'][2]], '0': POISON['0']}}
+check('learn_level：沒有 3 的樣板時，3 想學成 1（跟既有的 1 都不像）→ 不學', petmatch.learn_level(rows33, 13, t0) == 0 and len(t0['digit']['1']) == 2)
+damaged = compose([POISON['0'][0], POISON['轉'][2], [r[:4] + '0' * (len(r) - 4) for r in POISON['3'][0]], POISON['3'][0]])   # 第一個 3 被浮字蓋掉一半
+check('第一個 3 被蓋住 → 樣板讀不出（None，不猜）', petmatch.read_level(damaged, t) is None)
+check('蓋住時 OCR 共識 17 / 3 → 跟畫面矛盾（不採用）', not petmatch.level_consistent(damaged, 17, t) and not petmatch.level_consistent(damaged, 3, t))
+_ocr_real = pet.ocr_level_consensus
+ctx_l = {'tpl': t, 'learn': False, 'dirty': False}
+pet.ocr_level_consensus = lambda: 17
+check('level_from_rows：樣板讀不出 + OCR 17 矛盾 → (None, ocr-conflict:17)', pet.level_from_rows(damaged, ctx_l) == (None, 'ocr-conflict:17'))
+half = compose([POISON['0'][0], POISON['轉'][2], [r[:7] + '0' * (len(r) - 7) for r in POISON['3'][0]], POISON['3'][0]])    # 左半個 3 還在（切得出、認不出）
+check('第一個 3 剩左半（認不出）→ 樣板 None', petmatch.read_level(half, t) is None)
+pet.ocr_level_consensus = lambda: 33
+check('level_from_rows：認不出的字不算矛盾，OCR 33 → (33, ocr)', pet.level_from_rows(half, ctx_l) == (33, 'ocr'))
+pet.ocr_level_consensus = lambda: 17
+check('level_from_rows：OCR 17 跟認得的 3 矛盾 → None', pet.level_from_rows(half, ctx_l)[0] is None)
+check('level_from_rows：樣板讀得到 → tpl（不呼叫 OCR）', pet.level_from_rows(rows33, ctx_l) == (33, 'tpl'))
+pet.ocr_level_consensus = lambda: None
+check('level_from_rows：都讀不到 → (None, None)', pet.level_from_rows(damaged, ctx_l) == (None, None))
+pet.ocr_level_consensus = _ocr_real
+_d = Path(tempfile.mkdtemp())
+petmatch.TPL_DIR = _d
+petmatch.save_tpl({'name': {}, 'avatar': {}, 'digit': copy.deepcopy(POISON)})
+c2 = pet.load_ctx(False)
+check('load_ctx：讀到被污染的樣板 → 清掉並標 dirty（save_ctx 寫回）', c2['dirty'] and '轉' in c2['tpl']['digit'] and len(c2['tpl']['digit']['1']) == 2)
+pet.save_ctx(c2)
+check('save_ctx 後檔案是清過的', len(petmatch.load_tpl()['digit']['1']) == 2 and not pet.load_ctx(False)['dirty'])
+
 # ---------------- 實機 fixture（P-I5 2026-10-11）----------------
 R = json.load(open(HERE / 'fixtures' / 'pet_real.json', encoding='utf-8'))
 tc = lambda l: [tuple(c) for c in l]    # noqa: E731

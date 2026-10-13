@@ -5,13 +5,22 @@
   uv run --no-project python tools/gui/pet_catch.py --assign "DKBO2:鯊魚系:克邦凱斯,DKBO3:鯊魚系:加克拉,DKBO4:鯊魚系:加格,DKBO5:鯊魚系:邦恩吉" --count 5 [--stages bait,setup,wait] [--dry-run]
     --assign 角色:系別:物種,…   每人抓一種（誘餌數 = 隻數）
     --count N                  每人抓幾隻（預設 5）= 背包放 N 個誘餌 = 可抓捕數
-    --stages                   bait（公共倉庫取整疊 → 拆 N → 其餘存回）/ setup（外掛捉寵設置 + 勾自動存倉庫 + 勾自動抓寵）/ wait（輪詢到全部抓完）；預設全做
+    --stages                   bait（公共倉庫取整疊 → 拆 N → 其餘存回）/ setup（外掛捉寵設置 + 勾自動存倉庫 + 勾自動抓寵）/ wait（輪詢到全部抓完）/
+                               register（抓完登錄來源：見下）；預設全做
+  uv run --no-project python tools/gui/pet_catch.py --assign "..." --stages register     # 只登錄來源（抓完後補做 / 重做）
+  register（2026-10-13 卡坦 4 鯊 / 4 雞物種靠縮圖會混、只好人工比腹部顏色）：「誰抓的」是主鍵 —— 每人只抓 --assign 指定的一種，
+    所以抓寵者寵物欄裡沒名字、物種登錄檔還不認得的寵物 = 他抓的那種；寫進「成長字串 → 物種」登錄檔（register_growths，撞別種就刪）
+    與來源檔 tools/.cache/pet-tpl/catch-src.json（成長字串 → 物種 / 抓寵者 / 時間；倉庫存入後會重排，所以不記格位）。
+    交叉驗證：縮圖只在本次 --assign 的物種之間相對比較（petimg_match.rank_among，inlier + 主色都同意才算有把握）：
+    有把握且是別的物種 → 矛盾，不登錄這隻、退出碼 15（EXIT_CATCH_SPECIES，印出哪人哪格）；沒把握 → 照來源登錄。
+    之後 store-many / take-many 加 `--candidates <同一組物種>`：沒名字的寵物 / 倉庫卡先看登錄檔，認不得再用同一套相對比較，仍沒把握就 72 不取（不亂分）。
     --poll 秒                  wait 輪詢間隔（預設 120；每次要開外掛面板，開前會先等戰鬥結束）
     --dry-run                  只印計畫
   uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）
   uv run --no-project python tools/gui/pet_catch.py --autoswap on|off [--roles ...]                 # 自動轉換戰寵
   批次（2026-10-12）：背包（取誘餌）/ 外掛（捉寵設置、輪詢、自動轉換、鎖定）面板都只開一次，逐人切頭像做完再關。
-退出碼：0 全部抓完；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；14 捉寵設置系別 / 物種選不到或讀回對不上（EXIT_CATCH_PICK，已重試、已收下拉、沒勾自動抓寵）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
+退出碼：0 全部抓完；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；14 捉寵設置系別 / 物種選不到或讀回對不上（EXIT_CATCH_PICK，已重試、已收下拉、沒勾自動抓寵）；
+  15 register：抓寵者欄裡有寵物縮圖有把握認成別的物種（EXIT_CATCH_SPECIES，那隻沒登錄，其他照登錄）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
 安全：不點「+」（花石幣）、不碰丟棄區；沿用 rebirth_pets.Tools 的讀字驗證（讀不到 / 對不上就停，不盲點）。
 抓完後新寵物沒名字（成長字串），分配前要 `pet.py learn-species`，見 psa-pet-quest SKILL.md。
 """
@@ -37,7 +46,93 @@ def parse_assign(s: str) -> list:
     return out
 
 
-def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S, poll: float = rp.CATCH_POLL_S) -> int:
+EXIT_CATCH_SPECIES = 15
+SRC_FILE = 'catch-src.json'                # 抓寵來源檔（petmatch.TPL_DIR 底下）
+
+
+def src_path():
+    import petmatch
+    return petmatch.TPL_DIR / SRC_FILE
+
+
+def load_src() -> dict:
+    import json
+    try:
+        d = json.loads(src_path().read_text(encoding='utf-8'))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_src(d: dict) -> None:
+    import json
+    p = src_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix('.tmp')
+    tmp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
+    tmp.replace(p)
+
+
+def plan_register(assign: list, pets: dict, reg_growth: dict) -> tuple:
+    """純函式：抓寵者寵物欄 → (登錄 {成長字串: (物種, 抓寵者)}, 矛盾 [(角色, 格, 成長字串, 縮圖物種, 應是)])。
+    只看「沒名字、成長字串還沒登錄成別的物種」的格（已登錄成別種 = 以前分來的，不是這次抓的）；
+    縮圖（rank_among 結果放在 img_species / species）有把握且 ≠ 指定物種 → 矛盾（不登錄）；沒把握 / 相同 → 依來源登錄"""
+    want = {r: sp for r, _, sp in assign}
+    todo, bad = {}, []
+    for role, sp in want.items():
+        for s in pets.get(role) or []:
+            g = s.get('unnamed')
+            if s.get('empty') or not g:
+                continue
+            known = reg_growth.get(g)
+            if known and known != sp:
+                continue
+            seen = s.get('img_species') or (s.get('species') if s.get('species_src', '').startswith('img') else None)
+            if seen and seen != sp:
+                bad.append((role, s['slot'], g, seen, sp))
+                continue
+            if g in todo and todo[g][0] != sp:                  # 同一字串兩個抓寵者（不同物種）→ 不可靠，兩邊都不登錄
+                bad.append((role, s['slot'], g, f'字串也在 {todo[g][1]}（{todo[g][0]}）', sp))
+                todo[g] = (None, todo[g][1])
+                continue
+            todo[g] = (sp, role)
+    return {g: v for g, v in todo.items() if v[0]}, bad
+
+
+def register_catches(assign: list, tools=None) -> int:
+    """抓完登錄來源（見檔頭 register）：寵物面板只開一次讀抓寵者 → plan_register → register_growths + catch-src.json。→ 0 / 15 / 讀取失敗退出碼"""
+    import petmatch
+    T = tools or rp.Tools()
+    species = list(dict.fromkeys(sp for _, _, sp in assign))
+    rc, pets = T.pets_list([r for r, _, _ in assign], img_only=species)
+    if rc:
+        print(f'pet_catch：register 讀寵物欄失敗 rc {rc}')
+        return rc
+    reg = petmatch.load_species()
+    todo, bad = plan_register(assign, pets, reg.get('growth') or {})
+    dropped = register_growths({g: sp for g, (sp, _) in todo.items()})
+    src = load_src()
+    now = time.strftime('%Y-%m-%d %H:%M:%S')
+    for g, (sp, role) in todo.items():
+        old = src.get(g)
+        if old and old.get('species') != sp:
+            src[g] = {'species': None, 'catcher': None, 'ts': now, 'note': f'撞號：{old.get("species")} / {sp}'}
+        else:
+            src[g] = {'species': sp, 'catcher': role, 'ts': now}
+    save_src(src)
+    for role, _, sp in assign:
+        gs = [g for g, (s2, r2) in todo.items() if r2 == role]
+        print(f'pet_catch：register {role} 抓的 {sp}：登錄 {len(gs)} 隻 {gs}')
+    if dropped:
+        print(f'pet_catch：register 有 {dropped} 個成長字串撞到別的物種，已從登錄檔刪掉（這些只能靠縮圖）')
+    if bad:
+        for role, slot, g, seen, sp in bad:
+            print(f'pet_catch：register {role} 第 {slot} 格 {g}：縮圖認成 {seen}，但他抓的是 {sp} → 不登錄（請人看）')
+        return EXIT_CATCH_SPECIES
+    return 0
+
+
+def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S, poll: float = rp.CATCH_POLL_S) -> int:
     T = tools or rp.Tools()
     print(f'計畫：{[(r, f, s, count) for r, f, s in assign]} 階段 {list(stages)}')
     if dry_run:
@@ -76,6 +171,8 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait'), dry_run:
             if pending and uikit.clock() >= end:
                 print(f'pet_catch：逾時，未抓完 {sorted(pending)}')
                 return rp.EXIT_CATCH
+    if 'register' in stages:
+        return register_catches(assign, T)
     return 0
 
 
@@ -176,7 +273,7 @@ def main(argv=None) -> int:
     ap.add_argument('--mount-species', default='布拉奇多斯')
     ap.add_argument('--roles', default='DKBO,DKBO2,DKBO3,DKBO4,DKBO5')
     ap.add_argument('--count', type=int, default=5)
-    ap.add_argument('--stages', default='bait,setup,wait')
+    ap.add_argument('--stages', default='bait,setup,wait,register')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--timeout', type=float, default=rp.CATCH_TIMEOUT_S)
     ap.add_argument('--poll', type=float, default=rp.CATCH_POLL_S, help='wait 階段輪詢間隔秒（預設 120；每次要開外掛面板）')

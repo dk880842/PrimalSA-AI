@@ -308,9 +308,10 @@ class Tools:
         return uikit.snap(tag)
 
     # ---- 寵物（pet.py）----
-    def pets_list(self, roles):
+    def pets_list(self, roles, img_only=None):
+        """→ (rc, {角色: pet.list_role 的 slots})；寵物面板只開一次。img_only = 任務候選物種（沒名字的寵物只在這些之間比縮圖）"""
         import pet
-        ctx = pet.load_ctx(True)
+        ctx = pet.load_ctx(True, img_only)
         out = {}
         with pet.Session(False, False) as s:
             if s.rc:
