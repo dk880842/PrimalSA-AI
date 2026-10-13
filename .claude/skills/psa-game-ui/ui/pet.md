@@ -129,3 +129,8 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
   - **耗時**：一格 `read_cell` = 1 次 `uikit.px` 4537 點（常駐 server 約 0.2 s）+ 比對 0.4～0.85 s（family 階段；全部 Monster 約 1.3 s）→ 實機 `img_ms` 591～1071 ms / 格；只有認不出的格才付這個成本。
   - 測試：`test_pet_img.py`（bn_0.png 截圖餵 uikit.px：img 填出物種 / 不進 species / 騎寵更嚴 / 存倉照拒 / 放寬全 Monster / 同系別第二輪 / None 不猜 / 名字或登錄檔認得不比 / IMG_ON 關零讀點 / take img_target 各條件）。
   - 還沒做（原建議 2～4）：learn-species 用 img 免 `--confirm-growth`、take 一次讀 20 張卡縮圖不逐張點、store 前比縮圖物種。
+
+## 抓寵設定程式（pet_catch.py / rebirth_pets.py，2026-10-13）
+- 取誘餌：`bait_take_many` 背包面板只開一次；`bag.select_role` 頭像已選著不再點；`bag.find_item(hint=)` / `depot_take(hint=)` 先點上一人找到的倉庫格核對名稱（`bag.LAST['depot_slot']`）。
+- 捉寵設置：系別下拉（捲動）→ 物種下拉（不捲動，空白 / 沒目標列重試 `PICK_RETRY`=3 次、空白時重點下拉、失敗收起並記 `pick_why`）→ 讀可抓捕數 = N → 勾自動存倉庫 / 自動抓寵 → `_catch_verify` 讀回兩個欄位文字與兩個勾選。失敗退出碼 14，不默默關面板。
+- 輪詢：`catch_poll_many` 一次開外掛面板讀全部人，間隔 `CATCH_POLL_S`=120 秒；開面板前 `ass._many` → `wait_not_battle` 等戰鬥結束。

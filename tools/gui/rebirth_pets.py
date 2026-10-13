@@ -79,7 +79,9 @@ SPECIES_ORDER = {'鯊魚系': ['克邦凱斯', '加克拉', '加格', '邦恩吉
 FAMILY_OF = {'布拉奇多斯': '雷龍系'}            # 物種 → 外掛捉寵設置的系別（PetData 第 27 組；其他物種用 --family）
 BAIT = '寵物誘餌'
 BOX_CONTENTS = ['寵物誘餌', '離線水晶', '2倍智慧果', '安撫之素']      # 1轉新手禮盒內容（quest-log 實測）；存公共
-CATCH_POLL_S, CATCH_TIMEOUT_S = 30.0, 1200.0
+CATCH_POLL_S, CATCH_TIMEOUT_S = 120.0, 1200.0              # 輪詢間隔 2 分（2026-10-13：30 秒一次開外掛面板 15 次，面板開著會擋住戰鬥畫面 / 捕捉；5 隻本來就要數分鐘）
+EXIT_CATCH_PICK = 14                                       # 捉寵設置：系別 / 物種下拉選不到或讀回對不上（ass 12 / 13 之外；不默默關面板，pet_catch 印出原因）
+PICK_RETRY = 3                                             # 物種下拉（不捲動）讀不到目標列時的重試次數：等清單渲染 / 清單空白就再點下拉
 LAST: dict = {}
 
 # ---- 外掛座標（ui/ass.md / plan-dino-katan.md 手動實測；2880×1659 截圖座標）----
@@ -277,6 +279,8 @@ def ocr_lines(box, *opts) -> list:
 class Tools:
     """碰遊戲的全部動作（pet.py / bag.py / ass.py / team.py / char.py 的薄包裝；外掛捉寵 / 鎖定 / 拆分誘餌是本類自己寫的）"""
 
+    pick_why = ''                                                  # 最近一次 _pick_dropdown 失敗原因（給呼叫端印）
+
     def sleep(self, s):
         uikit.sleep(s)
 
@@ -383,9 +387,10 @@ class Tools:
         if rc:
             return rc
         if found.get(BAIT) is None:
-            rc = bag.depot_take(role, BAIT, 'public')
+            rc = bag.depot_take(role, BAIT, 'public', hint=getattr(self, 'bait_hint', None))
             if rc:
                 return rc
+            self.bait_hint = bag.LAST.get('depot_slot')          # 下一人先點這格核對（整疊存回後多半回到同一格），不逐格掃
         self.split_noop = False
         rc = self._split(role, BAIT, keep)
         if rc:
@@ -393,6 +398,22 @@ class Tools:
         if self.split_noop:
             return 0
         return bag.depot_store(role, BAIT, 'public', keep_ok=True)   # find_item 取第一格 = 原疊（新疊在隔壁格，排後面）；拆分後背包仍有新疊，不驗消失（2026-10-12 實機）
+
+    def bait_take_many(self, roles, keep):
+        """多人取誘餌（2026-10-13）：背包面板只開一次（左欄頭像切人連續做完才關）；公共倉庫誘餌格號記起來，後面的人直接核對那格。
+        → 0 / 第一個失敗的 rc（失敗人在 self.bait_failed）。每人流程同 bait_take（取整疊 → 拆 keep → 其餘存回）"""
+        import bag
+        self.bait_hint, self.bait_failed = None, None
+        with bag.Session() as s:
+            if s.rc:
+                return s.rc
+            for role in roles:
+                rc = self.bait_take(role, keep)
+                if rc:
+                    self.bait_failed = role
+                    return rc
+                print(f'rebirth_pets：{role} 背包誘餌 = {keep}', flush=True)
+        return 0
 
     def _split(self, role, name, n):
         """背包第一格 name → 拆分鈕 → 數量鍵盤輸入 n → 確定；之後隔壁格要有 name。座標：notes/plan-dino-katan.md（手動實測）"""
@@ -592,6 +613,8 @@ class Tools:
             rc = self._catch_setup_pick(role, fam, sp, count)
             if not rc:
                 rc = self._catch_toggles(role)
+            if not rc:
+                rc = self._catch_verify(role, fam, sp)
             return rc, None if rc else True
         rc, _, bad = self.ass_each([r for r, _, _ in assign], 'catch', fn)
         return rc, bad
@@ -605,7 +628,10 @@ class Tools:
         return rc, out
 
     def _field_is(self, box, name):
-        txt = ' '.join(t for t, _, _ in ocr_lines(box, '-Zooms', '2,3,4'))
+        return self._text_has(' '.join(t for t, _, _ in ocr_lines(box, '-Zooms', '2,3,4')), name)
+
+    @staticmethod
+    def _text_has(txt, name):
         return bool(txt) and (name in txt or (name[0] in txt and sum(c in txt for c in name) >= len(name) - 1))
 
     def _catch_setup_pick(self, role, family, species, count):
@@ -618,9 +644,9 @@ class Tools:
                 return uikit.fail(SRC, 4, f'可抓捕數讀到 {n}，要 {count}（背包誘餌數不對？不勾自動抓寵）')
             return 0
         if not self._pick_dropdown(CATCH_XY['family_dd'], CATCH_LIST_FAMILY, OCR_FAMILY_FIELD, ('name', family), scroll=True, snap_tag='family', plain=family):
-            return uikit.fail(SRC, 4, f'捉寵系別選不到 {family}')
+            return uikit.fail(SRC, EXIT_CATCH_PICK, f'{role} 捉寵系別選不到 {family}（{self.pick_why or "點了但欄位讀回不是它"}；沒勾自動抓寵）')
         if not self._pick_dropdown(CATCH_XY['pet_dd'], CATCH_LIST_PET, OCR_PET_FIELD, ('name', species), scroll=False, snap_tag='species', fam_species=SPECIES_ORDER.get(family)):
-            return uikit.fail(SRC, 4, f'捉寵物種選不到 {species}')
+            return uikit.fail(SRC, EXIT_CATCH_PICK, f'{role} 捉寵物種選不到 {species}（{self.pick_why or "點了但欄位讀回不是它"}；沒勾自動抓寵）')
         n = parse_count(''.join(t for t, _, _ in ocr_lines(OCR_TAB_CATCH, '-Zooms', '2,3,4')))
         if n != count:
             uikit.snap('rebirth-catch-count')
@@ -629,6 +655,8 @@ class Tools:
 
     def _pick_dropdown(self, dd, list_box, field_box, ident, scroll, snap_tag, plain=None, fam_species=None):
         import ass
+        self.pick_why = ''
+        lines = []
         uikit.gui('seq', f'click {dd[0]} {dd[1]}; wait 500', note=f'rebirth_pets 捉寵下拉 {snap_tag}')
         if scroll:                                              # 清單會記住上次捲動位置：先往上拖 4 次回到頂，再小步往下找（2026-10-12 實機）
             for _ in range(4):
@@ -661,13 +689,42 @@ class Tools:
                 if plain:                                                    # OCR 常漏字（鯊魚系 → 鯊系）：首字在、至少吻合 len-1 個字
                     return plain[0] in fld and sum(c in fld for c in plain) >= len(plain) - 1
                 return uikit.snap_pet(fld) == ident[1] or ident[1] in fld
-            if not scroll or k == 13:
+            if not scroll:
+                if k >= PICK_RETRY:
+                    break
+                if not any(t.strip() for t, _, _ in lines) and k >= 1:      # 清單一直空白 = 下拉沒展開（點 1 次被吃掉 / 剛好收起）→ 再點一次
+                    uikit.gui('seq', f'click {dd[0]} {dd[1]}; wait 500', note=f'rebirth_pets 捉寵下拉 {snap_tag} 重點')
+                else:
+                    uikit.sleep(0.8)                                         # 清單還在渲染 / OCR 偶爾漏讀：等一下再讀
+                continue
+            if k == 13:
                 break
             (x0, y0), (x1, y1) = (750, 650), (750, 600)     # 50px ≈ 2 列；大拖會慣性亂跳過目標列
             uikit.gui('drag', str(x0), str(y0), str(x1), str(y1), note='rebirth_pets 捉寵清單捲動')
             uikit.sleep(1.0)                                        # 清單有慣性滑動：等停下來再讀（不等會點到差一列的項目，2026-10-12 實機點成飛天蛙系）   # gui 參數要分開（一整串會被當成單一參數 → 不捲）
         uikit.snap(f'rebirth-catch-{snap_tag}')
+        self.pick_why = f'{snap_tag} 下拉讀到 {[t for t, _, _ in lines]}，找不到 {ident[1]}'
+        if not scroll and any(t.strip() for t, _, _ in lines):             # 清單開著卻沒目標列：點回欄位收起，下次不會變成「關」
+            uikit.gui('seq', f'click {dd[0]} {dd[1]}; wait 400', note=f'rebirth_pets 捉寵下拉 {snap_tag} 收起')
         return False
+
+    def _catch_verify(self, role, family, species):
+        """勾完讀回：系別 / 物種欄位文字 + 自動抓寵 / 自動存倉庫勾選都對才算設好（2026-10-13：物種沒選到就關面板、事後才發現）"""
+        bad = []
+        for box, want, label in ((OCR_FAMILY_FIELD, family, '系別'), (OCR_PET_FIELD, species, '物種')):
+            txt = ' '.join(t for t, _, _ in ocr_lines(box, '-Zooms', '2,3,4')).strip()
+            if not txt:
+                print(f'rebirth_pets：{role} {label}欄位 OCR 讀不到字，略過文字讀回（選取時已驗過）', flush=True)
+            elif not self._text_has(txt, want):
+                bad.append(f'{label}欄位 {txt!r} 不是 {want}')
+        if self._checked(CATCH_XY['auto']) is not True:
+            bad.append('自動抓寵沒勾')
+        if self._checked(CATCH_XY['store']) is not True:
+            bad.append('自動存倉庫沒勾')
+        if bad:
+            uikit.snap('rebirth-catch-verify')
+            return uikit.fail(SRC, EXIT_CATCH_PICK, f'{role} 捉寵設置讀回不符：{"、".join(bad)}')
+        return 0
 
     def catch_start(self, role, count):
         """面板已在捉寵設置（catch_setup 後）：自動存倉庫 → 自動抓寵 勾選，關面板"""

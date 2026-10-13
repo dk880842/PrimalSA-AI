@@ -380,7 +380,9 @@ def select_role(role: str, ctx: dict | None = None) -> int:
     """左欄點頭像 → 黃框剛好只有該角色 + 名牌 OCR 是該角色（0 / 91）"""
     if role not in petmatch.AVATAR_Y:
         return _fail(uikit.EXIT_USAGE, f'角色 {role!r} 不在五人白名單')
-    for _ in range(2):
+    for k in range(2):
+        if k == 0 and _avatar_sel(role):                  # 已經選著（批次連續操作同一人）就不再點頭像（2026-10-13：取誘餌流程一人點 4 次）
+            break
         if not _click(83, petmatch.AVATAR_Y[role], BAGANY, f'bag 選角色 {role}', wait_ms=500):
             return _fail(EXIT_PANEL, '背包外框特徵不在，沒點頭像', 'bag-avatar')
         if _wait(lambda: _avatar_sel(role), 1.5):
@@ -614,10 +616,15 @@ def icon_match_slots(want: str, depot: bool = False) -> list | None:
                   key=lambda i: -hit.get(i, 0))
 
 
-def find_item(want: str, depot: bool = False, popup_fallback: bool = True) -> int | None:
-    """want 在目前頁（背包 / 倉庫左半）的格號（0 起算）。
+def find_item(want: str, depot: bool = False, popup_fallback: bool = True, hint: int | None = None) -> int | None:
+    """want 在目前頁（背包 / 倉庫左半）的格號（0 起算）。hint = 上一次找到的格號：先只點那格核對彈窗名稱，吻合就直接回傳（省掉逐格開彈窗 + ESC，2026-10-13）。
     有圖示樣板：① 圖示比對只挑吻合的格（不掃全部格）→ ② 點進去核對彈窗名稱，相符才回傳（不靠格名 OCR，不逐格開彈窗）。
     沒樣板：逐格 OCR 名稱；找不到再逐格開彈窗讀名稱（慢、保險）"""
+    if hint is not None and 0 <= hint < n_slots(depot) and open_slot_popup(hint, depot):
+        nm = popup_name(want)
+        close_popup()
+        if nm and name_match(nm, want):
+            return hint
     cand = icon_match_slots(want, depot)
     if cand is not None:
         for i in cand:
@@ -1139,7 +1146,7 @@ def open_depot(sub: str) -> int:
     return 0
 
 
-def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consumable') -> int:
+def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consumable', hint: int | None = None) -> int:
     """倉庫取出 want（整疊）。kind=equip 時取出鈕在 722,662。成功 = 倉庫左半該格不再吻合，且切回背包能找到"""
     LAST.clear()
     with Session() as s:
@@ -1151,9 +1158,10 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
         rc = open_depot(depot)
         if rc:
             return rc
-        i = find_item(want, depot=True)
+        i = find_item(want, depot=True, hint=hint) if hint is not None else find_item(want, depot=True)   # 沒 hint 維持舊呼叫形式（測試替身 / 其他呼叫端）
         if i is None:
             return _fail(EXIT_ITEM, f'{depot} 倉庫找不到「{want}」', 'bag-depot-noitem')
+        LAST['depot_slot'] = i                           # 呼叫端（多人取同一物）下一人當 hint
         if not open_slot_popup(i, depot=True):
             return _fail(EXIT_PANEL, f'點倉庫第 {i + 1} 格沒開彈窗（空格不要點取出，會進刪除管理）', 'bag-depot-nopopup')
         nm = popup_name(want)

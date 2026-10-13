@@ -6,11 +6,12 @@
     --assign 角色:系別:物種,…   每人抓一種（誘餌數 = 隻數）
     --count N                  每人抓幾隻（預設 5）= 背包放 N 個誘餌 = 可抓捕數
     --stages                   bait（公共倉庫取整疊 → 拆 N → 其餘存回）/ setup（外掛捉寵設置 + 勾自動存倉庫 + 勾自動抓寵）/ wait（輪詢到全部抓完）；預設全做
+    --poll 秒                  wait 輪詢間隔（預設 120；每次要開外掛面板，開前會先等戰鬥結束）
     --dry-run                  只印計畫
   uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）
   uv run --no-project python tools/gui/pet_catch.py --autoswap on|off [--roles ...]                 # 自動轉換戰寵
   批次（2026-10-12）：背包（取誘餌）/ 外掛（捉寵設置、輪詢、自動轉換、鎖定）面板都只開一次，逐人切頭像做完再關。
-退出碼：0 全部抓完；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
+退出碼：0 全部抓完；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；14 捉寵設置系別 / 物種選不到或讀回對不上（EXIT_CATCH_PICK，已重試、已收下拉、沒勾自動抓寵）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
 安全：不點「+」（花石幣）、不碰丟棄區；沿用 rebirth_pets.Tools 的讀字驗證（讀不到 / 對不上就停，不盲點）。
 抓完後新寵物沒名字（成長字串），分配前要 `pet.py learn-species`，見 psa-pet-quest SKILL.md。
 """
@@ -36,7 +37,7 @@ def parse_assign(s: str) -> list:
     return out
 
 
-def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S) -> int:
+def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S, poll: float = rp.CATCH_POLL_S) -> int:
     T = tools or rp.Tools()
     print(f'計畫：{[(r, f, s, count) for r, f, s in assign]} 階段 {list(stages)}')
     if dry_run:
@@ -44,15 +45,13 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait'), dry_run:
     if 'bait' in stages:
         import contextlib
         import bag
-        with (bag.Session() if tools is None else contextlib.nullcontext()) as bs:   # 背包面板只開一次，逐人切頭像（各步驟的 bag.Session 巢狀時不重開 / 不關）
+        with (bag.Session() if tools is None else contextlib.nullcontext()) as bs:   # 背包面板只開一次，逐人切頭像（取 / 拆 / 存回都在同一次；內層 Session 巢狀時不重開 / 不關）
             if bs is not None and bs.rc:
                 return bs.rc
-            for role, fam, sp in assign:
-                rc = T.bait_take(role, count)
-                if rc:
-                    print(f'pet_catch：{role} 取誘餌失敗 rc {rc}')
-                    return rc
-                print(f'pet_catch：{role} 背包誘餌 = {count}')
+            rc = T.bait_take_many([r for r, _, _ in assign], count)
+            if rc:
+                print(f'pet_catch：{getattr(T, "bait_failed", None) or "?"} 取誘餌失敗 rc {rc}')
+                return rc
         if tools is None and uikit.is_open(bag.BAGANY):         # 2026-10-12 實機：拆分 / 存入後背包面板仍開著，外掛打不開
             uikit.close_panel(bag.BAGANY, known_open=True)
     if 'setup' in stages:
@@ -66,7 +65,7 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait'), dry_run:
         pending = {r for r, _, _ in assign}
         end = uikit.clock() + timeout
         while pending:
-            T.sleep(rp.CATCH_POLL_S)
+            T.sleep(poll)
             rc, st = T.catch_poll_many(sorted(pending))          # 一次開面板讀所有還沒抓完的人
             if rc:
                 return rc
@@ -180,6 +179,7 @@ def main(argv=None) -> int:
     ap.add_argument('--stages', default='bait,setup,wait')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--timeout', type=float, default=rp.CATCH_TIMEOUT_S)
+    ap.add_argument('--poll', type=float, default=rp.CATCH_POLL_S, help='wait 階段輪詢間隔秒（預設 120；每次要開外掛面板）')
     a = ap.parse_args(argv)
     if a.verify_battle:
         import winenv
@@ -209,7 +209,7 @@ def main(argv=None) -> int:
         return 2
     import winenv
     winenv.enable_server()
-    return run(assign, a.count, tuple(a.stages.split(',')), a.dry_run, timeout=a.timeout)
+    return run(assign, a.count, tuple(a.stages.split(',')), a.dry_run, timeout=a.timeout, poll=a.poll)
 
 
 if __name__ == '__main__':

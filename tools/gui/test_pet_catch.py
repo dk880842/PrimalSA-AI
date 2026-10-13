@@ -38,6 +38,15 @@ class FakeT:
     def bait_take(self, role, keep):
         return self._r('bait', role)
 
+    def bait_take_many(self, roles, keep):
+        self.calls.append(('bait_many', tuple(roles)))
+        for r in roles:
+            rc = self._r('bait', r)
+            if rc:
+                self.bait_failed = r
+                return rc
+        return 0
+
     def catch_setup(self, role, fam, sp, count):
         return self._r('setup', role)
 
@@ -66,7 +75,9 @@ check('setup：外掛面板開 1 次、逐人 setup + start', rc == 0 and f.call
 f = FakeT(fail_at=('setup', 'DKBO2'))
 check('setup 失敗 → 該 rc、不繼續下一人', pet_catch.run(A, stages=('setup',), tools=f) == 7 and f.calls[1:] == [('setup', 'DKBO2')])
 f = FakeT(fail_at=('bait', 'DKBO2'))
-check('bait 失敗 → rc、不繼續', pet_catch.run(A, stages=('bait',), tools=f) == 7 and f.calls == [('bait', 'DKBO2')])
+check('bait 失敗 → rc、不繼續', pet_catch.run(A, stages=('bait',), tools=f) == 7 and f.calls == [('bait_many', ('DKBO2', 'DKBO3')), ('bait', 'DKBO2')])
+f = FakeT()
+check('bait：一次 bait_take_many 帶全部人（背包只開一次）', pet_catch.run(A, stages=('bait',), tools=f) == 0 and f.calls[0] == ('bait_many', ('DKBO2', 'DKBO3')))
 
 # register_growths：撞到別的物種 → 刪除（只靠縮圖）
 import tempfile
@@ -136,5 +147,102 @@ f3 = FT3({}, polls=[{'DKBO2': (3, True), 'DKBO3': (0, False)}, {'DKBO2': (None, 
 check('wait：每輪外掛只開一次讀所有沒抓完的人、抓完的移除', pet_catch.run(A, stages=('wait',), tools=f3) == 0 and f3.opens == [('DKBO2', 'DKBO3'), ('DKBO2',)])
 f3 = FT3({})
 check('autoswap：ass_each 一次（一般設置分頁）', pet_catch.set_autoswap(['DKBO', 'DKBO2'], False, tools=f3) == 0 and f3.opens == [('each', 'general', ('DKBO', 'DKBO2'))])
+
+# ---- 2026-10-13：物種下拉重試 / 收起 / 讀回 / 輪詢間隔 ----
+import ass
+import uikit
+
+
+class Pick:
+    """假 OCR / 假點擊：scripts = 每次 ocr_lines 回傳的列表（依序）；記錄點擊"""
+    def __init__(self, scripts, field=''):
+        self.scripts, self.clicks, self.field = list(scripts), [], field
+
+    def ocr(self, box, *opts):
+        if box == rp.CATCH_LIST_PET:
+            return self.scripts.pop(0) if len(self.scripts) > 1 else (self.scripts[0] if self.scripts else [])
+        return [(self.field, 0, 0)]
+
+    def gui(self, *a, **k):
+        self.clicks.append(a)
+        if a[0] == 'seq' and 'click 1115' in a[1]:
+            self.field = '貝魯卡'
+
+
+def with_pick(p, fn):
+    saved = (rp.ocr_lines, uikit.gui, uikit.sleep, uikit.snap, ass.panel_open)
+    rp.ocr_lines, uikit.gui, uikit.sleep, uikit.snap, ass.panel_open = p.ocr, p.gui, lambda s: None, lambda *a, **k: None, lambda: True
+    try:
+        return fn()
+    finally:
+        rp.ocr_lines, uikit.gui, uikit.sleep, uikit.snap, ass.panel_open = saved
+
+
+row = [('貝魯卡', 1115, 463)]
+T = rp.Tools()
+p = Pick([[], [], row])
+ok = with_pick(p, lambda: T._pick_dropdown(rp.CATCH_XY['pet_dd'], rp.CATCH_LIST_PET, rp.OCR_PET_FIELD, ('name', '貝魯卡'), scroll=False, snap_tag='species'))
+check('物種下拉：清單先空白 → 重點下拉再讀到目標才選（成功）', ok and sum('click 1283' in str(c) for c in p.clicks) == 2 and any('click 1115 463' in str(c) for c in p.clicks))
+p = Pick([[('魯尼帖斯', 1115, 421)]])
+ok = with_pick(p, lambda: T._pick_dropdown(rp.CATCH_XY['pet_dd'], rp.CATCH_LIST_PET, rp.OCR_PET_FIELD, ('name', '貝魯卡'), scroll=False, snap_tag='species'))
+check('物種下拉：清單開著但沒目標 → False、原因寫進 pick_why、點回欄位收起', not ok and '貝魯卡' in T.pick_why and 'click 1283' in str(p.clicks[-1]))
+p = Pick([[]])
+ok = with_pick(p, lambda: T._pick_dropdown(rp.CATCH_XY['pet_dd'], rp.CATCH_LIST_PET, rp.OCR_PET_FIELD, ('name', '貝魯卡'), scroll=False, snap_tag='species'))
+check('物種下拉：一直空白 → False，沒亂點選項', not ok and not any('click 1115' in str(c) for c in p.clicks))
+
+# _catch_verify
+class V(rp.Tools):
+    def __init__(self, fam, pet, auto, store):
+        self.fam, self.pet, self.chk = fam, pet, {rp.CATCH_XY['auto']: auto, rp.CATCH_XY['store']: store}
+
+    def _checked(self, xy):
+        return self.chk[xy]
+
+
+def verify(fam, pet, auto=True, store=True):
+    v = V(fam, pet, auto, store)
+    saved = (rp.ocr_lines, uikit.snap)
+    rp.ocr_lines = lambda box, *o: [(v.fam if box == rp.OCR_FAMILY_FIELD else v.pet, 0, 0)]
+    uikit.snap = lambda *a, **k: None
+    try:
+        return v._catch_verify('DKBO3', '老虎系', '貝魯卡')
+    finally:
+        rp.ocr_lines, uikit.snap = saved
+
+
+check('_catch_verify：全對 → 0', verify('老虎系', '貝魯卡') == 0)
+check('_catch_verify：物種欄位不對 → 14', verify('老虎系', '魯尼帖斯') == rp.EXIT_CATCH_PICK)
+check('_catch_verify：自動抓寵沒勾 → 14', verify('老虎系', '貝魯卡', auto=False) == rp.EXIT_CATCH_PICK)
+check('_catch_verify：欄位 OCR 讀不到字 → 不誤判（略過文字，勾選對就 0）', verify('', '') == 0)
+check('輪詢間隔預設 ≥ 120 秒', rp.CATCH_POLL_S >= 120)
+f3 = FT3({}, polls=[{'DKBO2': (0, False), 'DKBO3': (0, False)}])
+slept = []
+f3.sleep = slept.append
+pet_catch.run(A, stages=('wait',), tools=f3, poll=77)
+check('wait：--poll 秒數有帶進 sleep', slept == [77])
+
+# bag.find_item hint / select_role 已選著不重點頭像
+import bag
+calls = []
+sv = (bag.open_slot_popup, bag.popup_name, bag.close_popup, bag.n_slots, bag.icon_match_slots)
+bag.open_slot_popup = lambda i, depot=False: calls.append(i) or True
+bag.popup_name = lambda want=None: '寵物誘餌'
+bag.close_popup = lambda: True
+bag.n_slots = lambda depot=False: 20
+bag.icon_match_slots = lambda want, depot=False: (calls.append('icon') or [])
+r = bag.find_item('寵物誘餌', depot=True, hint=4)
+check('find_item：hint 格名稱吻合 → 只點那一格就回傳（不掃圖示 / 逐格）', r == 4 and calls == [4])
+bag.popup_name = lambda want=None: '離線水晶'
+calls.clear()
+r = bag.find_item('寵物誘餌', depot=True, hint=4)
+check('find_item：hint 格名稱不符 → 退回原流程', r is None and calls[0] == 4 and 'icon' in calls)
+bag.open_slot_popup, bag.popup_name, bag.close_popup, bag.n_slots, bag.icon_match_slots = sv
+clicks = []
+sv2 = (bag._avatar_sel, bag._click, bag._ocr_join)
+bag._avatar_sel = lambda role: True
+bag._click = lambda *a, **k: clicks.append(a) or True
+bag._ocr_join = lambda *a, **k: 'DKBO2'
+check('select_role：頭像已選著 → 不點頭像、回 0', bag.select_role('DKBO2') == 0 and not clicks)
+bag._avatar_sel, bag._click, bag._ocr_join = sv2
 print('\n失敗 %d' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)
