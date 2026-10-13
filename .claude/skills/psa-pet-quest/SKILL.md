@@ -12,6 +12,27 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 **多人一律用批次版**（2026-10-12）：`pet.py store-many / take-many [--plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"] / set-state-many`、`bag.py store|take all 名稱 [--skip-missing]`、`pet_catch.py --lock / --autoswap`：面板只開一次、倉庫分頁 / 子分頁只切一次、左欄頭像換人連續做完再關（不要一人一次開關）；新抓的寵物沒名字（名字框是成長字串）見下方「轉生後寵物重整」。
 
 
+## 總控腳本 `petquest.py`（2026-10-13，**只有離線測試，整支未實機**）
+一行跑完一個寵物任務（接取 → 抓 / 分 / 練 → 交 → 丟獎勵寵 → 換回原戰寵），每段呼叫下面各節的既有腳本，失敗停在該段、印手動指令，進度檔 `tools/.cache/petquest.json` 續跑：
+```
+uv run --no-project python tools/gui/petquest.py plan 2016|2019|3003                     # 先看每段指令（不碰遊戲）
+uv run --no-project python tools/gui/petquest.py run 2016 --confirm-drop [--confirm-buy-bait]   # 恐龍博士
+uv run --no-project python tools/gui/petquest.py run 2019 --confirm-drop [--confirm-buy-bait]   # 卡坦的願望（鯊、雞兩輪）
+uv run --no-project python tools/gui/petquest.py run 3003 --confirm-drop                        # 猜謎三兄弟（金布伊練 77）
+  [--from 段] [--to 段] [--fresh] [--dry-run]
+```
+- **段**：恐龍 `accept prep catch distribute train turnin drop restore`；卡坦 `accept prep catch1 distribute1 train1 turnin1 drop1 catch2 distribute2 train2 turnin2 store_reward restore`；猜謎 `accept step1 prep train turnin drop restore`（`plan` 印全文）。
+- **prep**：關遇敵 + 解散 → `pet.py list` 記 5 人原朵拉比斯等級（進度檔 `orig`）→ 取消鎖定戰寵 → 朵拉比斯存個人倉庫（寵物欄 = 騎寵 + 4 空格）。
+- **catch**：**每批 ≤ 寵物欄空格（4）**（5 隻一次抓會有 1 隻自動進個人倉庫，倉庫卡沒縮圖、成長字串沒登錄就取不出來）→ 每輪 [4, 1] 兩批：`pet_catch --stages bait` →（誘餌不夠：`--confirm-buy-bait` 才用外掛「+」買，**每按一次前後開寵物面板讀頂部石幣，要剛好 −50,000、鑽石不變，否則停**；石幣框 MONEY_BOX 待實機量，讀不到就不買）→ `--stages setup,wait,register` → 抓寵者 `store-many --pick last --skip-missing --candidates` 存公共（最後一批留 1）→ list 驗。
+  - `rebirth_pets._split` 2026-10-13 改：整疊比要的少 → 按取消、回 92（bait_take 整疊存回公共）；舊版照輸入數量 → 拆分失敗 95。
+- **distribute**：`take-many --depot public --plan "角色:物種,…" --candidates`（抓寵者自己那種不取）→ list 驗每人每物種剛好 1 隻。
+- **train**：autoswap on → 第一種任務寵出戰 → `--verify-battle` → `grind.py start --spot 柯奧4F龜洞` → 每 120 秒 `pet.py list` 讀等級（恐龍 魯尼帖斯 18 / 貝魯卡 30、卡坦 25；最多 45 分）→ 關遇敵 → autoswap off → `rest-all --candidates`。猜謎：`grind.py start --spot 地雷區` → `petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --exp-fruit`。
+- **turnin**：`questrun.py run <ID> --after none --pet-turnin`（卡坦第 1 輪交完要讀到追蹤步號 2，否則 167）；猜謎 `questrun.py run 3003 --after none`。
+- **drop**（`--confirm-drop` 才做，沒給 → 168 停）：`petdrop.py all 布克布克 / 修寶 / 左迪洛斯 --confirm-name 同名 --max-level 1`。
+- **restore**：卡坦先把獎勵 Lv1 朵拉比斯存個人（store_reward）→ `take-many --depot personal --plan "角色:朵拉比斯@原等級"` → 出戰 → `pet_catch --lock 戰寵 --battle-pet 朵拉比斯` → `ass.py pet all normal 攻擊 --no-resume` → list 驗 5 人朵拉比斯出戰、等級 = 原等級（猜謎 ≥ 原等級）。**不恢復掛機**（交給呼叫端 grind）。
+- 退出碼 160 參數 / 161 接取（猜謎步 1 沒金布伊 → 爬塔 quiztower 人工）/ 162 準備 / 163 誘餌 · 買 / 164 抓 / 165 分配 / 166 練 / 167 交 / 168 丟 / 169 換回；9 / 10 透傳。離線測試 `test_petquest.py`（假寵物欄 / 倉庫模擬器）。
+- **待實機**：①石幣讀取框；②「+」按前後讀可抓捕數；③分批抓（count 4 → 1）與每批存公共；④卡坦第 1 輪交完 questrun 回 117 / 155 + 步號 2；⑤練寵 list 輪詢在快戰中讀等級；⑥全流程耗時。
+
 ## 何時用
 - Task 步驟類型是交寵物（`psa.py steps <任務ID>` / `knowledge/quests/`：寵物 ID × 數量 + petLevel），或使用者說抓寵 / 練寵交任務。
 - 條件：petLevel 是「≥」（實測 18 / 25 / 30 都過），交出的寵物會被收走（clean=1），寵物只是消耗品。**每個角色各要一套**。
@@ -125,7 +146,7 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 | 切換面板開啟 | 763,760 |
 
 ## 紅區
-- 可抓捕數「+」1295,315（推測花石幣 100,000）、「丟棄不滿足條件的寵物」勾選與 攻< / 防< / 敏< SET、寵物面板回爐 372,610、召喚 / 升星 / 兌換、任何鑽石、倉庫擴容 / 解鎖新頁。
+- 可抓捕數「+」1295,315（實測每按一次 50,000 石幣，2026-10-12；使用者 10-13 准許誘餌不夠時買，但只能經 `petquest.py --confirm-buy-bait`（按前後驗石幣）、手動不要點）、「丟棄不滿足條件的寵物」勾選與 攻< / 防< / 敏< SET、寵物面板回爐 372,610、召喚 / 升星 / 兌換、任何鑽石、倉庫擴容 / 解鎖新頁。
 - 垃圾桶 708,565 只准丟布克布克 / 修寶（丟前截圖確認名稱）；其他寵物一律不丟。
 - 答題 / 驗證視窗：立刻停手通知使用者（鐵則 5）。戰鬥中不可開外掛面板（等 VS 牌消失）。
 

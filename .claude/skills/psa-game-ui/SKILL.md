@@ -115,7 +115,7 @@ uv run --no-project python tools/gui/errlog.py list
 | **任務詳情讀取 / 接取**（1.82 各任務狀態、接取一個待接取任務；`questdetail.py status / list / accept`，退出碼 120～128；**詳情「傳送」鈕位置進行中任務是「重置任務」，只有腳本驗證後才點**） | [ui/quest.md](ui/quest.md) 的 questdetail 段 |
 | 背包、道具、倉庫、材料圖鑑 | [ui/bag.md](ui/bag.md) |
 | 看 / 改寵物出戰 · 等待（不碰存倉） | **先跑 `pet.py list` / `set-state` / `rest-all`**（介面參考 [ui/pet.md](ui/pet.md)） |
-| **交寵物類任務**（恐龍博士 2016 / 卡坦的願望 2019：外掛自動抓寵、共用倉庫分配、練寵、交任務；轉生 / 封印書後要重做） | **`/psa-pet-quest` skill** |
+| **交寵物類任務**（恐龍博士 2016 / 卡坦的願望 2019 / 猜謎三兄弟 3003：外掛自動抓寵、共用倉庫分配、練寵、交任務；轉生 / 封印書後要重做；總控 `petquest.py run 2016\|2019\|3003 [--confirm-buy-bait] [--confirm-drop]`，退出碼 160～169，未實機） | **`/psa-pet-quest` skill** |
 | 寵物出戰 / 騎乘 / 休息、寵物技能 | [ui/pet.md](ui/pet.md) |
 | 傳送到別的地圖 / 練級點 | [ui/transfer.md](ui/transfer.md) |
 | 遊戲設定、離線時間 | [ui/setting.md](ui/setting.md) |

@@ -393,8 +393,12 @@ class Tools:
                 return rc
             self.bait_hint = bag.LAST.get('depot_slot')          # 下一人先點這格核對（整疊存回後多半回到同一格），不逐格掃
         self.split_noop = False
+        self.split_short = None
         rc = self._split(role, BAIT, keep)
         if rc:
+            if rc == bag.EXIT_ITEM and self.split_short is not None:   # 整疊比要的少（2026-10-13 petquest）：整疊存回公共，回 92 = 誘餌不夠（呼叫端決定買不買）
+                st = bag.depot_store(role, BAIT, 'public')
+                print(f'rebirth_pets：{role} 誘餌只有 {self.split_short} 個（要 {keep}）→ 整疊存回公共倉庫 rc {st}', flush=True)
             return rc
         if self.split_noop:
             return 0
@@ -447,6 +451,10 @@ class Tools:
                 return uikit.fail(SRC, bag.EXIT_NAME, f'拆分：數量輸入視窗 OCR {dlg!r}（待實機量）不是預期，停手')
             mq = re.search(r'\d{1,3}', ' '.join(t for t, _, _ in ocr_lines((670, 430, 170, 45), '-Zooms', '2,3')))
             qty = int(mq.group()) if mq else None
+            if qty is not None and qty < n:                       # 整疊不夠（2026-10-13 petquest）：取消拆分，回 92「誘餌不夠」（bait_take 會整疊存回）；舊版照輸入 n → 拆分失敗 → 95
+                uikit.gui('seq', 'click 828 545; wait 600', note='rebirth_pets 拆分：整疊比要的少，取消')
+                self.split_short = qty
+                return uikit.fail(SRC, bag.EXIT_ITEM, f'{role} {name} 只有 {qty} 個，要 {n}（不夠）')
             if qty == n:                                          # 整疊剛好 = 要的數量：拆分會失敗（#284「拆分失敗！」）→ 取消，呼叫端不必存回
                 uikit.gui('seq', 'click 828 545; wait 600', note='rebirth_pets 拆分：整疊就是要的數量，取消')
                 self.split_noop = True

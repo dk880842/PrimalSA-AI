@@ -162,7 +162,8 @@ def pet_prep_hint(d: dict, step) -> str | None:
         cmd = f'uv run --no-project python tools/gui/pet_catch.py --assign "{pp["assign"]}" --count {pp.get("count", 5)}（先關原地遇敵、解散隊伍）'
     else:
         cmd = '見 psa-pet-quest SKILL.md'
-    return f'需先抓 / 練寵：步 {step} {pp["need"]}；下一步跑：{cmd}；寵物備妥後 `questrun run {d["id"]} --after none` 續跑'
+    return (f'需先抓 / 練寵：步 {step} {pp["need"]}；下一步跑：{cmd}；寵物備妥後 `questrun run {d["id"]} --after none` 續跑'
+            f'（或整套交給總控：uv run --no-project python tools/gui/petquest.py run {d["id"]} --confirm-drop）')
 
 
 _ROWS: list = []
