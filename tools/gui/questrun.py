@@ -4,7 +4,7 @@
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/questrun.py plan [任務ID …]            # 不碰遊戲：印交接 / 每任務步驟 / 指令 / 預估 / 退出碼（沒給 ID = questdefs 全部）
   uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--dragon [--dragon-all]] [--spot 地雷區]
-        [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 60] [--hp-check-every 3] [--no-boss-retry]
+        [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 0] [--hp-check-every 3] [--no-boss-retry]
         [--verify risk|each|off] [--no-verify-all] [--verify-skipped] [--no-battle-check] [--battle-check-always]
         [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
         [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post]
@@ -30,9 +30,10 @@
                         bossretry 重打前也查一次（同一份設定，失敗 147）。2026-10-13 起 30 分內查過 OK 且之後沒有重登 / bossretry → 沿用不開外掛面板（進度檔 battle_ok_at；--battle-check-always 關快取）
   每個任務
     1 preflight    背包空位（defs.bag_slots = 任務道具最多同時佔的格數，questdefs.bag_need 由 Task 表推、test 核對；--dragon 要吃且龍王還不在背包 → DKBO +1）：不足的人先自動刪 bag.AUTO_PURGE
-                   （ui/bag.md 白名單去掉有條件的龍的魅力之笛 / 亞姆亞姆的斧頭），仍不足才 110；補血檢查 hp_gate：隊長 HUD HP < --hp-min% 或全隊任一人 < --team-hp-min%（預設 60；開背包逐人讀 HP，約 8 秒）
-                   → heal（小護士補整隊）後重組隊；quest.py 37（BOSS 戰贏、滿 5 人）後下一片之前也做一次（BOSS 後一定讀；有人 HP 0 / 讀不出 = 風險事件）。
-                   2026-10-13：背包空格與全隊 HP 同一次開背包讀（bag.team_scan）；全隊 HP 5 分內確認過（讀了沒人偏低 / 剛補血）且之間 quest.py 說「本片戰鬥 0 場」→ 沿用不讀
+                   （ui/bag.md 白名單去掉有條件的龍的魅力之笛 / 亞姆亞姆的斧頭），仍不足才 110；補血檢查 hp_gate：隊長 HUD HP < --hp-min%（零成本）；
+                   2026-10-14 使用者定：**任務之間不讀血量**，--team-hp-min 預設 0 = 不讀全隊 HP（背包檢查只讀空格；>0 才回到舊行為：開背包逐人讀 HP 約 8 秒）
+                   → heal（小護士補整隊）後重組隊；quest.py 37（BOSS 戰贏、滿 5 人）後下一片之前同樣只看隊長 HUD（不再讀全隊 HP、BOSS 後 HP 0 不再算風險事件）。
+                   --team-hp-min > 0 時（舊行為）背包空格與全隊 HP 同一次開背包讀（bag.team_scan）；全隊 HP 5 分內確認過且之間沒戰鬥 → 沿用不讀
     2 接取         team.form（距上次組隊 / 驗隊伍 ≤ TEAM_FRESH_S 秒就略過，例：交接剛組完）→ questdetail.accept(skip_ok, verify=False)：**整個任務只開一次詳情**，同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 傳送 → NPC 對話 → 接受，不重開詳情驗證，看對話框收起）；失敗 119
     3 跑步驟       迴圈（每片 ≤ --slice-s 秒，總計 ≤ --max-min 分，片數 ≤ --max-slices）：
                    （--dragon 且 questdefs dragon（NO_DRAGON 以外）的任務才做）龍王的守護（人形圖示不在才吃：第一次 depot_use 公共倉庫整疊取出 → 吃 1 顆 → 剩的留在 DKBO 背包，之後直接從背包吃；吃完再關原地遇敵；
@@ -40,14 +41,14 @@
                    → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115（defs 有 turnin 且加 --pet-turnin：改跑交寵物，見下）；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
                    → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）；
                      questrun 在 TEAM_FRESH_S 秒內驗過隊伍（接取後 form、quest.py 37 的 BOSS 後檢查、30 / 32 後 form）→ 加 --team-fresh，quest.py 開始前不再開切換面板
-                     （領獎後 / 任務戰後的隊伍檢查、37 / 38 照舊）；--team-hp-min > 0 時加 --hp-check-min + --hp-check-every（片內：任務戰後、路上一般戰鬥每 N 場〔預設 3，
+                     （領獎後 / 任務戰後的隊伍檢查、37 / 38 照舊）；--team-hp-min > 0 時才加 --hp-check-min + --hp-check-every（預設 0 = 不傳，片內不讀血；舊行為：片內：任務戰後、路上一般戰鬥每 N 場〔預設 3，
                      questdefs hp_every 覆寫：四寶玉之謎 1〕回主畫面讀全隊 HP，偏低 → 41）
                    → 每片 0 / 37 後看主畫面信封鈕發亮（screen_sigs.MAIL_GLOW，會閃 → 讀 4 次）→ 背包 / 信箱處理（見下「背包滿進信箱」）
     4 逐人驗證     （2026-10-12，四寶玉之謎隊長完成、DKBO3 / DKBO5 被打飛沒完成卻沒發現）其他 4 人逐一 char.switch 讀任務詳情
                    （questdetail.status_all，每人開一次詳情、一趟捲動讀多個任務）；有人不是「已完成」→ bossretry --who 落後者（落後者當隊長組 5 人重打 → 切回 DKBO 重組）
                    → 再讀一次那幾個人；仍沒完成 / 讀不到 / 待接取（沒接到）→ 108 停手。
                    何時驗（--verify，2026-10-13 review §2：10-13 驗 20 次共 43 分、0 次抓到落後者）：
-                     risk（預設）本任務有風險事件 —— quest.py 30 / 32 / 38 / 21 / 41、bossretry、全員重登、BOSS 後有人 HP 0 或讀不出、交寵物 —— 才完成時當場驗；
+                     risk（預設）本任務有風險事件 —— quest.py 30 / 32 / 38 / 21 / 41、bossretry、全員重登、交寵物 —— 才完成時當場驗；
                                  沒有 → 記進進度檔 verify_pending，全部任務結束後一次批次驗；下一個任務的前置（questdefs.prereqs，Task 表 finishTasks）在待驗清單 → 接取前先批次驗；
                                  失敗退出時待驗清單留在進度檔，下次 questrun 結束再驗（超過 2 小時的丟掉）
                      each        舊行為：每任務完成當場驗；off / --no-verify-all 不驗。詳情一開就已完成而跳過的任務預設不驗（--verify-skipped 才當場驗）
@@ -56,7 +57,7 @@
                                  + `questrun.py verify <落後任務> --role <落後者>`（verify_many → bossretry --who 補人 → 再讀）處理
   questrun.py verify [ID…] [--role 角色,…]：ID 有給 = 逐人驗這些任務（--role 預設其他 4 人）；沒給 = 驗進度檔待驗清單（12 小時內）。
                  需要 bossretry 時先做交接（關遇敵 / 戰鬥設定 / 組隊）；驗過的移出待驗清單；仍落後 108
-    5 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
+    5 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；2026-10-14 起**完成判斷一律不開任務詳情**：quest.py 印「任務完成」或回 5（追蹤欄找不到該任務）= 完成；時間到 / 提前結束 / 模糊結束 = 下一片（下一個任務的接取本來就開一次詳情）→ 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交寵物（--pet-turnin，預設關 = manual 步照舊 115；**未實機**）
                  defs.turnin（目前只有恐龍博士 2016：步 1 魯尼帖斯 / 步 2 貝魯卡，逐人「選擇」視窗）：pet.py rest-all（任務寵改等待）→ team.disband
                  → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 讀詳情；失敗 150。
@@ -71,11 +72,11 @@
                  每個名字 petdrop.drop('all', 名字, max_level=1)（只丟名字完全相同、等級讀得到且 = 1 的；騎寵 / 第 1 格 / 出戰 / 騎乘一律擋）；失敗 151、不恢復掛機
   交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
-quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；「時間到」/「提前結束」（步驟結束後閒置，review §6.1）→ 不開詳情直接下一片；其他才讀一次詳情：已完成 = 結束、進行中 = 下一片；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
+quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；其他（時間到 / 提前結束 / 模糊）一律不開詳情直接下一片；5 找不到任務 = 完成；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
   （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
-  quest.py 回 0 且 tail 有「時間到」（單純 slice 到期、任務還在追蹤欄）→ 不開詳情，直接下一片（完成由下一片 quest.py「任務完成」或回 5 時才讀詳情確認）；回 0 但沒有「任務完成」也不是「時間到」（模糊）才讀一次詳情
-  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
-  41 片內戰鬥後全隊 HP 偏低 → 補血（小護士）+ team.form → 下一片（每任務最多 HP_LOW_MAX=5 次，超過 111）；
+  quest.py 回 0 沒有「任務完成」（時間到 / 提前結束 / 模糊）→ 直接下一片，完成由下一片 quest.py「任務完成」或回 5 判定（2026-10-14 起不再讀詳情確認）
+  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 當完成（不看詳情）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
+  41 片內戰鬥後全隊 HP 偏低（只有 --team-hp-min > 0 才會出現）→ 補血（小護士）+ team.form → 下一片（每任務最多 HP_LOW_MAX=5 次，超過 111）；
   40 任務 NPC 只有「再見」（quest.py 已 ESC）→ 背包 / 信箱處理：背包空格 < 1 的人刪白名單 → mail.py claim 領「丟失的物品」→ 續跑（不重置任務；每任務最多 BYE_RECOVER_MAX=2 次）；
      背包沒滿且信箱沒有丟失信（mail 112）→ 153；背包刪不出空位 / mail 114 等 → 154；
   19 自動巡路卡住（quest.py 已刷新角色 + 點地面解卡 3 次）→ questrun 再「刷新 + 走上附近出口」最多 2 次，仍不行 → 全員重登（見下）；
@@ -156,7 +157,7 @@ DRAGON = rebirth.DRAGON
 DRAGON_REEAT_S = rebirth.DRAGON_REEAT_S
 SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 60, 60, 30, 50
 BOSS_RETRY_MAX = 3              # 每個任務 38 / 21 時最多呼叫幾次 bossretry（四大洞窟每個 2～5 場 BOSS）
-TEAM_HP_MIN = 60                # 全隊任一人 HP < 這個 % → 補血（2026-10-12 四寶玉之謎：只看隊長 HP，隊員約 50% 連打 BOSS 被打死踢隊 4 次 38）；0 = 不讀全隊
+TEAM_HP_MIN = 0                 # 全隊任一人 HP < 這個 % → 補血；2026-10-14 使用者定預設 0 = 任務之間不讀血量（只看隊長 HUD HP，零成本）；>0 才開背包讀全隊（舊行為）
 WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
 DEFAULT_SPOT = '地雷區'
 MAIL_GLOW_READS, MAIL_GLOW_GAP = 4, 0.3                              # 信封發亮會閃：讀 4 次（約 1 秒）任一次亮就算有信
@@ -524,10 +525,10 @@ def print_plan(defs, opts: dict) -> None:
                   + '（bag.team_read 開背包一次逐人讀；不符 / 讀不到 110）')
         if d.get('dragon_required'):
             print(f'  - 龍王的守護必要（dragon_required，不看 --dragon）：接取前沒 buff 就吃；背包與公共倉庫都沒有 / 一直吃不到 → {EXIT_NODRAGON}（改走單人逃跑 psa-quest-solo §4）')
-        print(f'  - 補血檢查（任務開始前、每次 BOSS 戰後）：隊長 HUD HP < {opts["hp_min"]}% 或全隊（bag.hps）任一人 < {opts.get("team_hp_min", TEAM_HP_MIN)}% → heal.heal_trip --no-return（小護士補整隊）+ team.form')
+        print(f'  - 補血檢查（任務開始前、每次 BOSS 戰後）：隊長 HUD HP < {opts["hp_min"]}%' + (f' 或全隊（bag.hps）任一人 < {opts["team_hp_min"]}%' if opts.get('team_hp_min', TEAM_HP_MIN) > 0 else '（全隊血量不讀：--team-hp-min 0）') + ' → heal.heal_trip --no-return（小護士補整隊）+ team.form')
         for st, sd in sorted((d.get('steps') or {}).items()):
             if sd['kind'] == 'fight':
-                print(f'  - 步 {st}：kind=fight：全隊 HP < {sd.get("hp_min") or opts.get("team_hp_min", TEAM_HP_MIN)}% 先補血 → 不在 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]} 附近就便捷傳送「{sd.get("warp_name")}」'
+                print(f'  - 步 {st}：kind=fight：隊長 HP 檢查 → 不在 {sd["map"]}:{sd["xy"][0]},{sd["xy"][1]} 附近就便捷傳送「{sd.get("warp_name")}」'
                       f' → team.form → quest.py --fight --task {d["track"]} --step {st}（{sd.get("npc", "")}）；贏 + team.check 滿 5 人 → 下一片、不滿 → bossretry；'
                       f'輸 35 補血重打（共 {FIGHT_TRIES} 次）')
             elif sd['kind'] == 'walk':
@@ -563,10 +564,10 @@ def print_plan(defs, opts: dict) -> None:
               + (f' --hp-check-min {opts.get("team_hp_min", TEAM_HP_MIN)} --hp-check-every {d.get("hp_every", opts.get("hp_every", HP_EVERY))}'
                  f'（片內：任務戰後 / 路上一般戰鬥每 N 場讀全隊 HP，偏低 41 → 補血續片）' if opts.get('team_hp_min', TEAM_HP_MIN) > 0 else '')
               + f'（≤ {opts["max_slices"]} 片、≤ {opts["max_min"]} 分），依退出碼分支；NPC 只有再見 40 / 信封發亮 → 背包滿刪白名單 + 領信續跑（153 / 154）')
-        print('  - 收尾：quest.py「任務完成」（追蹤欄沒有該任務）→ 進度檔 + notes/quest-log.md（沒有該字樣才開詳情確認）')
+        print('  - 收尾：quest.py「任務完成」或回 5（追蹤欄沒有該任務）→ 進度檔 + notes/quest-log.md（不開詳情；時間到 / 提前結束 / 模糊結束 = 下一片）')
         pre = questdefs.prereqs(d['id'])
         print(f'  - 逐人驗證（--verify {opts.get("verify", "risk")}）：' + {
-            'risk': '本任務有風險事件（30/32/38/21/41、bossretry、重登、BOSS 後 HP 0、交寵物）才當場驗，否則延後到 run 結束批次驗'
+            'risk': '本任務有風險事件（30/32/38/21/41、bossretry、重登、交寵物）才當場驗，否則延後到 run 結束批次驗'
                     + (f'；接取前先批次驗待驗的前置任務 {pre}' if pre else ''),
             'each': '完成後當場逐人驗（舊行為）', 'off': '不驗',
             'defer': '同 risk，但沒風險事件的延後到呼叫端收尾（postrebirth finish：status --role all → questrun.py verify 補人）'
@@ -907,7 +908,7 @@ class Run:
         pre = None
         if need or extra:
             free = None
-            if self.o.get('team_hp_min', TEAM_HP_MIN) > 0 and not self.hp_fresh():
+            if self.o.get('team_hp_min', TEAM_HP_MIN) > 0 and not self.hp_fresh():   # 預設 0 = 只讀空格（bag_short → bag_free）；> 0 才連 HP 一起讀（舊行為）
                 rc, scan = self.T.team_scan(ALL_ROLES, True, True)
                 if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
                     return rc
@@ -954,7 +955,7 @@ class Run:
         """補血檢查（任務開始前、BOSS 戰後下一片之前）：隊長 HUD HP < --hp-min，或全隊（bag.hps）任一人 < --team-hp-min → heal 全隊（小護士補整隊）+ team.form。
         全隊讀不到（背包打不開 / 選不到角色）→ 只看隊長並記事件；某人 HP 讀不出 = 不知道，不單獨觸發補血。
         pre = (rc, {角色: %}) 呼叫端已讀好（team_scan）；非 BOSS 後且 HP_FRESH_S 內確認過、之間沒戰鬥 → 沿用不讀。
-        boss=True（BOSS 戰後）有人 HP 0 或讀不出 → 記風險事件（任務完成時當場逐人驗）；team_min = 這次的全隊門檻（kind=fight 步 BOSS 前用 hp_min，預設 --team-hp-min）"""
+        （2026-10-14 起 BOSS 後 HP 0 / 讀不出不再記風險事件）；team_min = 這次的全隊門檻（kind=fight 步 BOSS 前用 hp_min，預設 --team-hp-min）"""
         thr = team_min if team_min else self.o.get('team_hp_min', TEAM_HP_MIN)
         hp = self.T.hp_pct()
         self.info['hp_pct'] = hp
@@ -974,15 +975,11 @@ class Run:
                 self.info['team_hp'] = pct
                 if rc or not pct:
                     event(f'{where}：讀不到全隊 HP（bag rc={rc}）→ 只看隊長 HP {hp}%')
-                    if boss:
-                        self.mark_risk('BOSS 戰後讀不到全隊 HP')
                 else:
                     read_ok = True
                     unread = [r for r, v in pct.items() if v is None]
                     low.update({r: v for r, v in pct.items() if v is not None and v < thr})
                     event(f'{where}：全隊 HP {pct}' + (f'（讀不出 {unread}）' if unread else ''))
-                    if boss and (unread or any(v == 0 for v in pct.values())):
-                        self.mark_risk(f'BOSS 戰後 HP 0 / 讀不出 {[r for r, v in pct.items() if not v]}')
         if not low:
             if read_ok:
                 self.hp_ok_at = time.time()
@@ -1028,7 +1025,7 @@ class Run:
         want = (sd['map'], sd['xy'][0], sd['xy'][1])
         last = None
         for attempt in range(FIGHT_TRIES):
-            rc = self.hp_gate(f'任務 {tid} 步 {step} BOSS 前', boss=True, team_min=sd.get('hp_min'))   # 一定讀全隊（不沿用快取）
+            rc = self.hp_gate(f'任務 {tid} 步 {step} BOSS 前', boss=True)   # 2026-10-14 起只看隊長 HUD HP（--team-hp-min > 0 才讀全隊）
             if rc:
                 return rc, None
             pos = T.read_pos()
@@ -1406,30 +1403,14 @@ class Run:
                     continue
                 return self.fail(EXIT_STEP, f'任務 {tid}：追蹤沒反應（quest.py 3）且目前步驟（{st2}）沒有 walk 設定', quest_rc=rc)
             if act in ('check', 'gone'):
-                if act == 'check' and any('任務完成' in str(x) for x in tail):   # quest.py：領獎後追蹤欄掃完沒有該任務 → 完成，不開詳情
+                # 2026-10-14 使用者定：完成判斷不再開任務詳情。quest.py 印「任務完成」或回 5（追蹤欄找不到該任務）= 完成；
+                # 時間到 / 提前結束 / 其他模糊結束 = 還沒完成，直接下一片（真的完成會由下一片 quest.py 回「任務完成」或 5）
+                if act == 'gone' or any('任務完成' in str(x) for x in tail):
                     ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
                     self.save()
-                    event(f'任務 {tid}「{d["detail"]}」已完成（quest.py 任務完成；{int(time.time() - t0)} 秒、{k + 1} 片）')
+                    event(f'任務 {tid}「{d["detail"]}」已完成（quest.py {"回 5 追蹤欄找不到該任務" if act == "gone" else "任務完成"}；不開詳情；{int(time.time() - t0)} 秒、{k + 1} 片）')
                     return self.task_done(d, ts)
-                if act == 'check' and time_up(tail):                    # quest.py 只是 slice 時間到（任務還在追蹤欄、沒說完成）：不開詳情，直接下一片；
-                    continue                                           # 真的完成會在下一片由 quest.py 回 5（追蹤欄沒有該任務）或「任務完成」→ 那時才讀詳情確認
-                if act == 'check' and early_end(tail):                 # 「步驟結束 …，提前結束」：還有下一步 → 直接下一片（真的完成時下一片回「任務完成」/ 5）
-                    event(f'任務 {tid}：quest.py 步驟結束提前收片 → 不開詳情，直接下一片')
-                    continue
-                rc, s2 = self.status_of(d)                              # 沒有「任務完成」字樣、也不是時間到 / 提前結束（模糊）→ 才讀一次詳情
-                self.opens(ts)
-                if rc:
-                    return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 完成確認讀狀態失敗 rc={rc}')
-                if s2 == DONE:
-                    ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
-                    self.save()
-                    event(f'任務 {tid}「{d["detail"]}」已完成（{int(time.time() - t0)} 秒、{k + 1} 片）')
-                    return self.task_done(d, ts)
-                if act == 'gone':
-                    return self.fail(EXIT_STEP, f'任務 {tid}：quest.py 找不到追蹤列表上的任務，詳情狀態是 {s2}', quest_rc=rc, status=s2)
-                if s2 == PENDING:
-                    return self.fail(EXIT_STEP, f'任務 {tid}：詳情狀態是待接取（沒接成？）', status=s2)
-                continue                                               # 進行中：下一片
+                continue                                               # 時間到 / 提前結束 / 模糊結束：下一片
             if rc == 19:                                               # quest.py 已「刷新角色 + 點地面 / 重點追蹤」解卡 3 次仍卡
                 if rewarps < 2:                                        # 先試刷新 + 走上最近的換圖出口（出口附近打轉），再重點追蹤
                     rewarps += 1
@@ -1817,7 +1798,7 @@ def main() -> int:
     p.add_argument('--slice-s', type=int, default=SLICE_S)
     p.add_argument('--max-min', type=int, default=MAX_MIN)
     p.add_argument('--hp-min', type=int, default=HP_MIN)
-    p.add_argument('--team-hp-min', type=int, default=TEAM_HP_MIN, help='全隊任一人 HP 低於這個 %% 就補血（任務開始前 / BOSS 戰後；0 = 不讀全隊，只看隊長）')
+    p.add_argument('--team-hp-min', type=int, default=TEAM_HP_MIN, help='全隊任一人 HP 低於這個 %% 就補血（任務開始前 / BOSS 戰後；預設 0 = 不讀全隊血量，只看隊長 HUD；2026-10-14 使用者定）')
     p.add_argument('--no-boss-retry', action='store_true', help='BOSS 戰後不滿 5 人（38 / 21）不自動補人，直接 114 停手')
     p.add_argument('--no-trust-progress', action='store_true', help='不信進度檔的「已完成」（預設 2 小時內的完成記錄直接跳過）')
     p.add_argument('--no-verify-all', action='store_true', help='= --verify off（相容舊旗標）')

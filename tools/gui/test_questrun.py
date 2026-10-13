@@ -219,7 +219,12 @@ class Fake:
     def quest(self, args, timeout=0):
         self.rec('quest', tuple(str(a) for a in args))
         self.timeouts = getattr(self, 'timeouts', []) + [timeout]
-        return self.quest_q.pop(0) if self.quest_q else (0, [])
+        # 2026-10-14：questrun 不再開詳情判完成；quest.py 回 0 沒有「任務完成」= 下一片。
+        # 舊測試腳本的 (0, []) 當「這片做完」：最後一個腳本片 / 腳本用完 → 印「任務完成」（模擬追蹤欄找不到任務）
+        rc, tail = self.quest_q.pop(0) if self.quest_q else (0, [])
+        if rc == 0 and not tail and not self.quest_q:
+            tail = ['任務完成：假']
+        return rc, tail
 
     def read_pos(self):
         return self.pos
@@ -367,7 +372,10 @@ rc = go(f, [2017])
 n = f.names()
 check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', '地雷區') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
 check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
-check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh；片內 HP 檢查門檻 = --team-hp-min', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh', '--hp-check-min', '60', '--hp-check-every', '3')) in f.calls, str(f.calls))
+check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh；片內 HP 檢查門檻 = --team-hp-min', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh')) in f.calls, str(f.calls))
+f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2017], team_hp_min=60)
+check('--team-hp-min 60（舊行為）→ quest.py 帶 --hp-check-min 60 --hp-check-every 3', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh', '--hp-check-min', '60', '--hp-check-every', '3')) in f.calls, str(f.calls))
 check('交接不再另讀當前角色（team.form 同一次面板確認）', 'current' not in n and 'char_ensure' not in n)
 check('預設不吃龍王的守護（2026-10-12 起要 --dragon）', 'dragon' not in n, str(n))
 check('交接：關遇敵 → 戰鬥設定檢查 → team.form（battle_check 只 1 次）', n.count('battle_check') == 1 and n.index('enc_off') < n.index('battle_check') < n.index('team_form'), str(n))
@@ -541,7 +549,7 @@ check('沒 VS 卡死 → 不重登', go(f, [2017]) == questrun.EXIT_STEP and 're
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(5, [])])
 check('5 且詳情已完成 → 成功', go(f, [2017]) == 0)
 f = Fake(status={D17: [questrun.DOING, questrun.DOING]}, quest=[(5, [])])
-check('5 且仍進行中 → 112', go(f, [2017]) == questrun.EXIT_STEP)
+check('5 → 追蹤欄找不到 = 完成（2026-10-14 不開詳情）', go(f, [2017]) == 0 and 'status' not in f.names(), str(f.names()))
 
 # 10) 33 / 25 / 39 / 2 / 10 / 21 / 其他
 for code, want, label in ((33, questrun.EXIT_STALL, '117'), (25, questrun.EXIT_BATTLE, '118'), (39, questrun.EXIT_IRREV, '116'),
@@ -579,19 +587,19 @@ f = Fake(status={D99: [questrun.DOING]}, bag={'DKBO': 5, 'DKBO2': 0, 'DKBO3': 5,
 f.purge_rc = 96
 check('purge 失敗（提示窗清單核對不過 96）→ 110、不跑', go(f, [2999]) == questrun.EXIT_PREFLIGHT and 'quest' not in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], hp=30)
-go(f, [2017])
+go(f, [2017], team_hp_min=60)
 check('HP 30% < 50% → 補血後重組隊', 'heal' in f.names() and f.names().index('heal') < f.names().index('quest'))
 # 13b) 全隊 HP（2026-10-12 四寶玉之謎：只看隊長 → 隊員約 50% 連打 BOSS 被打死踢隊 4 次 38）
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(0, {'DKBO': 90, 'DKBO2': 95, 'DKBO3': 45, 'DKBO4': 100, 'DKBO5': None})])
-go(f, [2017])
+go(f, [2017], team_hp_min=60)
 n = f.names()
 check('任務前隊員 DKBO3 45% < 60% → 補血（整隊）→ team.form → 才跑 quest', 'heal' in n and n.index('heal') < n.index('quest') and 'team_form' in n[n.index('heal'):n.index('quest')], str(n))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(0, {'DKBO': 90, 'DKBO2': 95, 'DKBO3': 80, 'DKBO4': 100, 'DKBO5': None})])
-go(f, [2017])
+go(f, [2017], team_hp_min=60)
 check('全隊 ≥ 60%（有人讀不出）→ 不補血', 'heal' not in f.names() and f.team_hp_n == 1)
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(37, []), (0, ['任務完成：x'])],
          team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {'DKBO': 70, 'DKBO2': 70, 'DKBO3': 70, 'DKBO4': 70, 'DKBO5': 30})])
-rc = go(f, [2017])
+rc = go(f, [2017], team_hp_min=60)
 n = f.names()
 qs = [i for i, c in enumerate(n) if c == 'quest']
 check('BOSS 戰後（37）DKBO5 30% → 下一片前補血 + 組隊', rc == 0 and f.team_hp_n == 2 and len(qs) == 2 and 'heal' in n and qs[0] < n.index('heal') < qs[1]
@@ -599,20 +607,20 @@ check('BOSS 戰後（37）DKBO5 30% → 下一片前補血 + 組隊', rc == 0 an
 # 隊伍散了（30）：先讀全隊 HP → 偏低先補血 → team.form --regroup（2026-10-13 四寶玉之謎 DKBO3 / DKBO5 戰後掉隊）
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, ['任務完成：x'])],
          team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {'DKBO': 80, 'DKBO2': 80, 'DKBO3': 0, 'DKBO4': 80, 'DKBO5': 0})])
-rc = go(f, [2017])
+rc = go(f, [2017], team_hp_min=60)
 n = f.names()
 qs = [i for i, c in enumerate(n) if c == 'quest']
 check('30 隊伍散了、掉隊者 HP 0 → 補血後 team.form --regroup 再跑', rc == 0 and f.team_hp_n == 2 and 'heal' in n and 'team_regroup' in n
       and qs[0] < n.index('heal') < n.index('team_regroup') < qs[1], str(n))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, ['任務完成：x'])],
          team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {r: 90 for r in questrun.ALL_ROLES})])
-rc = go(f, [2017])
+rc = go(f, [2017], team_hp_min=60)
 n = f.names()
 check('30 隊伍散了、HP 都夠 → 不補血、直接 --regroup', rc == 0 and 'heal' not in n and 'team_regroup' in n, str(n))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(90, {})])
-check('全隊讀不到（bag 90）→ 不補血、照跑（只看隊長）', go(f, [2017]) == 0 and 'heal' not in f.names() and 'quest' in f.names())
+check('全隊讀不到（bag 90）→ 不補血、照跑（只看隊長）', go(f, [2017], team_hp_min=60) == 0 and 'heal' not in f.names() and 'quest' in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(9, {})])
-check('全隊讀 HP 時 bag 回 9（驗證視窗）→ 透傳 9、不跑 quest', go(f, [2017]) == 9 and 'quest' not in f.names())
+check('全隊讀 HP 時 bag 回 9（驗證視窗）→ 透傳 9、不跑 quest', go(f, [2017], team_hp_min=60) == 9 and 'quest' not in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
 go(f, [2017], team_hp_min=0)
 check('--team-hp-min 0 → 不讀全隊', f.team_hp_n == 0)
@@ -1112,7 +1120,7 @@ rc = go(f, [2017])
 check('slice「時間到」→ 不開詳情，直接下一片（只有開頭 accept 那一次讀詳情）', rc == 0 and f.names().count('quest') == 2 and f.names().count('status') == 0 and f.names().count('accept') == 1, str(f.names()))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, ['步驟結束（對話 1）'])])
 rc = go(f, [2017])
-check('不是時間到、也沒「任務完成」（模糊）→ 仍讀一次詳情確認', rc == 0 and f.names().count('status') == 1, str(f.names()))
+check('不是時間到、也沒「任務完成」（模糊）→ 不開詳情、直接下一片（2026-10-14）', rc == 0 and f.names().count('status') == 0 and f.names().count('quest') == 2, str(f.names()))
 check('quest 子程序逾時 = slice + WALK_CAP_S + 120（巡路不計時，不能被 slice+120 砍）', f.timeouts and f.timeouts[0] == questrun.SLICE_S + questrun.WALK_CAP_S + 120, str(getattr(f, 'timeouts', None)))
 # 巡路時間不計入 --max-min：假時鐘，每次 quest 過 40 秒，max_min=1（60 秒）
 import types as _ty  # noqa: E402
@@ -1244,8 +1252,8 @@ sa = [c[1] for c in f.calls if c[0] == 'status_all']
 check('risk：2017 有 quest.py 30（隊伍散）→ 2017 當場驗；2015 沒事 → 結束批次驗', sa == [(D17,), (D15,)] and f.names().index('status_all') < f.names().index('accept', 8), str(sa))
 f = Fake(status={D17: [questrun.DOING]}, quest=[(37, []), (0, done_tail)],
          team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {'DKBO': 90, 'DKBO2': 90, 'DKBO3': 0, 'DKBO4': 90, 'DKBO5': 90})])
-go(f, [2017])
-check('risk：BOSS 戰後有人 HP 0 → 風險事件（補血後當場驗）', 'heal' in f.names() and any('風險事件' in ln for ln in questrun.EVENT_LOG.read_text(encoding='utf-8').splitlines()))
+go(f, [2017], team_hp_min=60)
+check('BOSS 戰後有人 HP 0（舊行為 team_hp_min=60）→ 補血，但不再記風險事件（2026-10-14）', 'heal' in f.names() and not any('當場逐人驗' in ln for ln in questrun.EVENT_LOG.read_text(encoding='utf-8').splitlines()))
 f = Fake(status={D99: [questrun.DOING], D17: [questrun.PENDING]}, quest=[(0, done_tail), (0, done_tail)])
 rc = go(f, [2999, 2017])
 n = f.names()
@@ -1290,15 +1298,15 @@ go(f, [2017])
 check('bossretry 後戰鬥設定快取作廢（進度檔 battle_ok_at = 0）', not questrun.load_progress().get('battle_ok_at'))
 # --- §5.2 / §5.3 全隊 HP 5 分內且沒戰鬥沿用；背包空格與 HP 同一次開背包 ---
 f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail + ['本片戰鬥 0 場']), (0, done_tail)])
-go(f, [2017, 2015])
+go(f, [2017, 2015], team_hp_min=60)
 check('第一任務沒打仗（本片戰鬥 0 場）→ 第二任務開始前全隊 HP 沿用（只讀 1 次）', f.team_hp_n == 1, str(f.team_hp_n))
 check('任務開始前背包空格 + HP 用 team_scan 同一次讀；HP 沿用的那次只讀空格（bag_free）', f.names().count('team_scan') == 1 and f.names().count('bag_free') == 1
       and f.names().index('team_scan') < f.names().index('bag_free'), str(f.names()))
 f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail + ['本片戰鬥 2 場']), (0, done_tail)])
-go(f, [2017, 2015])
+go(f, [2017, 2015], team_hp_min=60)
 check('第一任務打過仗 → 第二任務開始前重讀（2 次）', f.team_hp_n == 2, str(f.team_hp_n))
 f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail), (0, done_tail)])
-go(f, [2017, 2015])
+go(f, [2017, 2015], team_hp_min=60)
 check('quest.py 沒印戰鬥場數（舊版）→ 當打過仗、重讀', f.team_hp_n == 2)
 # --- §3 龍王：只對長巡路任務吃、整疊留背包、run 結束存回、skip 不計 ---
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, done_tail)])
@@ -1444,8 +1452,8 @@ check('紅暴步 6：便捷傳送龍王守衛 → --fight → team.check', ('war
       and n.index('warp') < n.index('team_check'), str([c for c in f.calls if c[0] in ('warp', 'team_check')]))
 check('紅暴：完成後 英雄的祝福存個人、龍王的守護存公共；不另存 DKBO 那疊（dragon_store）', ('store_many', '英雄的祝福', 'personal') in f.calls
       and ('store_many', '龍王的守護', 'public') in f.calls and 'dragon_store' not in n, str([c for c in f.calls if c[0].startswith('store') or c[0] == 'dragon_store']))
-check('--stop-after-rewards 收片不開詳情（只有接取 + 最後 gone 確認）', n.count('status') == 1, str(n.count('status')))
-check('步 6 BOSS 前一定讀全隊 HP（不沿用）', f.team_hp_n >= 2)
+check('--stop-after-rewards 收片不開詳情（完成判斷也不開）', n.count('status') == 0, str(n.count('status')))
+check('步 6 BOSS 前不讀全隊 HP（2026-10-14）', f.team_hp_n == 0)
 
 f = hero(HAPPY_Q, HAPPY_S)
 f.no_dragon = True
