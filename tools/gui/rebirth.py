@@ -20,7 +20,7 @@
 階段（每階段開始 / 結束都寫 notes/quest-events.log、tools/.cache/rebirth.json；失敗另寫 errlog）：
   preflight 前置檢查：當前角色 = DKBO、team.form 滿 5 人、5 人轉數 / 等級、5 人 4 件證明（大地的羈絆 / 水的戒指 / 火的羽毛飾品 / 風的鎖）、
             背包 / 寵物欄空位 ≥ 2、heal 補滿
-  accept    接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
+  accept    接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（先看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
   enter     quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
   boss10    龍王的守護（背包沒有就從公共倉庫取）→ quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認進到 11F（32011）
   bow16     龍王的守護 → quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）

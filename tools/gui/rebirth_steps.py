@@ -7,7 +7,8 @@
   uv run --no-project python tools/gui/rebirth_steps.py drop-reward --trans 3 [--dry-run]   # 轉生後丟 5 人的獎勵寵（見下）
   可 import：accept_task(n, T=None)、reward_name(n)、find_new_lv1(before, after)、drop_rewards(n, before, T=None, dry_run=False)
 
-接任務（accept_task）：用 questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)。任務詳情列表 / 中間標題用樣板精確比對（(三轉) / (五轉) 只差一字也分得開，
+接任務（accept_task）：先看任務追蹤欄——有標題精確等於「漆黑洞窟(N轉)」的卡片（titlematch 圖樣板；沒樣板 / 不確定不用 OCR）→ quest.track_task 點卡片巡路到村長 →
+  questdetail._after_transfer（選單頁翻頁 → 接受 → 驗進行中）；沒有卡、或點卡後 20 秒沒對話框才 fallback：questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)。任務詳情列表 / 中間標題用樣板精確比對（(三轉) / (五轉) 只差一字也分得開，
   標題對不上就不傳送、不亂點）；傳送到村長後對話框第 1 頁是選單（左鈕「漆黑洞窟」）→ 先點左鈕翻頁（questdetail 2d0e38d 的選單頁邏輯）→ 第 2 頁「接受」→
   重開詳情驗證「進行中」。已進行中 = 跳過（回 0）；已完成 = 失敗（轉生 / 封印書後任務會重置，已完成表示轉數不對）。
 轉生獎勵寵：一轉 = 烏力斯坦、二轉 = 奇娜（REWARD，實機）；三轉起沒有對照表 → 轉生前後寵物欄 diff：
@@ -48,7 +49,26 @@ def accept_task(n: int, T=None) -> int:
     LAST.clear()
     title = task_name(n)
     T = T or _AcceptTools()
-    rc = T.accept(title)
+    rc = None
+    # 先看任務追蹤欄（使用者規定）：有標題「精確」相符的卡片 → 點卡片自動巡路到村長 → 選單翻頁 → 接受 → 驗進行中；
+    # 沒有卡 / 比對不確定（沒樣板、分數不夠）→ 才走任務詳情 fallback。卡片路徑只在「點了卡但 20 秒沒出現對話框」時退回 fallback（沒按過任何鈕）
+    try:
+        card = T.card_visible(title)
+    except AttributeError:                                           # 測試用假 T 沒實作 → 當沒有卡
+        card = False
+    LAST['via'] = 'detail'
+    if card:
+        LAST['via'] = 'tracker'
+        print(f'{SRC}：追蹤欄有「{title}」卡片 → 點卡片巡路到村長接取', flush=True)
+        rc = T.accept_card(title)
+        if rc == _NO_DIALOG:
+            print(f'{SRC}：點卡片後沒出現對話框 → 退回任務詳情接取', flush=True)
+            LAST['via'] = 'detail'
+            rc = None
+    else:
+        print(f'{SRC}：追蹤欄沒有（或比對不確定）「{title}」→ 任務詳情接取', flush=True)
+    if rc is None:
+        rc = T.accept(title)
     st = T.accept_state()
     LAST.update(accept_rc=rc, state=st)
     if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
@@ -61,7 +81,27 @@ def accept_task(n: int, T=None) -> int:
     return 0
 
 
+_NO_DIALOG = 125                                                     # = questdetail.EXIT_NO_DIALOG
+
+
 class _AcceptTools:
+    def card_visible(self, title):
+        """追蹤欄目前這頁有標題精確等於 title 的卡片（titlematch 圖樣板，(三轉) / (五轉) 分得開；沒樣板 / 不確定 = False，不用 OCR 模糊比對）"""
+        import quest
+        import titlematch
+        if uikit.preflight(SRC):
+            return False
+        quest.ensure_task_tab()
+        return titlematch.has_templates(title) and titlematch.find(title) is not None
+
+    def accept_card(self, title):
+        """點追蹤卡（quest.track_task，標題相符才點）→ 等村長對話框 → questdetail 既有的對話處理（選單頁翻頁 → 接受 → 重開詳情驗進行中）"""
+        import quest
+        import questdetail
+        if quest.track_task(title) is not True:
+            return _NO_DIALOG
+        return questdetail._after_transfer(SRC, title, 2, True)
+
     def accept(self, title):
         import questdetail
         return questdetail.accept(title, skip_ok=True)

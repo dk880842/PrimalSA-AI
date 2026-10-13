@@ -121,6 +121,28 @@ check('accept_task：任務名 = 漆黑洞窟(三轉)、成功 0', quiet(rs.acce
 check('accept_task：已進行中 → 0（跳過）', quiet(rs.accept_task, 2, AccT(0, 'doing')) == 0)
 check('accept_task：已完成 → 97（不接）', quiet(rs.accept_task, 2, AccT(0, 'done')) == 97)
 check('accept_task：questdetail 126 → 97；9 / 10 透傳', quiet(rs.accept_task, 2, AccT(126, None)) == 97 and quiet(rs.accept_task, 2, AccT(9, None)) == 9 and quiet(rs.accept_task, 2, AccT(10, None)) == 10)
+class CardT(AccT):
+    def __init__(self, card, card_rc=0, **k):
+        super().__init__(**k)
+        self.card, self.card_rc, self.cards = card, card_rc, []
+
+    def card_visible(self, title):
+        return self.card
+
+    def accept_card(self, title):
+        self.cards.append(title)
+        return self.card_rc
+
+
+c = CardT(True, st='accepted')
+check('accept_task：追蹤欄有卡 → 走卡片路徑、不開詳情', quiet(rs.accept_task, 3, c) == 0 and c.cards == ['漆黑洞窟(三轉)'] and c.titles == [] and rs.LAST.get('via') == 'tracker')
+c = CardT(False)
+check('accept_task：追蹤欄沒卡 → fallback questdetail', quiet(rs.accept_task, 3, c) == 0 and c.cards == [] and c.titles == ['漆黑洞窟(三轉)'] and rs.LAST.get('via') == 'detail')
+c = CardT(True, card_rc=125)
+check('accept_task：點卡後沒對話框(125) → 退回 questdetail', quiet(rs.accept_task, 2, c) == 0 and len(c.cards) == 1 and c.titles == ['漆黑洞窟(二轉)'] and rs.LAST.get('via') == 'detail')
+c = CardT(True, card_rc=126)
+check('accept_task：卡片路徑對話防護 126 → 97、不 fallback', quiet(rs.accept_task, 2, c) == 97 and c.titles == [])
+check('accept_task：卡片路徑 9 透傳', quiet(rs.accept_task, 2, CardT(True, card_rc=9)) == 9)
 check('task_name 各轉', [rs.task_name(i) for i in range(1, 6)] == [f'漆黑洞窟({c}轉)' for c in '一二三四五'])
 
 # ================= rebirth_steps：獎勵寵 diff =================
