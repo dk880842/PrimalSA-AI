@@ -18,7 +18,7 @@
   可 import：rebirth.run(trans=None, from_stage='preflight', dry_run=False, ..., tools=None) → 退出碼；結果 dict 在 rebirth.LAST
 
 階段（每階段開始 / 結束都寫 notes/quest-events.log、tools/.cache/rebirth.json；失敗另寫 errlog）：
-  preflight 前置檢查：當前角色 = DKBO、team.form 滿 5 人、5 人轉數 / 等級、5 人 4 件證明（大地的羈絆 / 水的戒指 / 火的羽毛飾品 / 風的鎖）、
+  preflight 前置檢查：當前角色 = DKBO、team.form 滿 5 人、5 人轉數 / 等級（不再查四大洞窟證明：2026-10-13 find_items 讀字不穩兩次誤判 81；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理）、
             背包 / 寵物欄空位 ≥ 2、heal 補滿
   accept    接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（先看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
   enter     quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
@@ -38,7 +38,7 @@
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79、90～96；rebirth 自己 80～89）：
   80 等級 / 轉數不符（info.levels 看誰）或讀不到等級
-  81 缺四件證明（info.missing）
+  81 保留不用（原「缺四件證明」，2026-10-13 起 preflight 不再檢查）
   82 背包 / 寵物欄空位不足
   83 隊伍 / 當前角色（不是 DKBO、team.form 失敗、補隊失敗）
   84 quest.py 階段沒完成（非預期退出碼 / 地圖不對 / 逾時；info.quest_rc、info.pos）
@@ -639,19 +639,13 @@ class Run:
         bad = {r: v for r, v in lv.items() if not v or v[0] != self.n - 1 or v[1] < level_min(self.n)}
         if bad:
             return self.fail(EXIT_LEVEL, f'要「{self.n - 1}轉 ≥{level_min(self.n)} 級」才能做 {self.task}；不符 / 讀不到：{bad}', bad=bad)
-        miss = {}
         space = {}
         for r in ALL_ROLES:
-            rc, it = T.find_items(r, CERTS)
+            rc, it = T.find_items(r, [])        # 只讀空格數；不查四大洞窟證明（2026-10-13：讀字不穩誤判 81）
             if rc:
-                return self.fail(EXIT_ITEMS, f'{r} 查證明失敗 bag rc={rc}', bag_rc=rc)
-            gone = [c for c in CERTS if it.get(c) is None]
-            if gone:
-                miss[r] = gone
+                return self.fail(EXIT_SPACE, f'{r} 讀背包空格失敗 bag rc={rc}', bag_rc=rc)
             space[r] = it.get('_free')
         self.info['bag_free'] = space
-        if miss:
-            return self.fail(EXIT_ITEMS, f'缺四大洞窟證明：{miss}（轉生 / 封印書後要重做洞窟）', missing=miss)
         short = {r: v for r, v in space.items() if v is not None and v < 2}
         rc, pe = T.pet_empties()
         if rc:
@@ -829,8 +823,7 @@ class Run:
 
 
 DRY_PLAN = {
-    'preflight': ['char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人', 'bag.levels：5 人 (N-1)轉 ≥{lv} 級（80）', '每人 4 件證明（81）',
-                  '背包 / 寵物欄空位各 ≥2（82）', 'heal.heal_trip --no-return（87）'],
+    'preflight': ['char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人', 'bag.levels：5 人 (N-1)轉 ≥{lv} 級（80）', '背包 / 寵物欄空位各 ≥2（82）', 'heal.heal_trip --no-return（87）'],
     'accept': ['questdetail.accept {t}（任務詳情列表 / 中間標題精確樣板比對 → 傳送瑪麗娜絲村長 → 對話選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗證進行中；已進行中略過）（97）'],
     'enter': ['quest.py --task {t} --stop-after-dialog --max-seconds 240（最多 3 輪）→ 地圖 32001'],
     'boss10': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use）', 'quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認地圖 32011'],
@@ -851,7 +844,7 @@ def print_plan(n: int, from_stage: str, opts: dict) -> None:
         print(f'[{s}]')
         for ln in DRY_PLAN[s]:
             print('  - ' + ln.format(t=task_name(n), lv=level_min(n), act=opts.get('pet_action')))
-    print('退出碼：80 等級 81 證明 82 空位 83 隊伍 84 quest 階段 85 BOSS 86 背包/寵物 87 補血/外掛/傳送 88 轉生對話 89 等人 97 接任務 98 獎勵寵不確定；9 驗證視窗 10 斷線')
+    print('退出碼：80 等級 (81 保留) 82 空位 83 隊伍 84 quest 階段 85 BOSS 86 背包/寵物 87 補血/外掛/傳送 88 轉生對話 89 等人 97 接任務 98 獎勵寵不確定；9 驗證視窗 10 斷線')
     print('quest.py 回 19 / 42（巡路卡住 / VS 牌卡死）→ 全員重登（stuckrecover）後重跑同階段，每階段最多 2 次')
 
 
