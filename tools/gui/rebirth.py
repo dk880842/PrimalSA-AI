@@ -9,7 +9,7 @@
   uv run --no-project python tools/gui/rebirth.py [--trans N] [--from 階段] [--dry-run] [--keep-old-weapon] [--confirm-rebirth] [--pet-action 忠犬|攻擊|防禦|none]
     --trans N        這次要轉到第 N 轉（預設 = 目前轉數 + 1；從 preflight 以外階段續跑時用上次進度檔的 N，沒有就要明講）
                      任務組 = 2004 + N - 1；等級門檻 N=1～4 為 131、N=5 為 140（knowledge/quests/tasks.md）
-    --from 階段      從這個階段開始（中斷後接著做）：preflight enter boss10 bow16 swap heal boss20 rebirth cleanup；--to 階段 = 跑到該階段（含）就停
+    --from 階段      從這個階段開始（中斷後接著做）：preflight accept enter boss10 bow16 swap heal boss20 rebirth cleanup；--to 階段 = 跑到該階段（含）就停
     --dry-run        只印計畫（階段 / 要跑的指令 / 退出碼），完全不碰遊戲
     --keep-old-weapon 換弓後不丟舊武器
     --confirm-rebirth 精靈王轉生頁確認是「角色轉生」後停下（退出碼 89，對話框維持開著）等人；預設不停直接轉（使用者 2026-10-11：不用停）
@@ -20,10 +20,12 @@
 階段（每階段開始 / 結束都寫 notes/quest-events.log、tools/.cache/rebirth.json；失敗另寫 errlog）：
   preflight 前置檢查：當前角色 = DKBO、team.form 滿 5 人、5 人轉數 / 等級、5 人 4 件證明（大地的羈絆 / 水的戒指 / 火的羽毛飾品 / 風的鎖）、
             背包 / 寵物欄空位 ≥ 2、heal 補滿
+  accept    接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
   enter     quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
   boss10    龍王的守護（背包沒有就從公共倉庫取）→ quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認進到 11F（32011）
   bow16     龍王的守護 → quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）
-  swap      5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器（名稱防護；--keep-old-weapon 跳過）
+  swap      5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器（名稱防護；--keep-old-weapon 跳過）；
+            武器格本來就是弓（already：上一轉的弓）→ 背包裡 16F 新給的那把是多的，bag.drop_spare_bow 丟掉（--allow-protected，武器格不動，二轉實測要丟）
   heal      heal.py --no-return → ass.py 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」→ team.form
   boss20    龍王的守護 → quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
             便捷傳送落在 32021:31,29（21 樓精靈王旁），BOSS 在上一層 32020:20,9。quest.py 退出碼不是 37 / 38 且人仍在 32021（追蹤沒走回去，如 3 / 19）→
@@ -31,7 +33,8 @@
             走不回 / 換圖失敗 → 84（info.backtrack = band / exit / spot）；被打飛者重打（refight）若追蹤把人傳到 21F 也先走回 20F（單人不 team.check）
   rebirth   team.form → quest.py 預設模式（守門人 → 精靈王）→ 39 時 OCR 對話判斷：「角色轉生」才放行（點完成 + quest.py --allow-irreversible 收尾），
             「寵物轉生」/ 讀不到 / 位置不在精靈王旁 → 88；--confirm-rebirth → 89；放行後確認 5 人轉數 = N
-  cleanup   丟 5 人烏力斯坦（petdrop）→ 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
+  cleanup   丟 5 人轉生獎勵寵（一轉烏力斯坦 / 二轉奇娜：petdrop 名稱 + Lv1；三轉起：rebirth 階段先拍寵物欄快照、這裡 diff 找「剛好 1 隻新出現的 Lv1」，
+            名字 + Lv1 驗過才丟，任何不確定 → 98，不碰騎寵 / 戰寵）→ 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79、90～96；rebirth 自己 80～89）：
   80 等級 / 轉數不符（info.levels 看誰）或讀不到等級
@@ -44,6 +47,10 @@
   87 補血 / 外掛戰寵動作 / 便捷傳送失敗
   88 精靈王對話不是「角色轉生」（寵物轉生 / 讀不到 / 位置不對），或轉生後驗證轉數沒變
   89 --confirm-rebirth 停下等人
+  97 接任務失敗（info.accept_rc = questdetail 退出碼；已完成 / 條件不達標 / 標題對不上都不亂點）
+  98 轉生獎勵寵無法確認（三轉起：沒快照 / 0 或多隻候選 / 名字或 Lv 讀不出）→ 一律不丟，人看寵物欄
+卡住自動重登：任何階段的 quest.py 回 19（自動巡路卡住）/ 42（VS 牌卡死）→ stuckrecover.relogin_team（relogin.py --stuck --confirm，只按已帶入帳密的「登錄」；105 → team.form）→
+team.check / form → 重吃龍王 → 重跑同一個 quest.py 指令；每階段最多 2 次（info.relogin_rc 記重登碼），仍卡 / 重登失敗 → 84；重登遇 9 / 10 → 原碼停手。--fight（單人重打）不重登。
 驗證視窗（quest 回 2 / uikit 回 9）→ 一律回 9 並停手（鐵則 5）；斷線（netwatch halt）→ 10。
 """
 import argparse
@@ -57,6 +64,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import charstate  # noqa: E402
+import rebirth_steps  # noqa: E402  接任務 / 轉生獎勵寵（可獨立呼叫的小步驟）
+import stuckrecover  # noqa: E402  卡住自動重登（questrun 同一份）
 import uikit  # noqa: E402
 
 SRC = 'rebirth'
@@ -67,15 +76,16 @@ QUEST_LOG = logpaths.p(ROOT / 'notes' / 'quest-log.md')
 PROGRESS = logpaths.p(uikit.CACHE / 'rebirth.json')
 
 EXIT_LEVEL, EXIT_ITEMS, EXIT_SPACE, EXIT_TEAM, EXIT_QUEST, EXIT_BOSS, EXIT_BAG, EXIT_SETUP, EXIT_REBIRTH, EXIT_CONFIRM = 80, 81, 82, 83, 84, 85, 86, 87, 88, 89
+EXIT_ACCEPT, EXIT_REWARD = rebirth_steps.EXIT_ACCEPT, rebirth_steps.EXIT_REWARD    # 97 接任務失敗 / 98 轉生獎勵寵無法確認（80～89 已用完）
 
-STAGES = ['preflight', 'enter', 'boss10', 'bow16', 'swap', 'heal', 'boss20', 'rebirth', 'cleanup']
+STAGES = ['preflight', 'accept', 'enter', 'boss10', 'bow16', 'swap', 'heal', 'boss20', 'rebirth', 'cleanup']
 LEADER = 'DKBO'
 ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 CN = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五'}
 CERTS = ['大地的羈絆', '水的戒指', '火的羽毛飾品', '風的鎖']
 BOW = '精靈王之弓'
 DRAGON = '龍王的守護'
-URISTAN = '烏力斯坦'
+URISTAN = rebirth_steps.REWARD[1]       # 一轉獎勵寵（二轉 奇娜；三轉起用轉生前後寵物欄 diff，見 rebirth_steps）
 DRAGON_REEAT_S = 540.0               # 效果約 10 分鐘（2026-10-11 實測）；超過 9 分鐘再吃
 SLICE_S = 540                        # quest.py 單次最長秒數（到點回 0 = 逾時，吃新的龍王再繼續）
 MAP_1F, MAP_10F, MAP_11F, MAP_16F, MAP_20F, MAP_21F = 32001, 32010, 32011, 32016, 32020, 32021
@@ -269,9 +279,25 @@ class Tools:
         import bag
         return bag.swap_weapon(role, BOW, keep_old), dict(bag.LAST)
 
+    def accept(self, n):
+        return rebirth_steps.accept_task(n)
+
+    def relogin(self):
+        return stuckrecover.real_relogin()
+
+    def pet_snapshot(self):
+        """轉生前 5 人寵物欄快照（只在沒有獎勵寵對照表的轉數用）→ (rc, 快照 dict)"""
+        rc, pets = rebirth_steps._PetTools().pets(ALL_ROLES)
+        return rc, rebirth_steps.snapshot_pets(pets)
+
     def drop_pet(self, name):
-        import petdrop
-        return petdrop.drop('all', name, name)
+        """對照表內的獎勵寵：名稱完全相同 + Lv1（--max-level 1）才丟，5 人"""
+        return rebirth_steps._PetTools().drop('all', name, None)
+
+    def drop_new_lv1(self, n, before):
+        """沒有對照表：轉生前後寵物欄 diff（rebirth_steps.drop_rewards）"""
+        rc = rebirth_steps.drop_rewards(n, before)
+        return rc, dict(rebirth_steps.LAST)
 
     def encounter_on(self):
         import heal
@@ -323,6 +349,8 @@ class Run:
         self.info: dict = {}
         self.warnings: list = []
         self.backtracked = False                        # 32021 走回 32020 的備援只試一次
+        self.relogins: dict = {}                        # 階段 → 已自動全員重登次數（每階段最多 stuckrecover.RELOGIN_MAX）
+        self.cur = ''                                   # 目前階段名
 
     # -- 紀錄 --
     def save(self):
@@ -331,6 +359,7 @@ class Run:
         save_progress(self.st)
 
     def begin(self, name):
+        self.cur = name
         self.st['stages'][name] = {'status': 'running', 't0': time.strftime('%H:%M:%S')}
         event(f'階段 {name} 開始（{self.task}）')
         self.save()
@@ -358,16 +387,47 @@ class Run:
 
     # -- 共用步驟 --
     def quest(self, args, timeout=1500):
-        event('quest.py ' + ' '.join(str(a) for a in args))
-        rc, tail = self.T.quest(args, timeout)
-        self.info['quest_rc'] = rc
-        event(f'quest.py 退出碼 {rc}')
-        return rc, tail
+        """跑 quest.py。回 19（巡路卡住）/ 42（VS 牌卡死）→ 全員重登後重跑同一指令（每階段最多 2 次，stuckrecover）；--fight（單人重打）不重登。
+        重登失敗 → 回原退出碼（階段 84，info.relogin_rc）；重登遇驗證視窗 / 斷線 → 回 9 / 10（一律停手）"""
+        recoverable = getattr(self.T, 'relogin', None) is not None and '--fight' not in args
+        while True:
+            event('quest.py ' + ' '.join(str(a) for a in args))
+            rc, tail = self.T.quest(args, timeout)
+            self.info['quest_rc'] = rc
+            event(f'quest.py 退出碼 {rc}')
+            if not (recoverable and stuckrecover.is_stuck(rc) and stuckrecover.allowed(self.relogins.get(self.cur, 0))):
+                return rc, tail
+            n = self.relogins[self.cur] = self.relogins.get(self.cur, 0) + 1
+            rr = self.relogin_recover(rc, n)
+            if rr:
+                self.info['relogin_rc'] = rr
+                return (rr if rr in stuckrecover.HALT_RC else rc), tail
+
+    def relogin_recover(self, rc: int, n: int) -> int:
+        """quest.py 卡住 → 全員重登（登入畫面只按已帶入帳密的「登錄」，鐵則 2）→ team.check / form → 重吃龍王。回 0 = 可重跑同階段；否則退出碼"""
+        T = self.T
+        event(f'{self.cur}：quest.py 退出碼 {rc}（巡路卡住 / VS 牌卡死）→ 全員重登 relogin.py --stuck --confirm（第 {n}/{stuckrecover.RELOGIN_MAX} 次）')
+        status, code = stuckrecover.relogin_team(T.relogin, T.team_form, event)
+        if status != 'ok':
+            event(f'{self.cur}：重登失敗 {status} rc={code}')
+            return code or 1
+        rc2 = T.team_check()
+        if rc2:
+            event(f'{self.cur}：重登後 team.check rc={rc2} → team.form')
+            rc2 = T.team_form()
+            if rc2:
+                event(f'{self.cur}：重登後 team.form 失敗 rc={rc2}')
+                return rc2
+        self.st.pop('last_eat', None)                          # 重登後 buff 狀態不明 → 下一次 ensure_dragon 重吃
+        self.ensure_dragon(force=True)
+        return 0
 
     def quest_stop(self, rc, where: str):
         """quest 非預期退出碼 → 本階段退出碼（2 = 疑似驗證視窗 → 9，鐵則 5）"""
         if rc == 2:
             return self.fail(uikit.EXIT_UNKNOWN_SCREEN, f'{where}：quest.py 看到不認得的畫面（疑似驗證視窗），停手通知使用者', quest_rc=rc)
+        if rc in stuckrecover.HALT_RC:                           # 自動重登遇驗證視窗 / 斷線（9 / 10）：原碼透傳
+            return self.fail(rc, f'{where}：自動重登時{"看到驗證視窗" if rc == 9 else "斷線"}，停手', quest_rc=rc)
         return self.fail(EXIT_QUEST, f'{where}：quest.py 非預期退出碼 {rc}', quest_rc=rc)
 
     def ensure_dragon(self, force: bool = False):
@@ -401,6 +461,16 @@ class Run:
     def read_pos(self):
         return self.T.read_pos()
 
+    def form(self) -> int:
+        """team.form。回 9（uikit.preflight 畫面連 3 次不認得）時等 20 秒只重試一次：二轉 22:20 剛打完 BOSS 回 9、16 秒後原指令就過（過場 / 結算畫面暫時認不得，非驗證視窗）；
+        真的驗證視窗會一直在 → 第 2 次仍 9 就停手（鐵則 5）。重試期間不點任何東西（preflight 只讀）"""
+        rc = self.T.team_form()
+        if rc == uikit.EXIT_UNKNOWN_SCREEN:
+            event('team.form 回 9（畫面連 3 次不認得）→ 等 20 秒只讀重試一次（過場畫面可能；驗證視窗不會自己消失）')
+            self.T.sleep(20)
+            rc = self.T.team_form()
+        return rc
+
     # -- BOSS 後處理 --
     def after_boss(self, name: str, won, boss_map: int) -> int:
         pos = self.read_pos()
@@ -427,7 +497,7 @@ class Run:
             self.T.char_ensure(LEADER)                         # 不論成敗都切回隊長
             if rc:
                 return rc
-        rc = self.T.team_form()
+        rc = self.form()
         if rc:
             return self.fail(EXIT_TEAM, f'{name}：重打後 team.form 失敗 rc={rc}')
         rc = self.T.team_check()
@@ -466,7 +536,7 @@ class Run:
             rc = self.walk_back_20f(f'{name}/{who}', team=False)
             if rc:
                 return rc
-        rc, _ = self.quest(['--fight', '--task', self.task, '--npc', 'auto', '--team-size', '1', '--max-seconds', '300'], 400)
+        rc, _ = self.quest(['--fight', '--task', self.task, '--npc', 'auto', '--step', 4 if boss_map == MAP_20F else 2, '--team-size', '1', '--max-seconds', '300'], 400)   # --step 明講：不靠追蹤文字 OCR（二轉 22:15 回 31）
         if rc == 2:
             return self.quest_stop(rc, f'{who} 重打')
         if rc:
@@ -507,7 +577,7 @@ class Run:
             rc = self.T.team_check()
             if rc:
                 event(f'{name}：換圖後 team.check rc={rc}，team.form')
-                rc = self.T.team_form()
+                rc = self.form()
                 if rc:
                     return self.fail(EXIT_TEAM, f'{name}：走回 32020 後 team.form 失敗 rc={rc}', backtrack='team')
         rc = self.T.preflight()
@@ -523,7 +593,7 @@ class Run:
         rc = self.walk_back_20f(name)
         if rc:
             return rc
-        rc, _ = self.quest(['--fight', '--task', self.task, '--npc', 'auto', '--max-seconds', SLICE_S], SLICE_S + 120)
+        rc, _ = self.quest(['--fight', '--task', self.task, '--npc', 'auto', '--step', 4, '--max-seconds', SLICE_S], SLICE_S + 120)   # 20F BOSS = 第 4 步；--step 明講，不靠追蹤文字 OCR
         if rc == 2:
             return self.quest_stop(rc, f'{name} 備援開打')
         if rc in (0, 37, 38):
@@ -559,7 +629,7 @@ class Run:
         rc, cur = T.current()
         if rc or not cur or not charstate.same(cur, LEADER):
             return self.fail(EXIT_TEAM, f'當前角色不是 {LEADER}（讀到 {cur}，rc {rc}）；判斷看面板左欄頭像紅字「當前登錄」', current=cur)
-        rc = T.team_form()
+        rc = self.form()
         if rc:
             return self.fail(EXIT_TEAM, f'team.form 沒成功 rc={rc}（要滿 5 人）')
         rc, lv = T.levels(ALL_ROLES)
@@ -596,6 +666,15 @@ class Run:
             return self.fail(EXIT_SETUP, f'補血失敗：{e}')
         return 0
 
+    def s_accept(self) -> int:
+        """接「漆黑洞窟(N轉)」（rebirth_steps.accept_task：任務詳情精確標題 → 傳送村長 → 選單頁翻頁 → 接受 → 驗進行中；已進行中跳過）"""
+        rc = self.T.accept(self.n)
+        if rc in stuckrecover.HALT_RC:
+            return self.fail(rc, f'接任務：{"看到驗證視窗" if rc == 9 else "斷線"}，停手')
+        if rc:
+            return self.fail(EXIT_ACCEPT, f'接「{self.task}」失敗（rc {rc}；見 questdetail 紀錄 / snap）', accept_rc=rc)
+        return 0
+
     def s_enter(self) -> int:
         for k in range(3):
             pos = self.read_pos()
@@ -630,7 +709,7 @@ class Run:
         res = {}
         for r in ALL_ROLES:
             rc, d = self.T.swap_weapon(r, self.o.get('keep_old', False))
-            res[r] = {'rc': rc, **{k: v for k, v in d.items() if k in ('old', 'already', 'kept_old', 'dropped')}}
+            res[r] = {'rc': rc, **{k: v for k, v in d.items() if k in ('old', 'already', 'kept_old', 'dropped', 'spare')}}
             self.info['swap'] = res
             event(f'換弓 {r}：{res[r]}')
             if rc:
@@ -657,7 +736,7 @@ class Run:
             T.teleport20()
         except RuntimeError as e:
             return self.fail(EXIT_SETUP, f'便捷傳送漆黑20樓失敗：{e}')
-        rc = T.team_form()
+        rc = self.form()
         if rc:
             return self.fail(EXIT_TEAM, f'傳到 20F 後 team.form 失敗 rc={rc}')
         return 0
@@ -667,9 +746,16 @@ class Run:
 
     def s_rebirth(self) -> int:
         T = self.T
-        rc = T.team_form()
+        rc = self.form()
         if rc:
             return self.fail(EXIT_TEAM, f'rebirth：team.form 失敗 rc={rc}')
+        if not rebirth_steps.reward_name(self.n) and not self.st.get('pets_before'):    # 沒有獎勵寵對照表 → 轉生前先拍寵物欄快照（cleanup 做 diff）
+            rc, snap = T.pet_snapshot()
+            if rc:
+                return self.fail(EXIT_REWARD, f'轉生前讀寵物欄快照失敗（pet rc {rc}）；沒快照轉生後認不出獎勵寵，先不轉', pet_rc=rc)
+            self.st['pets_before'] = snap
+            self.save()
+            event('轉生前寵物欄快照已存（第 %d 轉沒有獎勵寵對照表，cleanup 用 diff 找新出現的 Lv1 寵物）' % self.n)
         rc, _ = self.quest(['--task', self.task, '--max-seconds', 420], 540)
         if rc != 39:
             if rc == 0 and self.rebirth_done():
@@ -704,9 +790,18 @@ class Run:
 
     def s_cleanup(self) -> int:
         T = self.T
-        rc = T.drop_pet(URISTAN)
-        if rc:
-            return self.fail(EXIT_BAG, f'丟{URISTAN}失敗 petdrop rc={rc}（沒碰騎寵 / 戰寵）', bag_rc=rc)
+        name = rebirth_steps.reward_name(self.n)
+        if name:                                                # 一轉烏力斯坦 / 二轉奇娜：名稱完全相同 + Lv1 才丟
+            rc = T.drop_pet(name)
+            if rc:
+                return self.fail(EXIT_BAG, f'丟{name}失敗 petdrop rc={rc}（沒碰騎寵 / 戰寵）', bag_rc=rc)
+        else:                                                   # 三轉起：轉生前後寵物欄 diff，找「剛好 1 隻新出現的 Lv1」，名字 + Lv1 驗過才丟
+            rc, d = T.drop_new_lv1(self.n, self.st.get('pets_before'))
+            self.info['reward_drop'] = d
+            if rc in stuckrecover.HALT_RC:
+                return self.fail(rc, '丟轉生獎勵寵時看到驗證視窗 / 斷線，停手')
+            if rc:
+                return self.fail(EXIT_REWARD if rc == EXIT_REWARD else EXIT_BAG, f'丟轉生獎勵寵失敗 rc={rc}（{d.get("why", "")}；一律沒碰騎寵 / 戰寵）', bag_rc=rc)
         rc = T.bag_store(LEADER, DRAGON)
         if rc not in (0, 92):
             return self.fail(EXIT_BAG, f'{DRAGON}存回公共倉庫失敗 bag rc={rc}', bag_rc=rc)
@@ -736,15 +831,16 @@ class Run:
 DRY_PLAN = {
     'preflight': ['char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人', 'bag.levels：5 人 (N-1)轉 ≥{lv} 級（80）', '每人 4 件證明（81）',
                   '背包 / 寵物欄空位各 ≥2（82）', 'heal.heal_trip --no-return（87）'],
+    'accept': ['questdetail.accept {t}（任務詳情列表 / 中間標題精確樣板比對 → 傳送瑪麗娜絲村長 → 對話選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗證進行中；已進行中略過）（97）'],
     'enter': ['quest.py --task {t} --stop-after-dialog --max-seconds 240（最多 3 輪）→ 地圖 32001'],
     'boss10': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use）', 'quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認地圖 32011'],
     'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016'],
     'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
     'heal': ['heal.heal_trip --no-return', 'ass.set_pet 5 人 normal={act}（rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
     'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近', '人仍在 32021 追蹤沒動 → 備援一次：walk 傳送帶 31,47（北區才走）→ 32021 28,59（出口）→ 32020 → team.check → walk 20,11 → quest.py --fight --npc auto（84 / 85）'],
-    'rebirth': ['team.form', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
+    'rebirth': ['team.form', '沒有獎勵寵對照表的轉數（三轉起）：先拍 5 人寵物欄快照（98）', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
                 '點完成 + quest.py --no-track --allow-irreversible 收尾 → bag.levels 確認 5 人轉數 = N'],
-    'cleanup': ['petdrop 烏力斯坦（5 人；名稱完全相同才丟）', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
+    'cleanup': ['丟轉生獎勵寵：一轉烏力斯坦 / 二轉奇娜（petdrop 5 人，名稱完全相同 + Lv1）；三轉起 = 寵物欄 diff 剛好 1 隻新 Lv1、名字 + Lv1 驗過才丟，不確定 98', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
 }
 
 
@@ -755,7 +851,8 @@ def print_plan(n: int, from_stage: str, opts: dict) -> None:
         print(f'[{s}]')
         for ln in DRY_PLAN[s]:
             print('  - ' + ln.format(t=task_name(n), lv=level_min(n), act=opts.get('pet_action')))
-    print('退出碼：80 等級 81 證明 82 空位 83 隊伍 84 quest 階段 85 BOSS 86 背包/寵物 87 補血/外掛/傳送 88 轉生對話 89 等人；9 驗證視窗 10 斷線')
+    print('退出碼：80 等級 81 證明 82 空位 83 隊伍 84 quest 階段 85 BOSS 86 背包/寵物 87 補血/外掛/傳送 88 轉生對話 89 等人 97 接任務 98 獎勵寵不確定；9 驗證視窗 10 斷線')
+    print('quest.py 回 19 / 42（巡路卡住 / VS 牌卡死）→ 全員重登（stuckrecover）後重跑同階段，每階段最多 2 次')
 
 
 def run(trans=None, from_stage: str = 'preflight', dry_run: bool = False, keep_old_weapon: bool = False, confirm_rebirth: bool = False,

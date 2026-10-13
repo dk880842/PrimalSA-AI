@@ -17,6 +17,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py store DKBO 龍王的守護 [--depot public|personal]  # 倉庫存入
   uv run --no-project python tools/gui/bag.py store all 人龍隨機蛋 --depot public [--skip-missing]   # 多人（all / DKBO2,DKBO3）：背包面板只開一次逐人存（take 同）
   uv run --no-project python tools/gui/bag.py drop DKBO 名稱 --confirm-name 名稱               # 丟棄背包道具（名稱必須完全對上）
+  uv run --no-project python tools/gui/bag.py drop-spare-bow DKBO                                  # 武器格已是精靈王之弓時，丟背包裡多的那一把（轉生任務 16F 多給的；武器格不動）
   uv run --no-project python tools/gui/bag.py list all|DKBO,DKBO3                                  # 唯讀：每人背包每格名稱 + 空格數（面板開一次逐人切頭像）
   uv run --no-project python tools/gui/bag.py purge all|DKBO2,DKBO3 --names 名稱,名稱 [--dry-run]   # 刪除管理批次刪：只勾名單內道具 → 提示窗清單必須是名單子集且條數 = 像素勾選數才按確定，否則 X 停手
   uv run --no-project python tools/gui/bag.py store all 千年龜的殼 --depot public --all-copies --skip-missing   # 同名多格（不疊加）全部存
@@ -1107,6 +1108,38 @@ def weapons(roles) -> tuple:
     return 0, out
 
 
+def _drop_spare(role: str, bow: str) -> int:
+    """（Session 內、已選好角色、武器格已確認是 bow）背包裡還有 bow → 丟一把（--allow-protected 的精靈王之弓；武器格穿著的不在背包格）。
+    背包沒有 = 已丟過（LAST['spare'] = 0）。每次只丟一把；丟完再找，還有 → 失敗（不連丟，防誤判武器格）"""
+    j = find_item(bow)
+    if j is None:
+        LAST['spare'] = 0
+        return 0
+    rc = discard_item(role, j, bow, allow_protected=True)
+    if rc:
+        return rc
+    LAST['spare'] = 1
+    if find_item(bow) is not None:
+        return _fail(EXIT_VERIFY, f'{role} 丟了一把「{bow}」後背包仍有（不連丟）', 'bag-spare-more')
+    return 0
+
+
+def drop_spare_bow(role: str, bow: str = '精靈王之弓') -> int:
+    """獨立呼叫 / CLI：先確認武器格穿的就是 bow（不是就不丟）→ 丟背包裡多的那一把。結果 LAST（old / spare）"""
+    LAST.clear()
+    with Session() as s:
+        if s.rc:
+            return s.rc
+        rc = select_role(role)
+        if rc:
+            return rc
+        cur = equipped_name()
+        LAST['old'] = cur
+        if not cur or not name_match(cur, bow):
+            return _fail(EXIT_GUARD, f'{role} 武器格不是「{bow}」（讀到 {cur!r}）→ 不丟背包裡的弓（可能是唯一一把）', 'bag-spare-noweapon')
+        return _drop_spare(role, bow)
+
+
 def swap_weapon(role: str, bow: str = '精靈王之弓', keep_old: bool = False) -> int:
     """穿 bow、確認武器格是 bow、（預設）丟舊武器。舊武器名稱 = 穿之前武器格彈窗名稱；讀不到就不丟。結果 LAST"""
     LAST.clear()
@@ -1119,8 +1152,10 @@ def swap_weapon(role: str, bow: str = '精靈王之弓', keep_old: bool = False)
         cur = equipped_name()
         LAST['old'] = cur
         if cur and name_match(cur, bow):
-            LAST['already'] = True
-            return 0                                    # 已經是弓（續跑）；舊武器早丟過
+            LAST['already'] = True                      # 已經是弓（續跑 / 16F 直接穿上）；舊武器早丟過
+            if keep_old:
+                return 0
+            return _drop_spare(role, bow)               # 16F 多給的那把（背包裡）要丟；武器格穿著的不動
         i = find_item(bow)
         if i is None:
             return _fail(EXIT_ITEM, f'{role} 背包找不到「{bow}」', 'bag-nobow')
@@ -1326,6 +1361,7 @@ def main() -> int:
     p = sub.add_parser('list'); p.add_argument('role')
     p = sub.add_parser('purge'); p.add_argument('role'); p.add_argument('--names', required=True); p.add_argument('--dry-run', action='store_true')
     p = sub.add_parser('use'); p.add_argument('role'); p.add_argument('name')
+    p = sub.add_parser('drop-spare-bow'); p.add_argument('role'); p.add_argument('--bow', default='精靈王之弓')
     p = sub.add_parser('swap-weapon'); p.add_argument('role'); p.add_argument('--keep-old', action='store_true'); p.add_argument('--bow', default='精靈王之弓')
     for n in ('take', 'store'):
         p = sub.add_parser(n); p.add_argument('role'); p.add_argument('name'); p.add_argument('--depot', default='public', choices=['public', 'personal'])
@@ -1360,6 +1396,8 @@ def main() -> int:
         return _out(rc, {'purge': d, 'dry_run': a.dry_run})
     if a.cmd == 'use':
         return _out(use_item(r, a.name, verify_buff=True), {})
+    if a.cmd == 'drop-spare-bow':
+        return _out(drop_spare_bow(r, a.bow), {})
     if a.cmd == 'swap-weapon':
         return _out(swap_weapon(r, a.bow, a.keep_old), {})
     if a.cmd in ('take', 'store') and len(roles) > 1:

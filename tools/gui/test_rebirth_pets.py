@@ -111,6 +111,13 @@ class Fake:
         self.n_catch = 0
         self.growths = ['49/9/8/2', '49/9/7/2', '48/9/7/1', '47/10/7/1', '45/10/8/1']
         self.snaps = []
+        self.scan72 = False               # take_many 取戰寵回 72（倉庫同名多隻、等級讀不出）→ 走逐隻取出驗 Lv1
+        self.scan_rc = 0
+        self.stone = 3000000
+        self.diamond = 0
+        self.count = 0                    # 外掛可抓捕數
+        self.press_fail = 0
+        self.img = False
 
     def c(self, *a):
         self.calls.append(a)
@@ -196,6 +203,8 @@ class Fake:
             if p.get('unnamed'):
                 reg_species = p.get('species') if self.registered else None
                 d.update(unnamed=p['unnamed'], raw_name=f'?({p["unnamed"]})', species=reg_species, mountlike=reg_species == BRA)
+                if self.img:
+                    d.update(img_species=p.get('species'), img_score=0.95)      # 縮圖比對（直接抓流程要靠它登錄物種）
             else:
                 d.update(name=p['name'], mountlike=p['name'] in uikit.MOUNTS)
             out.append(d)
@@ -255,6 +264,9 @@ class Fake:
             return self.f('take_many'), {}
         for r in roles:
             for nm in pets:
+                nm = nm.split('@')[0]                          # 「名字@等級」目標：假倉庫沒有等級，只比名字
+                if nm == DOR and self.scan72:
+                    return 72, {'msg': '同名多隻、卡片等級讀不出'}
                 dep = self.depot[r][depot]
                 hit = next((k for k, c in enumerate(dep) if (c == nm) or (isinstance(c, dict) and c.get('species') == nm)), None)
                 if hit is None:
@@ -263,6 +275,33 @@ class Fake:
                 j = self.bar[r].index(None)
                 self.bar[r][j] = ({'name': c, 'state': '等待'} if isinstance(c, str) else {'name': nm, 'unnamed': c['unnamed'], 'species': c['species'], 'state': '等待'})
         return 0, {}
+
+    def pet_take_lv1_scan(self, r, name):
+        self.c('lv1_scan', r, name)
+        if self.scan_rc:
+            return self.scan_rc, {'tried': [[1, self.scan_rc]]}
+        dep = self.depot[r]['personal']
+        if name not in dep:
+            return 72, {'msg': f'{r} 倉庫沒有 {name}'}
+        dep.remove(name)
+        j = self.bar[r].index(None)
+        self.bar[r][j] = {'name': name, 'state': '等待'}
+        return 0, {'tried': [[1, 0]]}
+
+    def money(self):
+        self.c('money')
+        return self.stone, self.diamond
+
+    def press_plus(self, r, limit=None):
+        self.c('press_plus', r, limit)
+        if self.press_fail:
+            return self.press_fail, self.count, None
+        if limit is not None and self.count >= limit:
+            return 0, self.count, self.count
+        before = self.count
+        self.count += 1
+        self.stone -= 50000
+        return 0, before, self.count
 
     def learn_species(self, r, slot, species, growth):
         self.c('learn_species', r, slot, species, growth)
@@ -359,7 +398,7 @@ check('抓寵：先試 1（誘餌留 1、可抓捕數 1）、學物種、再 4',
 check('舊騎寵：--store-mount 瑪斯貝卡 → 先設等待（allow-mount）再存，存倉名單帶旗標', ('set_state', 'DKBO', '瑪斯貝卡', '等待', True) in f.calls and any(c[0] == 'store_many' and c[3] == 'personal' and '瑪斯貝卡' in c[2] and c[4] == ('瑪斯貝卡',) for c in f.calls))
 check('分配：catcher 存 4 隻進公共（取最後格 pick=last、旗標只放行布拉奇多斯）、其他 4 人各取 1',
       ('store_many', ('DKBO2',), (BRA,) * 4, 'public', (BRA,), 'last') in f.calls and ('take_many', ('DKBO', 'DKBO3', 'DKBO4', 'DKBO5'), (BRA,), 'public') in f.calls)
-check('戰寵：5 人從個人倉庫取朵拉比斯、設出戰（不帶 allow_mount）', ('take_many', tuple(ROLES), (DOR,), 'personal') in f.calls and all(('set_state', r, DOR, '出戰', False) in f.calls for r in ROLES))
+check('戰寵：5 人從個人倉庫取朵拉比斯、設出戰（不帶 allow_mount）', ('take_many', tuple(ROLES), (DOR + '@1',), 'personal') in f.calls and all(('set_state', r, DOR, '出戰', False) in f.calls for r in ROLES))
 check('誘餌：公共 = 禮盒 50 個（沒有花石幣），catcher 背包最後 0 個', f.pub_baits == 50 and f.bag_baits['DKBO2'] == 0)
 check('收尾：當前 DKBO、quest-log 有寫', f.cur == 'DKBO' and '轉生後寵物重整' in rp.QUEST_LOG.read_text(encoding='utf-8'))
 check('騎寵保護：所有 store_many 呼叫中，騎寵名只在 allow 名單內', all(set(c[2]) & set(uikit.MOUNTS) <= set(c[4]) for c in f.calls if c[0] == 'store_many'))
@@ -531,6 +570,151 @@ check('  下拉讀不到目標 → 7、不選不勾、收下拉', rc == 7 and ba
 (rc, sts), _ = quiet(T.lock_get_many, ROLES)
 check('lock_get_many：一次讀 5 人', rc == 0 and len(sts) == 5 and sts['DKBO']['戰寵'] is True)
 ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, rp.Tools._ass_tab, rp.Tools._checked = saved
+
+
+# ---------------- 2026-10-13：--confirm-buy-catch / 戰寵逐隻驗 Lv1 / 禮盒 95 重試 ----------------
+f = Fake()
+f.img = True
+rc, out = go(f, confirm_buy_catch=True)
+buys = [c for c in f.calls if c[0] == 'press_plus']
+check('--confirm-buy-catch：外掛「+」按到可抓捕數 = 5（5 次 +1 次確認已夠）、石幣少 250,000、鑽石不變', rc == 0 and f.count == 5 and f.stone == 3000000 - 250000 and f.diamond == 0 and len(buys) == 6, f'rc={rc} {len(buys)}')
+cs = [c[1:] for c in f.calls if c[0] == 'catch_setup']
+check('--confirm-buy-catch：直接抓 5（不取誘餌、不試抓）', cs == [('DKBO2', '雷龍系', BRA, 5)] and 'bait_take' not in [c[0] for c in f.calls], str(cs))
+check('--confirm-buy-catch：買完才設外掛、順序 press_plus < catch_setup', [i for i, c in enumerate(f.calls) if c[0] == 'press_plus'][-1] < [c[0] for c in f.calls].index('catch_setup'))
+f = Fake()
+rc, out = go(f)
+check('沒給旗標：不按「+」（舊行為，不花石幣）', 'press_plus' not in [c[0] for c in f.calls] and f.stone == 3000000)
+f = Fake()
+f.img = True
+f.count = 3
+rc, _ = go(f, confirm_buy_catch=True)
+check('續跑：可抓捕數已有 3 → 只再按 2 次', rc == 0 and f.count == 5 and f.stone == 3000000 - 100000)
+f = Fake()
+f.stone = 120000
+rc, _ = go(f, confirm_buy_catch=True)
+check('石幣不夠（第 3 個買不起）→ 103、不設外掛', rc == 103 and f.count == 2 and 'catch_setup' not in [c[0] for c in f.calls])
+f = Fake()
+f.press_fail = 4
+check('「+」失敗（讀不到可抓捕數）→ 103', go(f, confirm_buy_catch=True)[0] == 103)
+f = Fake()
+orig_press = f.press_plus
+def _bad_press(r, limit=None):                                  # 按了但石幣沒扣 50,000（扣了別的 / 沒扣）
+    rc_, b_, a_ = orig_press(r, limit)
+    f.stone += 10000
+    return rc_, b_, a_
+f.press_plus = _bad_press
+check('石幣扣的不是 50,000 → 103 停手', go(f, confirm_buy_catch=True)[0] == 103 and f.count == 1)
+f = Fake()
+orig_press = f.press_plus
+def _dia_press(r, limit=None):
+    rc_, b_, a_ = orig_press(r, limit)
+    f.diamond -= 5
+    return rc_, b_, a_
+f.press_plus = _dia_press
+check('鑽石有變 → 103 停手（鐵則 3）', go(f, confirm_buy_catch=True)[0] == 103 and f.count == 1)
+f = Fake()
+f.fail['preflight'] = 9
+check('--confirm-buy-catch：preflight 9 透傳', go(f, confirm_buy_catch=True)[0] == 9)
+rc, out = go(Fake(), dry_run=True, confirm_buy_catch=True)
+check('--dry-run 計畫列出「+」花石幣，且零呼叫', rc == 0 and '花石幣買可抓捕數' in out and '50,000' in out)
+
+# 戰寵逐隻驗 Lv1
+f = Fake()
+f.scan72 = True
+rc, out = go(f)
+check('取戰寵 take_many 回 72 → 5 人逐隻取出（pet_take_lv1_scan）→ 照樣設出戰完成', rc == 0 and [c[1] for c in f.calls if c[0] == 'lv1_scan'] == ROLES
+      and all(any(p and p.get('name') == DOR and p['state'] == '出戰' for p in f.bar[r]) for r in ROLES), f'rc={rc}')
+f = Fake()
+f.scan72 = True
+f.scan_rc = 76
+rc, out = go(f)
+check('逐隻驗 Lv1 全部不對（76）→ 106，沒設出戰', rc == 106 and not any(c[0] == 'set_state' and c[3] == '出戰' for c in f.calls))
+check('scan_candidates：只取名字吻合且等級讀不出（@None）的格，排序', rp.scan_candidates({'3': '朵拉比斯@None', '5': '朵拉比斯@130', '2': '迪基格斯@None', '7': '?(1/2/3/4)≈朵拉比斯(圖)@None'}, DOR) == [3, 7]
+      and rp.scan_candidates({}, DOR) == [] and rp.scan_candidates(None, DOR) == [])
+
+# pet_take_lv1_scan 的真實邏輯（假 pet 模組）：取到 Lv130（76）→ 存回 → 下一隻（index 往前 1）→ Lv1 成功
+import pet as _pet  # noqa: E402
+class _FakePet:
+    EXIT_NAME, EXIT_VERIFY = 72, 76
+    def __init__(self, lvs):
+        self.depot, self.bar, self.LAST, self.calls = list(lvs), [], {}, []   # depot: 每張卡等級（卡片讀不出）
+    def take(self, role, depot, index, expect, pause, learn, pet_name, growth, level):
+        self.calls.append(('take', index))
+        if index is None:
+            self.LAST = {'cards': {str(i + 1): f'{DOR}@None' for i in range(len(self.depot))}}
+            return 72
+        lv = self.depot.pop(index - 1)
+        self.bar.append(lv)
+        self.LAST = {'level': lv}
+        return 0 if lv == 1 else 76
+    def store_many(self, *a):
+        self.calls.append(('store', a[1]))
+        self.depot.append(self.bar.pop())
+        return 0
+for lvs, want_rc, want_calls in (([130, 1], 0, [('take', None), ('take', 1), ('store', [DOR]), ('take', 1)]),
+                                 ([1, 130], 0, [('take', None), ('take', 1)]),
+                                 ([130, 129], 72, [('take', None), ('take', 1), ('store', [DOR]), ('take', 1), ('store', [DOR])])):
+    fp_ = _FakePet(lvs)
+    saved = {k: getattr(_pet, k) for k in ('take', 'store_many', 'EXIT_NAME', 'EXIT_VERIFY')}
+    saved_last = _pet.LAST
+    for k in saved:
+        setattr(_pet, k, getattr(fp_, k))
+    try:
+        _pet.LAST = fp_.LAST
+        _orig_take = fp_.take
+        def _t(*a, _o=_orig_take, _fp=fp_):
+            r_ = _o(*a)
+            _pet.LAST = _fp.LAST
+            return r_
+        _pet.take = _t
+        rc, info = rp.Tools().pet_take_lv1_scan('DKBO2', DOR)
+    finally:
+        for k, v in saved.items():
+            setattr(_pet, k, v)
+        _pet.LAST = saved_last
+    check(f'pet_take_lv1_scan 倉庫等級 {lvs}：rc {want_rc}、呼叫序列', rc == want_rc and fp_.calls == want_calls, f'rc={rc} {fp_.calls}')
+
+# 禮盒 95 重試（bag 假函式）
+import bag as _bag  # noqa: E402
+class _FakeBag:
+    EXIT_VERIFY, EXIT_ITEM = 95, 92
+    def __init__(self, store_script, use_script=(0,), box_left=(1,)):
+        self.store_script, self.use_script, self.box_left, self.calls = list(store_script), list(use_script), list(box_left), []
+    def find_items(self, role, names):
+        self.calls.append('find')
+        return 0, {names[0]: (None if not self.box_left or self.box_left.pop(0) == 0 else 3)}
+    def use_item(self, role, name, verify_buff=False):
+        self.calls.append('use')
+        return self.use_script.pop(0) if self.use_script else 0
+    def depot_store(self, role, name, depot, **k):
+        self.calls.append(('store', name))
+        return self.store_script.pop(0) if self.store_script else 92
+def _box(fb):
+    saved = {k: getattr(_bag, k) for k in ('find_items', 'use_item', 'depot_store')}
+    for k in saved:
+        setattr(_bag, k, getattr(fb, k))
+    try:
+        t = rp.Tools()
+        t.sleep = lambda s: None
+        return t.box_open('DKBO4', 1)
+    finally:
+        for k, v in saved.items():
+            setattr(_bag, k, v)
+fb = _FakeBag([95, 0, 0, 0, 0, 0])                 # 第 1 項存倉 95 → 重試成功
+rc, info = _box(fb)
+check('box_open：存倉 95 → 重試 1 次成功，整體 0', rc == 0 and info.get('retry') == ['寵物誘餌'] and info['stored'][0] == '寵物誘餌', str(info))
+fb = _FakeBag([95, 95])
+rc, info = _box(fb)
+check('box_open：重試仍 95 → 回 95（info.failed）', rc == 95 and info.get('failed') == '寵物誘餌')
+fb = _FakeBag([95, 92, 92, 92, 92, 92])             # 重試時回 92 = 其實已存成功（驗證誤判）
+rc, info = _box(fb)
+check('box_open：95 後重試回 92（已存好）→ 視為成功繼續', rc == 0, str(info))
+fb = _FakeBag([], use_script=[95, 0], box_left=[1, 1])    # 用禮盒 95、禮盒還在 → 重用一次
+rc, info = _box(fb)
+check('box_open：使用 95 且禮盒還在 → 重用 1 次', rc == 0 and fb.calls.count('use') == 2 and info.get('retry', [None])[0] == 'use', str(fb.calls))
+fb = _FakeBag([], use_script=[95], box_left=[1, 0])        # 用禮盒 95、禮盒已不在 = 已用掉 → 不重用
+rc, info = _box(fb)
+check('box_open：使用 95 但禮盒已不在 → 不重用、繼續存倉', rc == 0 and fb.calls.count('use') == 1, str(fb.calls))
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

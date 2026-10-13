@@ -84,9 +84,8 @@ LEADER = 'DKBO'
 ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 BATTLE_PET = '朵拉比斯'
 BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
-PLUS_XY = (1295, 315)              # 外掛捉寵設置「可抓捕數 +」（紅區：只有 --confirm-buy-bait 才點；每按一次 +1、扣 50,000 石幣，2026-10-12 實測）
-PLUS_COST = 50000
-MONEY_BOX = (250, 5, 700, 40)      # 寵物面板頂部資源列（石幣 x≈335,y≈23，右邊依序鑽石 / 活力 / 聲望；ui/pet.md）—— OCR 框**待實機量**；讀不到就不買
+import catchbuy  # noqa: E402  外掛「+」買可抓捕數的共用邏輯（rebirth_pets 同一份）
+PLUS_XY, PLUS_COST, MONEY_BOX = catchbuy.PLUS_XY, catchbuy.PLUS_COST, catchbuy.MONEY_BOX      # 紅區：只有 --confirm-buy-bait 才點
 POLL_S = 30.0                      # 練寵讀等級間隔（2026-10-13 review 1013b §2.3：只讀等級 pet.py levels，跟 petwatch 一樣 30 秒；舊版 120 秒 + 每次讀 5 人全部身分 91 秒）
 TRAIN_STABLE_UP = 10              # 練寵確認：連兩輪都 ≥ 門檻、且第二輪比第一輪不降、最多升這麼多級（低等寵一場可升數級；讀錯值多半是大跳或下降）
 RESTED_S = 30 * 60                 # train 段 rest-all 成功後這麼久內的 turnin 段帶 --rested（questrun 交件前不重做）
@@ -283,16 +282,7 @@ def task_slots(roles_slots: dict, need: dict) -> list:
     return sorted({s.get('slot') for slots in (roles_slots or {}).values() for s in slots or [] if slot_species(s) in need and s.get('slot')})
 
 
-def parse_money(lines) -> tuple:
-    """寵物面板頂部資源列 OCR 行 [(文字, x, y)] → (石幣, 鑽石)：數字（去逗號）依 x 排序，第一個 = 石幣、第二個 = 鑽石；讀不到 None"""
-    nums = []
-    for t, x, _y in lines or []:
-        for m in re.finditer(r'\d[\d,]*', str(t)):
-            v = m.group().replace(',', '')
-            if v.isdigit():
-                nums.append((x, int(v)))
-    nums.sort(key=lambda a: a[0])
-    return (nums[0][1] if nums else None), (nums[1][1] if len(nums) > 1 else None)
+parse_money = catchbuy.parse_money
 
 
 def bait_ok_roles(lines) -> set:
@@ -379,35 +369,11 @@ class Tools:
 
     def money(self) -> tuple:
         """寵物面板頂部資源列 → (石幣, 鑽石)；面板打不開 / 讀不到 → (None, None)"""
-        import pet
-        import rebirth_pets as rp
-        with pet.Session(False, True) as s:
-            if s.rc:
-                return None, None
-            return parse_money(rp.ocr_lines(MONEY_BOX, '-Zooms', '2,3'))
+        return catchbuy.money()
 
     def press_plus(self, role) -> tuple:
-        """外掛 → 選角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)。
-        按前讀不到可抓捕數 → 不點。**紅區按鈕**：只有 petquest --confirm-buy-bait 的 buy_plus 會呼叫"""
-        import ass
-        import rebirth_pets as rp
-        rt = rp.Tools()
-        rc = rt._ass_open(role, 'catch')
-        try:
-            if rc:
-                return rc, None, None
-            read = lambda: rp.parse_count(''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, '-Zooms', '2,3,4')))   # noqa: E731
-            before = read()
-            if before is None or not ass.panel_open():
-                return EXIT_BAIT, before, None
-            uikit.gui('seq', f'click {PLUS_XY[0]} {PLUS_XY[1]}; wait 800', note=f'petquest {role} 捉寵設置「+」買 1 個可抓捕數（--confirm-buy-bait）')
-            after = read()
-            return 0, before, after
-        finally:
-            try:
-                ass.close_panel()
-            except Exception:                                          # noqa: BLE001
-                pass
+        """外掛「+」按一次（紅區：只有 petquest --confirm-buy-bait 的 buy_plus 會呼叫）→ (rc, 按前, 按後)"""
+        return catchbuy.press_plus(role)
 
 
 # ---------------------------------------------------------------- 驅動
@@ -556,26 +522,12 @@ class Run:
         return self.q['rounds'][stage_round(stage) - 1]
 
     def buy_plus(self, role, n) -> int:
-        """外掛「+」買 n 個可抓捕數（每按一次前後讀石幣：要剛好少 PLUS_COST、鑽石不變，否則停）"""
-        for i in range(n):
-            s0, d0 = self.T.money()
-            if s0 is None:
-                return self.fail(EXIT_BAIT, f'{role} 買可抓捕數前讀不到石幣（寵物面板頂部，MONEY_BOX 待實機量）→ 不按「+」')
-            if s0 < PLUS_COST:
-                return self.fail(EXIT_BAIT, f'石幣 {s0} 不夠 {PLUS_COST} → 不買')
-            rc, before, after = self.T.press_plus(role)
-            if rc:
-                return self.pass_or(rc, EXIT_BAIT, f'{role} 外掛「+」失敗 rc={rc}（按前可抓捕數 {before}）')
-            if after != (before or 0) + 1:
-                return self.fail(EXIT_BAIT, f'{role}「+」按了可抓捕數 {before} → {after}（不是 +1）→ 停手')
-            s1, d1 = self.T.money()
-            self.info.setdefault('bought', []).append({'role': role, 'stone': [s0, s1], 'diamond': [d0, d1]})
-            if s1 != s0 - PLUS_COST:
-                return self.fail(EXIT_BAIT, f'{role}「+」後石幣 {s0} → {s1}（不是剛好扣 {PLUS_COST}）→ 停手（可能扣了別的貨幣）')
-            if d0 is not None and d1 is not None and d1 != d0:
-                return self.fail(EXIT_BAIT, f'{role}「+」後鑽石 {d0} → {d1} 有變 → 停手（鐵則 3）')
-            event(f'{role} 買可抓捕數 1 個（第 {i + 1}/{n}）：石幣 {s0} → {s1}、可抓捕數 {before} → {after}')
-        return 0
+        """外掛「+」買 n 個可抓捕數（catchbuy.buy：每按一次前後讀石幣，要剛好少 PLUS_COST、鑽石不變，否則停）"""
+        kind, msg, rc, bought = catchbuy.buy(role, n, self.T.money, self.T.press_plus, event)
+        self.info.setdefault('bought', []).extend(bought)
+        if kind == 'ok':
+            return 0
+        return self.pass_or(rc, EXIT_BAIT, msg) if kind == 'pass' else self.fail(EXIT_BAIT, msg)
 
     def s_catch(self, stage) -> int:
         if self.p.get('already_done'):

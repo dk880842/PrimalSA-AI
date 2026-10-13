@@ -12,17 +12,18 @@
 | 階段 | 做什麼 | 失敗碼 |
 |---|---|---|
 | preflight | 當前角色 = DKBO（面板左欄頭像紅字「當前登錄」，不看頭頂名牌）、`team.form` 滿 5 人、5 人轉數 / 等級、5 人 4 件證明、背包 / 寵物欄空位 ≥2、`heal --no-return` | 83 / 80 / 81 / 82 / 87 |
+| accept | `rebirth_steps.accept_task`（= `questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)`）：任務詳情列表 / 中間標題樣板精確比對（(三轉) / (五轉) 分得開，對不上不傳送）→ 傳送村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗進行中；已進行中略過、已完成不接 | 97 |
 | enter | `quest.py --stop-after-dialog` 最多 3 輪：吉魯島守門人 → 守門人２ → 漆黑 1F（32001） | 84 |
 | boss10 | 龍王的守護 → `quest.py` 預設模式到 10F BOSS，退出碼 37（滿員）/ 38（不滿）→ 確認到 11F（32011） | 85 / 84 |
 | bow16 | 龍王 → `--stop-after-rewards 1`：16F 守門人收 4 件證明、每人得精靈王之弓（32016） | 84 |
-| swap | 5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器 | 86 |
+| swap | 5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器；武器格本來就是弓（上一轉的）→ 背包裡 16F 新給的那把是多的，`bag.drop_spare_bow` 丟掉 | 86 |
 | heal | `heal --no-return` → `ass.set_pet` 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」790,248 → `team.form` | 87 / 83 |
 | boss20 | 龍王 → 預設模式到 20F 帖拉所伊朵（37 / 38）→ 確認回到 32021:29,57 附近；追蹤沒走回 20F 時備援走回（見下） | 85 / 84 |
 | rebirth | `team.form` → 預設模式（守門人 → 精靈王）→ 39 停 → OCR 判斷 → 放行 → 確認 5 人轉數 = N | 88 / 89 |
-| cleanup | 丟 5 人烏力斯坦 → 龍王存回公共倉庫 → 確認原地遇敵關 → `char.ensure DKBO` → 寫 quest-log 摘要 | 86 |
+| cleanup | 丟 5 人轉生獎勵寵（一轉烏力斯坦 / 二轉奇娜，petdrop 名稱 + Lv1；三轉起 rebirth 階段先拍寵物欄快照、這裡 diff 找剛好 1 隻新 Lv1，不確定 98） → 龍王存回公共倉庫 → 確認原地遇敵關 → `char.ensure DKBO` → 寫 quest-log 摘要 | 86 |
 
 ## 退出碼
-80 等級 / 轉數不符或讀不到 · 81 缺四件證明 · 82 背包 / 寵物欄空位不足 · 83 隊伍 / 當前角色 · 84 quest.py 階段沒完成（非預期碼 / 地圖不對 / 逾時）· 85 BOSS 輸 / 重打失敗 / 補不滿 · 86 背包 / 寵物操作失敗 · 87 補血 / 外掛 / 傳送失敗 · 88 精靈王對話不是角色轉生（或轉生後轉數沒變）· 89 `--confirm-rebirth` 停下等人。
+80 等級 / 轉數不符或讀不到 · 81 缺四件證明 · 82 背包 / 寵物欄空位不足 · 83 隊伍 / 當前角色 · 84 quest.py 階段沒完成（非預期碼 / 地圖不對 / 逾時）· 85 BOSS 輸 / 重打失敗 / 補不滿 · 86 背包 / 寵物操作失敗 · 87 補血 / 外掛 / 傳送失敗 · 88 精靈王對話不是角色轉生（或轉生後轉數沒變）· 97 接任務失敗 · 98 轉生獎勵寵無法確認（三轉起 diff 不確定，一律不丟）· 89 `--confirm-rebirth` 停下等人。
 共用：1 參數錯、2 版面、8 戰鬥鎖、9 疑似驗證視窗（quest 回 2 也轉成 9，鐵則 5 停手通知）、10 斷線（netwatch halt）。底層碼：quest 20～39、team 40～47、char 60～65、pet 70～79、bag 90～96（見各檔開頭）。
 
 ## 規則與設計
@@ -50,3 +51,14 @@
 - **舊寵物存倉**：不必先解外掛鎖定，遊戲沒擋。舊騎寵（轉生後變「等待」、名字讀不出）：先 `pet.py learn-species`，或 `rebirth_pets` 以縮圖比對認物種（`stores_for`：沒名字 + mountlike + 縮圖分數 ≥0.9 + 物種 = `--store-mount`，才放行；測試見 test_rebirth_pets.py）。
 - **誘餌「+」要錢**：外掛捉寵設置裡可抓捕數「+」每按一次 +1，扣 **50,000 石幣**（鑽石不動），5 次 = 250,000 石幣。用 `rebirth_pets.py --direct-catch` 直接抓 5 隻（雷龍系 / 布拉奇多斯 約 1 分 10 秒），DKBO2 留 1、存 4 公共、其他 4 人取；每次按「+」前要確定石幣夠。戰寵 Lv1 朵拉比斯從個人倉庫取（`--expect-level 1`；同名多隻時卡片等級讀不出，指定 `--index` 取後驗 Lv1）。
 - **收尾練功**：吃 2倍智慧果 → `team.form` → `grind.py start 柯奧龜洞` → `grind.py follow --trans 2 --no-heal`。
+
+## 2026-10-13 二轉後續：模組化與自動化（離線測試 test_rebirth.py / test_rebirth_steps.py / test_rebirth_pets.py；**實機未驗證**）
+可獨立呼叫的小模組（rebirth.py 只串階段）：
+- **`stuckrecover.py`**：quest.py 回 19 / 42（巡路卡住 / VS 牌卡死）→ `relogin_team`（relogin.py --stuck --confirm；105 → team.form）→ 呼叫端善後。questrun（每任務 2 次）與 rebirth（`Run.quest` 內，每階段 2 次，重登後 team.check / form、重吃龍王、重跑同一指令；`--fight` 單人重打不重登）共用。二轉 boss10 因手動 relogin 損失 13 分鐘。重登遇 9 / 10 原碼停手；失敗 / 仍卡 → 84（info.relogin_rc）。
+- **`catchbuy.py`**：外掛捉寵設置「+」買可抓捕數（`parse_money / money / press_plus / buy / buy_to`），petquest（`--confirm-buy-bait`）與 rebirth_pets（`--confirm-buy-catch`）同一份；每次按前後讀石幣（剛好少 50,000、鑽石不變、可抓捕數 +1 才繼續）。CLI：`catchbuy.py DKBO2 5 --confirm-buy`（紅區花石幣，沒旗標只印計畫）。
+- **`rebirth_steps.py`**：`accept --trans N` 接任務、`snapshot` / `drop-reward --trans N [--dry-run]` 轉生獎勵寵（見上）。三轉起 diff：每人要剛好 1 隻新出現的 Lv1、名字讀得出、狀態不是騎乘 / 出戰、不在第 1 格，先全員驗過才動手，任何不確定 → 98。
+- **`bag.py drop-spare-bow <角色>`**：武器格是精靈王之弓時丟背包多的那把（`--allow-protected`；武器格不是弓 → 93 不丟）。
+- boss20 備援 / 單人重打的 `quest.py --fight` 一律帶 `--step 4`（10F 為 `--step 2`），不靠追蹤文字 OCR（二轉 22:15 回 31）。
+- **team.form 回 9**（二轉 22:20，BOSS 戰後；16 秒後原指令就過）：9 = `uikit.preflight` 畫面連 3 次不認得；無法重現當時畫面（事後無 snap），判斷是過場 / 結算畫面暫時認不得。rebirth 的 `Run.form` 改成回 9 時等 20 秒只讀重試一次，第 2 次仍 9 = 驗證視窗，照鐵則 5 停手。
+- rebirth_pets：`--confirm-buy-catch`（買到 count → `--direct-catch`）；戰寵取「名字@1」，同名多隻卡片等級讀不出（72）→ `pet_take_lv1_scan` 逐隻 `--index` 取出驗 Lv1、不對（讀得到等級但不是 1）存回個人倉庫換下一隻；boxes 的使用 / 存倉遇 bag 95（動作後驗證失敗）各自動重試 1 次（原因在二轉沒留下 snap，無法確認根因；92 視為已存好）。
+- 退出碼新增：rebirth 97 / 98（80～89 已用完，借 bag 90～96 後面空的）。

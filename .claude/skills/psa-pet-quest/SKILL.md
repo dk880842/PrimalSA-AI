@@ -176,6 +176,7 @@ uv run --no-project python tools/gui/petquest.py run 3003 --confirm-drop        
 ```
 uv run --no-project python tools/gui/rebirth_pets.py --dry-run                       # 先看計畫（不碰遊戲）
 uv run --no-project python tools/gui/rebirth_pets.py --trans 1 --store-mount 瑪斯貝卡   # --store-mount 只有使用者當次明講才加
+uv run --no-project python tools/gui/rebirth_pets.py --trans 3 --keep-lock --confirm-buy-catch   # 使用者規定騎寵用外掛「+」花石幣買可抓捕數（每個 50,000，catchbuy 前後驗石幣 / 鑽石，續跑已買的不重買），買到 5 直接抓；store-mount 照需要加
 uv run --no-project python tools/gui/rebirth_pets.py --from catch                    # 中斷後從某階段續跑（進度 tools/.cache/rebirth_pets.json）
 ```
 階段與退出碼：preflight 100 / boxes 101 / store 102 / catch 103 / distribute 104 / ride 105 / battle 106 / lock 107 / cleanup 108 / 參數與進度不一致 109（全文見檔頭）。

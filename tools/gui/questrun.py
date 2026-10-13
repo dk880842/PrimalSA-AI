@@ -123,6 +123,7 @@ sys.path.insert(0, str(HERE))
 import questdefs  # noqa: E402
 import questhandlers  # noqa: E402
 import rebirth  # noqa: E402
+import stuckrecover  # noqa: E402  卡住自動重登的共用邏輯（rebirth.py 同一份）
 import uikit  # noqa: E402
 
 SRC = 'questrun'
@@ -168,8 +169,8 @@ DEFER_KEEP_S = 12 * 3600        # --verify defer（postrebirth 整套約 5 小�
 BATTLE_OK_S = 30 * 60           # 戰鬥設定檢查 OK 後這麼久內（之間沒有重登 / bossretry）沿用，不再開外掛面板（review §5.1：19 次 run 開頭每次 11 秒）
 HP_FRESH_S = 5 * 60             # 全隊 HP 讀過（且沒人偏低）/ 剛補完血後這麼久內、之間沒有戰鬥 → 任務開始前沿用（review §5.2）
 HP_EVERY = 3                    # quest.py --hp-check-every 預設（路上一般戰鬥每幾場讀一次全隊 HP；questdefs hp_every 可覆寫，連戰任務 1）
-RELOGIN_MAX = 2                 # 每個任務最多自動全員重登幾次（VS 牌卡死 / 巡路卡住解不開）
-RELOGIN_TEAM = 105              # relogin.py：重登進遊戲了但隊伍檢查 / 組隊失敗 → questrun 再 team.form --regroup
+RELOGIN_MAX = stuckrecover.RELOGIN_MAX   # 每個任務最多自動全員重登幾次（VS 牌卡死 / 巡路卡住解不開）
+RELOGIN_TEAM = stuckrecover.RELOGIN_TEAM   # relogin.py：重登進遊戲了但隊伍檢查 / 組隊失敗 → questrun 再 team.form --regroup
 BAG_ITEM = 92                   # bag.EXIT_ITEM：背包 / 倉庫找不到該道具
 NO_TOUCH = (uikit.EXIT_USAGE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT, 116, 152)   # 失敗退出時畫面要留給人看（驗證視窗 / 斷線 / 不可逆對話 / 領獎窗）→ 不再開背包存龍王
 LAST: dict = {}
@@ -325,8 +326,7 @@ class Tools(rebirth.Tools):
 
     def relogin(self) -> int:
         """全員重登（stuck=True：起始畫面可以是巡路卡住 / 快速戰鬥 VS 牌卡死；登入畫面只按「登錄」，鐵則 2）"""
-        import relogin
-        return relogin.run(confirm=True, stuck=True)
+        return stuckrecover.real_relogin()
 
     def unstick_exit(self):
         import quest as _q
@@ -1461,17 +1461,14 @@ class Run:
         self.st['battle_ok_at'] = 0                                    # 重登過 → 戰鬥設定 / HP / 隊伍都不沿用
         self.hp_ok_at = 0.0
         self.team_ok_at = 0.0
-        rr = T.relogin()
-        event(f'任務 {tid}：全員重登 rc={rr}')
-        if rr in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+        fn = getattr(T, 'team_regroup', None) or T.team_form
+        status, rr = stuckrecover.relogin_team(T.relogin, lambda: retry_form(T, fn, f'任務 {tid} 重登後（--regroup）'), lambda m: event(f'任務 {tid}：{m}'))
+        if status == 'halt':
             return rr
-        if rr not in (0, RELOGIN_TEAM):
+        if status == 'relogin_fail':
             return self.fail(EXIT_STEP, f'任務 {tid}：{why}；全員重登失敗 rc={rr}（relogin 100～108 / 11 見 relogin.py）', relogin_rc=rr)
-        if rr == RELOGIN_TEAM:                                         # 重登進遊戲了但隊伍不對 → 解散重組
-            fn = getattr(T, 'team_regroup', None) or T.team_form
-            rc = retry_form(T, fn, f'任務 {tid} 重登後（--regroup）')
-            if rc:
-                return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_STEP, f'任務 {tid}：重登後重組隊伍失敗 rc={rc}', relogin_rc=rr)
+        if status == 'regroup_fail':
+            return self.fail(EXIT_STEP, f'任務 {tid}：重登後重組隊伍失敗 rc={rr}', relogin_rc=RELOGIN_TEAM)
         self.team_ok_at = time.time()
         try:
             T.encounter_off_wait()                                     # 重登後外掛原地遇敵狀態未知 → 關掉（任務中要關）
