@@ -130,5 +130,15 @@ walk.stat = lambda: {'ok': True, 'pos': ''}
 check('兩邊都讀不到 → None', walk.pos() is None)
 d.TPL_DIR, d.capture, walk.stat = real_tpl_dir, real_cap, real_stat
 import shutil; shutil.rmtree(tmpd, ignore_errors=True)
+# ---- 寵物等級欄：頭像白塊貼框頂（2026-10-13 二轉後換寵物，psa-hud 顯示「寵 ? o級」）----
+_pf = json.loads((FX / 'digitmatch_plv_portrait.json').read_text(encoding='utf-8'))
+_old = d.segment(_pf['plv'])
+_new = d.field_segments('plv', _pf['plv'])
+check('plv 舊切法：頭像白塊 + 轉125 合成一個大元件（只剩 3 段，認不出 → 退回 OCR）', len(_old) == 3 and any(g[1] == 0 for g in _old), str([(x, y) for x, y, _ in _old]))
+check('plv 新切法：丟掉貼框頂的寬白塊 → 0 / 轉 / 1 / 2 / 5 / 級 六個字', len(_new) == 6 and all(y > 0 for _, y, _ in _new), str([(x, y) for x, y, _ in _new]))
+check('lv 不套用（不在 EDGE_BLOB_FIELDS），切法不變', d.field_segments('lv', _pf['lv']) == d.segment(_pf['lv']) and 'lv' not in d.EDGE_BLOB_FIELDS)
+_rows = ['0' * 40 for _ in range(30)]
+_rows = [r[:5] + '1' * 3 + r[8:] if y < 20 else r for y, r in enumerate(_rows)]          # 窄字貼框頂（高 20、寬 3）
+check('貼框頂但不寬的元件（字）保留', len(d.segment(_rows, False, True)) == 1)
 print(f'failed={fails}')
 sys.exit(1 if fails else 0)

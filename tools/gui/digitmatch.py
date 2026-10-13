@@ -34,6 +34,11 @@ KNOWN_IOU = 0.93        # 補樣板時，字已被既有樣板以此分數以上
 SAME_IOU = 0.97         # 與既有變體 IoU >= 此值視為重複，不再存
 GAP = 30               # 切字後相鄰字元間距超過這麼多 px 視為不同簇（只留最大簇）
 FIELDS = ('lv', 'hp', 'mp', 'plv', 'php', 'pos', 'pos2')
+# 欄位框上緣會切到頭像圖的欄位：寵物等級框（plv 560,158,160,46）正上方是寵物頭像，換了白色臉的寵物（2026-10-13 二轉後）
+# 頭像下緣的白色塊（約 75×23 px）掉進框頂、又跟「轉 1 2 5」在 x 方向重疊 → 合併成一個大元件 → 認不出 → watch 退回 stat OCR 讀成「o級」。
+# 這些欄位切字前先丟掉「貼著框頂、寬 > EDGE_BLOB_WH × 高」的元件（字不會貼框頂，也不會比自己高寬很多）
+EDGE_BLOB_FIELDS = ('plv',)
+EDGE_BLOB_WH = 1.5
 
 
 # ---------- 切字 ----------
@@ -67,13 +72,15 @@ def _components(rows: list[str]) -> list[dict]:
     return comps
 
 
-def segment(rows: list[str], pos_mode: bool = False) -> list[tuple[int, int, list[str]]]:
+def segment(rows: list[str], pos_mode: bool = False, edge_blob: bool = False) -> list[tuple[int, int, list[str]]]:
     """切字 → [(x0, y0, 字元點陣列字串)]（依 x 排序）。
-    連通元件 → 丟掉高 <= 4 px 的細線（血條殘邊）→ x 重疊 >= 4 px 或 >= 60%（較窄者）的元件合併（轉 / 級 / 冒號）→ 丟掉高度 < 最高字 45% 的群
+    連通元件 → 丟掉高 <= 4 px 的細線（血條殘邊）→（edge_blob：丟掉貼框頂的寬白塊 = 頭像圖，見 EDGE_BLOB_FIELDS）→ x 重疊 >= 4 px 或 >= 60%（較窄者）的元件合併（轉 / 級 / 冒號）→ 丟掉高度 < 最高字 45% 的群
     （座標欄 pos_mode 保留落在數字帶內的小群 : , .）→ 只留最大的一簇（相鄰字距 < GAP；去掉兩端的場景雜訊）。"""
     if not rows:
         return []
     comps = [c for c in _components(rows) if c['y1'] - c['y0'] >= 4]
+    if edge_blob:
+        comps = [c for c in comps if not (c['y0'] == 0 and c['x1'] - c['x0'] + 1 > EDGE_BLOB_WH * (c['y1'] - c['y0'] + 1))]
     comps.sort(key=lambda c: c['x0'])
     merged = []
     for c in comps:
@@ -186,10 +193,15 @@ class Matcher:
 
 
 # ---------- 欄位解析 ----------
-def read_text(matcher: Matcher, rows: list[str], pos_mode: bool = False) -> str | None:
+def field_segments(k: str, rows: list[str]) -> list:
+    """欄位名 → 切字（pos 欄用座標模式、EDGE_BLOB_FIELDS 丟頭像白塊）；read_fields 與 learn_from 共用"""
+    return segment(rows, k.startswith('pos'), k in EDGE_BLOB_FIELDS)
+
+
+def read_text(matcher: Matcher, rows: list[str], pos_mode: bool = False, edge_blob: bool = False) -> str | None:
     """整欄 → 字元串；有任何字認不出來回 None；整欄沒墨回 ''"""
     s = ''
-    for _, _, g in segment(rows, pos_mode):
+    for _, _, g in segment(rows, pos_mode, edge_blob):
         ch, _, _ = matcher.classify(g)
         if ch is None:
             return None
@@ -239,7 +251,7 @@ def read_fields(cap: dict, tpl: dict | None = None) -> dict:
     tpl = tpl if tpl is not None else load_tpl(cap['layout'])
     m = Matcher(tpl)
     f = cap['fields']
-    txt = {k: read_text(m, f[k], k.startswith('pos')) for k in FIELDS if k in f}
+    txt = {k: read_text(m, f[k], k.startswith('pos'), k in EDGE_BLOB_FIELDS) for k in FIELDS if k in f}
     pos = parse_pos(txt.get('pos'))
     if pos is None:
         pos = parse_pos(txt.get('pos2'))
@@ -339,7 +351,7 @@ def learn_from(cap_a: dict, cap_b: dict, st: dict, tpl: dict, dm: dict | None = 
         if cap_a['fields'].get(k) != cap_b['fields'].get(k):
             log(f'  {k}: 前後畫面不同，略過')
             continue
-        segs = segment(cap_a['fields'][k], k.startswith('pos'))
+        segs = field_segments(k, cap_a['fields'][k])
         if len(segs) != len(label):
             log(f'  {k}: 切出 {len(segs)} 字、標籤「{label}」{len(label)} 字，略過')
             continue

@@ -23,6 +23,7 @@ watch 不上傳截圖（只有 unknown_long 觸發時唯讀存一張到 tools/.c
 """
 import argparse
 import json
+import re
 import os
 import secrets
 import signal
@@ -678,7 +679,7 @@ class Watcher:
         for k in self.HUD_SRC:
             if dm is not None and dm.get(k) not in (None, ''):
                 merged[k], src[k] = dm[k], 'digit'
-            elif st is not None and st.get(k) not in (None, ''):
+            elif st is not None and st.get(k) not in (None, '') and self.hud_value_ok(k, st[k]):
                 merged[k], src[k] = st[k], 'ocr'
         if merged:
             merged['ok'] = True
@@ -760,6 +761,13 @@ class Watcher:
         return d if isinstance(d, dict) else None
 
     HUD_SRC = ('level', 'hp', 'hpPct', 'mp', 'mpPct', 'petLevel', 'petHp', 'map', 'pos')
+    LEVEL_KEYS = ('level', 'petLevel')
+
+    @classmethod
+    def hud_value_ok(cls, k, v) -> bool:
+        """純函式：等級欄只收「N轉M級」（stat.ps1 的 Lv() 對不到數字時會原樣回 OCR 字串，例「o級」「0級」→ psa-hud 顯示「寵 ? o級」，2026-10-13）；
+        其他欄位照收。不收 = 這次當沒讀到（保留舊值 / 顯示 ?）"""
+        return k not in cls.LEVEL_KEYS or bool(re.fullmatch(r'\d+轉\d+級', str(v)))
 
     def merge_stat(self, d, t: float, src=None) -> bool:
         """把一次 stat 結果併進 self.hud；回 True = 有資料。
@@ -768,7 +776,7 @@ class Watcher:
         if not d or not d.get('ok'):
             self.hud_fail = True
             return False
-        got = {k: d.get(k) for k in self.HUD_SRC if d.get(k) not in (None, '')}
+        got = {k: d.get(k) for k in self.HUD_SRC if d.get(k) not in (None, '') and self.hud_value_ok(k, d.get(k))}
         if not got:
             self.hud_fail = True
             return False

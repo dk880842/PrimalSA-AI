@@ -1185,6 +1185,25 @@ n_after = sum(len(v) for v in json.loads(digitmatch.tpl_path(DM_RAW['layout']).r
 check('OCR 與 digit 不一致 / 兩張圖不同 → 不補樣板', n_after == n_before and w.dm_n['learned'] <= 3, f'{n_before} {n_after} {w.dm_n}')
 h = watchstate.read()['hud']
 check('不一致時 petHp 仍以 digit 為準', h['pet']['hp']['v'] == DM_RAW['expect']['petHp'] and h['src']['petHp'] == 'digit')
+# 7. 寵物等級 digit 讀不出 + stat OCR 讀成「o級」（2026-10-13 psa-hud「寵 ? o級」）→ 不採用（沒有值 → pane 顯示 ?）；合法「N轉M級」才收
+check('hud_value_ok：等級欄只收 N轉M級', watch.Watcher.hud_value_ok('petLevel', '0轉125級') and not watch.Watcher.hud_value_ok('petLevel', 'o級')
+      and not watch.Watcher.hud_value_ok('level', '0級') and not watch.Watcher.hud_value_ok('petLevel', '轉o級') and watch.Watcher.hud_value_ok('hp', 0))
+watch.LEARN_EVERY = 1e9
+blank = json.loads(json.dumps(DM_OUT)); blank['fields'] = {**DM_OUT['fields'], 'plv': ','.join('1' * len(r) for r in DM_OUT['fields']['plv'].split(','))}   # 整欄塗滿 → 認不出
+w, clk, fk = dm_setup('dm7', DM_TPL)
+w.last_learn = clk.t
+fk.digit = (0, json.dumps(blank) + '\n', '')
+fk.stat = (0, json.dumps({**DM_STAT, 'petLevel': 'o級'}, ensure_ascii=False) + '\n', '')
+run_cycles(w, clk, 2)
+h = watchstate.read()['hud']
+check('寵物等級 digit 讀不出、OCR「o級」→ 不採用（hud.pet 沒有 level、src 沒有 petLevel）', 'level' not in (h.get('pet') or {}) and 'petLevel' not in h['src'], json.dumps(h.get('pet'), ensure_ascii=False))
+check('其他欄位照常 digit', h['src']['hp'] == 'digit' and h['level']['v'] == '0轉130級')
+fk.stat = (0, json.dumps({**DM_STAT, 'petLevel': '0轉77級'}, ensure_ascii=False) + '\n', '')
+w.last_ocr = -1e9
+clk.t += 3.1
+w.cycle()
+h = watchstate.read()['hud']
+check('OCR 合法「0轉77級」→ 採用（來源 ocr）', h['pet']['level']['v'] == '0轉77級' and h['src']['petLevel'] == 'ocr', json.dumps(h.get('pet'), ensure_ascii=False))
 watch.OCR_ON = False
 watch.DIGIT_ON = False
 watch.LEARN_EVERY = 60.0
