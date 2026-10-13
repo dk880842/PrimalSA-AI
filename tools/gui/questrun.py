@@ -167,6 +167,11 @@ class Tools(rebirth.Tools):
         import heal
         heal.heal_trip('波拉島', True, False)
 
+    def team_regroup(self):
+        """解散不完整的隊伍後重組（team.form --regroup；掉隊者被打飛 / 回村時用）"""
+        import team
+        return team.form(regroup=True)
+
     def bag_free(self, roles):
         import bag
         out = {}
@@ -426,6 +431,32 @@ class Run:
     def form(self, what: str, tries: int = FORM_TRIES) -> int:
         """team.form 原地重試（見 retry_form）；成功記 team_ok_at"""
         rc = retry_form(self.T, self.T.team_form, what, tries)
+        if not rc:
+            self.team_ok_at = time.time()
+        return rc
+
+    def regroup_after_split(self, tid) -> int:
+        """BOSS / 連戰後隊伍散了（quest.py 30 / 32）：先讀全隊 HP（掉隊者多半被打飛回村、HP 0）→ 任一人 < team_hp_min 先補血（小護士補整隊）→
+        team.form --regroup（解散重組）。2026-10-13 四寶玉之謎：DKBO3 / DKBO5 戰後掉隊，舊流程 team.form 沒加 --regroup、回 41 三次就失敗"""
+        thr = self.o.get('team_hp_min', TEAM_HP_MIN)
+        low = {}
+        if thr > 0:
+            rc, pct = self.T.team_hp()
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            if not rc and pct:
+                self.info['team_hp'] = pct
+                low = {r: v for r, v in pct.items() if v is not None and v < thr}
+                event(f'任務 {tid} 隊伍散了：全隊 HP {pct}')
+        if low:
+            event(f'任務 {tid} 隊伍散了：HP 偏低 {low} → 補血（小護士補整隊）後再 team.form --regroup')
+            try:
+                self.T.heal()
+            except RuntimeError as e:
+                return self.fail(EXIT_HANDOVER, f'補血失敗：{e}')
+            self.info['heals'] = self.info.get('heals', 0) + 1
+        fn = getattr(self.T, 'team_regroup', None) or self.T.team_form
+        rc = retry_form(self.T, fn, f'任務 {tid} 隊伍散了（--regroup）')
         if not rc:
             self.team_ok_at = time.time()
         return rc
@@ -786,7 +817,7 @@ class Run:
                 if team_retry >= 3:                                    # 對話剛收起時切換面板偶爾打不開（2026-10-11 小豬愛情故事最後一段），多給幾次
                     return self.fail(EXIT_HANDOVER, f'任務 {tid}：隊伍檢查連續失敗（quest.py {rc}）', quest_rc=rc)
                 team_retry += 1
-                rc2 = self.form('隊伍檢查失敗後')
+                rc2 = self.regroup_after_split(tid)
                 if rc2:
                     return self.fail(EXIT_HANDOVER, f'任務 {tid}：team.form 失敗 rc={rc2}')
                 continue

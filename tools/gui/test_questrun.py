@@ -113,6 +113,10 @@ class Fake:
         self.rec('team_form')
         return self.team_rcs.pop(0) if self.team_rcs else 0
 
+    def team_regroup(self):
+        self.rec('team_regroup')
+        return self.team_rcs.pop(0) if self.team_rcs else 0
+
     def task_status(self, detail):
         self.rec('status', detail)
         q = self.status.get(detail)
@@ -510,6 +514,19 @@ n = f.names()
 qs = [i for i, c in enumerate(n) if c == 'quest']
 check('BOSS 戰後（37）DKBO5 30% → 下一片前補血 + 組隊', rc == 0 and f.team_hp_n == 2 and len(qs) == 2 and 'heal' in n and qs[0] < n.index('heal') < qs[1]
       and 'team_form' in n[n.index('heal'):qs[1]], str(n))
+# 隊伍散了（30）：先讀全隊 HP → 偏低先補血 → team.form --regroup（2026-10-13 四寶玉之謎 DKBO3 / DKBO5 戰後掉隊）
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, ['任務完成：x'])],
+         team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {'DKBO': 80, 'DKBO2': 80, 'DKBO3': 0, 'DKBO4': 80, 'DKBO5': 0})])
+rc = go(f, [2017])
+n = f.names()
+qs = [i for i, c in enumerate(n) if c == 'quest']
+check('30 隊伍散了、掉隊者 HP 0 → 補血後 team.form --regroup 再跑', rc == 0 and f.team_hp_n == 2 and 'heal' in n and 'team_regroup' in n
+      and qs[0] < n.index('heal') < n.index('team_regroup') < qs[1], str(n))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, ['任務完成：x'])],
+         team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {r: 90 for r in questrun.ALL_ROLES})])
+rc = go(f, [2017])
+n = f.names()
+check('30 隊伍散了、HP 都夠 → 不補血、直接 --regroup', rc == 0 and 'heal' not in n and 'team_regroup' in n, str(n))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(90, {})])
 check('全隊讀不到（bag 90）→ 不補血、照跑（只看隊長）', go(f, [2017]) == 0 and 'heal' not in f.names() and 'quest' in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], team_hp=[(9, {})])
