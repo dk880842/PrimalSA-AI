@@ -38,7 +38,7 @@
   猜謎三兄弟 3003（使用者 2026-10-12 / 10-13 做法）
     accept      questrun.py run 3003 --after none（步 1 manual → 115；步 2 需練寵 → 155；0 = 已完成）
     step1       追蹤步號 = 1 才做：quest.py --task 猜謎三兄弟 --stop-after-rewards 1（10-12 / 10-13 點追蹤自動巡到 810 伊那多拿金豬，沒爬塔）
-                → pet.py list 驗 5 人都有金布伊；沒有 → 161（爬塔備援 quiztower.py，人工確認）
+                → pet.py list 驗 5 人都有金布伊；沒有 → 161（點任務追蹤重試 / 人工處理）
     prep        關遇敵 → pet.py list 記原戰寵（朵拉比斯）等級 → 取消鎖定戰寵 → 金布伊 5 人出戰 → pet_catch.py --lock 戰寵 --battle-pet 金布伊
     train       grind.py start --spot 地雷區 → petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --exp-fruit（練前 depot_use 吃 2倍智慧果；到 77 自動換回朵拉比斯 + 重鎖）
     turnin      關遇敵 → questrun.py run 3003 --after none（交金豬 → 會員證 → 藍暴）
@@ -689,13 +689,13 @@ class Run:
         rc, _ = self.sub('quest.py', ['--task', self.q['track'], '--stop-after-rewards', 1, '--max-seconds', 900], 2400)
         if rc:
             return self.pass_or(rc, EXIT_ACCEPT, f'步 1（巡到 810 伊那多拿金豬）quest.py rc={rc}',
-                                '點追蹤沒直接巡到 810 時改爬塔：uv run --no-project python tools/gui/quiztower.py run（答題前人工確認）')
+                                '點任務追蹤重試（會直接傳送到 810）；仍不行就人工處理')
         rc, rs = self.pet_list()
         if rc:
             return self.pass_or(rc, EXIT_ACCEPT, f'步 1 後讀寵物欄失敗 pet rc={rc}')
         miss = [r for r in ALL_ROLES if not count_species(rs.get(r), pet)]
         if miss:
-            return self.fail(EXIT_ACCEPT, f'步 1 後 {miss} 沒有{pet}', 'uv run --no-project python tools/gui/pet.py list --role all；沒拿到就人工處理（爬塔 quiztower.py）')
+            return self.fail(EXIT_ACCEPT, f'步 1 後 {miss} 沒有{pet}', 'uv run --no-project python tools/gui/pet.py list --role all；沒拿到就點任務追蹤重試 / 人工處理')
         return 0
 
     def s_turnin(self, stage) -> int:

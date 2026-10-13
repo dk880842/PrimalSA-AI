@@ -645,7 +645,7 @@ export function titleFromLog(log: string, names: Map<number, string> = new Map()
   let state = '進行中'
   const end = /結束 rc=(\d+)/.exec(line)
   if (end) {
-    // rc≠0 之後還有別的事件行（quiztower / 手動…）→ 任務仍在處理，不是停了
+    // rc≠0 之後還有別的事件行（手動…）→ 任務仍在處理，不是停了
     const later = lines.slice(last + 1).some(l => l.trim() !== '')
     state = end[1] === '0' ? '已完成' : later ? `接手中（questrun rc=${end[1]}）` : `失敗 rc=${end[1]}`
   }

@@ -365,7 +365,7 @@ check('猜謎：quest.py 步 1 --stop-after-rewards 1', names(s, 'quest.py') == 
 s = Sim(3003)
 s.quest = lambda a: s.out(0)                                 # 步 1 跑完但沒拿到金布伊（要爬塔）
 rc = go(3003, s, confirm_drop=True)
-check('猜謎步 1 後沒有金布伊 → 161、提示 quiztower', rc == pq.EXIT_ACCEPT and 'quiztower' in pq.LAST['info'].get('manual', ''))
+check('猜謎步 1 後沒有金布伊 → 161、提示點任務追蹤重試', rc == pq.EXIT_ACCEPT and '任務追蹤' in pq.LAST['info'].get('manual', ''))
 
 # ---------------- 其他
 s = Sim(2016)

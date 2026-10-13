@@ -340,7 +340,7 @@ test('titleFromLog：[rebirth] 行（取最後一筆 questrun / rebirth）', () 
   expect(titleFromLog(q + run, NAMES)).toBe('PSA｜漆黑洞窟(二轉) boss10 進行中')
   const fail = run + '2026-10-12 21:49:22 [rebirth] 失敗 rc=84：boss10：x\n2026-10-12 21:49:22 [rebirth] 結束 rc=84；續跑：--from boss10 --trans 2\n'
   expect(titleFromLog(fail, NAMES)).toBe('PSA｜漆黑洞窟(二轉) 失敗 rc=84')
-  expect(titleFromLog(fail + '22:00:00 [quiztower] x\n', NAMES)).toBe('PSA｜漆黑洞窟(二轉) 接手中（rebirth rc=84）')
+  expect(titleFromLog(fail + '22:00:00 [manual] x\n', NAMES)).toBe('PSA｜漆黑洞窟(二轉) 接手中（rebirth rc=84）')
   expect(titleFromLog(run + '[rebirth] 結束 rc=0\n', NAMES)).toBe('PSA｜漆黑洞窟(二轉) 已完成')
   // 較新的 questrun 蓋過舊 rebirth
   expect(titleFromLog(fail + '[questrun] 開始：任務 [3003]\n', NAMES)).toBe('PSA｜猜謎三兄弟 進行中')
@@ -358,13 +358,13 @@ test('titleFromLog：不跨 run 抓名字；rc≠0 後有別的事件 → 接手
   const prev = '14:00:00 [questrun] 開始：任務 [2002]\n14:01:00 [questrun] 任務 2002「碧青洞窟」詳情結果：ok\n14:02:00 [questrun] 結束 rc=0，完成 [2002]\n'
   const cur = '14:36:09 [questrun] 開始：任務 [3003]，選項 {}\n14:36:30 [questrun] 追蹤 x\n14:37:07 [questrun] 結束 rc=111，完成 []；失敗退出，不恢復掛機\n'
   expect(titleFromLog(prev + cur, NAMES)).toBe('PSA｜猜謎三兄弟 失敗 rc=111')
-  expect(titleFromLog(prev + cur + '14:37:59 [quiztower] 811 → 800\n[petwatch] x\n', NAMES)).toBe('PSA｜猜謎三兄弟 接手中（questrun rc=111）')
+  expect(titleFromLog(prev + cur + '14:37:59 [manual] 811 → 800\n[petwatch] x\n', NAMES)).toBe('PSA｜猜謎三兄弟 接手中（questrun rc=111）')
   expect(titleFromLog(prev + cur + '\n\n', NAMES)).toBe('PSA｜猜謎三兄弟 失敗 rc=111')
   // 多 ID：取本 run 內最後出現的「任務 N」
   const multi = '1 [questrun] 開始：任務 [2000, 2019]\n2 [questrun] 任務 2000「琉璃洞窟」詳情結果：ok\n3 [questrun] 任務 2019「卡坦的願望(1.82)」詳情結果：ok\n'
   expect(titleFromLog(multi, NAMES)).toBe('PSA｜卡坦的願望 進行中')
   // rc=0 後有別的事件仍是已完成
-  expect(titleFromLog(prev + '[quiztower] x\n', NAMES)).toBe('PSA｜四大洞窟：碧青洞窟 已完成')
+  expect(titleFromLog(prev + '[manual] x\n', NAMES)).toBe('PSA｜四大洞窟：碧青洞窟 已完成')
 })
 
 test('mayRetitle：空與 PSA｜ 開頭才可改，使用者自取的不動', () => {
