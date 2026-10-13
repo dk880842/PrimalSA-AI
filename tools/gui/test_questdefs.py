@@ -57,5 +57,24 @@ check('洞窟不進預設順序', not ({2000, 2001, 2002, 2003} & set(questdefs.
 check('3003 步 1 / 2016 步 1、2 為 manual', questdefs.step_kind(questdefs.get(3003), 1) == 'manual' and questdefs.step_kind(questdefs.get(3003), 2) == 'default'
       and questdefs.step_kind(questdefs.get(2016), 1) == 'manual' and questdefs.step_kind(questdefs.get(2016), 2) == 'manual')
 check('P2 順序：2999 排第一', questdefs.DEFAULT_ORDER[0] == 2999)
+# 背包空位需求（2026-10-13 強盜的洞穴步 3 頭盔因 5 人背包滿進了信箱）：bag_slots >= Task 表推出的同時佔用格數
+for d in questdefs.ALL:
+    need = questdefs.bag_need(d['id'], tasks)
+    check(f'{d["id"]} bag_slots {d["bag_slots"]} >= Task 表推算 {need}', d['bag_slots'] >= need)
+check('bag_need 強盜的洞穴 = 4（衣服 / 斧頭 / 頭盔 / 盜賊們的足跡；交完只剩秘藥）', questdefs.bag_need(2020, tasks) == 4)
+check('bag_need 四寶玉之謎 = 5（4 寶玉 + 條件道具 2764）', questdefs.bag_need(2010, tasks) == 5)
+check('bag_need 交寵物任務（只給寵物 / 石幣）= 0', questdefs.bag_need(2016, tasks) == 0 and questdefs.bag_need(2019, tasks) == 0)
+# 背包滿自動刪（bag.AUTO_PURGE）：每個都在 ui/bag.md 白名單表、不在保護名單、不是任何任務的條件道具
+import bag  # noqa: E402
+import re as _re  # noqa: E402
+md = (questdefs.ROOT / '.claude' / 'skills' / 'psa-game-ui' / 'ui' / 'bag.md').read_text(encoding='utf-8')
+sec = md.split('## 可刪除道具白名單', 1)[1].split('保留 / 存公共倉庫', 1)[0]
+white = {m.group(1).strip() for m in _re.finditer(r'^\|\s*([^|]+?)\s*\|', sec, _re.M)} - {'道具名稱', '---'}
+items = {r['ID']: r.get('nameTn') for r in rows('Item')}
+cond_names = {items.get(c['itemId']) for t in tasks if t.get('group') in questdefs.BY_ID for c in (t.get('condition') or []) if c and c.get('itemId')}
+check('AUTO_PURGE 每個都在 bag.md 白名單表', set(bag.AUTO_PURGE) <= white, str(set(bag.AUTO_PURGE) - white))
+check('AUTO_PURGE 不含有條件的「龍的魅力之笛」「亞姆亞姆的斧頭」', not ({'龍的魅力之笛', '亞姆亞姆的斧頭'} & set(bag.AUTO_PURGE)) and {'龍的魅力之笛', '亞姆亞姆的斧頭'} <= white)
+check('AUTO_PURGE 沒有保護名稱（PROTECT / PURGE_FORBID）', not [n for n in bag.AUTO_PURGE if bag.purge_guard(n)])
+check('AUTO_PURGE 不是任何 questdefs 任務的條件道具（不會刪到要交的東西）', not (set(bag.AUTO_PURGE) & cond_names), str(set(bag.AUTO_PURGE) & cond_names))
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

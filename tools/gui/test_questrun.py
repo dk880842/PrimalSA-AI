@@ -93,6 +93,37 @@ class Fake:
         self.rec('esc')
         self.screen = 'idle'
 
+    def clear_screen(self):
+        """假 quest.clear_leftovers：對話框 / 面板殘留 → 記 esc / close 後回主畫面；unknown 不碰"""
+        self.rec('clear')
+        if self.screen in ('dialog', 'bye'):
+            self.rec('esc')
+            self.screen = 'idle'
+        elif self.screen == 'panel':
+            self.rec('close_panel')
+            self.screen = 'idle'
+        return self.screen
+
+    purge_rc = 0
+    mail_q = None                                         # 每次 mail_claim 取一個 rc（最後一個重複）；None = 0
+    glow_q = None                                         # 每次 mail_glow 取一個 bool（最後一個重複）；None = False
+
+    def bag_purge(self, roles):
+        self.rec('purge', tuple(roles))
+        if not self.purge_rc:
+            for r in roles:                               # 刪了 1 格
+                self.bag[r] = (self.bag.get(r) or 0) + getattr(self, 'purge_frees', 1)
+        return self.purge_rc, {r: {'deleted': ['薩頓家的秘藥']} for r in roles}
+
+    def mail_claim(self):
+        self.rec('mail_claim')
+        q = self.mail_q
+        return (q.pop(0) if len(q) > 1 else q[0]) if q else 0
+
+    def mail_glow(self):
+        q = self.glow_q
+        return (q.pop(0) if len(q) > 1 else q[0]) if q else False
+
     def encounter_off_wait(self):
         self.rec('enc_off')
 
@@ -309,7 +340,7 @@ rc = go(f, [2017])
 n = f.names()
 check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', '地雷區') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
 check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
-check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh')) in f.calls, str(f.calls))
+check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh；片內 HP 檢查門檻 = --team-hp-min', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh', '--hp-check-min', '60')) in f.calls, str(f.calls))
 check('交接不再另讀當前角色（team.form 同一次面板確認）', 'current' not in n and 'char_ensure' not in n)
 check('預設不吃龍王的守護（2026-10-12 起要 --dragon）', 'dragon' not in n, str(n))
 check('交接：關遇敵 → 戰鬥設定檢查 → team.form（battle_check 只 1 次）', n.count('battle_check') == 1 and n.index('enc_off') < n.index('battle_check') < n.index('team_form'), str(n))
@@ -495,7 +526,14 @@ f = Fake(status={D17: [questrun.DONE]}, follow=True)
 go(f, [2017])
 check('follow 在跑 → follow_stop', 'follow_stop' in f.names())
 f = Fake(status={D99: [questrun.DOING]}, bag={'DKBO': 5, 'DKBO2': 0, 'DKBO3': 5, 'DKBO4': 5, 'DKBO5': 5})
-check('背包空位不足 → 110', go(f, [2999]) == questrun.EXIT_PREFLIGHT and 'quest' not in f.names())
+f.purge_frees = 0                                                  # 白名單沒東西可刪
+check('背包空位不足、白名單刪不出空位 → 110', go(f, [2999]) == questrun.EXIT_PREFLIGHT and 'quest' not in f.names() and ('purge', ('DKBO2',)) in f.calls, str(f.calls))
+f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, bag={'DKBO': 5, 'DKBO2': 0, 'DKBO3': 5, 'DKBO4': 5, 'DKBO5': 5})
+rc = go(f, [2999])
+check('背包空位不足 → 只對不足的人 purge 白名單 → 夠了就續跑（2026-10-13 頭盔進信箱）', rc == 0 and ('purge', ('DKBO2',)) in f.calls and 'quest' in f.names(), f'rc={rc} {f.calls}')
+f = Fake(status={D99: [questrun.DOING]}, bag={'DKBO': 5, 'DKBO2': 0, 'DKBO3': 5, 'DKBO4': 5, 'DKBO5': 5})
+f.purge_rc = 96
+check('purge 失敗（提示窗清單核對不過 96）→ 110、不跑', go(f, [2999]) == questrun.EXIT_PREFLIGHT and 'quest' not in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], hp=30)
 go(f, [2017])
 check('HP 30% < 50% → 補血後重組隊', 'heal' in f.names() and f.names().index('heal') < f.names().index('quest'))
@@ -991,6 +1029,92 @@ f = ClockFake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, ['時間
 rc = go(f, [2017], max_min=1)
 check('沒有巡路時間（對照）：每片 40 秒 → 第 3 片起超過 1 分鐘 → 113', rc == questrun.EXIT_SLICES, f'rc={rc}')
 questrun.time = _real_time
+
+# ================= 2026-10-13 二轉後重做：片內 HP / NPC 只有再見 / 背包滿進信箱 / 交接清殘留 / 巡路中不吃龍王 =================
+check('classify 40 → bye、41 → hp_low', questrun.classify(40) == 'bye' and questrun.classify(41) == 'hp_low')
+DONE_TAIL = ['任務完成：彌生和日美子']
+
+
+class FullLater(Fake):
+    """開始時背包都有空（preflight 過），第一片 quest.py 跑完 DKBO3 背包滿了（領到任務道具）"""
+    def quest(self, args, timeout=0):
+        r = super().quest(args, timeout)
+        if self.names().count('quest') == 1:
+            self.bag['DKBO3'] = 0
+        return r
+
+
+# quest.py 40（NPC 只有再見）+ DKBO3 背包滿 → 只對 DKBO3 purge 白名單 → 領信 → 續跑 → 完成
+f = FullLater(status={D17: [questrun.DOING]}, quest=[(40, []), (0, DONE_TAIL)])
+rc = go(f, [2017])
+n = f.names()
+check('40 + 背包滿：purge 不足的人 → mail_claim → 續跑完成（不重置任務）', rc == 0 and ('purge', ('DKBO3',)) in f.calls and n.index('quest') < n.index('purge') < n.index('mail_claim')
+      and n.count('quest') == 2 and n.count('accept') == 1, f'rc={rc} {n}')
+# 背包沒滿、信箱也沒有丟失信（112）→ 153 回報（不是背包問題）
+f = Fake(status={D17: [questrun.DOING]}, quest=[(40, [])])
+f.mail_q = [112]
+rc = go(f, [2017])
+check('40 + 背包有空 + 信箱沒丟失信 → 153、不恢復掛機', rc == questrun.EXIT_BYE and 'purge' not in f.names() and 'grind_start' not in f.names(), f'rc={rc}')
+# 背包滿、白名單刪不出空位 → 154
+f = FullLater(status={D17: [questrun.DOING]}, quest=[(40, [])])
+f.purge_frees = 0
+rc = go(f, [2017])
+check('40 + 背包滿 + 白名單沒東西 → 154、沒開信箱', rc == questrun.EXIT_BAGMAIL and 'mail_claim' not in f.names(), f'rc={rc}')
+# 領了沒消失（114）→ 154
+f = FullLater(status={D17: [questrun.DOING]}, quest=[(40, [])])
+f.mail_q = [114]
+check('信箱領取 114 → 154', go(f, [2017]) == questrun.EXIT_BAGMAIL)
+# 一直 40（領完信 NPC 還是只有再見）→ 處理 BYE_RECOVER_MAX 次後 153
+f = Fake(status={D17: [questrun.DOING]}, quest=[(40, [])] * 5)
+rc = go(f, [2017])
+check(f'一直 40 → 處理 {questrun.BYE_RECOVER_MAX} 次後 153', rc == questrun.EXIT_BYE and f.names().count('mail_claim') == questrun.BYE_RECOVER_MAX, f'rc={rc} {f.names().count("mail_claim")}')
+# 片後信封發亮 → 主動處理（不等 NPC 只剩再見）
+f = FullLater(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, ['時間到，結束']), (0, DONE_TAIL)])
+f.glow_q = [True, False]
+rc = go(f, [2017])
+check('片後信封發亮 → purge 不足的人 + 領信 → 續跑', rc == 0 and f.names().count('mail_claim') == 1 and ('purge', ('DKBO3',)) in f.calls, f'rc={rc} {f.names()}')
+# 發亮但信箱沒有丟失信（112）→ 不失敗、本次不再因發亮開信箱
+f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, ['時間到，結束']), (0, ['時間到，結束']), (0, DONE_TAIL)])
+f.glow_q = [True]
+f.mail_q = [112]
+rc = go(f, [2017])
+check('發亮但沒有丟失信 → 不失敗、之後不再開信箱（只開 1 次）', rc == 0 and f.names().count('mail_claim') == 1, f'rc={rc} {f.names()}')
+# quest.py 41（片內 HP 偏低）→ 補血 + 重組 → 續跑
+f = Fake(status={D17: [questrun.DOING]}, quest=[(41, []), (0, DONE_TAIL)])
+rc = go(f, [2017])
+n = f.names()
+check('41 片內 HP 偏低 → heal → team_form → 下一片 → 完成', rc == 0 and n.count('heal') == 1 and n.index('heal') < len(n) - 1 - n[::-1].index('team_form') < len(n) - 1 - n[::-1].index('quest'), f'rc={rc} {n}')
+f = Fake(status={D17: [questrun.DOING]}, quest=[(41, [])] * 10)
+rc = go(f, [2017])
+check(f'一直 41 → 補血 {questrun.HP_LOW_MAX} 次後 111', rc == questrun.EXIT_HANDOVER and f.names().count('heal') == questrun.HP_LOW_MAX, f'rc={rc}')
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2017], team_hp_min=0)
+check('--team-hp-min 0 → quest.py 不帶 --hp-check-min', all('--hp-check-min' not in c[1] for c in f.calls if c[0] == 'quest'), str([c for c in f.calls if c[0] == 'quest']))
+# 交接：背包面板殘留 → 先關再做戰鬥設定檢查；不認得 → 9、不開外掛面板
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], screen='panel')
+rc = go(f, [2017])
+n = f.names()
+check('交接：殘留面板 → close_panel 在 battle_check 之前（2026-10-13 08:00 ass rc 3）', rc == 0 and n.index('close_panel') < n.index('battle_check'), str(n))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], screen='unknown')
+rc = go(f, [2017])
+check('交接：清不掉的不認得畫面 → 9、不開外掛 / 不組隊', rc == uikit.EXIT_UNKNOWN_SCREEN and 'battle_check' not in f.names() and 'team_form' not in f.names(), f'rc={rc}')
+
+
+class PreFake(Fake):
+    """preflight 第一次 9（背包面板蓋住 HUD）、清掉殘留後 0"""
+    def preflight(self):
+        self.rec('preflight')
+        return 9 if self.screen == 'panel' else 0
+
+
+f = PreFake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], screen='panel')
+rc = go(f, [2017])
+check('preflight 9 但畫面是已知面板 → 清掉後重驗 → 繼續', rc == 0 and f.names().count('preflight') == 2 and 'close_panel' in f.names(), f'rc={rc} {f.names()}')
+# --dragon：遊戲還在自動巡路 → 這片不吃（08:04 depot_use 被 NPC 對話框打斷）
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
+f.screen = 'walking'
+go(f, [2017], use_dragon=True)
+check('--dragon：自動巡路中 → 不吃（下一片再看）', 'dragon' not in f.names(), str(f.names()))
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

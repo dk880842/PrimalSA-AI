@@ -20,7 +20,9 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py list all|DKBO,DKBO3                                  # 唯讀：每人背包每格名稱 + 空格數（面板開一次逐人切頭像）
   uv run --no-project python tools/gui/bag.py purge all|DKBO2,DKBO3 --names 名稱,名稱 [--dry-run]   # 刪除管理批次刪：只勾名單內道具 → 提示窗清單必須是名單子集且條數 = 像素勾選數才按確定，否則 X 停手
   uv run --no-project python tools/gui/bag.py store all 千年龜的殼 --depot public --all-copies --skip-missing   # 同名多格（不疊加）全部存
-最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
+最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
+背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
+AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的兩項）。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；bag 自己 90～96）：
   90 背包面板打不開 / 分頁不對 / 中途消失（沒點面板內座標）
@@ -303,7 +305,7 @@ class Session:
     """開背包（本來沒開才開 / 才關）並確保在背包分頁；with 後看 self.rc"""
 
     def __init__(self):
-        self.rc, self.was_open = 0, False
+        self.rc, self.was_open, self.opened = 0, False, False
 
     def __enter__(self):
         self.was_open = uikit.is_open(BAGANY)            # 已開著（外層 Session / 呼叫端開的）就不再 preflight：背包開著時 screen() 會判 unknown，巢狀進入會誤報驗證視窗
@@ -315,14 +317,44 @@ class Session:
             if not ok:
                 self.rc = _fail(EXIT_PANEL, '背包面板打不開（沒看到主畫面 HUD 或背包外框特徵）；沒點任何面板內座標', 'bag-open-fail')
                 return self
+            self.opened = True
         if not uikit.is_open(BAG):
             self.rc = goto_page('bag')
         return self
 
     def __exit__(self, *exc):
-        if not self.was_open and uikit.is_open(BAGANY):
-            uikit.close_panel(BAGANY, known_open=True)
+        if not self.was_open:
+            close_leftover(dialog_esc=self.opened)
         return False
+
+
+LEFTOVER_ROUNDS = 3
+
+
+def close_leftover(dialog_esc: bool = True) -> str:
+    """Session 結束（含任何失敗出口）一定把自己開的背包關掉 → 回做了什麼（'' / 'closed' / 'dialog+closed' / 'dialog' …，給 log / 測試）。
+    根因（2026-10-13 08:04 depot_use rc 90）：吃龍王的守護時自動巡路還在走，隊伍走到看門者 → NPC 對話框跳出、整個 UI（含背包面板）被藏起來；
+    use_item 點格子沒開彈窗（90）、depot_store 開不了背包（90），舊版 __exit__ 只在「看得到背包外框」時才關 → 沒關；
+    之後 quest.py ESC 掉對話框，背包面板又露出來 → 連 3 次不認得誤報 rc 9。
+    做法（每輪現場讀圖、只做認得的動作）：道具彈窗開著 → close_popup（ESC）；NPC 對話框（screen_sigs.SIG_DIALOG）蓋著 → ESC（不回答任何選項）；
+    看得到背包外框 → 點 ✕ 1280,113（uikit.close_panel）。不認得的畫面不碰。dialog_esc=False（這次根本沒開成背包）→ 不碰對話框"""
+    did = []
+    for _ in range(LEFTOVER_ROUNDS):
+        if popup_open():
+            close_popup()
+            did.append('popup')
+            continue
+        if uikit.is_open(BAGANY):
+            uikit.close_panel(BAGANY, known_open=True)
+            did.append('closed')
+            continue
+        if dialog_esc and uikit.screen().get('state') == 'dialog':
+            uikit.gui('seq', 'key {ESC}; wait 600', note='bag：NPC 對話框蓋住背包（巡路抵達）→ ESC（不回答），再關背包')
+            log('NPC 對話框蓋住背包面板（自動巡路抵達 NPC？）→ ESC 關對話框（不回答）後再關背包')
+            did.append('dialog')
+            continue
+        break
+    return '+'.join(did)
 
 
 def goto_page(page: str) -> int:
@@ -402,6 +434,12 @@ def hps(roles) -> tuple:
                 return rc, out
             out[r] = read_hp()
     return 0, out
+
+
+def team_hp_pct(roles=None) -> tuple:
+    """全隊 HP 百分比（hps 換算）→ (rc, {角色: % | None})；roles 預設五人。questrun（任務前 / BOSS 後 / 隊伍散了）與 quest.py --hp-check-min 共用"""
+    rc, d = hps(list(roles or uikit.CHARS))
+    return rc, {r: (round(100 * v[0] / v[1]) if v and v[1] else None) for r, v in d.items()}
 
 
 def read_slot_name(i: int, depot: bool = False) -> str:
@@ -685,6 +723,12 @@ MARK_MIN = 12                                   # 25 點至少幾點是紅（實
 # purge 永遠不勾的名稱（PROTECT 之外）：二轉要交的四大洞窟產物與中間品（plan-182-finish §2.3）
 PURGE_FORBID = ['大地的羈絆', '火的羽毛飾品', '風的鎖', '水的戒指', '雅哈奴的日記', '拉魯的項鍊', '不死鳥的羽毛', '風的豎琴',
                 '深藍色石頭', '群青的水', '碧青水晶', '龍王的守護', '2倍智慧果', '離線水晶', '安撫之素', '寵物誘餌', '2轉新手禮盒']
+# 背包滿時可以「不問人」自動 purge 的名單（questrun 背包滿 → 信箱流程用）= ui/bag.md「可刪除道具白名單」表，
+# 但排除有條件的兩項：「龍的魅力之笛」（要和龍之槍 / 鎧 / 衣同一批刪，腳本判斷不了）、「亞姆亞姆的斧頭」（任務完成後才刪；
+# 而且同名有兩個道具：2448 是步 2 獎勵、2416 是步 1 要交的條件道具，用名稱刪會刪到進行中的任務道具）。
+# test_questdefs 核對：每個名稱都在 bag.md 白名單表、不在 PROTECT / PURGE_FORBID、也不是任何 questdefs 任務的條件道具（不會刪到任務要交的東西）
+AUTO_PURGE = ['儀之兜', '杉的手環', '龍之鎧', '龍之槍', '龍之衣', '月光的手鐲', '巴巴洛的許可證', '空想的衣服',
+              '老爺爺的護身符', '薩頓家的秘藥', '山賊的羽飾']
 
 
 def mark_red(c) -> bool:

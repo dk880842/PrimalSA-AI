@@ -424,6 +424,46 @@ def close_panel(p: Panel, known_open: bool = False) -> bool:
     return not is_open(p)
 
 
+def known_panel() -> str | None:
+    """現場讀圖：畫面上是不是「可以放心點 ✕ 關掉」的已知面板 → 面板名（screen_sigs.PANEL_NAMES 的 key）或 None。
+    判定 = screen_sigs.panel_strict（標題板字 + ✕ 都命中）；背包另外要 bag.BAGANY 外框（✕ + 刪除管理 / 整理背包兩顆鈕）也在
+    （刪除模式 / 圖鑑分頁等子狀態不算，交回呼叫端的不認得規則）。讀不到 / 不認得 = None（不碰）"""
+    pts = screen_sigs.points() + screen_sigs.panel_points()
+    cols = px(pts)
+    if cols is None:
+        return None
+    name = screen_sigs.panel_strict(dict(zip(pts, cols)))
+    if name == 'bag':
+        import bag                                   # 延後 import：bag 也 import uikit
+        if not is_open(bag.BAGANY):
+            return None
+    return name
+
+
+def known_panel_obj(name: str) -> Panel | None:
+    """面板名 → 關閉用的 Panel（已有專用 Panel 的沿用；其他用 screen_sigs.PANEL_X 的 ✕ 座標）"""
+    if name == 'bag':
+        import bag
+        return bag.BAGANY
+    if name == 'ass':
+        return _ass_panel()
+    fixed = {'switch': SWITCH, 'pet': PET, 'team': TEAMPANEL, 'qteam': QTEAM}.get(name)
+    if fixed:
+        return fixed
+    x = screen_sigs.PANEL_X.get(name)
+    return Panel(name.upper(), None, [x], (x[0], x[1])) if x else None
+
+
+def close_known_panel() -> str | None:
+    """畫面停在已知面板（known_panel）→ 點它的 ✕ 關掉（close_panel：✕ → 再 ✕ → ESC，每步驗證）。
+    回關掉的面板名；不是已知面板 / 關不掉 → None（呼叫端照舊當不認得）"""
+    name = known_panel()
+    p = known_panel_obj(name) if name else None
+    if not p:
+        return None
+    return name if close_panel(p, known_open=True) else None
+
+
 def in_rect(x: int, y: int, r: tuple) -> bool:
     return r[0] <= x < r[0] + r[2] and r[1] <= y < r[1] + r[3]
 

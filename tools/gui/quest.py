@@ -45,8 +45,15 @@
   對話框   右側棕底 + 兩顆米色鈕 → 點左鈕 948,461（接受 / 完成 / 成人勾玉 等推進鈕；右鈕 1220,461 是「再見」不點）
   獲得物品 藍色「確認」鈕 720,572 + 米色底 → 點它，並輪詢確認視窗消失（每次最多 1.5 秒；沒消失再按，最多 3 次 → 仍在 = 退出碼 18）。
            2026-10-10 / 10-12 紅暴步 8 按一次沒關、--stop-after-rewards 隨即結束 → 都要手動補點，所以領獎一定要驗證關閉才算數
-  閒聊對話 只有一顆「再見」鈕的對話框（SIG_BYE 9 點 + OCR 按鈕整串 =「再見」）→ ESC 關閉、回原流程（每次執行最多 BYE_MAX=3 次，之後照不認得）。
-           2026-10-12 紅暴步 1：領獎後又跳選擇對象面板、點到同 NPC 的閒聊，舊版連 3 次不認得 → 退出碼 2 誤警報
+  只有再見 只有一顆「再見」鈕的對話框（SIG_BYE 9 點 + OCR 按鈕區每個倍率的字都剛好是「再見」，bye_lines_only）→ ESC 關閉（不回答）：
+           - 點「選擇對象」卡片後 BYE_SELECT_WINDOW=15 秒內出現 = 點到別人的閒聊（2026-10-12 紅暴步 1）→ 回原流程（最多 BYE_MAX=3 次，第 3 次退出碼 40）；
+           - 其他（點追蹤 / 黃問號 / 巡路抵達）= 任務 NPC 只剩再見（2026-10-13 老人薩頓：頭盔因背包滿進了信箱）→ 退出碼 40（任務接不下去，questrun 查背包 / 信箱）。
+           2026-10-13 06:08 / 06:33 誤報 rc 9 的根因：ocr.ps1 -Zooms 2,3 同一顆鈕讀兩次，舊版整串接成「再見再見」≠「再見」
+  殘留面板 不認得的畫面連 2 次時先 close_stray_panel：選人小窗 ESC、組隊 / 切換面板、uikit.known_panel 的已知面板（標題板字 + ✕ 都命中；背包另要外框兩顆鈕）→ 點 ✕，記事件
+           （2026-10-13 07:59 / 08:04 背包 / 倉庫面板殘留誤報 rc 9）；clear_leftovers() 給 questrun 交接用（對話框 / 再見 / 選擇對象 ESC、獲得物品確認、已知面板 ✕，不認得不碰）
+  片內 HP --hp-check-min N（questrun 傳 --team-hp-min）：預設模式每打完 --hp-check-every 場（預設 1）、回主畫面閒置確認後讀全隊 HP（bag.team_hp_pct，開背包約 8 秒），
+           任一人 < N% → 退出碼 41（questrun 補血後續片）。任務 BOSS 戰打完、閒置確認前 slice 時間到也延後收片（slice_defer boss_pending，最多 180 秒），
+           確保回 37 讓 questrun 做 BOSS 後補血（2026-10-13 07:36 / 07:38 四寶玉之謎：守護獸打完領獎後下一輪就「時間到」回 0 → 沒補血連打 → DKBO3 / DKBO5 HP 0 被踢）
   戰鬥     完整戰鬥畫面（上方棕框標籤）或頭上綠色 VS 牌（快速戰鬥）→ 切換（完整 850,765 / 快速 763,760）→ 刷新角色 910,578（按完面板自己關；規則見上「刷新角色規則」）
   巡路中   畫面中央金黃色「Auto Walking」字樣
   主畫面   外掛鈕紅字 ASS（沒對話框 / 巡路 / 戰鬥時）→ 檢測方針（使用者指定）：
@@ -59,7 +66,7 @@
            `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
-退出碼：37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -103,6 +110,8 @@ EXIT_BOSS_UNKNOWN = 36               # --fight BOSS 戰打完，判斷不了輸�
 EXIT_BOSS_DONE = 37                  # 預設模式：任務 BOSS 戰打完（閒置確認），隊伍檢查滿員 → 停手，呼叫端確認戰果再繼續下一步（不自動接下一步 / 轉生；--no-stop-after-boss 可關）
 EXIT_BOSS_TEAM = 38                  # 預設模式：任務 BOSS 戰打完，但隊伍不滿 / 讀不到 → 停手，事件 log 寫誰不在隊；呼叫端做重打流程（char.py switch 單人隊長 → 追蹤傳送 → 重打 → 切回 → team.form）
 EXIT_IRREVERSIBLE = 39               # 對話框文字含不可逆關鍵字（轉生 / 封印 / 刪除 / 丟棄…）或讀不到對話文字 → 沒按、對話框維持開著，存 snap；人 / agent 看圖確認後用 --allow-irreversible 放行
+EXIT_BYE_ONLY = 40                   # 任務接不下去：任務 NPC 的對話框只有一顆「再見」鈕（OCR 確認）→ 已 ESC 關、不亂點，交給呼叫端（questrun 查背包滿 / 信箱，否則回報）
+EXIT_HP_LOW = 41                     # --hp-check-min：戰鬥後回主畫面讀全隊 HP（bag.team_hp_pct），有人低於門檻 → 結束本片，呼叫端補血後續片
 STALL_MAX = 4                        # 對話無進展幾輪就停
 STALL_MARKER_PX = 10                 # 兩次點的黃問號座標差超過這麼多 px = 不同標記（輪數歸零）
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
@@ -182,7 +191,9 @@ SIG_BYE = [(1360, 300) + _BROWN, (1100, 350) + _BROWN, (948, 445) + _BROWN, (122
            (1290, 461) + _BROWN, (1085, 445) + _BEIGE, (1010, 461) + _BEIGE, (1150, 461) + _BEIGE]
 SIG_BYE_TOL = 40
 BYE_BUTTON = '再見'
-BYE_MAX = 3                                # 同一次執行最多自動關幾次閒聊對話；超過就照「不認得」規則（避免 選擇對象 → 閒聊 無限循環）
+BYE_MAX = 3                                # 「選擇對象面板點到閒聊」最多自動 ESC 幾次；超過 → 退出碼 40（避免 選擇對象 → 閒聊 無限循環）
+BYE_SELECT_WINDOW = 15.0                   # 點「選擇對象」卡片後這麼多秒內出現的「只有再見」= 點到別人的閒聊（紅暴步 1）→ ESC 回原流程；
+                                           # 其他時候（點追蹤 / 黃問號 / 巡路抵達）出現 = 任務 NPC 只剩再見 → ESC 後退出碼 40（2026-10-13 老人薩頓：頭盔進信箱，交不了）
 # 「獲得物品」確認：按完要驗證視窗消失（2026-10-10 / 10-12 紅暴步 8 兩次按了沒關，--stop-after-rewards 直接結束沒人再按 → 都要手動補點）
 REWARD_GONE_S = 1.5                        # 按確認後最多等這麼久看視窗消失（期間只要有一次不是 reward 就算關了）
 REWARD_POLL_S = 0.3
@@ -240,9 +251,21 @@ def bye_text_only(flat: str) -> bool:
     return flat == BYE_BUTTON
 
 
+def bye_lines_only(lines) -> bool:
+    """純函式：按鈕區 OCR 的行（ocr.ps1 每行帶 zoom）→ 每個「有讀到字」的倍率，該倍率的字串起來都剛好是「再見」才 True。
+    根因（2026-10-13 06:08 / 06:33 老人薩頓誤報 rc 9）：-Zooms 2,3 同一顆鈕兩個倍率各讀一次「再見」，舊版整串接起來 =「再見再見」≠「再見」
+    → 不當閒聊、連 3 次不認得。任何一個倍率多讀到別的字（例「戰鬥」）、或全部讀不到 → False（照不認得處理）"""
+    by = {}
+    for ln in lines or []:
+        t = re.sub(r'\s+', '', str((ln or {}).get('text', '')))
+        if t:
+            by.setdefault((ln or {}).get('zoom'), []).append(t)
+    return bool(by) and all(bye_text_only(''.join(v)) for v in by.values())
+
+
 def bye_button_only() -> bool:
-    """OCR 按鈕區：只有「再見」一顆鈕才回 True"""
-    return bye_text_only(dialog_button_text())
+    """OCR 按鈕區：只有「再見」一顆鈕才回 True（每個倍率分開判，見 bye_lines_only）"""
+    return bye_lines_only(dialog_button_lines())
 
 
 def loading_screen() -> bool:
@@ -262,11 +285,16 @@ def button_probe_ok(px: dict) -> bool:
     return n >= DIALOG_BTN_NEED
 
 
-def dialog_button_text() -> str:
-    """OCR 對話框按鈕區（深字）→ 去掉空白的整串文字；讀不到回空字串"""
+def dialog_button_lines() -> list:
+    """OCR 對話框按鈕區（深字，-Zooms 2,3）→ ocr.ps1 的 lines（每行 text / zoom）；讀不到回 []"""
     tx, ty, tw, th = DIALOG_BTN_BOX
     r = ps_json('ocr.ps1', tx, ty, tw, th, '-Zooms', '2,3', '-Dark', DIALOG_BTN_DARK)
-    return re.sub(r'\s+', '', ''.join(ln.get('text', '') for ln in r.get('lines', [])))
+    return [ln for ln in (r.get('lines') or []) if isinstance(ln, dict)]
+
+
+def dialog_button_text() -> str:
+    """OCR 對話框按鈕區（深字）→ 去掉空白的整串文字（兩個倍率串在一起）；讀不到回空字串"""
+    return re.sub(r'\s+', '', ''.join(ln.get('text', '') for ln in dialog_button_lines()))
 
 
 def fight_button_open() -> bool:
@@ -498,7 +526,9 @@ def _reveal_low_card(want: str, y: int) -> tuple[int, int]:
 
 
 def close_stray_panel() -> bool:
-    """畫面停在已知的誤開面板（組隊 / 切換）→ 點它的 ✕ 關掉並回 True；都不是回 False（照舊當不認得 / 疑似驗證視窗）"""
+    """畫面停在已知的誤開 / 殘留面板 → 點它的 ✕ 關掉並回 True；都不是回 False（照舊當不認得 / 疑似驗證視窗）。
+    認得：選人小窗（ESC）、組隊 / 切換面板、uikit.known_panel 的已知面板（標題板字 + ✕ 都命中才算；背包另要外框兩顆鈕，
+    2026-10-13 07:59 / 08:04 depot_use 中斷留下背包 / 倉庫面板 → 舊版連 3 次不認得誤報 rc 9）。只點 ✕（必要時 ESC），不點面板內容"""
     try:
         import uikit
         if uikit.is_open(uikit.PLAYERPICK):                 # 選人小窗（點地面點到隊友）：ESC 關；它會擋住自動巡路
@@ -510,9 +540,46 @@ def close_stray_panel() -> bool:
             if uikit.is_open(p):
                 event(f'誤開了「{p.name}」面板（戰鬥剛結束時刷新鈕點到主畫面按鈕）→ 點 ✕ 關閉')
                 return uikit.close_panel(p, known_open=True)
+        name = uikit.known_panel()
+        if name:
+            label = screen_sigs.PANEL_NAMES.get(name, name)
+            shot = snap(f'stray-{name}')
+            p = uikit.known_panel_obj(name)
+            ok_ = bool(p) and uikit.close_panel(p, known_open=True)
+            event(f'畫面停在「{label}」面板（別的工具中斷殘留）→ 點 ✕ 關閉' + ('' if ok_ else '，但關不掉'), shot)
+            return ok_
     except Exception as e:
         log(f'close_stray_panel 失敗：{e}')
     return False
+
+
+CLEAR_ROUNDS = 5                     # clear_leftovers 最多處理幾輪（對話框多頁 / 面板疊兩層）
+
+
+def clear_leftovers(rounds: int = CLEAR_ROUNDS) -> str:
+    """交接 / 開跑前清掉上次中斷留下的東西，回最後的畫面狀態（idle / walking / battle / unknown …）：
+    NPC 對話框、只有「再見」的對話、選擇對象面板 → ESC（不回答任何選項）；獲得物品 → close_reward（按確認並驗證消失）；
+    已知面板 / 選人小窗 → close_stray_panel（只點 ✕）。不認得的畫面（可能是驗證視窗）一律不碰、直接回 'unknown'（鐵則 5）"""
+    st = 'error'
+    for _ in range(rounds):
+        st = read_screen()['state']
+        if st in ('dialog', 'bye', 'select'):
+            what = {'dialog': 'NPC 對話框', 'bye': '只有再見的對話框', 'select': '選擇對象面板'}[st]
+            gui('key', '{ESC}', note=f'清殘留：{what} → ESC（不回答）')
+            event(f'清殘留：畫面停在{what}（上次中斷）→ ESC 關閉（不回答任何選項）')
+            time.sleep(0.8)
+            continue
+        if st == 'reward':
+            gone, n = close_reward()
+            event(f'清殘留：獲得物品視窗 → 按確認（{n} 次）' + ('，已關' if gone else '，仍關不掉'))
+            if not gone:
+                return 'reward'
+            continue
+        if st in ('panel', 'unknown') and close_stray_panel():
+            time.sleep(0.5)
+            continue
+        return st
+    return read_screen()['state']
 
 
 def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | None:
@@ -757,9 +824,33 @@ SLICE_DEFER_STATES = ('battle', 'dialog', 'reward', 'select')
 SLICE_DEFER_MAX_S = 180.0          # 時間到後最多再等這麼久（戰鬥 / 對話收尾）；超過就照舊收片
 
 
-def slice_defer(st: str, over_s: float) -> bool:
-    """純函式：slice 時間到了但畫面正在戰鬥 / 對話 / 領獎 / 選擇對象 → True（先不結束，讓這一段在同一個程序收尾；over_s = 超時秒數，超過上限就放棄延後）"""
-    return st in SLICE_DEFER_STATES and over_s < SLICE_DEFER_MAX_S
+def slice_defer(st: str, over_s: float, boss_pending: bool = False) -> bool:
+    """純函式：slice 時間到了但畫面正在戰鬥 / 對話 / 領獎 / 選擇對象 → True（先不結束，讓這一段在同一個程序收尾；over_s = 超時秒數，超過上限就放棄延後）。
+    boss_pending = 預設模式打過任務 BOSS 戰、還沒閒置確認停手（退出碼 37 / 38）→ 任何狀態都延後（2026-10-13 07:36 / 07:38 四寶玉之謎：
+    守護獸打完領獎後下一輪就「時間到」回 0，questrun 不做 BOSS 後補血，下一片連打 → DKBO3 / DKBO5 HP 0 被踢）"""
+    return (st in SLICE_DEFER_STATES or boss_pending) and over_s < SLICE_DEFER_MAX_S
+
+
+HP_CHECK_EVERY = 1                     # --hp-check-every 預設：每打完幾場戰鬥（回主畫面閒置確認後）讀一次全隊 HP
+
+
+def hp_check_due(a, battles: int, idle_ok: bool) -> bool:
+    """純函式：--hp-check-min 開著、預設模式（非 --solo / --fight）、打完 >= --hp-check-every 場、主畫面閒置確認（不在巡路中，開背包才安全）"""
+    return bool(getattr(a, 'hp_check_min', 0)) and not (a.solo or a.fight) and battles >= max(1, getattr(a, 'hp_check_every', HP_CHECK_EVERY)) and idle_ok
+
+
+def hp_low_roles(pct, thr: int) -> dict:
+    """純函式：{角色: % | None} → 低於 thr 的 {角色: %}（讀不出的 None 不算）"""
+    return {r: v for r, v in (pct or {}).items() if v is not None and v < thr}
+
+
+EXIT_UNKNOWN, EXIT_HALT_CODE = 9, 10   # bag / uikit 共用碼：疑似驗證視窗 / 斷線（同 uikit.EXIT_UNKNOWN_SCREEN / EXIT_HALT）
+
+
+def read_team_hp() -> tuple:
+    """全隊 HP%（bag.team_hp_pct：開背包逐人點頭像讀 HP 條字，約 8 秒，讀完關背包）→ (rc, {角色: % | None})"""
+    import bag
+    return bag.team_hp_pct()
 
 
 class WalkClock:
@@ -1563,6 +1654,8 @@ def _main() -> int:
     ap.add_argument('--no-refresh', action='store_true', help='戰鬥不按刷新角色（預設：--solo / --fight 只在任務 / BOSS 戰刷新，組隊預設模式每場都刷新）')
     ap.add_argument('--stop-after-rewards', type=int, default=0, help='領到第 N 次獲得物品視窗後停（0 = 不停）')
     ap.add_argument('--no-stop-after-boss', action='store_true', help='預設模式（非 --solo / --fight）：任務 BOSS 戰（對話 / 黃問號後 %d 秒內開打）打完閒置確認後預設會先驗隊伍再停（退出碼 %d 滿員 / %d 不滿）；加這個旗標 = 不停、照舊一路連跑（呼叫端自己負責驗隊伍與不可逆步驟）' % (QUEST_BATTLE_WINDOW, EXIT_BOSS_DONE, EXIT_BOSS_TEAM))
+    ap.add_argument('--hp-check-min', type=int, default=0, help='預設模式：每打完 --hp-check-every 場戰鬥、回主畫面閒置確認後讀全隊 HP（開背包約 8 秒），任一人低於這個 %%%% → 結束本片，退出碼 %d（questrun 補血後續片）；0 = 不檢查' % EXIT_HP_LOW)
+    ap.add_argument('--hp-check-every', type=int, default=HP_CHECK_EVERY, help='--hp-check-min 每幾場戰鬥讀一次（預設 1）')
     ap.add_argument('--allow-irreversible', action='store_true', help='不檢查對話框是否含不可逆關鍵字（%s）：預設遇到會不按、存 snap、退出碼 %d；人 / agent 看過截圖確認要做才加' % ('、'.join(IRREVERSIBLE_KEYWORDS), EXIT_IRREVERSIBLE))
     a = ap.parse_args()
     a.npc_map_arg = a.npc_map or None
@@ -1634,6 +1727,8 @@ def _main() -> int:
     select_loops = 0             # 選擇對象面板累計次數（領獎 / 戰鬥 / 巡路歸零；對話夾在中間不歸零）
     select_tries = 0             # 連續幾輪看到「選擇對象」面板（點了還在就別一直點）
     byes = 0                     # 已 ESC 關掉的「只有再見」閒聊對話次數（BYE_MAX）
+    last_select_t = 0.0          # 最後一次點「選擇對象」卡片的時間（BYE_SELECT_WINDOW：之後出現的「只有再見」= 點到別人的閒聊）
+    battles_since_hp = 0         # --hp-check-min：上次讀全隊 HP 之後打完幾場（每場戰鬥結束 +1）
     last_refresh_t = 0.0         # 本場戰鬥最後一次按刷新角色的時間（REFRESH_GAP）
     refresh_tries = 0            # 本場戰鬥連續幾次刷新沒成功（面板沒開 / 關閉列還在 / 切換鈕沒露出）
     if guard_ko:
@@ -1718,6 +1813,7 @@ def _main() -> int:
         if st in ('idle', 'walking', 'dialog', 'reward'):
             if in_battle:
                 battleguard.release()          # 戰鬥結束 → 刪鎖檔，ass.py 可以動了
+                battles_since_hp += 1
                 if quest_battle:
                     team_dirty = True          # 任務戰打完：下次點之前驗隊伍
             in_battle = False
@@ -1747,7 +1843,7 @@ def _main() -> int:
                     print('對話 / 選擇面板循環無進展，已停手', flush=True)
                     return EXIT_SELECT_LOOP
             if select_tries <= SELECT_MAX_TRIES and handle_select_panel():
-                last_action = time.time()                      # 點了 NPC = 任務互動（戰鬥時間窗從這裡起算）
+                last_action = last_select_t = time.time()      # 點了 NPC = 任務互動（戰鬥時間窗從這裡起算）
                 if npc_click_t:
                     npc_click_t = last_action                  # --fight：「點 NPC 後 12 秒沒反應」重新計時（還要等 NPC 走過來開對話框）
                 if a.once:
@@ -1755,10 +1851,6 @@ def _main() -> int:
                 time.sleep(a.every)
                 continue
             st = 'unknown'                                     # 找不到黃字 / 點了面板還在 → 不亂點，照「不認得」規則（3 次 + 5 秒 → 交給使用者）
-            s = dict(s, state='unknown')
-        if st == 'bye' and byes >= BYE_MAX:
-            log(f'只有「再見」的閒聊對話已自動關 {byes} 次仍出現 → 不再關，照不認得規則')
-            st = 'unknown'
             s = dict(s, state='unknown')
         if st in ('unknown', 'error'):
             # 先給 netwatch 看：「網路異常，是否重連?」提示 / 登入畫面（自動按登錄重登；失敗才 halt exit 10，不輸入帳密）
@@ -2011,6 +2103,22 @@ def _main() -> int:
             if idle_ok:
                 event(f'步驟結束（對話 {dialogs}、獎勵 {rewards}），連續閒置 {idle_streak} 次 → 停（--stop-after-dialog，未點追蹤 / 黃問號）')
                 return finish(a)
+        elif st == 'idle' and hp_check_due(a, battles_since_hp, idle_ok):
+            # 片內連戰 HP 檢查（2026-10-13 四寶玉之謎：同一片連打守護獸、片內沒驗 HP，DKBO3 / DKBO5 HP 0 被踢出隊伍）
+            battles_since_hp = 0
+            rc_hp, pct = read_team_hp()
+            if rc_hp in (EXIT_UNKNOWN, EXIT_HALT_CODE):
+                return rc_hp
+            low = hp_low_roles(pct, a.hp_check_min) if not rc_hp else {}
+            if rc_hp or not pct:
+                event(f'戰鬥後讀全隊 HP 失敗（bag rc={rc_hp}）→ 這次不判斷，繼續')
+            elif low:
+                shot = snap('hp-low')
+                event(f'戰鬥後全隊 HP {pct}：{low} 低於 {a.hp_check_min}% → 結束本片，退出碼 {EXIT_HP_LOW}（呼叫端補血後續片）', shot)
+                print(f'全隊 HP 偏低：{low}', flush=True)
+                return EXIT_HP_LOW
+            else:
+                log(f'戰鬥後全隊 HP {pct}（門檻 {a.hp_check_min}%）OK')
         elif st == 'idle':
             # 做完事（對話 / 領獎）後連續 2 次閒置 = 這一步結束，馬上結束不空等（有領過獎勵，或 --no-track 時對話過）
             if idle_ok and not (rewards and not a.no_track and a.task and not tracked and checked_rewards < rewards) and (rewards or (a.no_track and dialogs) or (a.stop_after_dialog and dialogs)):
@@ -2099,8 +2207,19 @@ def _main() -> int:
         elif st == 'bye':
             byes += 1
             shot = snap('bye')
-            gui('key', '{ESC}', note='只有「再見」的閒聊對話：ESC 關閉（不回答）')
-            event(f'只有「再見」一顆鈕的閒聊對話（OCR 確認）→ ESC 關閉、回原流程（第 {byes} 次；不是驗證視窗）', shot)
+            gui('key', '{ESC}', note='只有「再見」的對話框：ESC 關閉（不回答）')
+            from_select = bool(last_select_t) and time.time() - last_select_t <= BYE_SELECT_WINDOW
+            if from_select and byes < BYE_MAX:
+                event(f'選擇對象面板點到只有「再見」的閒聊（OCR 確認）→ ESC 關閉、回原流程（第 {byes} 次；不是驗證視窗）', shot)
+            else:
+                time.sleep(0.8)
+                if read_screen()['state'] == 'bye':            # ESC 沒吃到：再送一次（只 ESC，不點任何鈕）
+                    gui('key', '{ESC}', note='只有「再見」的對話框還在：再 ESC 一次')
+                why = (f'選擇對象 → 閒聊已自動關 {byes} 次仍出現' if from_select else
+                       '任務 NPC 只回「再見」（任務條件不符：例如任務道具進了信箱 / 背包滿、寵物沒湊齊）')
+                event(f'只有「再見」一顆鈕的對話框（OCR 確認，不是驗證視窗）：{why} → 已 ESC 關閉，任務接不下去，退出碼 {EXIT_BYE_ONLY}', shot)
+                print('任務 NPC 只有「再見」，任務接不下去（已 ESC）', flush=True)
+                return EXIT_BYE_ONLY
         elif st == 'unknown' and loading_screen():
             log('載入畫面（「加載中」字形，換圖轉場）→ 等待，不計入不認得畫面')   # 2026-10-12 新插畫載入圖誤判 unknown 連 3 次 → 退出碼 2
             unknown = 0
@@ -2121,7 +2240,7 @@ def _main() -> int:
                 return 2
         if a.once:
             return 0
-        if wclock.expired(time.time()) and not slice_defer(st, time.time() - wclock.end):   # 戰鬥 / 對話 / 領獎中不收片（60 秒切片會切到 BOSS 戰中間，丟掉 BOSS 判斷）
+        if wclock.expired(time.time()) and not slice_defer(st, time.time() - wclock.end, boss_stop and boss_seen):   # 戰鬥 / 對話 / 領獎中、BOSS 戰後等閒置確認中不收片（60 秒切片會切到 BOSS 戰中間，丟掉 BOSS 判斷）
             event(f'時間到，結束（對話 {dialogs}、獎勵 {rewards}、戰鬥 {battles}；巡路中不計時 {wclock.walked:.0f} 秒）')
             return 0
         time.sleep(nap)

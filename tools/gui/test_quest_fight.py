@@ -1464,12 +1464,126 @@ class KeySim(Script):
         return super().gui(*args, note=note)
 
 
-s = KeySim([DIALOG, REWARD, IDLE, BYE, IDLE, IDLE, IDLE, IDLE, IDLE])
+SELECT_S = dict(IDLE, state='select')
+_keep_hsp = quest.handle_select_panel
+quest.handle_select_panel = lambda: True                    # 選擇對象面板：假裝點到一張卡
+s = KeySim([DIALOG, REWARD, IDLE, SELECT_S, BYE, IDLE, IDLE, IDLE, IDLE, IDLE])
 rc = run2(['--stop-after-dialog', '--task', 'x', '--max-seconds', '60'], s)
-ok &= check('領獎後跳閒聊 → ESC 1 次、回原流程（--stop-after-dialog 閒置後停 0，不是 rc 2）', rc == 0 and [c[1] for c in s.clicks].count('key {ESC}') == 1, f'rc={rc} {s.clicks}')
-s = KeySim([DIALOG] + [BYE, IDLE] * 3 + [BYE] * 12)
+ok &= check('領獎後選擇對象面板點到閒聊（紅暴步 1）→ ESC 1 次、回原流程（--stop-after-dialog 閒置後停 0）', rc == 0 and [c[1] for c in s.clicks].count('key {ESC}') == 1, f'rc={rc} {s.clicks}')
+s = KeySim([DIALOG] + [SELECT_S, BYE, IDLE] * 3 + [BYE] * 12)
 rc = run2(['--stop-after-dialog', '--task', 'x', '--max-seconds', '120'], s)
-ok &= check(f'閒聊一直出現 → 最多 ESC {quest.BYE_MAX} 次，之後照不認得規則 rc 2', rc == 2 and [c[1] for c in s.clicks].count('key {ESC}') == quest.BYE_MAX, f'rc={rc} {s.clicks}')
+ok &= check(f'選擇對象 → 閒聊一直出現 → 第 {quest.BYE_MAX} 次退出碼 40（不是 rc 2 疑似驗證）', rc == quest.EXIT_BYE_ONLY and [c[1] for c in s.clicks].count('key {ESC}') == quest.BYE_MAX, f'rc={rc} {s.clicks}')
+quest.handle_select_panel = _keep_hsp
+s = KeySim([IDLE, IDLE, WALK, WALK, BYE, IDLE, IDLE])
+rc = run2(['--task', 'x', '--max-seconds', '120', '--no-marker'], s, track=lambda *a, **k: True)
+ok &= check('點追蹤巡路抵達任務 NPC、只有再見（2026-10-13 老人薩頓）→ ESC 後退出碼 40、沒點任何鈕', rc == quest.EXIT_BYE_ONLY
+            and [c[1] for c in s.clicks if c[1].startswith('key')] == ['key {ESC}'] and not [c for c in s.clicks if c[1].startswith('click 948') or c[1].startswith('click 1220')], f'rc={rc} {s.clicks}')
+s = KeySim([IDLE, IDLE, WALK, BYE, BYE, IDLE])
+rc = run2(['--task', 'x', '--max-seconds', '120', '--no-marker'], s, track=lambda *a, **k: True)
+ok &= check('ESC 後對話框還在 → 再 ESC 一次（只 ESC）', rc == quest.EXIT_BYE_ONLY and [c[1] for c in s.clicks].count('key {ESC}') == 2, f'rc={rc} {s.clicks}')
+
+print('(BYE-OCR) 按鈕區 OCR 每個倍率分開判（-Zooms 2,3 同一顆「再見」讀兩次）')
+for _lines, _want, _nm in [([{'text': '再見', 'zoom': 2}, {'text': '再見', 'zoom': 3}], True, '兩倍率各一次再見（老人薩頓實測）'),
+                           ([{'text': '再見', 'zoom': 2}], True, '只有一個倍率讀到'),
+                           ([{'text': '再 見', 'zoom': 2}, {'text': '', 'zoom': 3}], True, '空白 / 空行忽略'),
+                           ([{'text': '再見', 'zoom': 2}, {'text': '戰鬥再見', 'zoom': 3}], False, '另一倍率多讀到戰鬥'),
+                           ([{'text': '進入採石場', 'zoom': 2}, {'text': '再見', 'zoom': 2}], False, '同倍率兩顆鈕（看門者）'),
+                           ([{'text': '再', 'zoom': 2}], False, '讀不完整'), ([], False, '讀不到'), ([{'text': '再見再見', 'zoom': 2}], False, '同倍率重複')]:
+    ok &= check(f'bye_lines_only {_nm} → {_want}', quest.bye_lines_only(_lines) == _want)
+_keep_ps3 = quest.ps_json
+quest.ps_json = lambda script, *a: {'ok': True, 'lines': [{'text': '再見', 'x': 1084, 'y': 462, 'zoom': 2}, {'text': '再見', 'x': 1084, 'y': 462, 'zoom': 3}]}
+ok &= check('bye_button_only：ocr.ps1 兩倍率各回「再見」→ True（舊版接成「再見再見」→ False，誤報 rc 9）', quest.bye_button_only())
+quest.ps_json = _keep_ps3
+
+print('(STRAY) 2026-10-13 誤報樣本（fixtures/stray_px.json，tools/.cache 實機截圖取點）')
+import screen_sigs as _S  # noqa: E402
+import bag as _bag  # noqa: E402
+_FX = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'stray_px.json').read_text(encoding='utf-8'))
+
+
+def _fxpx(rel):
+    return {tuple(int(v) for v in k.split(',')): tuple(c) for k, c in _FX['images'][rel]['px'].items()}
+
+
+def _chrome(px):
+    return all(_S.close(px[(x, y)], (r, g, b), t) for x, y, r, g, b, t in _bag.CHROME)
+
+
+for _rel, _img in _FX['images'].items():
+    _px = _fxpx(_rel)
+    _kind = _img['note'].split('（')[0].split(' ')[0]
+    _cls = _S.classify(_px)['state']
+    _strict = _S.panel_strict(_px)
+    _bye = quest.bye_probe_ok(_px)
+    if _kind == 'bye':
+        ok &= check(f'{_rel}：classify 不認得、SIG_BYE 9 點全中、OCR 記錄 → 只有再見', _cls == 'unknown' and _bye and _strict is None
+                    and (_rel not in _FX['ocr_btn'] or quest.bye_lines_only(_FX['ocr_btn'][_rel])), f'{_cls} {_bye} {_strict}')
+    elif _kind == 'bag':
+        ok &= check(f'{_rel}：舊 classify（points 只有切換面板）不認得；panel_strict = bag 且背包外框兩顆鈕在 → 可點 ✕ 關', _S.classify({k: v for k, v in _px.items() if k in set(_S.points())})['state'] == 'unknown'
+                    and _strict == 'bag' and _chrome(_px) and not _bye, f'{_strict} {_chrome(_px)}')
+    else:
+        ok &= check(f'{_rel}（{_img["note"]}）：不是背包可關 / 不是只有再見', _strict is None and not _bye, f'{_strict} {_bye}')
+    ok &= check(f'{_rel}：信封發亮 = {"發亮" in _img["note"]}', _S.mail_glow(_px) == ('發亮' in _img['note']))
+
+print('(STRAY-2) close_stray_panel / clear_leftovers：已知面板點 ✕、對話框 ESC、不認得不碰')
+import uikit as _uk  # noqa: E402
+_keep = (_uk.is_open, _uk.known_panel, _uk.close_panel, quest.read_screen, quest.gui, quest.snap, quest.event, quest.close_reward, quest.time.sleep)
+_log = []
+_uk.is_open = lambda p: False
+_uk.close_panel = lambda p, known_open=False: (_log.append(('close', p.name)), True)[1]
+quest.snap, quest.event, quest.time.sleep = (lambda tag: 'sim.png'), (lambda m, shot=None: _log.append(('event', m))), (lambda d: None)
+_uk.known_panel = lambda: 'bag'
+ok &= check('close_stray_panel：背包面板殘留 → 點背包 ✕（bag.BAGANY）', quest.close_stray_panel() and ('close', 'BAGANY') in _log, str(_log))
+_uk.known_panel = lambda: None
+del _log[:]
+ok &= check('close_stray_panel：不是已知面板 → False、什麼都不點', not quest.close_stray_panel() and not [x for x in _log if x[0] == 'close'])
+_seq = ['dialog', 'bye', 'unknown', 'idle']
+_kp = ['bag']
+quest.read_screen = lambda: {'state': _seq.pop(0) if len(_seq) > 1 else _seq[0]}
+quest.gui = lambda *a, **k: _log.append(('gui',) + a) or ''
+_uk.known_panel = lambda: _kp.pop(0) if _kp else None
+del _log[:]
+_st = quest.clear_leftovers()
+ok &= check('clear_leftovers：對話框 ESC → 再見 ESC → 背包面板 ✕ → idle', _st == 'idle' and [x[2] for x in _log if x[0] == 'gui'] == ['{ESC}', '{ESC}'] and ('close', 'BAGANY') in _log, f'{_st} {_log}')
+_seq = ['unknown']
+del _log[:]
+_st = quest.clear_leftovers()
+ok &= check('clear_leftovers：真的不認得 → 回 unknown、沒按任何鍵', _st == 'unknown' and not [x for x in _log if x[0] in ('gui', 'close')], f'{_st} {_log}')
+_seq = ['reward', 'idle']
+quest.close_reward = lambda: (True, 1)
+del _log[:]
+ok &= check('clear_leftovers：獲得物品 → close_reward → idle', quest.clear_leftovers() == 'idle')
+(_uk.is_open, _uk.known_panel, _uk.close_panel, quest.read_screen, quest.gui, quest.snap, quest.event, quest.close_reward, quest.time.sleep) = _keep
+
+print('(HP) 片內連戰 HP 檢查 / BOSS 戰後時間到延後（2026-10-13 四寶玉之謎 DKBO3 / DKBO5 HP 0 被踢）')
+ok &= check('slice_defer：主畫面 + BOSS 待確認 → 延後；超過上限不延後；沒 BOSS 照舊', quest.slice_defer('idle', 5, True) and not quest.slice_defer('idle', 5, False)
+            and not quest.slice_defer('idle', quest.SLICE_DEFER_MAX_S + 1, True) and quest.slice_defer('battle', 5))
+_A = lambda **k: type('A', (), dict(dict(hp_check_min=60, hp_check_every=1, solo=False, fight=False), **k))()
+ok &= check('hp_check_due：打完 1 場 + 閒置確認 → True；沒打 / 沒閒置確認 / 沒開 / --solo / --fight → False',
+            quest.hp_check_due(_A(), 1, True) and not quest.hp_check_due(_A(), 0, True) and not quest.hp_check_due(_A(), 1, False)
+            and not quest.hp_check_due(_A(hp_check_min=0), 3, True) and not quest.hp_check_due(_A(solo=True), 1, True) and not quest.hp_check_due(_A(fight=True), 1, True)
+            and not quest.hp_check_due(_A(hp_check_every=2), 1, True) and quest.hp_check_due(_A(hp_check_every=2), 2, True))
+ok &= check('hp_low_roles：低於門檻才算、讀不出不算', quest.hp_low_roles({'DKBO': 100, 'DKBO3': 0, 'DKBO5': None, 'DKBO4': 59}, 60) == {'DKBO3': 0, 'DKBO4': 59})
+FULL_ON = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': False, 'auto_off': False}
+_hp_calls = []
+_keep_hp = quest.read_team_hp
+quest.read_team_hp = lambda: (_hp_calls.append(1), (0, {'DKBO': 90, 'DKBO2': 80, 'DKBO3': 0, 'DKBO4': 100, 'DKBO5': 30}))[1]
+s = Script([FULL_ON, FULL_ON, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--no-track', '--max-seconds', '120', '--no-refresh', '--no-stop-after-boss', '--hp-check-min', '60'], s)
+ok &= check('打完一場、閒置確認 → 讀全隊 HP → DKBO3 0 / DKBO5 30 < 60 → 退出碼 41', rc == quest.EXIT_HP_LOW and len(_hp_calls) == 1, f'rc={rc} n={len(_hp_calls)}')
+quest.read_team_hp = lambda: (_hp_calls.append(1), (0, {r: 100 for r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')}))[1]
+del _hp_calls[:]
+s = Script([FULL_ON, IDLE, IDLE, IDLE, IDLE, FULL_ON, IDLE, IDLE, IDLE, IDLE] + [IDLE] * 4)
+rc = run2(['--no-track', '--max-seconds', '14', '--no-refresh', '--no-stop-after-boss', '--hp-check-min', '60'], s)
+ok &= check('HP 都夠 → 不停；每打完一場讀一次（2 場 = 2 次）', rc == 0 and len(_hp_calls) == 2, f'rc={rc} n={len(_hp_calls)}')
+del _hp_calls[:]
+s = Script([FULL_ON, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--no-track', '--max-seconds', '8', '--no-refresh', '--no-stop-after-boss'], s)
+ok &= check('沒給 --hp-check-min → 不讀 HP', not _hp_calls)
+quest.read_team_hp = _keep_hp
+s = Script([DIALOG, FULL_ON, FULL_ON, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE])
+rc = run2(['--no-track', '--max-seconds', '3', '--no-refresh'], s)
+ok &= check('任務 BOSS 戰打完領獎後 slice 時間到 → 延後到閒置確認，回 37（舊版回 0「時間到」，questrun 不做 BOSS 後補血）', rc == quest.EXIT_BOSS_DONE, f'rc={rc} t={s.t - 1000:.1f}')
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

@@ -109,6 +109,56 @@ check('圖示命中但彈窗名稱不符 → None', bag.find_item('龍王的守�
 bag.load_icons = _real_icons
 check('fixtures/item_icons.json 有龍王的守護 bag / depot 樣板', set(bag.load_icons().get('龍王的守護', {})) == {'bag', 'depot'})
 
+# bag.Session 結束一定關自己開的背包（2026-10-13 08:04 depot_use rc 90：巡路抵達看門者 → NPC 對話框把背包藏起來，舊版看不到外框就不關）
+_keep_s = (uikit.is_open, uikit.close_panel, uikit.screen, uikit.gui, uikit.preflight, uikit.open_panel_ex, bag.popup_open, bag.close_popup, bag.goto_page)
+_st = {'dialog': True, 'bag': False, 'popup': False}
+_ops = []
+
+
+def _is_open(p):
+    return _st['bag'] and not _st['dialog'] if p is bag.BAG or p is bag.BAGANY else False
+
+
+def _gui(*a, note=''):
+    if 'ESC' in ' '.join(a):
+        _ops.append('esc')
+        _st['dialog'] = False
+    return ''
+
+
+uikit.is_open = _is_open
+uikit.close_panel = lambda p, known_open=False: (_ops.append('close'), _st.update(bag=False), True)[2]
+uikit.screen = lambda full=False: {'state': 'dialog' if _st['dialog'] else ('panel' if _st['bag'] else 'idle')}
+uikit.gui = _gui
+bag.popup_open = lambda: _st['popup']
+bag.close_popup = lambda: (_ops.append('popup'), _st.update(popup=False), True)[2]
+_st.update(dialog=True, bag=True)
+check('close_leftover：NPC 對話框蓋住背包 → ESC（不回答）→ 背包露出 → 點 ✕', bag.close_leftover() == 'dialog+closed' and _ops == ['esc', 'close'] and not _st['bag'])
+_ops.clear()
+_st.update(dialog=True, bag=True)
+check('close_leftover(dialog_esc=False)：這次沒開成背包 → 不碰對話框', bag.close_leftover(dialog_esc=False) == '' and _ops == [])
+_ops.clear()
+_st.update(dialog=False, bag=True, popup=True)
+check('close_leftover：道具彈窗 → 先關彈窗再關背包', bag.close_leftover() == 'popup+closed' and _ops == ['popup', 'close'])
+_ops.clear()
+_st.update(dialog=False, bag=False, popup=False)
+check('close_leftover：什麼都沒開 → 不動', bag.close_leftover() == '' and _ops == [])
+# 真的 Session：開成功 → 中途被對話框蓋住 → with 結束時 ESC + 關；本來就開著（巢狀）→ 不關
+uikit.preflight = lambda src, fast=True: 0
+uikit.open_panel_ex = lambda p, timeout=4.0, hud_wait=0.0: (_st.update(bag=True), (True, 'ok'))[1]
+bag.goto_page = lambda page: 0
+_ops.clear()
+_st.update(dialog=False, bag=False)
+with bag.Session() as _ss:
+    _st['dialog'] = True                                      # 巡路抵達 NPC：對話框跳出、背包被藏
+check('Session：自己開的背包被對話框蓋住 → 結束時 ESC + 點 ✕（任何失敗出口都一樣）', _ss.opened and _ops == ['esc', 'close'] and not _st['bag'])
+_ops.clear()
+_st.update(dialog=False, bag=True)
+with bag.Session() as _ss:
+    pass
+check('Session：進來時背包已開（外層 Session）→ 不關', not _ss.opened and _ops == [] and _st['bag'])
+(uikit.is_open, uikit.close_panel, uikit.screen, uikit.gui, uikit.preflight, uikit.open_panel_ex, bag.popup_open, bag.close_popup, bag.goto_page) = _keep_s
+
 # depot_use.run：吃失敗仍存回；成功全流程
 import heal  # noqa: E402
 heal.set_encounter = lambda on: None

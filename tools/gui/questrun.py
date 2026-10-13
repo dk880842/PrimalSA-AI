@@ -14,22 +14,27 @@
 任務資料在 questdefs.py（id / 詳情標題 / 追蹤標題 / 特殊步驟）。全部組隊模式（使用者 2026-10-11）；解任務靠遊戲自動巡路（quest.py 點追蹤、對話按確認、每場戰鬥刷新角色）。
 
 流程：
-  交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 關原地遇敵 + 等戰鬥結束 → team.form 滿 5 人（同一次切換面板讀「當前」，不是 DKBO 才 char.ensure；
+  交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 清殘留（quest.clear_leftovers：NPC 對話框 / 只有再見 / 選擇對象 → ESC 不回答、獲得物品 → 確認、
+                        已知面板〔背包 / 倉庫、組隊、切換、寵物…；標題板字 + ✕ 都命中〕→ 點 ✕；preflight 回 9 時也先清一次再重驗；清不掉的不認得畫面 → 9）
+                        → 關原地遇敵 + 等戰鬥結束 → 再清一次殘留（2026-10-13 08:00 / 08:01 背包面板、NPC 對話窗殘留 → ass 選不到頭像 / 外掛面板打不開 109）→ team.form 滿 5 人（同一次切換面板讀「當前」，不是 DKBO 才 char.ensure；
                         2026-10-12 起不另跑 char.current，省 1～2 次開關面板）
                         → （2026-10-12 四寶玉之謎 DKBO 人物首次動作「風的精靈Lv.5」沒勾、BOSS 戰 2 人陣亡）戰鬥設定檢查 ass.battle_check：
                         一次開外掛面板、左欄頭像逐人（隊長最後）讀 5 人自動戰鬥 + DKBO 人物首次動作（值 風的精靈 + 打勾），只改不對的勾選、讀回確認；
                         值不對 / 改不動 → 109（不自動改下拉）；放在關遇敵 + 等戰鬥結束之後（戰鬥中不開外掛面板，ass 回 8 → 109）；--no-battle-check 關。
                         bossretry 重打前也查一次（同一份設定，失敗 147）
   每個任務
-    1 preflight    背包空位（defs.bag_slots）、補血檢查 hp_gate：隊長 HUD HP < --hp-min% 或全隊任一人 < --team-hp-min%（預設 60；bag.hps 開背包逐人讀 HP，約 8 秒）
+    1 preflight    背包空位（defs.bag_slots = 任務道具最多同時佔的格數，questdefs.bag_need 由 Task 表推、test 核對）：不足的人先自動刪 bag.AUTO_PURGE
+                   （ui/bag.md 白名單去掉有條件的龍的魅力之笛 / 亞姆亞姆的斧頭），仍不足才 110；補血檢查 hp_gate：隊長 HUD HP < --hp-min% 或全隊任一人 < --team-hp-min%（預設 60；bag.hps 開背包逐人讀 HP，約 8 秒）
                    → heal（小護士補整隊）後重組隊；quest.py 37（BOSS 戰贏、滿 5 人）後下一片之前也做一次
     2 接取         team.form（距上次組隊 / 驗隊伍 ≤ TEAM_FRESH_S 秒就略過，例：交接剛組完）→ questdetail.accept(skip_ok, verify=False)：**整個任務只開一次詳情**，同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 傳送 → NPC 對話 → 接受，不重開詳情驗證，看對話框收起）；失敗 119
     3 跑步驟       迴圈（每片 ≤ --slice-s 秒，總計 ≤ --max-min 分，片數 ≤ --max-slices）：
-                   （--dragon 才做）龍王的守護（人形圖示不在才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵）
+                   （--dragon 才做）龍王的守護（人形圖示不在才吃：depot_use 公共倉庫取出 → 吃 1 顆 → 剩的存回；吃完再關原地遇敵；
+                   遊戲還在自動巡路就這片先不吃 —— 2026-10-13 08:04 開背包途中抵達 NPC、對話框把背包藏起來 → depot_use 90）
                    → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115（defs 有 turnin 且加 --pet-turnin：改跑交寵物，見下）；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
                    → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）；
                      questrun 在 TEAM_FRESH_S 秒內驗過隊伍（接取後 form、quest.py 37 的 BOSS 後檢查、30 / 32 後 form）→ 加 --team-fresh，quest.py 開始前不再開切換面板
-                     （領獎後 / 任務戰後的隊伍檢查、37 / 38 照舊）
+                     （領獎後 / 任務戰後的隊伍檢查、37 / 38 照舊）；--team-hp-min > 0 時加 --hp-check-min（片內每場戰鬥後回主畫面讀全隊 HP，偏低 → 41）
+                   → 每片 0 / 37 後看主畫面信封鈕發亮（screen_sigs.MAIL_GLOW，會閃 → 讀 4 次）→ 背包 / 信箱處理（見下「背包滿進信箱」）
     4 逐人驗證     （2026-10-12，四寶玉之謎隊長完成、DKBO3 / DKBO5 被打飛沒完成卻沒發現）隊長判完成後，其他 4 人逐一 char.switch 讀任務詳情
                    （questdetail.status_all，每人約 10～40 秒）；有人不是「已完成」→ bossretry --who 落後者（落後者當隊長組 5 人重打 → 切回 DKBO 重組）
                    → 再讀一次那幾個人；仍沒完成 / 讀不到 / 待接取（沒接到）→ 108 停手。--no-verify-all 關；詳情一開就已完成而跳過的任務預設不驗（--verify-skipped 才驗）
@@ -46,6 +51,9 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀�
   （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
   quest.py 回 0 且 tail 有「時間到」（單純 slice 到期、任務還在追蹤欄）→ 不開詳情，直接下一片（完成由下一片 quest.py「任務完成」或回 5 時才讀詳情確認）；回 0 但沒有「任務完成」也不是「時間到」（模糊）才讀一次詳情
   3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 看詳情狀態（已完成 = 結束，否則 112）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
+  41 片內戰鬥後全隊 HP 偏低 → 補血（小護士）+ team.form → 下一片（每任務最多 HP_LOW_MAX=5 次，超過 111）；
+  40 任務 NPC 只有「再見」（quest.py 已 ESC）→ 背包 / 信箱處理：背包空格 < 1 的人刪白名單 → mail.py claim 領「丟失的物品」→ 續跑（不重置任務；每任務最多 BYE_RECOVER_MAX=2 次）；
+     背包沒滿且信箱沒有丟失信（mail 112）→ 153；背包刪不出空位 / mail 114 等 → 154；
   19 自動巡路卡住解卡 3 次仍卡 → 112；33 對話無進展 → 117；25 完整戰鬥自動戰鬥卡住 → 118；39 不可逆對話 → 116（不放行）；2 不認得的畫面（疑似驗證視窗）→ 9 停手通知（鐵則 5）；10 斷線（netwatch）→ 10；21 被打飛 → 同 38 走 bossretry；其他 → 112
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 20～107、120～129；questrun 自己 108、110～119）：
@@ -63,6 +71,11 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；否則讀�
   119 接取失敗（info.accept_rc 是 questdetail 的 120～128）
   150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～125 / 切回 DKBO / 重組；info.turnin）
   151 丟獎勵寵失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；info.drop）
+  153 任務接不下去：quest.py 40（任務 NPC 只有「再見」）且背包有空、信箱沒有丟失的物品（或處理 2 次後 NPC 仍只有再見）→ 停手回報（條件不符？請人看）
+  154 背包滿自動處理失敗：讀空格 / 刪白名單失敗、刪完仍滿、mail.py 領取失敗（114 = 領了沒消失）
+  背包滿進信箱（2026-10-13 強盜的洞穴步 3：5 人背包滿 15 格，薩頓家的頭盔進系統郵件「這是您丟失的物品」→ 老人薩頓只剩再見）：
+                 觸發 = quest.py 40 或片後信封發亮；做法 = make_room（空格 < 1 的人 bag.purge AUTO_PURGE）→ mail.run('claim')（帳號共用信箱一次領完）→ 續跑；
+                 信封發亮但沒有丟失信（112）→ 本次 run 不再因發亮開信箱
   152 領獎視窗關不掉：quest.py 回 18（獲得物品按確認 3 次仍在）→ questrun 先重試關窗（只有畫面仍是 reward 才按確認 720,572 並驗證消失；已不是 reward 就不點，當成已關）
       成功就續跑下一片；重試仍關不掉、或同一任務重試已達 REWARD_RETRY_MAX 次 → 152「請人工處理」，存 snap questrun-reward-stuck，不恢復掛機（info.reward_retry）
 """
@@ -93,6 +106,9 @@ EXIT_BATTLESET = 109                                                 # 戰鬥設
 EXIT_REWARD = 152                                                    # 領獎視窗關不掉（quest.py 18 → 重試仍失敗；152 grep 過沒被用）
 REWARD_RETRY_MAX = 3                                                 # 每個任務最多重試關領獎窗幾次（避免無限迴圈）
 EXIT_TURNIN, EXIT_DROP = 150, 151                                    # 交寵物 / 丟獎勵寵失敗（150～151 grep 過沒被用）
+EXIT_BYE, EXIT_BAGMAIL = 153, 154                                    # 任務 NPC 只有再見（背包 / 信箱都不是原因）/ 背包滿自動處理失敗（153～154 grep 過沒被用）
+BYE_RECOVER_MAX = 2             # 每個任務 quest.py 40（NPC 只有再見）時最多做幾次「背包 / 信箱」處理
+HP_LOW_MAX = 5                  # 每個任務 quest.py 41（片內 HP 偏低）最多補血幾次，超過 111
 DROP_MAX_LEVEL = 1                                                   # --drop-reward 只丟這個等級以下（剛拿到的獎勵寵是 1 級）
 
 LEADER = rebirth.LEADER
@@ -104,6 +120,7 @@ BOSS_RETRY_MAX = 3              # 每個任務 38 / 21 時最多呼叫幾次 bos
 TEAM_HP_MIN = 60                # 全隊任一人 HP < 這個 % → 補血（2026-10-12 四寶玉之謎：只看隊長 HP，隊員約 50% 連打 BOSS 被打死踢隊 4 次 38）；0 = 不讀全隊
 WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
 DEFAULT_SPOT = '地雷區'
+MAIL_GLOW_READS, MAIL_GLOW_GAP = 4, 0.3                              # 信封發亮會閃：讀 4 次（約 1 秒）任一次亮就算有信
 FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出）
 TEAM_FRESH_S = 30.0             # 隊伍在這麼多秒內驗過（form 成功 / quest.py 37）→ 接取前不重組、quest.py 加 --team-fresh（2026-10-12 解救老爺爺：開始前 4 次 + quest.py 啟動 1 次開關切換面板）
 DONE_TRUST_S = 2 * 3600         # 進度檔記「已完成」且在這段時間內 → 重啟續跑直接跳過（超過視為可能轉生 / 封印書重置過，重新讀一次詳情）
@@ -158,10 +175,9 @@ class Tools(rebirth.Tools):
         return quest.stat().get('hpPct')
 
     def team_hp(self):
-        """5 人 HP%（開背包逐人點頭像讀 HP 條字，約 8 秒）→ (rc, {角色: % | None})；HUD / 切換面板 / 組隊面板都只有當前角色或沒有 HP"""
+        """5 人 HP%（bag.team_hp_pct：開背包逐人點頭像讀 HP 條字，約 8 秒）→ (rc, {角色: % | None})；HUD / 切換面板 / 組隊面板都只有當前角色或沒有 HP"""
         import bag
-        rc, d = bag.hps(ALL_ROLES)
-        return rc, {r: (round(100 * v[0] / v[1]) if v else None) for r, v in d.items()}
+        return bag.team_hp_pct(ALL_ROLES)
 
     def heal(self):
         import heal
@@ -192,6 +208,33 @@ class Tools(rebirth.Tools):
         """誤開的組隊 / 切換面板 → 點 ✕ 關（已知面板才關；不認得的畫面不碰）"""
         import quest
         return quest.close_stray_panel()
+
+    def clear_screen(self):
+        """交接前清殘留（NPC 對話框 / 只有再見 / 獲得物品 → ESC 或確認；已知面板 → ✕）→ 最後畫面狀態；不認得的不碰"""
+        import quest
+        return quest.clear_leftovers()
+
+    def bag_purge(self, roles):
+        """背包滿：只刪 bag.AUTO_PURGE（ui/bag.md 白名單去掉有條件的）→ (rc, {角色: info})"""
+        import bag
+        return bag.purge(list(roles), bag.AUTO_PURGE)
+
+    def mail_claim(self):
+        """信箱領「丟失的物品」（帳號共用，一次領完）→ mail 退出碼（0 / 112 沒有丟失信 / 114 領了沒消失…）"""
+        import mail
+        return mail.run('claim')
+
+    def mail_glow(self):
+        """主畫面信封鈕有沒有發亮（有新信；會閃 → 讀 MAIL_GLOW_READS 次任一次亮就算）"""
+        import screen_sigs
+        pts = [(x, y) for x, y, *_ in screen_sigs.MAIL_GLOW]
+        for i in range(MAIL_GLOW_READS):
+            if i:
+                time.sleep(MAIL_GLOW_GAP)
+            cols = uikit.px(pts)
+            if cols and screen_sigs.mail_glow(dict(zip(pts, cols))):
+                return True
+        return False
 
     def dragon_active(self):
         """buff 列有龍王的人形圖示嗎（True / False）；讀不到 None"""
@@ -329,9 +372,10 @@ def retry_form(T, form_fn, what: str, tries: int = FORM_TRIES) -> int:
 
 # ---------------------------------------------------------------- 純函式
 def classify(rc: int, tail=()) -> str:
-    """quest.py 退出碼 → 動作字串（測試直接餵）：done? / boss / stuck3 / gone / team / stall / battle / irrev / verify / halt / knocked / other"""
+    """quest.py 退出碼 → 動作字串（測試直接餵）：done? / boss / stuck3 / gone / team / stall / battle / irrev / verify / halt / knocked / bye / hp_low / other"""
     return {0: 'check', 37: 'boss', 38: 'boss_team', 3: 'no_track', 5: 'gone', 30: 'team', 32: 'team', 33: 'stall', 29: 'stall', 25: 'battle',
-            39: 'irrev', 18: 'reward_stuck', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked'}.get(rc, 'other')
+            39: 'irrev', 18: 'reward_stuck', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked',
+            40: 'bye', 41: 'hp_low'}.get(rc, 'other')
 
 
 def walk_secs(tail) -> int:
@@ -366,7 +410,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[任務 {d["id"]}] {d["detail"]}（追蹤標題「{d["track"]}」，接取 {d["accept_npc"]}，{d["steps_total"]} 步，預估 {d.get("est_min", "?")} 分）')
         print(f'  - team.form（{TEAM_FRESH_S:.0f} 秒內剛確認過就略過）→ questdetail.accept（只開一次詳情）：已完成 → 跳過；待接取 → 接受（不重開詳情）；進行中 → 續跑')
         if d.get('bag_slots'):
-            print(f'  - 背包空位：5 人各 ≥ {d["bag_slots"]} 格（bag.find_items）')
+            print(f'  - 背包空位：5 人各 ≥ {d["bag_slots"]} 格（bag.find_items；不足先刪 bag.AUTO_PURGE 白名單，仍不足 110）')
         print(f'  - 補血檢查（任務開始前、每次 BOSS 戰後）：隊長 HUD HP < {opts["hp_min"]}% 或全隊（bag.hps）任一人 < {opts.get("team_hp_min", TEAM_HP_MIN)}% → heal.heal_trip --no-return（小護士補整隊）+ team.form')
         for st, sd in sorted((d.get('steps') or {}).items()):
             if sd['kind'] == 'walk':
@@ -386,7 +430,9 @@ def print_plan(defs, opts: dict) -> None:
             print(f'  - 有任務戰 / BOSS 戰：quest.py 預設模式打完回 37（滿 5 人 → 繼續）/ 38（不滿 → bossretry.py 落後者當隊長 5 人重打 + 重組，每任務最多 {BOSS_RETRY_MAX} 次；失敗 114）')
         if opts.get('dragon', False):
             print(f'  - 每片前：龍王的守護（buff 列看不到人形圖示才吃；depot_use 公共倉庫取出 → 吃 → 存回 → 關遇敵）')
-        print(f'  - 迴圈：quest.py --task {d["track"]} --max-seconds {opts["slice_s"]}（≤ {opts["max_slices"]} 片、≤ {opts["max_min"]} 分），依退出碼分支')
+        print(f'  - 迴圈：quest.py --task {d["track"]} --max-seconds {opts["slice_s"]}'
+              + (f' --hp-check-min {opts.get("team_hp_min", TEAM_HP_MIN)}（片內每場戰鬥後讀全隊 HP，偏低 41 → 補血續片）' if opts.get('team_hp_min', TEAM_HP_MIN) > 0 else '')
+              + f'（≤ {opts["max_slices"]} 片、≤ {opts["max_min"]} 分），依退出碼分支；NPC 只有再見 40 / 信封發亮 → 背包滿刪白名單 + 領信續跑（153 / 154）')
         print('  - 收尾：quest.py「任務完成」（追蹤欄沒有該任務）→ 進度檔 + notes/quest-log.md（沒有該字樣才開詳情確認）')
     if not opts.get('dragon', False):
         print('[龍王的守護] 預設不吃（要吃加 --dragon）')
@@ -396,7 +442,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 152 領獎窗關不掉；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 152 領獎窗關不掉 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -411,6 +457,7 @@ class Run:
         self.run_dragons = 0                                           # 本次 run 吃的龍王的守護（LAST.dragon_used；進度檔累計另放 dragon_used_total）
         self.task_dragons = 0                                          # 目前任務吃的（quest-log 摘要用）
         self.team_ok_at = 0.0                                          # 最近一次確認 5 人隊伍完整的時間（form 成功 / quest.py 37）；0 = 不新鮮
+        self.mail_no_lost = False                                      # 信封發亮但信箱沒有「丟失的物品」（mail 112）→ 本次 run 不再因發亮開信箱
 
     # -- 共用 --
     def save(self):
@@ -476,6 +523,9 @@ class Run:
         active = self.T.dragon_active()                                # 人形圖示在 = 還有效（不看時間）；2倍智慧果的 EXP 圖示不會誤判
         if not force and active:
             return
+        if self.T.screen_state() == 'walking':                         # 2026-10-13 08:04：片「時間到」時遊戲還在自動巡路，開背包吃龍王途中抵達 NPC → 對話框蓋住背包（depot_use 90）
+            event('龍王的守護：遊戲還在自動巡路（開背包途中抵達 NPC 會被對話框打斷）→ 這片先不吃，下一片再看')
+            return
         have = bool(self.st.get('dragon_in_bag'))
         rc, d = self.T.dragon(have)
         if rc:
@@ -502,16 +552,19 @@ class Run:
             if T.follow_active():
                 return self.fail(EXIT_HANDOVER, 'follow 停不掉')
         rc = T.preflight()
+        if rc == uikit.EXIT_UNKNOWN_SCREEN:                         # 不認得：先看是不是上次中斷留下的已知面板 / 對話框（清得掉才重驗；真的不認得照舊 9）
+            if self.clear_leftovers('交接前（preflight 不認得）') != 'unknown':
+                rc = T.preflight()
         if rc:
             return rc
-        if T.screen_state() == 'dialog':                            # 上次中斷在 NPC 對話窗（HUD 不在，面板打不開）：ESC 關掉（不回答），quest.py 之後會再點 NPC 開
-            event('畫面停在 NPC 對話窗（上次中斷）→ ESC 關閉後再交接')
-            T.esc()
-            T.sleep(1)
+        if self.clear_leftovers('交接前') == 'unknown':             # 上次中斷在 NPC 對話窗 / 背包面板等（HUD 不在，外掛面板打不開）：ESC / ✕ 關掉（不回答）
+            return self.fail(uikit.EXIT_UNKNOWN_SCREEN, '交接前畫面不認得（疑似驗證視窗）→ 停手通知使用者（鐵則 5）')
         try:
             T.encounter_off_wait()
         except RuntimeError as e:
             return self.fail(EXIT_HANDOVER, f'關原地遇敵失敗：{e}')
+        if self.clear_leftovers('戰鬥設定檢查前') == 'unknown':     # 2026-10-13 08:00 / 08:01：背包面板 / NPC 對話窗殘留 → ass 選不到頭像 / 外掛面板打不開（109）
+            return self.fail(uikit.EXIT_UNKNOWN_SCREEN, '戰鬥設定檢查前畫面不認得（疑似驗證視窗）→ 停手通知使用者（鐵則 5）')
         rc = self.battle_gate('交接')                                   # 戰鬥已結束（上一步等過）才開外掛面板
         if rc:
             return rc
@@ -522,6 +575,13 @@ class Run:
                 return rc                                               # 驗證視窗 / 斷線透傳
             return self.fail(EXIT_HANDOVER, f'team.form 沒成功 rc={rc}（要滿 5 人）', team_rc=rc)
         return 0
+
+    def clear_leftovers(self, where: str) -> str:
+        """清掉上次中斷留下的對話框 / 已知面板（quest.clear_leftovers）→ 最後畫面狀態；有動到才記事件"""
+        st = self.T.clear_screen()
+        if st not in ('idle', 'walking'):
+            event(f'{where}：清殘留後畫面是 {st}')
+        return st
 
     def battle_gate(self, where: str) -> int:
         """戰鬥設定檢查（ass.battle_check：5 人自動戰鬥、DKBO 人物首次動作 風的精靈 打勾）；只改不對的勾選。
@@ -595,16 +655,65 @@ class Run:
         rc, s = self.T.task_status(d['detail'])
         return rc, s
 
+    def bag_short(self, need: int) -> tuple:
+        """讀 5 人背包空格 → (rc, {角色: 空格}, {不足 need 的角色: 空格})；讀不出的（None）不算不足"""
+        rc, free = self.T.bag_free(ALL_ROLES)
+        if rc:
+            return rc, free or {}, {}
+        self.info['bag_free'] = free
+        return 0, free, {r: v for r, v in free.items() if v is not None and v < need}
+
+    def make_room(self, need: int, where: str) -> tuple:
+        """背包空格不足 need 的人 → 只刪 bag.AUTO_PURGE（白名單）→ 重讀 → (rc, 仍不足 {角色: 空格})。rc = bag 的讀 / 刪退出碼（9 / 10 透傳）"""
+        rc, free, short = self.bag_short(need)
+        if rc or not short:
+            return rc, short
+        event(f'{where}：背包空格不足 {need}：{short} → 自動刪白名單道具（bag.AUTO_PURGE）')
+        prc, pinfo = self.T.bag_purge(sorted(short))
+        self.info['purge'] = {'rc': prc, 'roles': {r: (i or {}).get('deleted') for r, i in (pinfo or {}).items()}}
+        if prc:
+            return prc, short
+        event(f'{where}：已刪 {self.info["purge"]["roles"]}')
+        rc, free, short = self.bag_short(need)
+        return rc, short
+
     def preflight_task(self, d) -> int:
-        if d.get('bag_slots'):
-            rc, free = self.T.bag_free(ALL_ROLES)
+        need = d.get('bag_slots') or 0
+        if need:
+            rc, short = self.make_room(need, f'{d["detail"]} 開始前')
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
             if rc:
-                return self.fail(EXIT_PREFLIGHT, f'讀背包空位失敗 bag rc={rc}', bag_rc=rc)
-            self.info['bag_free'] = free
-            short = {r: v for r, v in free.items() if v is not None and v < d['bag_slots']}
+                return self.fail(EXIT_PREFLIGHT, f'讀背包空位 / 自動刪白名單道具失敗 bag rc={rc}', bag_rc=rc)
             if short:
-                return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 要每人背包空 ≥{d["bag_slots"]} 格，不足：{short}', bag_short=short)
+                return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 要每人背包空 ≥{need} 格（questdefs.bag_slots，任務道具最多同時佔的格數），刪完白名單仍不足：{short}', bag_short=short)
         return self.hp_gate('任務開始前')
+
+    def recover_items(self, tid, why: str) -> int:
+        """背包滿 → 任務道具進信箱的處理（不重置任務）：背包空格 < 1 的人先刪白名單道具 → mail.py 領「丟失的物品」。
+        why='bye'（quest.py 40：NPC 只有再見）時，背包沒滿又沒有丟失信 = 不是這個原因 → 153 回報；
+        why='glow'（信封發亮）時沒有丟失信只記住、不失敗。回 0 = 處理完可以續跑"""
+        rc, short = self.make_room(1, f'任務 {tid} 背包 / 信箱處理')
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.fail(EXIT_BAGMAIL, f'任務 {tid}：背包滿處理失敗（讀空格 / 刪白名單 bag rc={rc}）', bag_rc=rc)
+        if short:
+            return self.fail(EXIT_BAGMAIL, f'任務 {tid}：背包仍是滿的 {short}（白名單沒有可刪的）→ 信箱領不進來，請人清背包', bag_short=short)
+        mrc = self.T.mail_claim()
+        self.info['mail_rc'] = mrc
+        if mrc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return mrc
+        if mrc == 0:
+            event(f'任務 {tid}：信箱「丟失的物品」已領（mail rc 0）→ 續跑')
+            return 0
+        if mrc == 112:                                                 # 有信但沒有「丟失」字樣 / 沒信：不是背包滿的問題
+            self.mail_no_lost = True
+            if why == 'bye':
+                return self.fail(EXIT_BYE, f'任務 {tid}：NPC 只有「再見」，背包有空、信箱沒有丟失的物品 → 任務接不下去（條件不符？），請人看', quest_rc=40)
+            event(f'任務 {tid}：信封發亮但沒有「丟失的物品」→ 不領，本次不再因發亮開信箱')
+            return 0
+        return self.fail(EXIT_BAGMAIL, f'任務 {tid}：信箱領取失敗 mail rc={mrc}（114 = 領了沒消失，背包還滿？）', mail_rc=mrc)
 
     def hp_gate(self, where: str) -> int:
         """補血檢查（任務開始前、BOSS 戰後下一片之前）：隊長 HUD HP < --hp-min，或全隊（bag.hps）任一人 < --team-hp-min → heal 全隊（小護士補整隊）+ team.form。
@@ -628,6 +737,10 @@ class Run:
         if not low:
             return 0
         event(f'{where}：HP 偏低 {low}（隊長門檻 {self.o["hp_min"]}%、全隊門檻 {self.o.get("team_hp_min", TEAM_HP_MIN)}%）→ 補血（小護士補整隊）')
+        return self.heal_form()
+
+    def heal_form(self) -> int:
+        """補血（小護士補整隊）→ team.form；失敗 111"""
         try:
             self.T.heal()
         except RuntimeError as e:
@@ -722,6 +835,8 @@ class Run:
         relogins = 0
         boss_retries = 0
         reward_retries = 0
+        bye_recovers = 0
+        hp_lows = 0
         turnin_tried = False
         for k in range(self.o['max_slices']):
             if time.time() - t0 > self.o['max_min'] * 60:
@@ -754,6 +869,8 @@ class Run:
             qargs = ['--task', track, '--max-seconds', self.o['slice_s']]
             if self.team_fresh():
                 qargs.append('--team-fresh')                           # 剛驗過隊伍：quest.py 開始前不再開切換面板（之後的領獎後 / 任務戰後檢查照舊）
+            if self.o.get('team_hp_min', TEAM_HP_MIN) > 0:
+                qargs += ['--hp-check-min', self.o.get('team_hp_min', TEAM_HP_MIN)]   # 片內每場戰鬥後驗全隊 HP（四寶玉之謎連戰被打死踢隊）
             rc, tail = T.quest(qargs, self.o['slice_s'] + WALK_CAP_S + 120)
             self.team_ok_at = time.time() if rc == 37 else 0.0         # 37 = quest.py 剛驗過滿 5 人；其他結束方式隊伍狀態未知
             walked = walk_secs(tail)
@@ -769,6 +886,11 @@ class Run:
                 return self.fail(uikit.EXIT_UNKNOWN_SCREEN, 'quest.py 看到不認得的畫面（疑似驗證視窗）→ 停手通知使用者（鐵則 5）', quest_rc=rc)
             if act == 'halt':
                 return uikit.EXIT_HALT
+            if act in ('check', 'boss') and not self.mail_no_lost and T.mail_glow():   # 信封發亮 = 可能有道具因背包滿進了信箱 → 先騰空位再領（不等 NPC 只剩再見）
+                event(f'任務 {tid}：主畫面信封發亮（可能是背包滿、任務道具進了信箱）→ 背包 / 信箱處理')
+                rc2 = self.recover_items(tid, 'glow')
+                if rc2:
+                    return rc2
             if act == 'reward_stuck':                                   # quest.py 18：領獎窗按確認 3 次沒關 → 重試關窗一次，成功續跑，否則停手交人
                 reward_retries += 1
                 if reward_retries > REWARD_RETRY_MAX:
@@ -779,6 +901,25 @@ class Run:
                 if rr == 'stuck':
                     T.snap('questrun-reward-stuck')
                     return self.fail(EXIT_REWARD, f'任務 {tid}：領獎視窗關不掉，請人工處理', quest_rc=rc, reward_retry=reward_retries)
+                continue
+            if act == 'hp_low':                                        # quest.py 41：片內戰鬥後全隊 HP 偏低 → 補血 + 重組再續片
+                hp_lows += 1
+                if hp_lows > HP_LOW_MAX:
+                    return self.fail(EXIT_HANDOVER, f'任務 {tid}：片內 HP 偏低已補血 {HP_LOW_MAX} 次仍一直偏低（quest.py 41），停手交人', quest_rc=rc)
+                event(f'任務 {tid}：quest.py 41 片內戰鬥後全隊 HP 偏低 → 補血（第 {hp_lows}/{HP_LOW_MAX} 次）後續片')
+                rc = self.heal_form()
+                if rc:
+                    return rc
+                continue
+            if act == 'bye':                                           # quest.py 40：任務 NPC 只有「再見」→ 查背包滿 / 信箱（2026-10-13 薩頓家的頭盔進信箱）
+                bye_recovers += 1
+                if bye_recovers > BYE_RECOVER_MAX:
+                    T.snap('questrun-bye')
+                    return self.fail(EXIT_BYE, f'任務 {tid}：NPC 只有「再見」，背包 / 信箱處理 {BYE_RECOVER_MAX} 次後仍一樣 → 任務接不下去，請人看', quest_rc=rc)
+                event(f'任務 {tid}：quest.py 40 任務 NPC 只有「再見」→ 查背包滿 / 信箱（第 {bye_recovers}/{BYE_RECOVER_MAX} 次）')
+                rc = self.recover_items(tid, 'bye')
+                if rc:
+                    return rc
                 continue
             if act == 'irrev':
                 T.snap('questrun-irrev')

@@ -410,5 +410,32 @@ check('same(DKB0, DKBO) / same(DKB02, DKBO2)', charstate.same('DKB0', 'DKBO') an
 check('ass.norm_role：DKB0 / DKBO / dkb05 → 真名', ass.norm_role('DKB0') == 'DKBO' and ass.norm_role('DKBO') == 'DKBO' and ass.norm_role('dkb05') == 'DKBO5' and ass.norm_role('DKB06') is None)
 check('charstate.write(DKB02) 寫入真名 DKBO2', charstate.write('DKB02', path=tmp) and charstate.read(path=tmp)['name'] == 'DKBO2')
 
+# known_panel / close_known_panel（2026-10-13 背包面板殘留誤報 rc 9；實機取點 fixtures/stray_px.json）
+_fx = json.loads((HERE / 'fixtures' / 'stray_px.json').read_text(encoding='utf-8'))['images']
+_keep_px, _keep_close = uikit.px, uikit.close_panel
+
+
+def _use(rel):
+    m = {tuple(int(v) for v in k.split(',')): tuple(c) for k, c in _fx[rel]['px'].items()}
+    uikit.px = lambda pts: [m.get(tuple(p), (0, 0, 0)) for p in pts]
+
+
+_use('quest-log/080443-UNKNOWN.png')
+check('known_panel：背包頁殘留 → bag', uikit.known_panel() == 'bag')
+_use('quest-log/075938-UNKNOWN.png')
+check('known_panel：倉庫頁殘留（同一個背包面板）→ bag', uikit.known_panel() == 'bag')
+for _rel in ('quest-log/060801-UNKNOWN.png', 'ui-log/080426-bag-nopopup.png', 'watch-alerts/unknown-1791843913.png', 'quest-log/060732-boss-done.png'):
+    _use(_rel)
+    check(f'known_panel：{_rel} → None（不是可關的面板）', uikit.known_panel() is None)
+uikit.px = lambda pts: None
+check('known_panel：讀不到 → None', uikit.known_panel() is None)
+_closed = []
+uikit.close_panel = lambda p, known_open=False: (_closed.append((p.name, p.close_xy)), True)[1]
+_use('quest-log/080443-UNKNOWN.png')
+check('close_known_panel：背包 → 點 ✕ 1280,113（bag.BAGANY）', uikit.close_known_panel() == 'bag' and _closed == [('BAGANY', (1280, 113))], str(_closed))
+check('known_panel_obj：沒專用 Panel 的（任務詳情）用 PANEL_X ✕', uikit.known_panel_obj('quest').close_xy == screen_sigs.PANEL_X['quest'][:2]
+      and uikit.known_panel_obj('pet') is uikit.PET and uikit.known_panel_obj('nope') is None)
+uikit.px, uikit.close_panel = _keep_px, _keep_close
+
 print('失敗', fails)
 sys.exit(1 if fails else 0)

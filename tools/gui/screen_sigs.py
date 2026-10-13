@@ -177,6 +177,18 @@ NET_CHARSEL = _t([(640, 640, 197, 134, 70), (500, 250, 241, 213, 179), (1186, 19
 # ---- heal 特徵：主畫面「取消遇敵」紅龍頭（容差 50）----
 ENC_ON = _t([(1380, 630, 129, 6, 0), (1360, 632, 179, 12, 0)], ENC_TOL)
 
+# ---- 主畫面左側信封鈕（178,583）「有新信」發亮（2026-10-13 背包滿 → 任務道具進信箱「這是您丟失的物品」）----
+# 正常信封是暗棕圓鈕；有信時整顆變亮黃（會閃：同一段時間 3 張發亮、1 張正常）。tools/.cache 1800 多張 1440×830 樣本只有
+# quest-log/060732-boss-done、064721-boss-done、064813-boss-done 3 張發亮（都在 06:07 頭盔進信箱～領信之間），其餘 0 張。
+# 只當「可能有信」的觸發：真正領之前 mail.py 會 OCR 郵件文字含「丟失」才領；沒看到發亮不代表沒信（閃爍 / 被對話框蓋住）
+MAIL_GLOW = _t([(155, 565, 255, 255, 209), (200, 565, 255, 249, 199), (200, 600, 237, 213, 17), (178, 606, 236, 211, 16)], TOL)
+MAIL_GLOW_NEED = 3
+
+
+def mail_glow(px: dict) -> bool:
+    """純函式：信封鈕 4 點至少 MAIL_GLOW_NEED 點是發亮色（缺點當不符）"""
+    return _count_ok(px, [(x, y, r, g, b) for x, y, r, g, b, _ in MAIL_GLOW], TOL) >= MAIL_GLOW_NEED
+
 
 def sig_str(sig, neg: bool = False) -> str:
     """tuple 清單 → gui.ps1 waitpix 字串 'x,y,r,g,b/x,y,r,g,b'；neg = 每點加 '!'（不是這個顏色）。容差由呼叫端另帶"""
@@ -217,6 +229,17 @@ def panel_of(px: dict):
             return name
     for name, (x, y, r, g, b, tol) in PANEL_X.items():
         if (x, y) in px and close(px[(x, y)], (r, g, b), tol) and _count_ok(px, PANEL_PTS[name], PANEL_TOL) >= PANEL_NEED:
+            return name
+    return None
+
+
+def panel_strict(px: dict):
+    """要「動手關」時用的嚴格面板判斷 → 面板名或 None：標題板字（PANEL_TITLE 8 中 TITLE_NEED）**且**該面板的 ✕（PANEL_X）都要命中。
+    panel_of 只要其一（給 watch 顯示用）；這裡兩個都要，避免把蓋在面板上的驗證 / 不認得視窗當成面板去點 ✕
+    （被模態視窗壓暗的面板，標題 ×0.5 不會命中 → None，照不認得處理）。缺點一律不符"""
+    for name, pts in PANEL_TITLE.items():
+        x, y, r, g, b, tol = PANEL_X[name]
+        if _count_ok(px, pts, TITLE_TOL) >= TITLE_NEED and (x, y) in px and close(px[(x, y)], (r, g, b), tol):
             return name
     return None
 
