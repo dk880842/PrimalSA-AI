@@ -110,12 +110,12 @@ def read_status() -> tuple:
 
 
 def spot_by_name(text) -> str | None:
-    """地圖名 OCR 文字 → 練功點名：只吃「唯一」吻合（地圖名連續 3 字出現在文字裡；柯奧龜洞 1 樓 / 4 樓同名前綴 → 兩個都吻合 = 不確定 None）"""
+    """地圖名 OCR 文字 → 練功點名：只吃「唯一」吻合（地圖名連續 4 字出現在文字裡；柯奧龜洞 1 樓 / 4 樓同名前綴 → 兩個都吻合 = 不確定 None）"""
     s = re.sub(r'[^\u4e00-\u9fff]', '', str(text or ''))
     hit = []
     for n, v in spots.SPOTS.items():
         nm = re.sub(r'[^\u4e00-\u9fff]', '', v[4])
-        if len(nm) >= 3 and any(nm[i:i + 3] in s for i in range(len(nm) - 2)):
+        if len(nm) >= 4 and any(nm[i:i + 4] in s for i in range(len(nm) - 3)):   # 連續 4 字（3 字太鬆：2026-10-13 海底通路被誤認五兄弟洞窟）
             hit.append(n)
     return hit[0] if len(hit) == 1 else None
 
@@ -127,6 +127,15 @@ def where_by_name() -> str | None:
         if n:
             return n
     return None
+
+
+def arrived_at(target: str) -> bool:
+    """傳送失敗（EXIT_TELEPORT）後判斷人是否其實已在 target：以地圖 ID 為準（HUD id 讀得到就只比 ID，不吻合 = 沒到）；
+    ID 讀不到才退回精確地圖名（where_by_name）"""
+    mid = hud_map_id()
+    if mid is not None:
+        return mid == spots.SPOTS[target][2]
+    return where_by_name() == target
 
 
 def hud_map_id() -> int | None:
@@ -339,8 +348,8 @@ class Follow:
         if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
             return rc
         if rc == grind.EXIT_TELEPORT:
-            if where_by_name() == target:             # 其實傳過去了，只是座標讀不到（地圖名兩行）→ 當成功，補 ensure
-                note(f'傳送驗證讀不到座標，但地圖名是 {target}：視為已抵達，補 grind ensure')
+            if arrived_at(target):                    # 其實傳過去了（地圖 ID 吻合；ID 讀不到才看精確地圖名）→ 當成功，補 ensure
+                note(f'傳送驗證讀不到座標，但地圖 ID / 名稱確認是 {target}：視為已抵達，補 grind ensure')
                 self.cur, self.last_switch, self.fails = target, int(time.time()), 0
                 rc2 = self.grind_run('ensure')
                 self.unrecovered = bool(rc2)

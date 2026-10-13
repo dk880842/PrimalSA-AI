@@ -59,6 +59,7 @@ def install(w):
     follow.read_status = lambda: (w.reads.pop(0) if w.reads else (w.lv[1], w.map))
     follow.verify_screen_state = lambda: w.screen
     follow.where_by_name = lambda: getattr(w, 'byname', None)
+    follow.hud_map_id = lambda: getattr(w, 'hudid', None)
     follow.watchstate.verify_suspect = lambda *a, **k: w.verify
     follow.read_block_msg = lambda: w.block
     follow.errlog.add = lambda msg, **k: w.errs.append(msg)
@@ -290,14 +291,25 @@ follow.PID_FILE.unlink()
 check('spot_by_name 五兄弟（含雜字）', follow.spot_by_name('五兄弟•的山寨地下-6、') == '五兄弟洞窟')
 check('spot_by_name 柯奧龜洞 1 / 4 樓同前綴 → 不確定 None', follow.spot_by_name('柯奧山的小洞窟') is None)
 check('spot_by_name 垃圾 / 空 → None', follow.spot_by_name('') is None and follow.spot_by_name('3170·5,20') is None)
-w = install(World(lv=(1, 45), map_=31401))
-w.byname = '五兄弟洞窟'
-w.start_rc['五兄弟洞窟'] = follow.grind.EXIT_TELEPORT
-f = mk(w)
-f.good = (1, 45)
-f.cur = '海主人隧道'
-rc = f.switch('五兄弟洞窟')
-check('傳送驗證失敗但地圖名已是目標 → 視為抵達、補 ensure、不修正門檻', rc is None and f.cur == '五兄弟洞窟' and ('ensure', None) in w.runs and not w.errs)
+def teleport_fail(hudid, byname, cur_map=31401):
+    w = install(World(lv=(1, 45), map_=cur_map))
+    w.hudid, w.byname = hudid, byname
+    w.start_rc['五兄弟洞窟'] = follow.grind.EXIT_TELEPORT
+    f = mk(w)
+    f.good = (1, 45)
+    f.cur = '海主人隧道'
+    return w, f, f.switch('五兄弟洞窟')
+
+
+w, f, rc = teleport_fail(31706, None)
+check('傳送驗證失敗但 HUD 地圖 ID 已是目標 → 視為抵達、補 ensure', rc is None and f.cur == '五兄弟洞窟' and ('ensure', None) in w.runs and not w.errs)
+w, f, rc = teleport_fail(None, '五兄弟洞窟')
+check('ID 讀不到、精確地圖名是目標 → 視為抵達', rc is None and f.cur == '五兄弟洞窟')
+# 2026-10-13 bug：人在奇努伊的海底通路（31401），OCR 名稱誤認五兄弟 → 以 ID 為準，不算抵達、走 on_blocked
+w, f, rc = teleport_fail(31401, '五兄弟洞窟')
+check('HUD ID = 海底通路但名稱誤認五兄弟 → 不算抵達，cur 不變（on_blocked 回原點 ensure）', f.cur == '海主人隧道' and rc is None and any('傳送 五兄弟洞窟' in e for e in w.errs))
+check('誤認時走 on_blocked（目標進冷卻）', f.block_until.get('五兄弟洞窟', 0) > 0)
+check('spot_by_name 只吻合 3 字雜訊 → None', follow.spot_by_name('的山寨') is None and follow.spot_by_name('海底') is None)
 
 # 11) 掛機未恢復：補血後 ensure 失敗 → 之後重試；連 3 次失敗停
 w = install(World(lv=(1, 5), map_=11001))
