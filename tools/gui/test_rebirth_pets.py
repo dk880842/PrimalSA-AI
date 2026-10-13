@@ -65,6 +65,18 @@ names, mount, left = rp.stores_for(bar, '布拉奇多斯')
 check('stores_for：--store-mount 名字與寵物不同 → 瑪斯貝卡仍不碰', '瑪斯貝卡' not in names and mount is None)
 bar2 = [S(1, unnamed='49/9/8/2', raw_name='?(49/9/8/2)', species=BRA, mountlike=True), S(2, name=DOR)]
 check('stores_for：沒名字但物種是騎寵（布拉奇多斯）→ 沒給旗標不存', rp.stores_for(bar2, None)[0] == [DOR] and rp.stores_for(bar2, BRA)[0] == [BRA, DOR])
+# 縮圖比對認物種（3d0362b）：沒名字 + mountlike + img_score >= 0.9 + img_species == --store-mount 才放行
+def _um(**k):
+    d = {'slot': 1, 'unnamed': True, 'mountlike': True, 'img_species': BRA, 'img_score': 0.95}
+    d.update(k)
+    return d
+check('stores_for：縮圖 0.95 認出 --store-mount 物種 → 存', rp.stores_for([_um()], BRA) == ([BRA], BRA, []))
+check('stores_for：縮圖 0.9（邊界）→ 存', rp.stores_for([_um(img_score=0.9)], BRA)[0] == [BRA])
+check('stores_for：縮圖 0.89 → 留下回報', rp.stores_for([_um(img_score=0.89)], BRA)[0] == [] and len(rp.stores_for([_um(img_score=0.89)], BRA)[2]) == 1)
+check('stores_for：縮圖物種與 --store-mount 不同 → 留下', rp.stores_for([_um(img_species=DOR)], BRA)[0] == [])
+check('stores_for：沒給 --store-mount → 縮圖再準也不存', rp.stores_for([_um()], None)[0] == [])
+check('stores_for：不是 mountlike 的沒名字寵物，縮圖不放行', rp.stores_for([_um(mountlike=False)], BRA)[0] == [])
+check('stores_for：img_score 缺 → 當 0、留下', rp.stores_for([_um(img_score=None)], BRA)[0] == [])
 check('new_unnamed：前一次空格、這次有沒名字 → 新增', [s['slot'] for s in rp.new_unnamed([S(1, name='x'), E(2), E(3)], [S(1, name='x'), S(2, unnamed='1/1/1/1'), E(3)])] == [2]
       and rp.new_unnamed([S(1, name='x'), E(2)], [S(1, name='x'), S(2, name='y')]) == [])
 check('role_ident：騎寵 = 沒名字 → growth；戰寵 = name；找不到 / 兩隻 → None',

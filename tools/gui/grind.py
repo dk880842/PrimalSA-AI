@@ -15,7 +15,7 @@
   52 外掛設定失敗（info.role / ass_rc）；check 時 = 有人快速戰鬥 / 自動戰鬥是關的
   53 此地圖禁止快速戰鬥（ass 回 4 且項目是快速戰鬥）
   54 原地遇敵開不起來（check 時 = 遇敵鈕是關的）
-  55 確認視窗內沒看到 ≥2 次 EXP 橫幅（遇敵開著但沒戰鬥 / 沒經驗）
+  55 確認視窗內沒看到 ≥2 次 EXP 橫幅（遇敵開著但沒戰鬥 / 沒經驗）；只看到 1 次時自動再延長一輪（遇敵稀疏的點，累計 ≥2 次算 ok）。JSON：from_map = 換點前地圖、to_map = 換點後、map_mismatch = 結束地圖與目標不符
   56 看到完整戰鬥畫面（有人沒快速戰鬥）；--fix（預設開）會先自動重設一次再確認，仍看到才回 56
   57 補血失敗（heal RuntimeError）
   58 當前角色切不回隊長（char.ensure 失敗，info.char_rc）
@@ -320,12 +320,26 @@ def read_map() -> int | None:
     return p[0] if p else None
 
 
+def map_id_of_pos(pos) -> int | None:
+    """'60049:30,25' → 60049（讀不到 None）"""
+    try:
+        return int(str(pos).split(':')[0])
+    except (ValueError, TypeError):
+        return None
+
+
 def finish(rc: int, mode: str, info: dict, t_start: float) -> int:
     info.update(rc=rc, mode=mode, secs=round(clock() - t_start, 1), laps=_marks, ts=int(time.time()))
     if rc not in (uikit.EXIT_IN_BATTLE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):     # 這幾種不再碰畫面
         try:
             s = heal.stat()
             info.update(map=s.get('pos'), level=s.get('level'), hpPct=s.get('hpPct'))
+            to = map_id_of_pos(s.get('pos'))
+            info['to_map'] = to                     # 換點「後」的地圖 ID（驗證用）
+            want = spots.SPOTS[info['spot']][2] if info.get('spot') in spots.SPOTS else None
+            if rc == 0 and want and to and to != want and not spots.same_tier(spots.spot_of_map(to) or '', info['spot']):
+                info['map_mismatch'] = {'want': want, 'got': to}
+                print(f'警告：目標 {info["spot"]}（地圖 {want}）但結束時在地圖 {to}', flush=True)
         except Exception:
             pass
     try:
@@ -409,7 +423,7 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
         lv = spots.parse_level(s.get('level'))
         trans, level = lv if lv else (0, 0)
         cur = read_map()
-        info.update(level=s.get('level'), cur_map=cur)
+        info.update(level=s.get('level'), from_map=cur)     # from_map = 換點「前」所在地圖（舊名 cur_map 易誤認為換點後）
         if spot == 'auto' and not lv:
             return uikit.fail(SRC, uikit.EXIT_USAGE, '讀不到隊長等級，無法 auto 選點')
         if spot not in ('here', 'auto') and not lv:
@@ -460,6 +474,15 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
             return uikit.fail(SRC, EXIT_ENC, '點了遇敵但紅龍頭沒亮')
         lap('開遇敵')
         res = confirm(confirm_secs)
+        if res['result'] == 'no_exp' and res['events'] >= 1:
+            # 看到 1 次 EXP 橫幅 = 有在戰鬥，只是這點遇敵稀疏（2026-10-12 海主人隧道 30 秒 1 次 → rc 55，其實一分鐘內連升 5 級）：再給一輪
+            r2 = confirm(confirm_secs)
+            r2['events'] += res['events']
+            r2['polls'] += res['polls']
+            r2['max_px'] = max(r2['max_px'], res['max_px'])
+            if r2['result'] == 'no_exp' and r2['events'] >= EXP_NEED:
+                r2['result'] = 'ok'
+            res = r2
         lap('確認視窗')
         info['confirm'] = res
         if res['result'] != 'full_battle' or k == tries - 1:

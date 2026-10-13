@@ -267,6 +267,23 @@ g.screens = [banner(), banner(), banner(), idle()]
 rc, j, _ = run('ensure', confirm_secs=5)
 check('同一個橫幅連續多幀只算 1 次 → 55', rc == 55 and j['confirm']['events'] == 1, str(j['confirm']))
 
+# 5c) 第一輪只 1 次橫幅（遇敵稀疏）→ 再給一輪，累計 2 次就算 ok（2026-10-12 海主人隧道 rc 55 誤判）
+g = install(Game())
+g.screens = [banner()] + [idle()] * 5 + [banner()] + [idle()] * 12
+rc, j, _ = run('ensure', confirm_secs=5)
+check('第一輪 1 次 + 第二輪 1 次 → 延長後 ok', rc == 0 and j['confirm']['result'] == 'ok' and j['confirm']['events'] == 2, str(j['confirm']))
+g = install(Game())
+g.screens = [banner()] + [idle()] * 30
+rc, j, _ = run('ensure', confirm_secs=5)
+check('延長一輪仍只 1 次 → 55', rc == 55 and j['confirm']['events'] == 1, str(j['confirm']))
+
+# 5d) start 換點：from_map 是換點前、to_map 是換點後（舊 cur_map 易誤認）
+g = install(Game(cur_map=500, level='0轉130級'))
+g.screens = good_screens()
+rc, j, _ = run('start', spot='地雷區2')
+check('start：from_map=500、to_map=60050、無 map_mismatch', rc == 0 and j.get('from_map') == 500 and j.get('to_map') == 60050 and 'map_mismatch' not in j and 'cur_map' not in j, str(j))
+check('map_id_of_pos', grind.map_id_of_pos('60049:30,25') == 60049 and grind.map_id_of_pos(None) is None and grind.map_id_of_pos('abc') is None)
+
 # 6) 完整戰鬥連 2 次 → 先自動重設一次再確認；第二次仍完整戰鬥 → 56
 g = install(Game())
 g.screens = [full(), full()]
