@@ -4,6 +4,9 @@
 **實機驗證狀態（2026-10-11 寫成時）**：流程取自 2004 一轉實跑（notes/quest-log.md 2004 段）。quest / team / char / heal / ass 的呼叫都是既有已驗證工具；
 **bag.py / petdrop.py（讀等級、找道具、使用龍王的守護、穿弓丟舊武器、公共倉庫取出 / 存入、丟烏力斯坦）是新寫的，實機完全沒驗證**，
 離線測試只驗流程與防護（test_rebirth.py）。第一次實跑請在旁邊看。
+**三轉實跑（2026-10-13 21:26～21:47）寫回的修正**：preflight 先關原地遇敵（EXP 橫幅擋讀字）；team.form 非 0 先 team.check（42 但其實滿 5 人）；
+boss10 / bow16 進度一律看地圖（boss10 回 37「戰鬥 0」仍以 11F 以上為勝；bow16 給弓沒算到獎勵、一路打完 20F 回 37 → 人在 21F 就記 boss20_done，
+swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/rebirth.py [--trans N] [--from 階段] [--dry-run] [--keep-old-weapon] [--confirm-rebirth] [--pet-action 忠犬|攻擊|防禦|none]
@@ -18,16 +21,18 @@
   可 import：rebirth.run(trans=None, from_stage='preflight', dry_run=False, ..., tools=None) → 退出碼；結果 dict 在 rebirth.LAST
 
 階段（每階段開始 / 結束都寫 notes/quest-events.log、tools/.cache/rebirth.json；失敗另寫 errlog）：
-  preflight 前置檢查：當前角色 = DKBO、team.form 滿 5 人、5 人轉數 / 等級（不再查四大洞窟證明：2026-10-13 find_items 讀字不穩兩次誤判 81；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理）、
+  preflight 前置檢查：先關原地遇敵（heal.set_encounter(False)，已關不點；練功中 EXP 橫幅會擋讀字）、當前角色 = DKBO、team.form 滿 5 人（form 非 0 → 先 team.check，滿 5 就算）、5 人轉數 / 等級（不再查四大洞窟證明：2026-10-13 find_items 讀字不穩兩次誤判 81；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理）、
             背包 / 寵物欄空位 ≥ 2、heal 補滿
   accept    接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（先看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
   enter     quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
-  boss10    龍王的守護（背包沒有就從公共倉庫取）→ quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認進到 11F（32011）
-  bow16     龍王的守護 → quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）
+  boss10    龍王的守護（背包沒有就從公共倉庫取）→ quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認在 11F 以上（32011～32021，地圖為準）
+  bow16     龍王的守護 → quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）。
+            進度看地圖（bow16_progress）：開始時 / quest 回任何碼（2、9、10 除外）後人在 17～20F = 弓已拿到 → 0；在 21F = 20F 帖拉所伊朵也打完
+            （三轉實測：給弓時沒算到獎勵，巡路一路打完回 37）→ after_boss 確認滿 5 人（不滿走被打飛者重打）→ 記 boss20_done → heal / boss20 跳過
   swap      5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器（名稱防護；--keep-old-weapon 跳過）；
             武器格本來就是弓（already：上一轉的弓）→ 背包裡 16F 新給的那把是多的，bag.drop_spare_bow 丟掉（--allow-protected，武器格不動，二轉實測要丟）
-  heal      heal.py --no-return → ass.py 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」→ team.form
-  boss20    龍王的守護 → quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
+  heal      （boss20_done → 跳過）heal.py --no-return → ass.py 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」→ team.form
+  boss20    （boss20_done → 跳過）龍王的守護 → quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
             便捷傳送落在 32021:31,29（21 樓精靈王旁），BOSS 在上一層 32020:20,9。quest.py 退出碼不是 37 / 38 且人仍在 32021（追蹤沒走回去，如 3 / 19）→
             備援一次：preflight → 在北區（y<50，便捷傳送落點 31,29）先 walk 32021 傳送帶 31,47（同圖傳到 31,53，看座標 y>=50 判斷，逾時 84 backtrack=band；已在南區跳過）→ walk 32021 南出口 28,59（換圖 32020）→ team.check（散了 form）→ walk 32020 20,11 → quest.py --fight --npc auto → after_boss（37 / 38 同上）。
             走不回 / 換圖失敗 → 84（info.backtrack = band / exit / spot）；被打飛者重打（refight）若追蹤把人傳到 21F 也先走回 20F（單人不 team.check）
@@ -134,6 +139,30 @@ def judge_rebirth_dialog(texts: dict, pos) -> tuple:
     if pos and not (pos[0] == MAP_21F and abs(pos[2] - KING_Y) <= 8):
         return 'unknown', f'位置 {pos} 不在精靈王旁（32021 y≈{KING_Y}）'
     return 'role', '內文是角色轉生儀式'
+
+
+def floor_of(pos) -> int | None:
+    """座標 → 漆黑洞窟樓層（32001～32021 → 1～21）；不在漆黑 / 讀不到 → None。純函式"""
+    if not pos or not (MAP_1F <= pos[0] <= MAP_21F):
+        return None
+    return pos[0] - MAP_1F + 1
+
+
+def past_boss10(pos) -> bool:
+    """10F BOSS 已打過 = 人在 11F 以上（11～21F；以地圖為準，不看 quest.py 的戰鬥計數，2026-10-13 三轉 boss10 回 37 時「戰鬥 0」）"""
+    f = floor_of(pos)
+    return f is not None and f >= 11
+
+
+def bow16_progress(pos) -> str:
+    """bow16 階段用地圖判斷進度（純函式）→ 'boss20'（已在 21F = 20F 帖拉所伊朵也打完；bow16 前不會便捷傳送，能到 21F 只有打贏）/
+    'bow'（17～20F = 16F 守門人已收證明給弓）/ 'todo'（16F 以下 / 不在漆黑 / 讀不到）"""
+    f = floor_of(pos)
+    if f == 21:
+        return 'boss20'
+    if f is not None and f >= 17:
+        return 'bow'
+    return 'todo'
 
 
 def missing_members(cards) -> list:
@@ -469,6 +498,13 @@ class Run:
             event('team.form 回 9（畫面連 3 次不認得）→ 等 20 秒只讀重試一次（過場畫面可能；驗證視窗不會自己消失）')
             self.T.sleep(20)
             rc = self.T.team_form()
+        elif rc:                                                  # 2026-10-13 三轉 preflight：form 回 42 但 team.py status 其實滿 5 人（讀卡片那一下被橫幅 / 過場擋）
+            event(f'team.form 回 {rc} → 等 3 秒先 team.check（唯讀；滿 5 人就算數），不滿才再 form 一次')
+            self.T.sleep(3)
+            if self.T.team_check() == 0:
+                event('team.check 滿 5 人 → 視為組隊成功')
+                return 0
+            rc = self.T.team_form()
         return rc
 
     # -- BOSS 後處理 --
@@ -626,6 +662,11 @@ class Run:
         rc = T.preflight()
         if rc:
             return rc
+        try:                                                    # 練功中接著跑：EXP 橫幅會擋背包 / 等級讀字（2026-10-13 三轉），先關原地遇敵（已關就不點）
+            T.encounter_off()
+        except RuntimeError as e:
+            return self.fail(EXIT_SETUP, f'preflight 關原地遇敵失敗：{e}')
+        T.sleep(3)                                              # 正在打的那場打完、橫幅消失
         rc, cur = T.current()
         if rc or not cur or not charstate.same(cur, LEADER):
             return self.fail(EXIT_TEAM, f'當前角色不是 {LEADER}（讀到 {cur}，rc {rc}）；判斷看面板左欄頭像紅字「當前登錄」', current=cur)
@@ -685,19 +726,49 @@ class Run:
         return self.fail(EXIT_QUEST, f'enter：3 輪後仍不在漆黑 1F（{pos}）', pos=pos)
 
     def s_boss10(self) -> int:
-        return self.boss_stage('boss10', lambda p: bool(p) and p[0] == MAP_11F, MAP_10F)
+        return self.boss_stage('boss10', past_boss10, MAP_10F)   # 勝利 = 11F 以上（地圖為準；quest.py 37 的「戰鬥 N」計數不可靠）
 
     def s_bow16(self) -> int:
+        """16F 守門人收證明給弓。進度以地圖為準（bow16_progress）：2026-10-13 三轉 16F 給弓時 quest.py 沒算到獎勵（--stop-after-rewards 不停），
+        一路巡路打完 20F 帖拉所伊朵回 37、人已在 32021 → 舊版當 84。現在：17～20F = 弓已拿到；21F = boss20 也打完（after_boss 確認滿 5 人 /
+        補人）→ 記 st['boss20_done']，swap 之後 heal / boss20 直接跳過"""
+        self.st.pop('boss20_done', None)
+        pos = self.read_pos()
+        if bow16_progress(pos) != 'todo':                       # 續跑：已過 16F
+            return self.bow16_beyond(pos, None)
         for k in range(2):
             self.ensure_dragon()
             rc, _ = self.quest(['--task', self.task, '--stop-after-rewards', 1, '--max-seconds', SLICE_S], SLICE_S + 120)
+            pos = self.read_pos()
+            if rc == 2 or rc in stuckrecover.HALT_RC:
+                return self.quest_stop(rc, 'bow16')
+            if bow16_progress(pos) != 'todo':
+                return self.bow16_beyond(pos, rc)
             if rc != 0:
                 return self.quest_stop(rc, 'bow16')
-            pos = self.read_pos()
             if pos and pos[0] == MAP_16F:
                 return 0
             event(f'bow16：quest 回 0 但位置 {pos} 不在 16F（逾時？）再跑一段')
         return self.fail(EXIT_QUEST, 'bow16：沒在 16F 領到精靈王之弓', pos=self.read_pos())
+
+    def bow16_beyond(self, pos, rc) -> int:
+        """bow16 時人已過 16F：17～20F → 弓已拿到（回 0，照常 swap → heal → boss20）；21F → 20F BOSS 也打贏了：
+        after_boss（勝利 = 在 21F；不滿 5 人走被打飛者重打）→ 記 boss20_done。背包的弓只讀來記錄（find_items 讀字不穩，不當判斷依據；swap 會再驗）"""
+        prog = bow16_progress(pos)
+        event(f'bow16：quest 退出碼 {rc}、位置 {pos}（{floor_of(pos)}F）→ 已過 16F 守門人（弓已拿到）' + ('，且 20F 帖拉所伊朵已打完' if prog == 'boss20' else ''))
+        if prog != 'boss20':
+            return 0
+        rc2 = self.after_boss('bow16/boss20', lambda p: bool(p) and p[0] == MAP_21F, MAP_20F)
+        if rc2:
+            return rc2
+        r, it = self.T.find_items(LEADER, [BOW])
+        self.info['bow_in_bag'] = None if r else it.get(BOW)
+        if r or it.get(BOW) is None:
+            self.warn(f'{LEADER} 背包沒讀到多的{BOW}（bag rc {r}）；只記錄，swap 階段會再驗')
+        self.st['boss20_done'] = True
+        self.save()
+        event('bow16：20F 已打完 → swap 之後跳過 heal / boss20，直接 rebirth')
+        return 0
 
     def s_swap(self) -> int:
         res = {}
@@ -712,6 +783,9 @@ class Run:
 
     def s_heal(self) -> int:
         T = self.T
+        if self.st.get('boss20_done'):
+            event('heal：bow16 時已打完 20F（人在 21F）→ 跳過補血 / 戰寵動作 / 便捷傳送')
+            return 0
         try:
             T.heal()
         except RuntimeError as e:
@@ -736,6 +810,9 @@ class Run:
         return 0
 
     def s_boss20(self) -> int:
+        if self.st.get('boss20_done'):
+            event('boss20：bow16 時已打完 20F 帖拉所伊朵 → 跳過')
+            return 0
         return self.boss_stage('boss20', lambda p: near(p, WIN_21F), MAP_20F, backtrack=True)
 
     def s_rebirth(self) -> int:
@@ -823,11 +900,11 @@ class Run:
 
 
 DRY_PLAN = {
-    'preflight': ['char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人', 'bag.levels：5 人 (N-1)轉 ≥{lv} 級（80）', '背包 / 寵物欄空位各 ≥2（82）', 'heal.heal_trip --no-return（87）'],
+    'preflight': ['heal.set_encounter(False)：關原地遇敵（已關不點；87）', 'char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人（非 0 → team.check 滿 5 就算，否則再 form 一次）', 'bag.levels：5 人 (N-1)轉 ≥{lv} 級（80）', '背包 / 寵物欄空位各 ≥2（82）', 'heal.heal_trip --no-return（87）'],
     'accept': ['questdetail.accept {t}（任務詳情列表 / 中間標題精確樣板比對 → 傳送瑪麗娜絲村長 → 對話選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗證進行中；已進行中略過）（97）'],
     'enter': ['quest.py --task {t} --stop-after-dialog --max-seconds 240（最多 3 輪）→ 地圖 32001'],
-    'boss10': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use）', 'quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認地圖 32011'],
-    'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016'],
+    'boss10': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use）', 'quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認在 11F 以上（32011～32021，地圖為準）'],
+    'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016', '已過 16F 看地圖：17～20F = 弓已拿到；21F = 20F 也打完 → after_boss（滿 5 人）→ boss20_done，heal / boss20 跳過'],
     'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
     'heal': ['heal.heal_trip --no-return', 'ass.set_pet 5 人 normal={act}（rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
     'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近', '人仍在 32021 追蹤沒動 → 備援一次：walk 傳送帶 31,47（北區才走）→ 32021 28,59（出口）→ 32020 → team.check → walk 20,11 → quest.py --fight --npc auto（84 / 85）'],

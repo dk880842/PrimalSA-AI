@@ -632,29 +632,45 @@ check('逐隻驗 Lv1 全部不對（76）→ 106，沒設出戰', rc == 106 and 
 check('scan_candidates：只取名字吻合且等級讀不出（@None）的格，排序', rp.scan_candidates({'3': '朵拉比斯@None', '5': '朵拉比斯@130', '2': '迪基格斯@None', '7': '?(1/2/3/4)≈朵拉比斯(圖)@None'}, DOR) == [3, 7]
       and rp.scan_candidates({}, DOR) == [] and rp.scan_candidates(None, DOR) == [])
 
-# pet_take_lv1_scan 的真實邏輯（假 pet 模組）：取到 Lv130（76）→ 存回 → 下一隻（index 往前 1）→ Lv1 成功
+# pet_take_lv1_scan 的真實邏輯（假 pet 模組）。depot：int = 朵拉比斯等級（卡片等級讀不出）、str = 別的寵物、None = 空洞
+# mode 'hole'（2026-10-13 三轉實機）：取出留空洞、存回填第一個空洞 → 其他卡格號不變；'compact'：取出後面遞補、存回接在最後
 import pet as _pet  # noqa: E402
 class _FakePet:
     EXIT_NAME, EXIT_VERIFY = 72, 76
-    def __init__(self, lvs):
-        self.depot, self.bar, self.LAST, self.calls = list(lvs), [], {}, []   # depot: 每張卡等級（卡片讀不出）
+    def __init__(self, lvs, mode='hole'):
+        self.depot, self.bar, self.LAST, self.calls, self.mode = list(lvs), [], {}, [], mode
     def take(self, role, depot, index, expect, pause, learn, pet_name, growth, level):
         self.calls.append(('take', index))
         if index is None:
-            self.LAST = {'cards': {str(i + 1): f'{DOR}@None' for i in range(len(self.depot))}}
+            self.LAST = {'cards': {str(i + 1): (f'{DOR}@None' if isinstance(e, int) else f'{e}@5') for i, e in enumerate(self.depot) if e is not None}}
             return 72
-        lv = self.depot.pop(index - 1)
-        self.bar.append(lv)
-        self.LAST = {'level': lv}
-        return 0 if lv == 1 else 76
+        e = self.depot[index - 1] if index <= len(self.depot) else None
+        if not isinstance(e, int):                       # 卡片名字不符 → 72、不取
+            self.LAST = {}
+            return 72
+        if self.mode == 'hole':
+            self.depot[index - 1] = None
+        else:
+            self.depot.pop(index - 1)
+        self.bar.append(e)
+        self.LAST = {'level': e}
+        return 0 if e == 1 else 76
     def store_many(self, *a):
         self.calls.append(('store', a[1]))
-        self.depot.append(self.bar.pop())
+        e = self.bar.pop()
+        if self.mode == 'hole' and None in self.depot:
+            self.depot[self.depot.index(None)] = e
+        else:
+            self.depot.append(e)
         return 0
-for lvs, want_rc, want_calls in (([130, 1], 0, [('take', None), ('take', 1), ('store', [DOR]), ('take', 1)]),
-                                 ([1, 130], 0, [('take', None), ('take', 1)]),
-                                 ([130, 129], 72, [('take', None), ('take', 1), ('store', [DOR]), ('take', 1), ('store', [DOR])])):
-    fp_ = _FakePet(lvs)
+S_ = ('store', [DOR])
+for lvs, mode, want_rc, want_calls in (
+        ([130, '摩娜西普', 1], 'hole', 0, [('take', None), ('take', 1), S_, ('take', 3)]),                 # DKBO2 實況：存回後原第 3 格不動（舊版會試 2 → 72）
+        ([1, 130], 'hole', 0, [('take', None), ('take', 1)]),
+        ([130, 129], 'hole', 72, [('take', None), ('take', 1), S_, ('take', 2), S_]),
+        ([130, 1, '迪基格斯'], 'compact', 0, [('take', None), ('take', 1), S_, ('take', 2), ('take', 1)]),   # 遞補模型：原格號 72（沒取）→ 退一格
+        ([130, '摩娜西普', '迪基格斯', 1], 'hole', 0, [('take', None), ('take', 1), S_, ('take', 4)])):
+    fp_ = _FakePet(lvs, mode)
     saved = {k: getattr(_pet, k) for k in ('take', 'store_many', 'EXIT_NAME', 'EXIT_VERIFY')}
     saved_last = _pet.LAST
     for k in saved:
@@ -672,7 +688,59 @@ for lvs, want_rc, want_calls in (([130, 1], 0, [('take', None), ('take', 1), ('s
         for k, v in saved.items():
             setattr(_pet, k, v)
         _pet.LAST = saved_last
-    check(f'pet_take_lv1_scan 倉庫等級 {lvs}：rc {want_rc}、呼叫序列', rc == want_rc and fp_.calls == want_calls, f'rc={rc} {fp_.calls}')
+    check(f'pet_take_lv1_scan 倉庫 {lvs}（{mode}）：rc {want_rc}、呼叫序列', rc == want_rc and fp_.calls == want_calls, f'rc={rc} {fp_.calls}')
+
+# ---- 2026-10-13 三轉實跑寫回 ----
+# 鎖定騎寵成長字串漏段（errlog 584 / 585）
+check('growth_partial：漏一段當萬用；讀錯一段 / 漏兩段 / 不是 4 段都不算',
+      rp.growth_partial('48/10//2', '48/10/7/2') and rp.growth_partial('48//7/2', '48/10/7/2') and rp.growth_partial('49//8/1', '49/10/8/1')
+      and not rp.growth_partial('48/10/8/2', '48/10/7/2') and not rp.growth_partial('48///2', '48/10/7/2') and not rp.growth_partial('48/10/7', '48/10/7/2'))
+L584 = [('48/10//2', 1100, 360), ('48//7/2', 1100, 362), ('48//7/2', 1101, 361)]          # 同一列多個放大倍數
+check('pick_row：errlog 584 同一列三種漏段讀法 → 併成 1 列命中', rp.pick_row(L584, ('growth', '48/10/7/2'))[0] is not None)
+L585 = [('49//8/1', 1100, 360), ('49//8/1', 1100, 361), ('49//8/1', 1100, 360)]
+check('pick_row：errlog 585 → 命中', rp.pick_row(L585, ('growth', '49/10/8/1'))[0] is not None)
+check('pick_row：兩列（y 不同）都漏段吻合 → None（多候選停）', rp.pick_row([('48/10//2', 1100, 360), ('48//7/2', 1100, 402)], ('growth', '48/10/7/2'))[0] is None)
+check('pick_row：有整行相同的列就不用萬用（漏段列不搶）', rp.pick_row([('48/10/7/2', 1100, 402), ('48//7/2', 1100, 360)], ('growth', '48/10/7/2'))[0] == ('48/10/7/2', 1100, 402))
+hit_, why_ = rp.pick_row([('48/10//2', 1100, 360)], ('growth', '48/10/7/2', ('48/10/9/2',)))
+check('pick_row：漏的那段剛好是同角色別隻的差別（48/10/9/2）→ None + 歧義說明', hit_ is None and '歧義' in why_, why_)
+check('pick_row：同角色別隻不吻合漏段 → 照常命中', rp.pick_row([('48/10//2', 1100, 360)], ('growth', '48/10/7/2', ('30/5/5/5',)))[0] is not None)
+check('role_ident：同角色有別隻沒名字寵物 → ident 第 3 項帶它的成長字串；只有一隻 → 2 項（舊格式）',
+      rp.role_ident([S(1, unnamed='48/10/7/2', species=BRA), S(2, unnamed='48/10/9/2', species=None), S(3, name=DOR)], BRA, DOR, '騎寵') == ('growth', '48/10/7/2', ('48/10/9/2',))
+      and rp.role_ident([S(1, unnamed='48/10/7/2', species=BRA), S(3, name=DOR)], BRA, DOR, '騎寵') == ('growth', '48/10/7/2'))
+# 系別清單（雷龍系被上緣切半）
+check('plain_row：完整字串優先；同列多倍數併 1；兩列 → None', rp.plain_row([('雷龍系', 750, 476), ('雷龍系', 752, 478)], '雷龍系') == ('雷龍系', 750, 476)
+      and rp.plain_row([('雷龍系', 750, 476), ('雷龍系', 750, 560)], '雷龍系') is None)
+check('plain_row：讀不全（雷龍 / 雷系）→ 寬鬆比對；只有首字以外 / 太長 → None', rp.plain_row([('雷龍', 750, 476), ('大象系', 750, 518)], '雷龍系') == ('雷龍', 750, 476)
+      and rp.plain_row([('龍系', 750, 476)], '雷龍系') is None and rp.plain_row([('雷龍系的寵物很多很多', 750, 476)], '雷龍系') == ('雷龍系的寵物很多很多', 750, 476)
+      and rp.plain_row([('雷系寵物很多很多', 750, 476)], '雷龍系') is None)
+top_ = rp.CATCH_LIST_FAMILY[1]
+check('family_below_action：大象系貼上緣（y 430）→ back；捲滿 2 次仍貼 → stop', rp.family_below_action([('大象系', 752, 430)], '雷龍系', 0, top_) == ('back', None)
+      and rp.family_below_action([('大象系', 752, 430)], '雷龍系', 2, top_) == ('stop', None))
+check('family_below_action：往回捲後大象系在 518 → 點 476（= 518 - 42，人手動點的位置）', rp.family_below_action([('大象系', 752, 518)], '雷龍系', 1, top_) == ('pick', ('雷龍系', 752, 476)))
+check('family_below_action：沒看到大象系：沒捲過 → 照常往下捲；捲過 → stop（不震盪）', rp.family_below_action([('鯊魚系', 752, 500)], '雷龍系', 0, top_) == ('', None)
+      and rp.family_below_action([('鯊魚系', 752, 500)], '雷龍系', 1, top_) == ('stop', None))
+# 外掛面板失敗出口保險關閉
+import ass as _ass  # noqa: E402
+class _FakeAss:
+    def __init__(self, opens):
+        self.opens, self.closes = list(opens), 0
+    def panel_open(self):
+        return self.opens.pop(0) if self.opens else False
+    def close_panel(self):
+        self.closes += 1
+        return True
+for opens, want, n_close, label in (([False], True, 0, '已關 → 不點'), ([True, False], True, 1, '還開著 → 再關一次'),
+                                    ([True, True, True], False, 2, '關不掉 → 2 輪後 False（snap + 警告）')):
+    fa = _FakeAss(opens)
+    saved = (_ass.panel_open, _ass.close_panel, rp.uikit.sleep, rp.uikit.snap)
+    _ass.panel_open, _ass.close_panel, rp.uikit.sleep, rp.uikit.snap = fa.panel_open, fa.close_panel, (lambda s: None), (lambda t: None)
+    try:
+        import contextlib as _cl, io as _io
+        with _cl.redirect_stdout(_io.StringIO()):
+            got_ = rp.Tools().ass_close_hard()
+    finally:
+        _ass.panel_open, _ass.close_panel, rp.uikit.sleep, rp.uikit.snap = saved
+    check(f'ass_close_hard：{label}', got_ is want and fa.closes == n_close, f'{got_} {fa.closes}')
 
 # 禮盒 95 重試（bag 假函式）
 import bag as _bag  # noqa: E402

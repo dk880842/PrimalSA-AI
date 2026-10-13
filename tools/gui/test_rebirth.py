@@ -214,7 +214,7 @@ check('--dry-run 完全不呼叫 Tools', quiet(rebirth.run, dry_run=True, trans=
 fresh()
 check('當前不是 DKBO → 83', quiet(rebirth.run, tools=FakeTools(cur='DKBO3', quest=[])) == 83)
 fresh()
-check('team.form 失敗 → 83', quiet(rebirth.run, tools=FakeTools(team_form_rc=41)) == 83)
+check('team.form 失敗（team.check 也不滿）→ 83', quiet(rebirth.run, tools=FakeTools(team_form_rc=41, team_checks=[41])) == 83)
 fresh()
 check('等級不足（130）→ 80', quiet(rebirth.run, trans=1, tools=FakeTools(levels={**{r: (0, 133) for r in rebirth.ALL_ROLES}, 'DKBO4': (0, 130)})) == 80)
 fresh()
@@ -316,7 +316,7 @@ T, rc = b20(fight_rc=35)
 check('boss20：備援開打沒贏（35）→ 85，且備援只試一次', rc == 85 and len([c for c in T.calls if c[0] == 'walk']) == 3)
 T, rc = b20(team_checks=[1, 0])
 check('boss20：換圖後隊伍散了 → team.form 再走', rc == 0 and 'team_form' in T.names())
-T, rc = b20(team_checks=[1], team_form_rc=41)
+T, rc = b20(team_checks=[1, 1], team_form_rc=41)
 check('boss20：換圖後 team.form 失敗 → 83', rc == 83)
 T, rc = b20(track_rc=2)
 check('boss20：quest 回 2（驗證視窗）→ 9，不走備援', rc == 9 and 'walk' not in T.names())
@@ -921,6 +921,63 @@ quiet(r_.backtrack_fight, 'boss20', lambda p: True, rebirth.MAP_20F)
 fq = [c[1] for c in T.calls if c[0] == 'quest' and '--fight' in c[1]]
 check('boss20 備援 quest.py --fight 帶 --step 4', fq and fq[0][fq[0].index('--step') + 1] == 4, str(fq))
 
+# ---- 2026-10-13 三轉實跑寫回：preflight 先關遇敵、boss10 / bow16 以地圖為準 ----
+check('floor_of：32001→1、32021→21、村子 / None → None', rebirth.floor_of((32001, 1, 1)) == 1 and rebirth.floor_of((32021, 29, 57)) == 21
+      and rebirth.floor_of((1000, 1, 1)) is None and rebirth.floor_of(None) is None)
+check('bow16_progress：16F todo、17～20F bow、21F boss20、村子 todo',
+      [rebirth.bow16_progress(p_) for p_ in ((32016, 1, 1), (32017, 1, 1), (32020, 20, 11), (32021, 29, 57), (1000, 1, 1), None)] == ['todo', 'bow', 'bow', 'boss20', 'todo', 'todo'])
+check('past_boss10：11F 以上才算（10F / 1F 不算）', rebirth.past_boss10((32011, 1, 1)) and rebirth.past_boss10((32016, 1, 1)) and not rebirth.past_boss10((32010, 1, 1)) and not rebirth.past_boss10(None))
+
+fresh()
+T = FakeTools()
+rc = quiet(rebirth.run, tools=T, to_stage='preflight')
+nm_ = T.names()
+check('preflight：先關原地遇敵（在 current / team_form / levels 之前）', rc == 0 and 'enc_off' in nm_ and nm_.index('enc_off') < nm_.index('current') < nm_.index('team_form'), str(nm_[:6]))
+class _EncFail(FakeTools):
+    def encounter_off(self):
+        raise RuntimeError('切換原地遇敵失敗')
+fresh()
+T = _EncFail()
+check('preflight：關遇敵失敗 → 87，不讀等級', quiet(rebirth.run, trans=1, tools=T, to_stage='preflight') == 87 and 'levels' not in T.names())
+
+fresh()
+T = FakeTools(pos=(32010, 54, 31), quest=[(37, (32012, 5, 5))])
+check('boss10：37 且已在 12F（地圖為準）→ 0', quiet(rebirth.run, trans=1, from_stage='boss10', to_stage='boss10', tools=T) == 0)
+fresh()
+T = FakeTools(pos=(32010, 54, 31), quest=[(37, (32010, 54, 31))])
+check('boss10：37（戰鬥 0）但人還在 10F → 85，不往下', quiet(rebirth.run, trans=1, from_stage='boss10', to_stage='boss10', tools=T) == 85)
+
+fresh()
+T = FakeTools(pos=(32011, 56, 36), quest=[(37, (32021, 29, 57)), (39, (32021, 31, 29))])
+rc = quiet(rebirth.run, trans=1, from_stage='bow16', tools=T)
+qs = [c[1] for c in T.calls if c[0] == 'quest']
+check('bow16 回 37 但人已在 21F（三轉 21:38）→ 記 boss20_done、swap 後跳過 heal / boss20 直接 rebirth → 0',
+      rc == 0 and 'heal' not in T.names() and 'teleport20' not in T.names() and T.names().count('swap_weapon') == 5
+      and len(qs) == 3 and '--stop-after-rewards' in qs[0] and '--allow-irreversible' in qs[2] and 'team_check' in T.names()
+      and rebirth.LAST['stages']['heal']['status'] == 'ok', str(qs))
+check('bow16 跳過 boss20 時 event 有寫', 'boss20：bow16 時已打完 20F' in rebirth.EVENT_LOG.read_text(encoding='utf-8'))
+fresh()
+T = FakeTools(pos=(32011, 56, 36), quest=[(0, (32018, 5, 5)), (37, (32021, 29, 57))])
+rc = quiet(rebirth.run, trans=1, from_stage='bow16', to_stage='boss20', tools=T)
+check('bow16 回 0、人在 18F（弓已拿到、20F 還沒打）→ 照常 heal / 傳送 / boss20', rc == 0 and 'heal' in T.names() and 'teleport20' in T.names(), str(T.names()))
+fresh()
+T = FakeTools(pos=(32021, 29, 57), quest=[(39, (32021, 31, 29))])
+rc = quiet(rebirth.run, trans=1, from_stage='bow16', tools=T)
+check('續跑 --from bow16 時人已在 21F → bow16 不跑 quest、after_boss 驗隊伍 → swap → rebirth',
+      rc == 0 and len([c for c in T.calls if c[0] == 'quest']) == 2 and 'heal' not in T.names())
+fresh()
+T = FakeTools(pos=(32011, 56, 36), quest=[(37, (32016, 31, 40))])
+check('bow16 回 37 但人在 16F → 84（不是已過 16F）', quiet(rebirth.run, trans=1, from_stage='bow16', to_stage='bow16', tools=T) == 84)
+fresh()
+T = FakeTools(pos=(32011, 56, 36), quest=[(37, (32021, 29, 57))], team_checks=[1], cards=[])
+check('bow16 回 37 在 21F 但隊伍不滿、找不出被打飛的人 → 85（after_boss）', quiet(rebirth.run, trans=1, from_stage='bow16', to_stage='bow16', tools=T) == 85)
+fresh()
+T = FakeTools(pos=(32011, 56, 36), quest=[(37, (32021, 29, 57))])
+quiet(rebirth.run, trans=1, from_stage='bow16', to_stage='bow16', tools=T)
+T2 = FakeTools(pos=(32021, 29, 57), quest=[(39, (32021, 31, 29))])
+rc = quiet(rebirth.run, trans=1, from_stage='swap', tools=T2)
+check('bow16 記的 boss20_done 寫進度檔：之後 --from swap 續跑也跳過 heal / boss20', rc == 0 and 'heal' not in T2.names() and 'teleport20' not in T2.names())
+
 # ---- team.form 回 9 → 等 20 秒只重試一次 ----
 fresh()
 T = FakeTools(team_form_rcs=[9, 0])
@@ -929,9 +986,15 @@ check('form()：9 → 重試一次成功 → 0', quiet(r_.form) == 0 and T.names
 T = FakeTools(team_form_rcs=[9, 9])
 r_ = rebirth.Run(2, T, {})
 check('form()：連 2 次 9（真的驗證視窗）→ 9 停手', quiet(r_.form) == 9 and T.names().count('team_form') == 2)
-T = FakeTools(team_form_rcs=[42])
+T = FakeTools(team_form_rcs=[42], team_checks=[0])
 r_ = rebirth.Run(2, T, {})
-check('form()：非 9 的失敗不重試', quiet(r_.form) == 42 and T.names().count('team_form') == 1)
+check('form()：42 但 team.check 滿 5 人（2026-10-13 三轉 preflight）→ 0，不再 form', quiet(r_.form) == 0 and T.names().count('team_form') == 1 and T.names().count('team_check') == 1)
+T = FakeTools(team_form_rcs=[42, 0], team_checks=[42])
+r_ = rebirth.Run(2, T, {})
+check('form()：42、team.check 也不滿 → 再 form 一次成功 → 0', quiet(r_.form) == 0 and T.names().count('team_form') == 2)
+T = FakeTools(team_form_rcs=[42, 42], team_checks=[42])
+r_ = rebirth.Run(2, T, {})
+check('form()：42 → check 不滿 → 再 form 仍 42 → 42（只重試一次）', quiet(r_.form) == 42 and T.names().count('team_form') == 2)
 
 # ---- 轉生獎勵寵 ----
 for n, nm_ in ((1, '烏力斯坦'), (2, '奇娜')):

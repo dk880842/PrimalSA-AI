@@ -4,7 +4,8 @@
 每按一次 +1 可抓捕數、扣 50,000 石幣（2026-10-12 實測）。**紅區按鈕**：只有呼叫端明確帶 --confirm-buy-bait（petquest）/
 --confirm-buy-catch（rebirth_pets）才會進來。每次按前後都讀石幣（寵物面板頂部）：要剛好少 PLUS_COST、鑽石不變，否則停手（鐵則 3）。
 
-  parse_money(lines)                              OCR 行 → (石幣, 鑽石)
+  parse_money(lines)                              OCR 行 → (石幣, 鑽石)：石幣 x<450、鑽石 450～700（x 分區 + 去重；讀不到 None，2026-10-13 三轉）
+  parse_count_zero(txt, zero_ok)                  可抓捕數；zero_ok = 有「可抓捕數」字樣但沒數字 → 0（0 時 OCR 常漏「0」，2026-10-13 三轉 163）
   money()                                         開寵物面板讀 (石幣, 鑽石)；讀不到 (None, None)
   press_plus(role, limit=None)                    外掛 → 角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)
                                                   limit：按前可抓捕數已 ≥ limit 就不點（回 (0, 前, 前)）
@@ -46,6 +47,18 @@ def parse_money(lines) -> tuple:
     return stone, dia
 
 
+def parse_count_zero(txt, zero_ok: bool = False):
+    """捉寵設置那一列 OCR 文字 → 可抓捕數（純函式；rebirth_pets.parse_count 為主）。zero_ok：讀到「可抓捕數」但後面完全沒有數字 → 0
+    （2026-10-13 三轉實機：可抓捕數 = 0 時 OCR 常整個漏掉「0」只剩「可抓捕數:」「+」→ 舊版回 163；按後必須讀到 1 才算數，_one 仍驗 +1 / 石幣剛好 -50000）。
+    沒讀到「可抓捕數」字樣 → None（不猜）"""
+    import rebirth_pets as rp
+    n = rp.parse_count(txt)
+    t = str(txt or '')
+    if n is None and zero_ok and '可抓捕數' in t and not re.search(r'\d', t.split('可抓捕數')[-1]):
+        return 0
+    return n
+
+
 def money() -> tuple:
     """寵物面板頂部資源列 → (石幣, 鑽石)；面板打不開 / 讀不到 → (None, None)"""
     import pet
@@ -66,11 +79,7 @@ def press_plus(role, limit=None) -> tuple:
         if rc:
             return rc, None, None
         def read(zero_ok=False):
-            txt = ''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, '-Zooms', '2,3,4'))
-            n = rp.parse_count(txt)
-            if n is None and zero_ok and '可抓捕數' in txt and not re.search(r'\d', re.sub(r'.*可抓捕數', '', txt)):
-                return 0                                           # 2026-10-13 實機：可抓捕數 = 0 時 OCR 常整個漏掉「0」只剩「可抓捕數:」「+」；按後必須讀到 1 才算數（_one 仍驗 +1 / 石幣剛好 -50000）
-            return n
+            return parse_count_zero(''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, '-Zooms', '2,3,4')), zero_ok)
         before = read(zero_ok=True)
         if before is None or not ass.panel_open():
             return EXIT_BAIT, before, None

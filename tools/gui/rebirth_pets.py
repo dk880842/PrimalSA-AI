@@ -8,6 +8,9 @@
 - **外掛「捉寵設置」與「鎖定騎寵 / 戰寵」是本檔自己寫的**：座標取自 ui/ass.md 與 plan-dino-katan.md 的手動實測，但下拉清單的「讀字找列」範圍
   （CATCH_LIST_FAMILY / CATCH_LIST_PET / LOCK_LIST_* / 各 OCR 框）是**猜的**，第一次實跑要看 snap 修正；所有點擊前都先 OCR 驗證（讀不到就停、不盲點），
   下拉選項用 ocr.ps1 回傳的文字座標點（不是固定列距）。這些框沒量過 → 標「待實機量」，見 ui/ass.md。
+**三轉實跑（2026-10-13 21:47～22:19）寫回的修正（只有離線測試）**：pet_take_lv1_scan 先用原格號（實機存回後格號不變）、72 才試遞補格號；
+鎖定騎寵成長字串漏段比對（growth_partial，同角色別隻吻合 = 歧義停）；系別清單雷龍系被上緣切半 → plain_row 寬鬆比對 + family_below_action
+（大象系 y - 42 位置備援、往回捲最多 2 次、不震盪）；選不到時收下拉 + ass_close_hard 保險關面板；catchbuy 可抓捕數 0 讀不到 → parse_count_zero。
 
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/rebirth_pets.py [--trans N] [--mount-species 布拉奇多斯] [--battle-pet 朵拉比斯] [--catcher DKBO2] [--count 5]
@@ -82,6 +85,8 @@ LEADER = 'DKBO'
 ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 FAMILY_NEIGHBORS = {'鯊魚系': (('犀牛', '牛系'), ('飛天蛙', '飛夭蛙', '蛙系'))}          # 外掛系別清單的上下鄰居（2026-10-12 實機）
 FAMILY_BELOW = {'雷龍系': '大象系'}                         # 系別清單中該列正下方的列（該列被清單上緣切掉時用下一列的位置判斷要往回捲）
+FAMILY_ROW_H = 42                                          # 系別清單列距（FAMILY_NEIGHBORS 兩列約 70～100）；往回捲後目標列仍讀不到字 → 用下一列 y - 列距點，點完照樣讀欄位驗證
+FAMILY_BACK_MAX = 2                                        # 往回捲最多幾次；捲過仍找不到就停（2026-10-13 實機：往回捲 → 往下捲來回震盪 3 輪沒選到）
 SPECIES_ORDER = {'鯊魚系': ['克邦凱斯', '加克拉', '加格', '邦恩吉'], '火雞系': ['火雞', '克克洛斯', '霍爾克', '奇寶']}   # 寵物下拉的列順序（第一列 y=421、列距 42、x=1115）；選中的藍底白字 OCR 讀不到時用位置
 FAMILY_OF = {'布拉奇多斯': '雷龍系'}            # 物種 → 外掛捉寵設置的系別（PetData 第 27 組；其他物種用 --family）
 BAIT = '寵物誘餌'
@@ -142,10 +147,20 @@ def parse_growth_line(text) -> str | None:
     return '/'.join(str(int(g)) for g in m.groups()) if m else None
 
 
+def growth_partial(text, val: str) -> bool:
+    """OCR 漏段的成長字串是否「可能是」val（純函式）：切成 4 段、讀到的段 ≥ 3 段且都與 val 相同、漏掉的段（空字串）當萬用。
+    例：'48/10//2'、'48//7/2' 都可能是 '48/10/7/2'（2026-10-13 三轉 DKBO3 / DKBO5 實機）；整段讀錯（'48/10/8/2'）不算"""
+    got = re.sub(r'\s+', '', str(text or '')).split('/')
+    want = val.split('/')
+    return len(got) == len(want) == 4 and sum(1 for g in got if g) >= 3 and all(not g or g == w for g, w in zip(got, want))
+
+
 def pick_row(lines: list, ident: tuple) -> tuple:
-    """下拉選項 [(文字, x, y)] 與身分 ('name', 名) / ('growth', 'a/b/c/d') → (命中的 (文字, x, y) | None, 說明)。
-    必須「剛好一列」吻合：名字用 uikit.snap_pet 對到同一個正式名；成長字串整行完全相同。0 列或 ≥ 2 列 → None（不猜）"""
-    kind, val = ident
+    """下拉選項 [(文字, x, y)] 與身分 ('name', 名) / ('growth', 'a/b/c/d'[, 同角色其他沒名字寵物的成長字串]) → (命中的 (文字, x, y) | None, 說明)。
+    必須「剛好一列」吻合：名字用 uikit.snap_pet 對到同一個正式名；成長字串整行完全相同。0 列或 ≥ 2 列 → None（不猜）。
+    成長字串沒有整行相同的列時才用漏段萬用（growth_partial）：吻合的列也可能是同角色別隻（ident 第 3 項）→ 有歧義就停，不選"""
+    kind, val = ident[0], ident[1]
+    others = tuple(ident[2]) if len(ident) > 2 else ()
     hits = []
     for t, x, y in lines:
         if kind == 'growth':
@@ -155,15 +170,49 @@ def pick_row(lines: list, ident: tuple) -> tuple:
         if ok and not any(abs(y - h[2]) <= 15 for h in hits):          # 多個放大倍數會重複回同一列：y 差 ≤ 15 併成一個（2026-10-12）
             hits.append((t, x, y))
     if not hits and kind == 'growth':                                  # OCR 常漏整段數字（'49/10/8/1' → '49//8/1'）：4 段裡讀到的 ≥ 3 段都相同、漏的當萬用，且只有一列這樣吻合才用（2026-10-13 DKBO5 / DKBO3 實機）
-        want = val.split('/')
         for t, x, y in lines:
-            got = re.sub(r'\s+', '', t).split('/')
-            if len(got) == len(want) == 4 and sum(1 for g in got if g) >= 3 and all(not g or g == w for g, w in zip(got, want)) \
-                    and not any(abs(y - h[2]) <= 15 for h in hits):
+            if not growth_partial(t, val):
+                continue
+            amb = [o for o in others if o != val and growth_partial(t, o)]
+            if amb:                                                    # 漏的那段剛好是兩隻的差別 → 分不出來，停
+                return None, f'{kind} {val!r}：下拉「{t}」漏段，也可能是同角色的 {amb}（歧義，不選）'
+            if not any(abs(y - h[2]) <= 15 for h in hits):
                 hits.append((t, x, y))
     if len(hits) == 1:
         return hits[0], ''
     return None, f'{kind} {val!r}：下拉讀到 {[t for t, _, _ in lines]}，吻合 {len(hits)} 列（要剛好 1 列）'
+
+
+def plain_row(lines: list, plain: str):
+    """系別清單 OCR 行 → 剛好一列是 plain 的 (文字, x, y)，否則 None（純函式）。先找含完整字串的列；沒有才用寬鬆比對
+    （首字在、至少 len-1 個字吻合、字數不多於 len+2；2026-10-13 雷龍系 半列讀不全），多個放大倍數同一列（y 差 ≤ 15）併成一個"""
+    def uniq(pred):
+        hits = []
+        for t, x, y in lines:
+            if pred(str(t)) and not any(abs(y - h[2]) <= 15 for h in hits):
+                hits.append((t, x, y))
+        return hits
+    hits = uniq(lambda t: plain in t)
+    if not hits:
+        hits = uniq(lambda t: plain[0] in t and sum(c in t for c in plain) >= len(plain) - 1 and len(t.strip()) <= len(plain) + 2)
+    return hits[0] if len(hits) == 1 else None
+
+
+def family_below_action(lines: list, plain: str, backed: int, list_top: int) -> tuple:
+    """系別目標列讀不到時，看正下方那列（FAMILY_BELOW）決定（純函式）→ (動作, 位置備援的 (名, x, y) | None)：
+    'pick' = 下一列在清單內夠低（y - FAMILY_ROW_H ≥ 清單上緣 + 20，目標列整列露出只是 OCR 沒讀到）→ 點下一列 y - FAMILY_ROW_H（點完照樣讀欄位驗證）；
+    'back' = 下一列貼著清單上緣（目標被切半）、還沒捲滿 FAMILY_BACK_MAX 次 → 往回捲一點；
+    'stop' = 已往回捲過仍不行 → 不再往下捲（避免來回震盪）；'' = 沒看到下一列，照常往下捲"""
+    below = FAMILY_BELOW.get(plain)
+    ys = sorted((y, x) for t, x, y in lines if below and below in str(t))
+    if not ys:
+        return ('stop', None) if backed else ('', None)
+    y, x = ys[0]
+    if y - FAMILY_ROW_H >= list_top + 20:
+        return 'pick', (plain, x, y - FAMILY_ROW_H)
+    if backed < FAMILY_BACK_MAX:
+        return 'back', None
+    return 'stop', None
 
 
 def role_ident(slots: list, species: str, battle_pet: str, which: str) -> tuple | None:
@@ -178,7 +227,10 @@ def role_ident(slots: list, species: str, battle_pet: str, which: str) -> tuple 
     if len(hits) != 1:
         return None
     s = hits[0]
-    return ('growth', s['unnamed']) if s.get('unnamed') else ('name', s['name'])
+    if not s.get('unnamed'):
+        return ('name', s['name'])
+    others = tuple(x['unnamed'] for x in slots if not x.get('empty') and x.get('unnamed') and x is not s)
+    return ('growth', s['unnamed'], others) if others else ('growth', s['unnamed'])   # 第 3 項：同角色其他沒名字寵物（pick_row 漏段萬用時排除歧義）
 
 
 def lock_items(pets: dict, roles: list, species: str, battle_pet: str, which=('騎寵', '戰寵')) -> tuple:
@@ -375,7 +427,10 @@ class Tools:
 
     def pet_take_lv1_scan(self, role, name):
         """同名多隻、倉庫卡片等級讀不出（take_many 回 72）：逐隻取出（--index + --expect-level 1，取後切寵物分頁讀等級驗）→ 不是 Lv1（76）就存回個人倉庫、換下一隻。
-        → (rc, info)。候選格取自 pet.take 失敗時 LAST['cards']（{格: 「名字@等級」}，@None = 等級讀不出）；每存回一隻，後面的卡往前遞補 1 格"""
+        → (rc, info)。候選格取自 pet.take 失敗時 LAST['cards']（{格: 「名字@等級」}，@None = 等級讀不出）。
+        格號：2026-10-13 三轉實機「取出 → 存回」後**其他卡的格號不變**（舊版假設遞補 idx = pos - k：DKBO2 候選 [1, 7] 取 1 存回後試 6、DKBO4 [1, 4] 試 3 都不是朵拉比斯 → 72；
+        手動 take --index 7 才拿到 Lv1）→ 先用原格號；pet.take 帶名字時會先驗卡片名字（不符回 72、不取），回 72 才退一步試遞補格號 pos - 已存回數。
+        某候選兩種格號都 72 → 換下一個候選；全部試完 → 72"""
         import pet
         rc = pet.take(role, 'personal', None, None, False, True, name, None, 1)
         if rc == 0:
@@ -384,12 +439,17 @@ class Tools:
         if rc != pet.EXIT_NAME or len(cands) < 2:
             return rc, dict(pet.LAST)
         info = {'cands': cands, 'tried': []}
-        for k, pos in enumerate(cands):
-            idx = pos - k
-            rc = pet.take(role, 'personal', idx, name, False, True, None, None, 1)
-            info['tried'].append([idx, rc])
+        returned = 0                                               # 已存回幾隻（遞補備援用）
+        for pos in cands:
+            for idx in dict.fromkeys(i for i in (pos, pos - returned) if i >= 1):
+                rc = pet.take(role, 'personal', idx, name, False, True, None, None, 1)
+                info['tried'].append([idx, rc])
+                if rc != pet.EXIT_NAME:                            # 72 = 卡片名字不符、沒取 → 試下一種格號
+                    break
             if rc == 0:
                 return 0, info
+            if rc == pet.EXIT_NAME:
+                continue
             lv = pet.LAST.get('level')
             if rc != pet.EXIT_VERIFY or lv in (None, 1):           # 不是「讀得到等級、但不是 1」的 76 = 別的問題（等級讀不出也不猜），不亂存回
                 return rc, info
@@ -398,6 +458,7 @@ class Tools:
             if rc2:
                 info['store_back_rc'] = rc2
                 return rc2, info
+            returned += 1
         return pet.EXIT_NAME, info
 
     def money(self):
@@ -600,7 +661,24 @@ class Tools:
         rc, out, msg, info = ass._many({r: None for r in roles}, visit)
         if rc and msg and not info.get('role'):
             uikit.fail(SRC, rc, msg)
+        if rc:
+            self.ass_close_hard()
         return rc, out, info.get('role')
+
+    def ass_close_hard(self) -> bool:
+        """失敗出口確認外掛面板關了（ass._many / catch_setup 已點過 X；這裡是保險）：還開著 → 等 0.5 秒再 ass.close_panel（點 X 1318,90 + 驗證消失），最多 2 輪。
+        2026-10-13 三轉：捉寵系別下拉開著時點 X 被吃掉、面板殘留 → 下一步開寵物面板 rc 9（人手動點 X 1316,90）。仍開著 → snap + 警告，回 False"""
+        import ass
+        for _ in range(2):
+            if not ass.panel_open():
+                return True
+            uikit.sleep(0.5)
+            ass.close_panel()
+        if not ass.panel_open():
+            return True
+        uikit.snap('rebirth-ass-close-fail')
+        print('rebirth_pets 警告：外掛面板關不掉（請 shot 看畫面，手動點 X 1318,90）', flush=True)
+        return False
 
     def _checked(self, xy):
         import ass
@@ -689,6 +767,7 @@ class Tools:
         if rc:                                                   # 失敗時關面板：下拉清單開著的狀態會讓下次點下拉變成「關」
             import ass
             ass.close_panel()
+            self.ass_close_hard()
         return rc
 
     def catch_setup_many(self, assign, count, reuse=False):
@@ -756,14 +835,11 @@ class Tools:
             for _ in range(4):
                 uikit.gui('drag', '750', '480', '750', '650', note='rebirth_pets 捉寵清單回頂')
             uikit.sleep(1.0)
+        backed = 0                                                      # 已往回捲幾次（FAMILY_BELOW）
         for k in range(14):
             lines = ocr_lines(list_box, '-Zooms', '2,3,4')
             if plain:                                                   # 系別名不在 Monster 表 → 直接比文字
-                hits = []
-                for t, x, y in lines:                                   # 多個放大倍數會重複回同一列：y 差 ≤ 15 併成一個（2026-10-12 實機：重複 → 誤判 0 命中）
-                    if plain in t and not any(abs(y - h[2]) <= 15 for h in hits):
-                        hits.append((t, x, y))
-                hit = hits[0] if len(hits) == 1 else None
+                hit = plain_row(lines, plain)
             else:
                 hit, _ = pick_row(lines, ident)
             if not hit and plain in FAMILY_NEIGHBORS:                # OCR 讀不到這列（鯊魚系常讀不出）：上下鄰居都讀到、間距約 2 列 → 取中間
@@ -773,10 +849,17 @@ class Tools:
                     for (_, y2) in ys['n']:
                         if 70 <= y2 - y1 <= 100 and hit is None:
                             hit = (plain, x1, (y1 + y2) // 2)
-            if not hit and plain in FAMILY_BELOW and any(FAMILY_BELOW[plain] in t and y < 470 for t, _, y in lines):
-                uikit.gui('drag', '750', '520', '750', '566', note=f'rebirth_pets 捉寵清單往回捲一點（{plain} 被清單上緣切掉，只露出下一列 {FAMILY_BELOW[plain]}）')   # 2026-10-13 實機：雷龍系 在大象系正上方，捲到只剩半列時 OCR 讀不到、下一步就捲過頭
-                uikit.sleep(1.0)
-                continue
+            if not hit and plain in FAMILY_BELOW:
+                act, pos_hit = family_below_action(lines, plain, backed, list_box[1])
+                if act == 'pick':
+                    hit = pos_hit
+                elif act == 'back':
+                    backed += 1
+                    uikit.gui('drag', '750', '520', '750', '566', note=f'rebirth_pets 捉寵清單往回捲一點（{plain} 被清單上緣切掉，只露出下一列 {FAMILY_BELOW[plain]}）')   # 2026-10-13 實機：雷龍系 在大象系正上方，捲到只剩半列時 OCR 讀不到、下一步就捲過頭
+                    uikit.sleep(1.0)
+                    continue
+                elif act == 'stop':
+                    break
             if not hit and not scroll and ident[0] == 'name' and fam_species and ident[1] in fam_species:
                 hit = (ident[1], 1115, 421 + 42 * fam_species.index(ident[1]))      # 位置備援：只在 OCR 沒讀到時；點完照樣讀欄位驗證
             if hit:
@@ -802,7 +885,7 @@ class Tools:
             uikit.sleep(1.0)                                        # 清單有慣性滑動：等停下來再讀（不等會點到差一列的項目，2026-10-12 實機點成飛天蛙系）   # gui 參數要分開（一整串會被當成單一參數 → 不捲）
         uikit.snap(f'rebirth-catch-{snap_tag}')
         self.pick_why = f'{snap_tag} 下拉讀到 {[t for t, _, _ in lines]}，找不到 {ident[1]}'
-        if not scroll and any(t.strip() for t, _, _ in lines):             # 清單開著卻沒目標列：點回欄位收起，下次不會變成「關」
+        if scroll or any(t.strip() for t, _, _ in lines):                  # 清單開著卻沒目標列：點回欄位收起（開著時點 X 會被吃掉 → 面板殘留，2026-10-13 系別清單實機），下次不會變成「關」
             uikit.gui('seq', f'click {dd[0]} {dd[1]}; wait 400', note=f'rebirth_pets 捉寵下拉 {snap_tag} 收起')
         return False
 
@@ -1032,7 +1115,7 @@ class Run:
         T = self.T
         rc = T.catch_setup(ct, fam, sp, n)
         if rc:
-            return self.stop(EXIT_CATCH, f'{ct} 外掛捉寵設置失敗（rc {rc}；可抓捕數沒讀到 {n}？）')
+            return self.stop(EXIT_CATCH, f'{ct} 外掛捉寵設置失敗（rc {rc}；' + ('系別 / 物種下拉選不到或讀回不符，見 snap rebirth-catch-*' if rc == EXIT_CATCH_PICK else f'可抓捕數沒讀到 {n}？') + '）')
         rc = T.catch_start(ct, n)
         if rc:
             return self.stop(EXIT_CATCH, f'{ct} 勾自動抓寵失敗（rc {rc}）')

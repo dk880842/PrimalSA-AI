@@ -50,6 +50,13 @@ check('questrun 與 rebirth 共用同一份常數', questrun.RELOGIN_MAX == sr.R
 
 # ================= catchbuy =================
 check('parse_money：依 x 排序、去逗號', catchbuy.parse_money([('0', 520, 23), ('3,264,500', 335, 23)]) == (3264500, 0) and catchbuy.parse_money([]) == (None, None))
+check('parse_money：多組 OCR 重複的石幣（x 差 < 80）合併、活力 x≈808 不當鑽石、鑽石讀不到 = None（2026-10-13 三轉誤停）',
+      catchbuy.parse_money([('4,884,500', 335, 23), ('4,884,500', 340, 23), ('346', 808, 23)]) == (4884500, None)
+      and catchbuy.parse_money([('4,884,500', 335, 23), ('0', 560, 23), ('346', 808, 23)]) == (4884500, 0))
+check('parse_count_zero：「可抓捕數:」後沒數字 + zero_ok → 0（2026-10-13 三轉 163）；沒 zero_ok → None；有數字照讀',
+      catchbuy.parse_count_zero('自動抓寵自動存倉庫可抓捕數:+', True) == 0 and catchbuy.parse_count_zero('自動抓寵自動存倉庫可抓捕數:+', False) is None
+      and catchbuy.parse_count_zero('可抓捕數：2 +', True) == 2)
+check('parse_count_zero：沒讀到「可抓捕數」字樣 → None（不猜 0）', catchbuy.parse_count_zero('自動抓寵 自動存倉庫', True) is None and catchbuy.parse_count_zero('', True) is None)
 
 
 class Shop:
