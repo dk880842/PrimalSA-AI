@@ -254,9 +254,16 @@ def buff_kind(item: str) -> str | None:
     return BUFF_KIND.get(norm_name(item))
 
 
+def buff_state(kind: str) -> bool | None:
+    """buff 列有 kind（'dragon' / 'exp'）圖示嗎 → True / False；像素讀不到 = None。
+    questrun（要不要吃龍王）與 depot_use（吃前跳過 / 吃後驗證）共用這一個判斷（2026-10-13 review §3.4：兩邊各讀各的，曾一邊說沒有、一邊說有）"""
+    row = buff_row()
+    return None if row is None else kind in row
+
+
 def has_buff(kind: str) -> bool:
-    """buff 列有 kind（'dragon' / 'exp'）圖示嗎；讀不到 = False"""
-    return kind in (buff_row() or [])
+    """buff 列有 kind（'dragon' / 'exp'）圖示嗎；讀不到 = False（buff_state 的 bool 版）"""
+    return bool(buff_state(kind))
 
 
 def _buff_icon() -> bool:
@@ -421,19 +428,36 @@ def read_hp() -> tuple | None:
     return None
 
 
-def hps(roles) -> tuple:
-    """唯讀：開背包逐人點左欄頭像讀 HP → (rc, {role: (目前, 最大) | None})。
-    給 questrun 任務之間 / BOSS 後檢查全隊血量（HUD 只有當前角色的 HP；切換面板 / 組隊面板沒有 HP）"""
+def team_scan(roles=None, free: bool = True, hp: bool = True) -> tuple:
+    """唯讀：開背包一次、逐人點左欄頭像，同一次讀背包空格（free：slot_occupancy 像素判，不做名稱 OCR）與 HP（hp：背包頁 HP 條字）
+    → (rc, {角色: {'free': 空格數 | None, 'hp': % | None, 'hp_raw': (目前, 最大) | None}})。
+    2026-10-13 review §5.3：questrun 任務開始前「背包空格 bag.find_items 逐人開關一次 + 全隊 HP 再開一次」22～26 秒 → 合成一次（約 8～10 秒）。
+    空格像素讀不到時 free = None（呼叫端當「不知道」，不算不足）"""
     out = {}
     with Session() as s:
         if s.rc:
             return s.rc, out
-        for r in roles:
+        for r in list(roles or uikit.CHARS):
             rc = select_role(r)
             if rc:
                 return rc, out
-            out[r] = read_hp()
+            d = {}
+            if free:
+                occ = slot_occupancy()
+                d['free'] = None if occ is None else occ.count(False)
+            if hp:
+                v = read_hp()
+                d['hp_raw'] = v
+                d['hp'] = round(100 * v[0] / v[1]) if v and v[1] else None
+            out[r] = d
     return 0, out
+
+
+def hps(roles) -> tuple:
+    """唯讀：開背包逐人點左欄頭像讀 HP → (rc, {role: (目前, 最大) | None})。
+    給 questrun 任務之間 / BOSS 後檢查全隊血量（HUD 只有當前角色的 HP；切換面板 / 組隊面板沒有 HP）；實作 = team_scan(free=False)"""
+    rc, d = team_scan(roles, free=False, hp=True)
+    return rc, {r: v.get('hp_raw') for r, v in d.items()}
 
 
 def team_hp_pct(roles=None) -> tuple:

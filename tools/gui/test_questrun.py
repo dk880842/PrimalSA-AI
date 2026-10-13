@@ -184,14 +184,37 @@ class Fake:
         self.rec('heal')
 
     def bag_free(self, roles):
+        self.rec('bag_free')
         return 0, dict(self.bag)
+
+    def team_scan(self, roles, free=True, hp=True):
+        """假 bag.team_scan：同一次讀空格（self.bag）+ HP（取 team_hp 序列一個）"""
+        self.rec('team_scan')
+        out = {r: {} for r in roles}
+        if hp:
+            rc, pct = self.team_hp()
+            if rc:
+                return rc, {}
+            for r in roles:
+                out[r]['hp'] = (pct or {}).get(r)
+        if free:
+            for r in roles:
+                out[r]['free'] = self.bag.get(r)
+        return 0, out
 
     def dragon_active(self):
         return self.active
 
+    dragon_step = 'done'
+    store_rc = 0
+
     def dragon(self, have=False):
         self.rec('dragon', have)
-        return (self.dragon_rc, {'warn': '已取出'} if self.dragon_rc else {})
+        return (self.dragon_rc, {'warn': '已取出', 'step': 'use'} if self.dragon_rc else {'step': self.dragon_step})
+
+    def dragon_store(self):
+        self.rec('dragon_store')
+        return self.store_rc
 
     def quest(self, args, timeout=0):
         self.rec('quest', tuple(str(a) for a in args))
@@ -280,14 +303,18 @@ class Fake:
         q = getattr(self, 'drop_q', None)
         return (q.pop(0) if len(q) > 1 else q[0]) if q else (0, {'dropped': [[x, 3] for x in questrun.ALL_ROLES]})
 
-    def status_all(self, detail, roles):
-        """all_q：每次取一個 {角色: 狀態 | None(讀不到)}（最後一個重複）；沒給 = 全員已完成"""
-        self.rec('status_all', detail, tuple(roles))
+    def status_all(self, details, roles):
+        """all_q：每次取一個 {角色: 狀態 | None(讀不到)} 或 {角色: {標題: 狀態}}（最後一個重複）；沒給 = 全員已完成"""
+        details = tuple(details)
+        self.rec('status_all', details, tuple(roles))
         q = getattr(self, 'all_q', None)
         if not q:
-            return 0, {r: {detail: '已完成'} for r in roles}
+            return 0, {r: {x: '已完成' for x in details} for r in roles}
         m = q.pop(0) if len(q) > 1 else q[0]
-        res = {r: (None if m.get(r, '已完成') is None else {detail: m.get(r, '已完成')}) for r in roles}
+        res = {}
+        for r in roles:
+            v = m.get(r, '已完成')
+            res[r] = None if v is None else ({x: v.get(x, '已完成') for x in details} if isinstance(v, dict) else {x: v for x in details})
         return (1 if any(v is None for v in res.values()) else 0), res
 
 
@@ -340,7 +367,7 @@ rc = go(f, [2017])
 n = f.names()
 check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', '地雷區') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
 check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
-check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh；片內 HP 檢查門檻 = --team-hp-min', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh', '--hp-check-min', '60')) in f.calls, str(f.calls))
+check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh；片內 HP 檢查門檻 = --team-hp-min', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh', '--hp-check-min', '60', '--hp-check-every', '3')) in f.calls, str(f.calls))
 check('交接不再另讀當前角色（team.form 同一次面板確認）', 'current' not in n and 'char_ensure' not in n)
 check('預設不吃龍王的守護（2026-10-12 起要 --dragon）', 'dragon' not in n, str(n))
 check('交接：關遇敵 → 戰鬥設定檢查 → team.form（battle_check 只 1 次）', n.count('battle_check') == 1 and n.index('enc_off') < n.index('battle_check') < n.index('team_form'), str(n))
@@ -415,13 +442,13 @@ check('bossretry 9 → 9 透傳', go(f, [2017]) == uikit.EXIT_UNKNOWN_SCREEN)
 DONE_TAIL = (0, ['任務完成'])
 others = tuple(r for r in questrun.ALL_ROLES if r != questrun.LEADER)
 f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL])
-check('完成後逐人驗：其他 4 人都已完成 → 0、只讀 1 次、沒 bossretry', go(f, [2017]) == 0 and f.calls.count(('status_all', D17, others)) == 1
+check('完成後逐人驗：其他 4 人都已完成 → 0、只讀 1 次、沒 bossretry', go(f, [2017]) == 0 and f.calls.count(('status_all', (D17,), others)) == 1
       and 'boss_retry' not in f.names(), str([c for c in f.calls if c[0] == 'status_all']))
 f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL], boss=[(0, {})])
 f.all_q = [{'DKBO3': questrun.DOING, 'DKBO5': questrun.DOING}, {}]
 rc = go(f, [2017])
 check('有人進行中 → bossretry --who 落後者 → 只重讀那兩人 → 0', rc == 0 and ('boss_retry', questdefs.get(2017)['track'], ('DKBO3', 'DKBO5')) in f.calls
-      and ('status_all', D17, ('DKBO3', 'DKBO5')) in f.calls and 'grind_start' in f.names(), str(f.calls[-6:]))
+      and ('status_all', (D17,), ('DKBO3', 'DKBO5')) in f.calls and 'grind_start' in f.names(), str(f.calls[-6:]))
 f = Fake(status={D17: [questrun.DOING]}, quest=[DONE_TAIL], boss=[(0, {})])
 f.all_q = [{'DKBO5': questrun.DOING}]
 rc = go(f, [2017])
@@ -488,8 +515,15 @@ rc = go(f, [2017])
 check('3 連續 + VS 卡死 → relogin 一次後續跑', rc == 0 and f.names().count('relogin') == 1 and f.names().count('unfreeze') == 2, str(f.names()))
 f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8)
 f.vs_stuck_val = True
+f.relogin_rc = 103
+check('VS 卡死但重登失敗（103）→ 112', go(f, [2017]) == questrun.EXIT_STEP and f.names().count('relogin') == 1)
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, [])] * 3 + [(0, ['任務完成：x'])])
+f.vs_stuck_val = True
 f.relogin_rc = 105
-check('VS 卡死但重登失敗 → 112', go(f, [2017]) == questrun.EXIT_STEP and f.names().count('relogin') == 1)
+rc = go(f, [2017])
+n = f.names()
+check('重登進遊戲但隊伍不對（105）→ team.form --regroup → 關遇敵 → 續跑', rc == 0 and n.index('relogin') < n.index('team_regroup') < len(n) - 1 - n[::-1].index('quest')
+      and n.count('enc_off') == 2, str(n))
 f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8)
 check('沒 VS 卡死 → 不重登', go(f, [2017]) == questrun.EXIT_STEP and 'relogin' not in f.names())
 
@@ -572,8 +606,17 @@ check('全隊讀 HP 時 bag 回 9（驗證視窗）→ 透傳 9、不跑 quest',
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
 go(f, [2017], team_hp_min=0)
 check('--team-hp-min 0 → 不讀全隊', f.team_hp_n == 0)
-f = Fake(status={D17: [questrun.DOING]}, quest=[(19, [])])
-check('quest.py 19（巡路卡住解卡失敗）→ 112', go(f, [2017]) == questrun.EXIT_STEP)
+f = Fake(status={D17: [questrun.DOING]}, quest=[(19, [])] * 10)
+rc = go(f, [2017])
+check(f'quest.py 19 一直卡（解卡 / 走出口都無效）→ 全員重登 {questrun.RELOGIN_MAX} 次仍卡 → 112', rc == questrun.EXIT_STEP and f.names().count('relogin') == questrun.RELOGIN_MAX
+      and f.names().count('unstick_exit') == 3, f'rc={rc} {f.names()}')
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(19, []), (0, ['任務完成：x'])])
+rc = go(f, [2017])
+n = f.names()
+check('quest.py 19 → 走出口沒有可走的 → 全員重登 1 次 → 續跑完成；重登後重查戰鬥設定（不沿用快取）', rc == 0 and n.count('relogin') == 1 and n.count('battle_check') == 2, f'rc={rc} {n}')
+f = Fake(status={D17: [questrun.DOING]}, quest=[(19, [])] * 10)
+f.relogin_rc = 9
+check('重登回 9（驗證視窗）→ 透傳 9', go(f, [2017]) == 9)
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(19, []), (0, [])])
 f.unstick_exit = lambda: (f.rec('unstick_exit'), (21010, 48, 48))[1]
 check('quest.py 19 → 先 unstick_exit（刷新 + 走上附近出口）成功就再跑 quest', go(f, [2017]) == 0 and f.names().count('unstick_exit') == 1 and f.names().count('quest') == 2, str(f.names()))
@@ -614,13 +657,13 @@ go(f, [2999])
 check('畫面停在對話窗 → 先 ESC 再交接', f.names().index('esc') < f.names().index('enc_off') and f.names().count('quest') == 1)
 
 f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
-go(f, [2017], use_dragon=True)
+go(f, [2017], use_dragon=True, dragon_all=True)
 check('--dragon：龍王的守護跑第一片前吃（have=False）', ('dragon', False) in f.calls and f.names().index('dragon') < f.names().index('quest'))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=True)
-go(f, [2017], use_dragon=True)
+go(f, [2017], use_dragon=True, dragon_all=True)
 check('人形圖示在 → 不吃', 'dragon' not in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=None)
-go(f, [2017], use_dragon=True)
+go(f, [2017], use_dragon=True, dragon_all=True)
 check('圖示讀不到 → 退回計時（第一次會吃）', f.names().count('dragon') == 1)
 
 # 14) --after none：不恢復；grind 失敗 → 回 grind 碼
@@ -639,11 +682,11 @@ check('第一個失敗 → 第二個不跑', f.names().count('quest') == 1 and D
 
 # 16) 龍王：失敗只警告、續跑（have=True）；人形圖示不在就吃
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], dragon_rc=92)
-rc = go(f, [2017], use_dragon=True)
+rc = go(f, [2017], use_dragon=True, dragon_all=True)
 check('龍王失敗只警告、任務照跑', rc == 0 and f.names().count('quest') == 2)
 check('龍王取出後失敗 → 下次 have=True', ('dragon', True) in f.calls, str([c for c in f.calls if c[0] == 'dragon']))
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], active=None)
-go(f, [2017], use_dragon=True)
+go(f, [2017], use_dragon=True, dragon_all=True)
 check('buff 列沒人形圖示 → 每次都吃（不看時間）', f.names().count('dragon') >= 2)
 f = Fake(status={D17: [questrun.DONE]})
 go(f, [2017], use_dragon=False)
@@ -661,7 +704,7 @@ check('quest-log 摘要寫本任務 0 顆（不是累計 6）', '本任務吃 0 
 reset()
 questrun.save_progress({'tasks': {}, 'dragon_used': 6})
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])], active=False)
-quiet(questrun.run, [2017], tools=f, after='none', use_dragon=True)
+quiet(questrun.run, [2017], tools=f, after='none', use_dragon=True, dragon_all=True)
 check('吃 1 顆：dragon_used 1、累計 7', questrun.LAST['dragon_used'] == 1 and questrun.LAST['dragon_used_total'] == 7, str(questrun.LAST))
 check('quest-log 摘要寫本任務 1 顆', '本任務吃 1 顆' in questrun.QUEST_LOG.read_text(encoding='utf-8'))
 
@@ -701,10 +744,10 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     questrun.run([2017], dry_run=True)
 txt = buf.getvalue()
-check('plan：預設不吃龍王、列戰鬥設定檢查', '預設不吃（要吃加 --dragon）' in txt and '每片前：龍王' not in txt and 'ass.battle_check' in txt, txt[-400:])
+check('plan：預設不吃龍王、列戰鬥設定檢查', '預設不吃（要吃加 --dragon' in txt and '每片前：龍王' not in txt and 'ass.battle_check' in txt, txt[-400:])
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
-    questrun.run([2017], dry_run=True, use_dragon=True, battle_check=False)
+    questrun.run([2017], dry_run=True, use_dragon=True, dragon_all=True, battle_check=False)
 txt = buf.getvalue()
 check('plan --dragon --no-battle-check', '每片前：龍王' in txt and '--no-battle-check 不做' in txt)
 import argparse as _ap  # noqa: E402
@@ -984,8 +1027,10 @@ r = run_track(fl, '解救老爺爺')
 check('下緣的卡捲不動 → 點標題本身 205,425（避開 ▼）', r is True and fl.clicks == ['205 425'], f'{fl.drags} {fl.clicks}')
 
 # ================= quest.close_stray_panel：誤開的組隊 / 切換面板自動關、不算驗證視窗 =================
-_so = (uikit.is_open, uikit.close_panel, quest.event, quest.log)
+_so = (uikit.is_open, uikit.close_panel, quest.event, quest.log, uikit.known_panel, quest.snap)
 _closed = []
+uikit.known_panel = lambda: None                                   # 不讀真畫面（舊版這裡會讀遊戲像素；遊戲剛好開著面板時誤判 + 截圖）
+quest.snap = lambda tag: None
 uikit.is_open = lambda p: p.name == 'TEAMPANEL'
 uikit.close_panel = lambda p, known_open=False: (_closed.append(p.name), True)[1]
 quest.event = lambda *a, **k: None
@@ -993,7 +1038,7 @@ quest.log = lambda *a, **k: None
 check('close_stray_panel：組隊面板開著 → 關它並回 True', quest.close_stray_panel() is True and _closed == ['TEAMPANEL'])
 uikit.is_open = lambda p: False
 check('close_stray_panel：沒有已知面板 → False（照舊當不認得）', quest.close_stray_panel() is False)
-uikit.is_open, uikit.close_panel, quest.event, quest.log = _so
+uikit.is_open, uikit.close_panel, quest.event, quest.log, uikit.known_panel, quest.snap = _so
 
 
 # ================= 走路不計時 / 時間到不開詳情（2026-10-11 馬祖快遞冗餘修正）=================
@@ -1113,8 +1158,161 @@ check('preflight 9 但畫面是已知面板 → 清掉後重驗 → 繼續', rc 
 # --dragon：遊戲還在自動巡路 → 這片不吃（08:04 depot_use 被 NPC 對話框打斷）
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
 f.screen = 'walking'
-go(f, [2017], use_dragon=True)
+go(f, [2017], use_dragon=True, dragon_all=True)
 check('--dragon：自動巡路中 → 不吃（下一片再看）', 'dragon' not in f.names(), str(f.names()))
+
+# ================= 2026-10-13 冗餘 review 前 5 名 =================
+D18 = '馬祖快遞(1.82)'
+done_tail = ['任務完成：x']
+# --- §2 逐人驗證：risk（預設）沒風險事件 → run 結束批次一次；有風險 → 當場；each = 舊行為 ---
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail), (0, done_tail)])
+rc = go(f, [2017, 2015])
+sa = [c for c in f.calls if c[0] == 'status_all']
+n = f.names()
+check('risk：2 個任務都沒風險事件 → 只在全部結束後批次讀 1 次（兩個標題一起）、在恢復掛機之前', rc == 0 and sa == [('status_all', (D17, D15), others)]
+      and n.index('status_all') > len(n) - 1 - n[::-1].index('quest') and n.index('status_all') < n.index('grind_start'), str(sa))
+check('批次驗完 → 待驗清單清空', questrun.LAST.get('verify_pending') == [], str(questrun.LAST.get('verify_pending')))
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail), (0, done_tail)])
+go(f, [2017, 2015], verify='each')
+check('--verify each：每任務完成當場驗（2 次）', [c[1] for c in f.calls if c[0] == 'status_all'] == [(D17,), (D15,)])
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(30, []), (0, done_tail), (0, done_tail)])
+go(f, [2017, 2015])
+sa = [c[1] for c in f.calls if c[0] == 'status_all']
+check('risk：2017 有 quest.py 30（隊伍散）→ 2017 當場驗；2015 沒事 → 結束批次驗', sa == [(D17,), (D15,)] and f.names().index('status_all') < f.names().index('accept', 8), str(sa))
+f = Fake(status={D17: [questrun.DOING]}, quest=[(37, []), (0, done_tail)],
+         team_hp=[(0, {r: 100 for r in questrun.ALL_ROLES}), (0, {'DKBO': 90, 'DKBO2': 90, 'DKBO3': 0, 'DKBO4': 90, 'DKBO5': 90})])
+go(f, [2017])
+check('risk：BOSS 戰後有人 HP 0 → 風險事件（補血後當場驗）', 'heal' in f.names() and any('風險事件' in ln for ln in questrun.EVENT_LOG.read_text(encoding='utf-8').splitlines()))
+f = Fake(status={D99: [questrun.DOING], D17: [questrun.PENDING]}, quest=[(0, done_tail), (0, done_tail)])
+rc = go(f, [2999, 2017])
+n = f.names()
+sa = [i for i, c in enumerate(f.calls) if c[0] == 'status_all']
+acc17 = f.calls.index(('accept', D17))
+check('前置依賴：成人儀式待驗 → 接取彌生和日美子之前先批次驗（Task 表 finishTasks）', rc == 0 and f.calls[sa[0]][1] == (D99,) and sa[0] < acc17 and f.calls[sa[1]][1] == (D17,), str([f.calls[i] for i in sa]))
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail), (33, [])])
+rc = go(f, [2017, 2015])
+check('中途失敗（117）→ 不批次驗、待驗 [2017] 留在進度檔', rc == questrun.EXIT_STALL and 'status_all' not in f.names() and questrun.LAST.get('verify_pending') == ['2017'], str(questrun.LAST.get('verify_pending')))
+f2 = Fake(status={D15: [questrun.DOING]}, quest=[(0, done_tail)])
+quiet(questrun.run, [2015], tools=f2, after='none')                 # 不 reset：沿用上一輪進度檔
+check('下次 run 結束 → 上次留下的 2017 跟這次的 2015 一起批次驗', [c[1] for c in f2.calls if c[0] == 'status_all'] == [(D17, D15)], str([c for c in f2.calls if c[0] == 'status_all']))
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail), (0, done_tail)], boss=[(0, {})])
+f.all_q = [{'DKBO3': {D15: questrun.DOING}}, {}]
+rc = go(f, [2017, 2015])
+check('批次驗：DKBO3 只有 2015 沒完成 → 只對 2015 bossretry --who DKBO3 → 只重讀 DKBO3 的 2015', rc == 0 and ('boss_retry', questdefs.get(2015)['track'], ('DKBO3',)) in f.calls
+      and ('status_all', (D15,), ('DKBO3',)) in f.calls, str([c for c in f.calls if c[0] in ('status_all', 'boss_retry')]))
+# --- §6.1 提前結束 → 不開詳情直接下一片 ---
+f = Fake(status={D17: [questrun.DOING]}, quest=[(0, ['步驟結束（對話 2、獎勵 1、戰鬥 0），連續閒置 3 次，提前結束']), (0, done_tail)])
+rc = go(f, [2017])
+check('quest.py「提前結束」→ 不讀詳情、直接下一片（碧青洞窟 09:31 多開一次詳情 32 秒）', rc == 0 and 'status' not in f.names() and f.names().count('quest') == 2, str(f.names()))
+check('early_end / battles_in 純函式', questrun.early_end(['…提前結束']) and not questrun.early_end(['時間到']) and questrun.battles_in(['本片戰鬥 3 場']) == 3
+      and questrun.battles_in(['x']) is None and questrun.battles_in(['本片戰鬥 0 場']) == 0)
+# --- §5.1 戰鬥設定檢查 30 分快取 ---
+reset()
+questrun.save_progress({'tasks': {}, 'battle_ok_at': questrun.time.time() - 600})
+f = Fake(status={D17: [questrun.DONE]})
+quiet(questrun.run, [2017], tools=f, after='none')
+check('戰鬥設定 10 分前查過 → 交接不再開外掛面板', 'battle_check' not in f.names(), str(f.names()))
+reset()
+questrun.save_progress({'tasks': {}, 'battle_ok_at': questrun.time.time() - 600})
+f = Fake(status={D17: [questrun.DONE]})
+quiet(questrun.run, [2017], tools=f, after='none', battle_cache=False)
+check('--battle-check-always → 照查', f.names().count('battle_check') == 1)
+reset()
+questrun.save_progress({'tasks': {}, 'battle_ok_at': questrun.time.time() - questrun.BATTLE_OK_S - 5})
+f = Fake(status={D17: [questrun.DONE]})
+quiet(questrun.run, [2017], tools=f, after='none')
+check('超過 30 分 → 照查', f.names().count('battle_check') == 1)
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(38, []), (0, done_tail)], boss=[(0, {})])
+go(f, [2017])
+check('bossretry 後戰鬥設定快取作廢（進度檔 battle_ok_at = 0）', not questrun.load_progress().get('battle_ok_at'))
+# --- §5.2 / §5.3 全隊 HP 5 分內且沒戰鬥沿用；背包空格與 HP 同一次開背包 ---
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail + ['本片戰鬥 0 場']), (0, done_tail)])
+go(f, [2017, 2015])
+check('第一任務沒打仗（本片戰鬥 0 場）→ 第二任務開始前全隊 HP 沿用（只讀 1 次）', f.team_hp_n == 1, str(f.team_hp_n))
+check('任務開始前背包空格 + HP 用 team_scan 同一次讀；HP 沿用的那次只讀空格（bag_free）', f.names().count('team_scan') == 1 and f.names().count('bag_free') == 1
+      and f.names().index('team_scan') < f.names().index('bag_free'), str(f.names()))
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail + ['本片戰鬥 2 場']), (0, done_tail)])
+go(f, [2017, 2015])
+check('第一任務打過仗 → 第二任務開始前重讀（2 次）', f.team_hp_n == 2, str(f.team_hp_n))
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail), (0, done_tail)])
+go(f, [2017, 2015])
+check('quest.py 沒印戰鬥場數（舊版）→ 當打過仗、重讀', f.team_hp_n == 2)
+# --- §3 龍王：只對長巡路任務吃、整疊留背包、run 結束存回、skip 不計 ---
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, done_tail)])
+go(f, [2017], use_dragon=True)
+check('--dragon：短巡路任務（彌生和日美子 2 秒）不吃', 'dragon' not in f.names())
+f = Fake(status={D18: [questrun.DOING]}, quest=[(0, ['時間到，結束']), (0, done_tail)])
+rc = go(f, [2018], use_dragon=True, after='none')
+dc = [c for c in f.calls if c[0] == 'dragon']
+n = f.names()
+check('--dragon：長巡路（馬祖快遞）第一次 have=False 取出、第二片 have=True 直接從背包吃；結束存回 1 次', rc == 0 and dc == [('dragon', False), ('dragon', True)]
+      and n.count('dragon_store') == 1 and n.index('dragon_store') > len(n) - 1 - n[::-1].index('quest'), str(n))
+check('  存回後旗標清掉、LAST.dragon_in_bag False', questrun.LAST.get('dragon_in_bag') is False and not questrun.load_progress().get('dragon_in_bag'))
+f = Fake(status={D18: [questrun.DOING]}, quest=[(0, done_tail)])
+f.dragon_step = 'skip'
+go(f, [2018], use_dragon=True, after='none')
+check('depot_use 判 buff 已在（skip）→ 不計「已吃」、不留背包旗標、不存回', questrun.LAST.get('dragon_used') == 0 and 'dragon_store' not in f.names(), str(questrun.LAST.get('dragon_used')))
+f = Fake(status={D18: [questrun.DOING]}, quest=[(0, ['時間到，結束']), (33, [])])
+rc = go(f, [2018], use_dragon=True, after='none')
+check('任務失敗（117）也存回龍王', rc == questrun.EXIT_STALL and f.names().count('dragon_store') == 1)
+f = Fake(status={D18: [questrun.DOING]}, quest=[(0, ['時間到，結束']), (2, [])])
+rc = go(f, [2018], use_dragon=True, after='none')
+check('驗證視窗（9）→ 不碰畫面、不存；旗標留進度檔', rc == 9 and 'dragon_store' not in f.names() and questrun.load_progress().get('dragon_in_bag') is True)
+f2 = Fake(status={D17: [questrun.DONE]})
+quiet(questrun.run, [2017], tools=f2, after='none')                 # 沿用進度檔（dragon_in_bag True），這次不吃
+n = f2.names()
+check('下次 run（不吃龍王）→ 交接後先存回上次留在背包的龍王', n.count('dragon_store') == 1 and n.index('team_form') < n.index('dragon_store') < n.index('accept'), str(n))
+f = Fake(status={D18: [questrun.DOING]}, quest=[(0, done_tail)])
+f.store_rc = 90
+go(f, [2018], use_dragon=True, after='none')
+check('存回失敗 → 只警告、旗標留著（下次補存）', questrun.LAST.get('ok') and questrun.LAST.get('dragon_in_bag') is True and any('存回公共倉庫失敗' in w for w in questrun.LAST['warnings']))
+
+
+class NoBagDragon(Fake):
+    """進度檔說龍王在背包，但背包其實沒有（have=True → 92）"""
+    def dragon(self, have=False):
+        self.rec('dragon', have)
+        return (92, {'step': 'use'}) if have else (0, {'step': 'done'})
+
+
+reset()
+questrun.save_progress({'tasks': {}, 'dragon_in_bag': True})
+f = NoBagDragon(status={D18: [questrun.DOING]}, quest=[(0, done_tail)])
+quiet(questrun.run, [2018], tools=f, after='none', use_dragon=True)
+check('have=True 但背包沒有（92）→ 改從公共倉庫取（have=False）再吃', [c for c in f.calls if c[0] == 'dragon'] == [('dragon', True), ('dragon', False)] and questrun.LAST['dragon_used'] == 1)
+f = Fake(status={D18: [questrun.DOING]}, quest=[(0, done_tail)], bag={'DKBO': 1, 'DKBO2': 5, 'DKBO3': 5, 'DKBO4': 5, 'DKBO5': 5})
+go(f, [2018], use_dragon=True, after='none')
+check('--dragon 且龍王還不在背包：DKBO 要 bag_slots + 1 格（馬祖快遞 1 + 1）→ 只空 1 格先 purge DKBO', ('purge', ('DKBO',)) in f.calls, str(f.calls[:12]))
+f = Fake(status={D18: [questrun.DOING]}, quest=[(0, done_tail)], bag={'DKBO': 1, 'DKBO2': 5, 'DKBO3': 5, 'DKBO4': 5, 'DKBO5': 5})
+go(f, [2018], after='none')
+check('沒 --dragon：DKBO 1 格就夠、不 purge', 'purge' not in f.names())
+# --- B6：quest.py 42 VS 牌卡死 → 全員重登；每任務最多 RELOGIN_MAX ---
+f = Fake(status={D17: [questrun.DOING]}, quest=[(42, []), (0, done_tail)])
+rc = go(f, [2017])
+n = f.names()
+check('quest.py 42（VS 牌卡死）→ 全員重登 → 關遇敵 → 戰鬥設定重查 → 續跑完成；重登 = 風險事件（當場驗）', rc == 0 and n.count('relogin') == 1
+      and n.index('relogin') < n.index('enc_off', 2) < n.index('battle_check', n.index('relogin')) and n.index('status_all') < n.index('grind_start'), str(n))
+f = Fake(status={D17: [questrun.DOING]}, quest=[(42, [])] * 5)
+rc = go(f, [2017])
+check(f'42 一直來 → 重登 {questrun.RELOGIN_MAX} 次後 112', rc == questrun.EXIT_STEP and f.names().count('relogin') == questrun.RELOGIN_MAX)
+check('classify 29 → select_loop、42 → vs_stuck', questrun.classify(29) == 'select_loop' and questrun.classify(42) == 'vs_stuck')
+# --- 交寵物（S5 / S6）---
+f = Fake(status={D19: [questrun.DOING]}, quest=[(29, [])])
+rc = go(f, [2019], after='none', pet_turnin=True)
+check('卡坦的願望 quest.py 29（寵物沒湊齊按完成循環）→ 117、訊息提示寵物沒湊齊', rc == questrun.EXIT_STALL and '寵物沒湊齊' in questrun.LAST['info'].get('msg', ''), questrun.LAST['info'].get('msg'))
+f = Fake(status={D16: [questrun.PENDING, questrun.DONE]}, steps=[1])
+rc = go(f, [2016], after='none', pet_turnin=True)
+check('恐龍博士 --pet-turnin：接取後已 rest-all → 交寵物前不重做（只 1 次）', rc == 0 and f.names().count('rest_all') == 1, str(f.names()))
+f = Fake(status={D19: [questrun.DOING]}, quest=[(0, done_tail)])
+f.rest_rc = 74
+rc = go(f, [2019], after='none', pet_turnin=True)
+check('rest-all 74（外掛鎖定戰寵）→ 150、訊息提示先取消鎖定', rc == questrun.EXIT_TURNIN and '鎖定戰寵' in questrun.LAST['info'].get('msg', ''), questrun.LAST['info'].get('msg'))
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    questrun.run([2018, 2017], dry_run=True, use_dragon=True)
+txt = buf.getvalue()
+check('plan --dragon：長巡路列「每片前」、短巡路列「不吃」、逐人驗證模式', '每片前：龍王' in txt.split('[任務 2017]')[0] and '龍王的守護：不吃' in txt.split('[任務 2017]')[1]
+      and '--verify risk' in txt, txt[-600:])
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

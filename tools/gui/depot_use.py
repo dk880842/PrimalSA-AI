@@ -10,6 +10,7 @@
 每步失敗就停、回該步的退出碼（bag 90～96），不重點；取出後失敗會提醒「道具還在背包」。
 任何出口（成功 / 失敗 / 例外）都由 bag.Session 結束時 close_leftover 收尾：道具彈窗 ESC、NPC 對話框蓋住背包 → ESC（不回答）、背包外框在 → 點 ✕ 1280,113
 （2026-10-13 08:04 rc 90：吃龍王途中自動巡路抵達看門者，對話框把背包藏起來，舊版沒關 → quest.py 誤報 rc 9）。questrun 在遊戲自動巡路中不呼叫本工具。
+questrun --dragon（2026-10-13 起）用 restore=False（剩的留在 DKBO 背包）、之後 have=True 直接從背包吃，run 結束才 bag.depot_store 存回；buff 判斷與 questrun 共用 bag.buff_state。
 最後一行 JSON {"ok","rc","step","buff",...}。
 """
 import argparse

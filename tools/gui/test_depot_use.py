@@ -217,6 +217,38 @@ bag.depot_take = lambda *a: (calls.append('take'), bag.EXIT_VERIFY)[1]
 calls.clear()
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('取出驗證失敗 → 仍嘗試存回、不吃', rc == bag.EXIT_VERIFY and calls == ['take', 'store'])
+# questrun --dragon（2026-10-13 review §3.1）：restore=False → 剩的留在 DKBO 背包不存；have=True → 不取直接從背包吃
+bag.depot_take = lambda *a: (calls.append('take'), 0)[1]
+bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
+_seq = [[None, None, None], ['dragon', None, None]]
+bag.buff_row = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]
+calls.clear()
+rc, info = depot_use.run('DKBO', '龍王的守護', 'public', restore=False, have=False, reopen=False)
+check('restore=False：取出 → 吃 → 不存回（留背包）', rc == 0 and calls == ['take', 'use'] and info['step'] == 'done')
+_seq = [[None, None, None], ['dragon', None, None]]
+calls.clear()
+rc, info = depot_use.run('DKBO', '龍王的守護', 'public', restore=False, have=True, reopen=False)
+check('have=True + restore=False：不開倉庫，直接從背包吃', rc == 0 and calls == ['use'])
+bag.buff_row = lambda: None
+check('buff_state：讀不到 → None；has_buff → False', bag.buff_state('dragon') is None and bag.has_buff('dragon') is False)
+bag.buff_row = lambda: ['dragon', None, None]
+check('buff_state：有人形 → True、沒有 EXP → False', bag.buff_state('dragon') is True and bag.buff_state('exp') is False)
+# bag.team_scan（review §5.3）：開背包一次，逐人同時讀空格（像素）+ HP
+_k = (bag.select_role, bag.slot_occupancy, bag.read_hp)
+_sel = []
+bag.select_role = lambda r, ctx=None: (_sel.append(r), 0)[1]
+bag.slot_occupancy = lambda: [True] * 12 + [False] * 3
+bag.read_hp = lambda: (300, 600)
+rc, d = bag.team_scan(['DKBO', 'DKBO3'])
+check('team_scan：每人選一次、空格 3、HP 50%', rc == 0 and _sel == ['DKBO', 'DKBO3'] and d['DKBO3'] == {'free': 3, 'hp_raw': (300, 600), 'hp': 50})
+bag.slot_occupancy = lambda: None
+rc, d = bag.team_scan(['DKBO'], hp=False)
+check('team_scan：空格像素讀不到 → None（不當滿）、hp=False 不讀 HP', rc == 0 and d['DKBO'] == {'free': None})
+rc, d = bag.hps(['DKBO'])
+check('hps 沿用 team_scan → (目前, 最大)', rc == 0 and d == {'DKBO': (300, 600)})
+bag.select_role = lambda r, ctx=None: 91
+check('team_scan：選不到角色 → 91', bag.team_scan(['DKBO'])[0] == 91)
+bag.select_role, bag.slot_occupancy, bag.read_hp = _k
 
 # 2倍智慧果（2026-10-12 bug：按了使用、彈窗關了卻沒扣道具，舊版沒驗就回 0）：成敗看 buff 列 EXP 圖示
 uikit.snap = lambda tag: None

@@ -56,6 +56,9 @@
 - **戰鬥底部「關閉」列（2026-10-10；2026-10-13 改成單次嘗試、不阻塞）**：戰鬥中底部可能出現「**關閉**」直式鈕（510,745）+ 5 個角色頭像列（DKB0…DKB05，播放中打勾；上方綠字「如果遇到下指令出錯等問題，可使用下方[切換]按鈕切換至其他角色」），它**蓋住切換鈕**。特徵像素（`SIG_CLOSE_ROW`，樣本 `tools/.cache/battle-samples/cmd_a.png`）：關閉鈕半透明灰米色 ≈(188,162,134) 取 4 點（480,745 / 500,710 / 520,745 / 490,800，容差 22）+ 右側頭像條 555,745 與 1085,745 兩點 RGB 皆 < 95。
   - **2026-10-13 根因（使用者回報「進戰鬥十幾秒才刷新」）**：`tools/.cache/actions.log`（05:55～07:38）完整戰鬥共 5 場是「一偵測到戰鬥（0 秒）就按切換 850,765」→ 5 場的 seq 都**沒有後續的 `click 910,578`**（waitpix 等不到面板 = 刷新沒按到），舊版卻照樣記「按刷新角色（第 1 次）」；8～10 秒後（REFRESH_GAP）底部都已出現關閉列，接著「關閉」點 4 下（每下等 0.9 秒 + 輪詢 3 秒，約 18 秒）幾乎都收不掉，最後是列自己消失後才按成功。同期成功的 3 次都是開戰約 2 秒以上、底部沒有列時按的。**推測**（未實機確認）：開戰瞬間按切換不開面板、反而叫出這條列（或列本來就在開戰時出現）；「關閉」在播放中多半點不動。
   - **現行做法**：`refresh_characters(full, attempt)` 一次只做一次嘗試：`bottom_bar()` 一次 gui pixel 讀列 + 切換鈕圖示 → 有列就點一下「關閉」（輪流 510,745 / 745 / 725 / 765，errlog #61）、等 0.5 秒再讀，還在 → 回 `row`；切換鈕圖示 `SIG_SWITCH_FULL`（850,765 版；主畫面 / 快速戰鬥用 `SIG_SWITCH_MAIN` = 同圖示 -87,-5，容差 30）沒露出 → 不點、回 `notready`（轉場 / 被蓋 / 戰鬥剛結束回主畫面時 850,765 是「組隊」鈕，圖示不同，所以不會點到組隊）；露出才按切換 → `waitpix 1500` 面板 → `ifok click 910,578`，`waitpix_result()` 解析 seq 輸出：timeout / pwfail → 回 `nopanel`（沒點刷新）。主迴圈只把 `ok` / `unverified`（seq 沒有 waitpix 結果，只有假遊戲）當成功；其餘 1 秒後重試，連續 `REFRESH_STUCK_SNAP`＝10 次沒成功存一張 `*-close-row-stuck.png` / `*-refresh-fail.png` + errlog。像素讀不到 → 照舊直接按。
+  - **2026-10-13 冗餘 review（30 場完整戰鬥有 14 場「本場刷新連續 10 次沒成功」，關閉列點十幾下都收不掉）**：同一場「關閉」點 `CLOSE_ROW_MAX_CLICKS`＝2 次列還在 → 之後 `refresh_characters(click_row=False)` 只讀不點（回 `row_wait`），等列自己消失再按切換刷新（仍每 1 秒讀一次底部列）。
+    看 14 張 `close-row-stuck` 圖（**推測**，未實證）：列出現時 5 格頭像全打勾、上方是「播放中」或「1回合 剩餘時間 70」＋怪物已倒 = 全員指令已送出、等回合結算 / 播放動畫時的指令狀態列，這段期間「關閉」點了無效；頭像格是「切換至其他角色」用（點了會換當前角色，所以收不掉時更不能亂點）。
+  - **VS 牌卡死 → 退出碼 42**：快速戰鬥（頭上 VS 牌、沒有完整戰鬥畫面）開戰 `VS_STUCK_S`＝90 秒還沒結束 → 存 `vs-stuck` 圖、errlog、結束本片回 42；questrun 收到就全員重登（見下 questrun「自動全員重登」）。完整戰鬥打再久都不算。
   - 切換鈕圖示離線核對（2026-10-13，shotcache 1,700+ 張 1440×830）：完整戰鬥 90 張 = 切換露出 18 / 快速戰鬥 14 / 關閉列蓋住 58，三者互斥無遺漏；主畫面 idle 407 張主畫面版全中、850 版 0 張。
   - 預期效果（假時鐘 test_quest_fight (t4)）：一般情況開戰約 2.2 秒刷新成功（舊版第一次幾乎都沒按到，要等 8 秒 + 收列）；有列且前 2 下被吃 → 約 5.7 秒；列點不掉、第 10 秒自己消失 → 消失後 0.7 秒內刷新。**實機待驗**：開戰 1.5 秒後按切換是否真的開出面板、不再叫出關閉列。
 - **「選擇對象」面板（2026-10-10，樣本 `tools/.cache/quest-log/172356-no-npc.png`）**：點 NPC（或點黃問號 / --fight 點 NPC）後，若 NPC 周圍有隊友重疊，**右側（外框 1106～1420 × 230～560）跳出米色面板**，每個候選是一張頭像卡片，**名字在卡片下方：NPC 是黃 / 金字 (255,2xx,0)、隊友白字**。以前沒處理 → 面板一直開著，`--fight` 12 秒後誤報退出碼 22「沒點到 NPC」。現在 `read_screen()` 多一個狀態 `select`（外框 8 點：左右棕邊 (104,79,48) / (93,68,36) 與內部米色漸層 (247,216,177) (245,229,191) (246,219,182)，容差 40；離線掃 476 張截圖只有該樣本符合；排在 idle 之前，因為 HUD 紅字還在）。處理 `handle_select_panel()`：`findmark.ps1` 找黃色色塊 → `pick_select_card()`（純函式）取面板內、w/h ≤ 16、y 相近併成一排、x 相近併成一個名字、像素總數 ≥ 30 的黃字，**點名字水平中心、名字中心往上 48（卡片頭像）**，不寫死第一格（樣本：名字 y≈337 → 點 1172,289）；點完 `last_action` / `--fight` 的「點 NPC 後 12 秒」計時重設，繼續等對話框。找不到黃字、或連 `SELECT_MAX_TRIES`(4) 輪面板還在 → 不亂點，當「不認得」（3 次 + 5 秒後退出碼 2 交給使用者）。`--fight`、預設模式、`--stop-after-dialog` 都處理。
@@ -269,6 +272,23 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
   - **交接前清殘留**：08:00 `ass rc=3 選不到角色 DKBO3`、08:01「外掛面板 40 秒內打不開」+ NPC 對話窗殘留。questrun 交接改 `quest.clear_leftovers()`：對話框 / 只有再見 / 選擇對象 → ESC（不回答）、獲得物品 → 確認並驗證、已知面板 → 點 ✕（`uikit.known_panel`：標題板字 + ✕ 都命中，背包另要外框兩顆鈕）；preflight 回 9 時先清一次再重驗；關遇敵後、戰鬥設定檢查前再清一次；清不掉的不認得畫面 → 9（鐵則 5）。quest.py 不認得畫面連 2 次時 `close_stray_panel` 也會關已知面板（07:59 / 08:04 背包面板殘留誤報 rc 9，`fixtures/stray_px.json`）。
   - **龍王的守護與巡路**：08:04 depot_use rc 90 根因（證實，看 ui-log/080426-bag-nopopup、080431-bag-open-fail）：片「時間到」時遊戲還在自動巡路，吃龍王途中隊伍走到看門者 → NPC 對話框把整個 UI 連同背包藏起來 → use_item 點格沒開彈窗 90、depot_store 開不了背包 90，舊 `bag.Session` 看不到背包外框就不關 → quest.py ESC 掉對話框後背包露出 → 誤報 9。修：questrun 看到畫面是 `walking` 這片先不吃；`bag.Session` 結束一定 `close_leftover`（見 ui/bag.md）。07:59 那次背包 / 倉庫面板是誰開的**查不到**（actions.log 只留 2000 行已輪替；那片沒吃龍王）。
 
+- **2026-10-13 冗餘 review 修正（notes/review-redundancy-1013.md 前 5 名 + 卡住自動重登；離線測試通過，實機未驗證）**：
+  - **逐人驗證改「風險才當場、其餘批次」**（10-13 驗 20 次共 43 分、0 次抓到落後者）：`--verify risk`（預設）本任務有風險事件 —— quest.py 30 / 32 / 38 / 21 / 41、bossretry、全員重登、BOSS 後有人 HP 0 或讀不出、交寵物（解散逐人交）—— 才完成時當場 `verify_many`；
+    沒有 → 進度檔 `verify_pending`，全部任務結束後其他 4 人**每人開一次詳情讀全部待驗任務**（`questdetail.status_all` 多標題）；下一任務的前置（`questdefs.prereqs` = Task 表 finishTasks，1.82 全部要先完成成人儀式）在待驗清單 → 接取前先批次驗；
+    失敗退出時待驗留在進度檔（`LAST.verify_pending`），下次 questrun 結束再驗（超過 2 小時丟掉）。`--verify each` = 舊行為、`--verify off` / `--no-verify-all` 不驗。結果照寫 quest-events（「逐人驗證：{角色: 狀態}」）。
+  - **龍王的守護**：`--dragon` 只對 questdefs `dragon`（`WALK_S` 10-13 實測巡路 ≥ `DRAGON_WALK_MIN`＝120 秒：馬祖快遞 316、伐木證書 589、四寶玉 136、黃金羚羊 141、四大洞窟 220～678）的任務吃，`--dragon-all` 全吃；
+    第一次 `depot_use.run(restore=False)` 從公共倉庫整疊取出、吃一顆、**剩的留在 DKBO 背包**（進度檔 `dragon_in_bag`），之後 `have=True` 直接從背包吃（背包其實沒有 → 92 → 改從倉庫取）；run 結束（成功或失敗；9 / 10 / 116 / 152 / 1 等要留畫面給人看的除外）才 `bag.depot_store` 整疊存回；
+    中斷沒存到 → 下次 questrun 開頭（這次不吃時）或結束補存；存回失敗只警告、旗標留著。DKBO 背包空格需求 +1（龍王還不在背包時）。depot_use 判 buff 已在（`step=skip`）不再記「已吃」；questrun / depot_use 共用 `bag.buff_state`。
+  - **快取**：戰鬥設定檢查 30 分內 OK 且之後沒有重登 / bossretry → 沿用（進度檔 `battle_ok_at`；`--battle-check-always` 關快取）；全隊 HP 讀了沒人偏低 / 剛補血後 5 分內、且之間 quest.py 印「本片戰鬥 0 場」→ 任務開始前沿用（BOSS 後一定讀）；
+    任務開始前背包空格 + HP 用 `bag.team_scan` 同一次開背包（空格用像素 `slot_occupancy`，不做名稱 OCR）。
+  - **片內 HP**：quest.py `--hp-check-every` 預設 3（路上一般戰鬥每 3 場讀一次；任務戰後照讀），questdefs `hp_every`（四寶玉之謎 1）優先；questrun `--hp-check-every` 改預設。
+  - **提前結束不開詳情**：quest.py「步驟結束 …，提前結束」→ questrun 直接下一片（碧青洞窟 09:31 多開一次詳情 32 秒）；真的完成時下一片會印「任務完成」或回 5。
+  - **自動全員重登**：quest.py 42（VS 牌卡死 90 秒）、19（quest.py 刷新 + 點地面解卡 3 次仍卡，questrun 再「刷新 + 走上附近出口」仍不行）、3 + 全隊 VS 牌卡住 → `relogin.run(confirm=True, stuck=True)`（起始畫面可為巡路中 / 快速戰鬥 VS 牌；登入畫面只按已帶入帳密的「登錄」，鐵則 2）
+    → relogin 自己 team.check（105 隊伍不對 → `team.form --regroup`）→ 關原地遇敵 → 戰鬥設定重查 → 續片；每任務最多 `RELOGIN_MAX`＝2 次，之後 112。重登 = 風險事件（任務完成當場逐人驗）。
+  - **交寵物**：quest.py 29（對話 ↔ 選擇對象循環，S6 卡坦步 2 雞沒湊齊按完成 54 次）→ 117，訊息改「寵物沒湊齊 / 等級不夠 / 還在出戰？」；rest-all 失敗訊息帶提示（72 名字 / 縮圖都認不出、74 外掛鎖定戰寵還勾著）；
+    恐龍博士 `--pet-turnin` 接取後已 rest-all，交寵物前不重做；`pet.plan_rest` 名字讀不出但縮圖認得物種（img_species，非騎寵）→ 照改等待（S5 剛抓的貝魯卡沒名字、rest-all 拒絕）。
+  - **實機要確認**：①批次驗證的支線捲動能一次讀到多個任務（status_all 多標題）；②DKBO 背包整疊留著時 use_item 找得到、run 結束 depot_store 整疊存回；③relogin `--stuck` 在 VS 牌 / 巡路畫面時設置鈕（1210,760）點得開；④關閉列只點 2 次後，等列消失的時間是否比舊版連點短。
+
 ### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12；`--who` 模式實機驗過 DKBO3 / DKBO5 補完四寶玉之謎；questrun 38 / 21 與逐人驗證自動呼叫）
 照 memory psa-team-check-after-boss（2026-10-12 使用者更正）：照 0 轉龍王任務（英雄島前傳 2031 步 6）的做法——**落後的人當隊長、組滿 5 人、按追蹤回 BOSS 處全隊一起打**，不是掉隊者單人去打。errlog #222 / #226 / #238（四寶玉之謎 38 手動處理）。
 ```
@@ -284,9 +304,9 @@ uv run --no-project python tools/gui/test_bossretry.py                          
 - **不盲打**：步號讀不到（隊長或掉隊者）→ 142；掉隊者步號超前 → 144；quest.py 39 / 33 / 29 / 25 / 19 / 31 / 22 / 23 / 34 / 36、或 3 之後 `--fight` 仍 3 → 146；9 / 10 立即透傳且不再點；其他失敗先解散臨時隊伍、`char.ensure DKBO` 再回碼。
 - 退出碼 140～149：140 隊伍讀不到 / 沒隊長 / 名字讀不出、141 切角色、142 步號讀不到、143 補血、144 重打失敗、145 組隊 / 解散失敗、146 quest.py 要人看、147 戰鬥設定檢查失敗。
 - **重打前查戰鬥設定**（2026-10-12）：一般模式在 team.check 確定缺人之後、`--who` 模式一開始，跑 `ass.battle_check`（同 questrun 交接）；只改不對的勾選，值不對 / 改不動 → 147；`--no-battle-check` 關（questrun `--no-battle-check` 會一起傳下來）。
-- **questrun 逐人驗證（2026-10-12，`verify_all`）**：根因 = questrun 只看隊長的追蹤列表 / 詳情就判任務完成，被打飛的隊員進度落後沒被發現（四寶玉之謎 DKBO3 / DKBO5 一直是進行中）。現在每個任務由隊長判完成後，其他 4 人逐一 `questdetail.status_all` 讀詳情（每人約 10～40 秒）；有人是進行中 → `bossretry --who 落後者`（落後者當隊長 5 人重打 → 切回 DKBO 重組）→ 只重讀那幾個人；仍沒完成 / bossretry 失敗 / 某人讀不到 / 某人是待接取（沒接到，bossretry 幫不上）→ **108** 停手（`info.laggards`、`info.verify`）。`--no-verify-all` 關；詳情一開就已完成而跳過的任務預設不驗（`--verify-skipped` 才驗，驗過記 `all_done` 不重驗）。9 / 10 透傳。唯讀查：`questrun.py status --role all [任務ID …]`。
+- **questrun 逐人驗證（2026-10-12，`verify_all`；2026-10-13 起 `verify_many` + `--verify risk` 見上「冗餘 review 修正」）**：根因 = questrun 只看隊長的追蹤列表 / 詳情就判任務完成，被打飛的隊員進度落後沒被發現（四寶玉之謎 DKBO3 / DKBO5 一直是進行中）。現在每個任務由隊長判完成後，其他 4 人逐一 `questdetail.status_all` 讀詳情（每人約 10～40 秒）；有人是進行中 → `bossretry --who 落後者`（落後者當隊長 5 人重打 → 切回 DKBO 重組）→ 只重讀那幾個人；仍沒完成 / bossretry 失敗 / 某人讀不到 / 某人是待接取（沒接到，bossretry 幫不上）→ **108** 停手（`info.laggards`、`info.verify`）。`--no-verify-all` 關；詳情一開就已完成而跳過的任務預設不驗（`--verify-skipped` 才驗，驗過記 `all_done` 不重驗）。9 / 10 透傳。唯讀查：`questrun.py status --role all [任務ID …]`。
 - **questrun 接線**：quest.py 38 / 21 → `Tools.boss_retry(track)` = `bossretry.run(track)`；每任務最多 `BOSS_RETRY_MAX` = 3 次；0 → `team_ok_at` = 現在 → `hp_gate` → 下一片（`--team-fresh`）；9 / 10 透傳；其他 → 114（`info.boss_retry_rc`）；`--no-boss-retry` 關（直接 114）。
-- **`--who` 模式**：不看 team.check / 掉隊卡片，落後者 = 名單、參考步號預設 GONE（其他人已完成）；有隊伍先由現任隊長解散，之後同上。questrun 每任務完成後的逐人驗證（`verify_all`）就是用這個。
+- **`--who` 模式**：不看 team.check / 掉隊卡片，落後者 = 名單、參考步號預設 GONE（其他人已完成）；有隊伍先由現任隊長解散，之後同上。questrun 逐人驗證（`verify_many`，風險事件當場 / run 結束批次）有人進行中時就是用這個。
 - **組完隊再驗**：`form_as` 組完重讀切換面板，隊長必須是落後者、其他 4 人都是隊員，否則 145（使用者 2026-10-12 要求）；組隊小錯（切換面板讀到 0 張卡 42）原地重試 3 次（`questrun.retry_form`，與 questrun.form 共用）。
 - **隊伍散了由現任隊長解散**（`disband_actual`）：落後者當隊長打輸、自己陣亡被踢，剩下的隊伍隊長會自動換人（實機：DKBO3 陣亡 → 隊長變 DKBO）；舊流程切到 DKBO3 解散 → team 46 → 145。現在讀卡片找真正的隊長再解散；失敗收尾也一樣。
 - **2026-10-12 實機（四寶玉之謎，DKBO3 步 4、DKBO5 步 2）**：

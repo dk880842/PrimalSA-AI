@@ -10,7 +10,7 @@ notes/quest-log.md 10-10 兩段：第一次輸、5 人 HP 1 原地；第二次 5
   uv run --no-project python tools/gui/bossretry.py plan --track 琉璃洞窟                 # 不碰遊戲：印流程與退出碼
   uv run --no-project python tools/gui/bossretry.py run --track 琉璃洞窟 [--max-tries 2] [--max-slices 6] [--slice-s 300] [--hp-min 60] [--no-battle-check] [--dry-run]
   uv run --no-project python tools/gui/bossretry.py run --track 四寶玉之謎 --who DKBO3,DKBO5 [--ref-step done|N]   # 指定落後者（隊伍滿的也照跑）：
-        逐人驗證發現有人任務沒完成時用（questrun 每任務完成後 verify_all 自動呼叫）；--ref-step 預設 done = 其他人已完成，落後者要打到任務完成
+        逐人驗證發現有人任務沒完成時用（questrun verify_many 自動呼叫：有風險事件的任務完成當場 / 其餘 run 結束批次驗）；--ref-step 預設 done = 其他人已完成，落後者要打到任務完成
   uv run --no-project python tools/gui/bossretry.py status                                 # 唯讀：開切換面板，印隊長 / 不在隊的人
   可 import：bossretry.run(track, tools=None, who=None, ref_step=None, battle_check=True, ...) → 退出碼；結果 dict 在 bossretry.LAST
   --dry-run = 同 plan（完全不碰遊戲）。重跑 = 續跑：每次都從現場狀態（隊伍卡片、各人任務步號）重新判斷，不靠進度檔。

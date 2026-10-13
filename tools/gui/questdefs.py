@@ -20,6 +20,11 @@
   turnin      （選填）交寵物步驟：dict(kind=pet_turnin 的種類, steps={任務步號: (pet_turnin 步…)})；questrun --pet-turnin 時 manual 步改跑 pet_turnin 5 人逐人交
   rest_pets   （選填）True = 交寵物前任務寵要先「等待」：questrun --pet-turnin 時接取後第一片前 pet.py rest-all
   reward_pets （選填）任務獎勵寵物名（只給 plan 顯示；要丟由使用者下 --drop-reward / --confirm-drop，questrun 只丟 1 級）
+  hp_every    （選填）片內全隊 HP 每幾場一般戰鬥讀一次（quest.py --hp-check-every；沒填 = questrun --hp-check-every 預設 3）；連戰任務填 1
+  walk_s      （自動）2026-10-13 二轉後實跑 quest.py 自報的巡路秒數合計（WALK_S；沒量到 = None）
+  dragon      （自動）walk_s >= DRAGON_WALK_MIN 才 True：questrun --dragon 只對這些「長巡路」任務吃龍王的守護
+              （2026-10-13 review §3.2：亞姆的斧頭巡路 7 秒、夢幻洞窟 9 秒也各吃一顆 30 秒；--dragon-all 恢復每個任務都吃）
+前置依賴：prereqs(id) 讀 Task 表第 1 步的 finishTasks（1.82 全部要先完成成人儀式 2999）；questrun 逐人驗證延後時，依賴任務接取前先批次驗
 """
 from pathlib import Path
 
@@ -58,7 +63,7 @@ Q182 = [
          steps={}, bag_slots=3, boss=False, est_min=23, live=False,
          note='純巡路 + 對話（哈恩 20508 / 科巴爾特 20507 地下 7F / 巴爾 / 加加村賽尚 3000:114,69）；中間道具 2～3 件（空壺 / 水壺 / 斧頭）→ 背包留空位；10-10 步 1 曾跳「接取任務條件不達標」（原因沒查到）→ questrun 停 119 / 128 時先關提示重試 1 次；獎勵杉的手環（可丟）'),
     dict(id=2010, detail='四寶玉之謎(1.82)', track='四寶玉之謎', accept_npc='村子的學者 6000:58,44', steps_total=5,
-         steps={}, bag_slots=5, boss=True, est_min=18, live=False,
+         steps={}, bag_slots=5, boss=True, est_min=18, live=False, hp_every=1,
          note='4 場守護獸任務戰（薩伊那斯 / 加魯卡 / 吉魯島 / 沙姆島，完整戰鬥畫面，5 人自動戰鬥要開）；步 5 回奇努伊村學者；接取前先關原地遇敵較穩；獎勵月光的手鐲（可丟）'),
     dict(id=2014, detail='黃金羚羊之謎(1.82)', track='黃金羚羊之謎', accept_npc='採石所管理人 31902:9,7', steps_total=11,
          steps={}, bag_slots=3, boss=False, est_min=14, live=False,
@@ -102,19 +107,46 @@ QCAVE = [
          note='5 場戰鬥；10-10 在戰鬥中開外掛「自動逃跑」→ DKBO 脫隊（現已廢除，跑洞窟期間任何 agent 不准開外掛面板）；BOSS 後照 37 / 38 查滿 5 人；建議 --max-min 45'),
 ]
 
+# 2026-10-13 二轉後重做實測：每任務 quest.py 自報「走路不計時」秒數合計（notes/review-redundancy-1013.md §1）
+WALK_S = {2999: 43, 2017: 2, 2015: 7, 2027: 79, 2018: 316, 2011: 9, 2024: 63, 2020: 93, 2023: 43, 2028: 81, 2025: 589,
+          2010: 136, 2014: 141, 2012: 35, 2013: 18, 2021: 70, 2000: 320, 2003: 220, 2001: 374, 2002: 678}
+DRAGON_WALK_MIN = 120           # 巡路 >= 這麼多秒才值得吃龍王（取出 + 吃約 30 秒；短路程最多遇 1 場一般戰鬥）
+
 ALL = Q182 + QCAVE
+for _d in ALL:
+    _d['walk_s'] = WALK_S.get(_d['id'])
+    _d['dragon'] = _d['walk_s'] is not None and _d['walk_s'] >= DRAGON_WALK_MIN
 BY_ID = {d['id']: d for d in ALL}
 DEFAULT_ORDER = [d['id'] for d in Q182]
 STEP_KINDS = ('walk', 'manual')
 
 
+_ROWS: list = []
+
+
+def load_rows() -> list:
+    """Task.jsonl 整張表（第一次讀後快取）"""
+    if not _ROWS:
+        import json
+        p = ROOT / 'knowledge' / 'data' / 'tables' / 'Task.jsonl'
+        _ROWS.extend(json.loads(ln) for ln in p.read_text(encoding='utf-8').splitlines() if ln.strip())
+    return _ROWS
+
+
 def task_rows(task_id: int, rows=None) -> list:
     """Task.jsonl 該任務組的各步（依 step 排序）；rows = 已讀好的整張表（測試 / 重複呼叫用）"""
     if rows is None:
-        import json
-        p = ROOT / 'knowledge' / 'data' / 'tables' / 'Task.jsonl'
-        rows = [json.loads(ln) for ln in p.read_text(encoding='utf-8').splitlines() if ln.strip()]
+        rows = load_rows()
     return sorted((r for r in rows if r.get('group') == int(task_id)), key=lambda r: r.get('step', 0))
+
+
+def prereqs(task_id: int, rows=None) -> list:
+    """接這個任務前要先完成的任務組（Task 表第 1 步 finishTasks）；表讀不到 → []"""
+    try:
+        ts = task_rows(task_id, rows)
+    except (OSError, ValueError):
+        return []
+    return [int(x) for x in (ts[0].get('finishTasks') or [])] if ts else []
 
 
 def bag_need(task_id: int, rows=None) -> int:

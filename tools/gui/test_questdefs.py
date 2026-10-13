@@ -76,5 +76,13 @@ check('AUTO_PURGE 每個都在 bag.md 白名單表', set(bag.AUTO_PURGE) <= whit
 check('AUTO_PURGE 不含有條件的「龍的魅力之笛」「亞姆亞姆的斧頭」', not ({'龍的魅力之笛', '亞姆亞姆的斧頭'} & set(bag.AUTO_PURGE)) and {'龍的魅力之笛', '亞姆亞姆的斧頭'} <= white)
 check('AUTO_PURGE 沒有保護名稱（PROTECT / PURGE_FORBID）', not [n for n in bag.AUTO_PURGE if bag.purge_guard(n)])
 check('AUTO_PURGE 不是任何 questdefs 任務的條件道具（不會刪到要交的東西）', not (set(bag.AUTO_PURGE) & cond_names), str(set(bag.AUTO_PURGE) & cond_names))
+# 龍王只對長巡路任務吃（2026-10-13 review §3.2）/ 前置依賴（Task 表 finishTasks）
+check('dragon = walk_s >= DRAGON_WALK_MIN', all(d['dragon'] == (d['walk_s'] is not None and d['walk_s'] >= questdefs.DRAGON_WALK_MIN) for d in questdefs.ALL))
+check('短巡路（亞姆的斧頭 7 秒 / 夢幻洞窟 9 秒 / 成人儀式 43 秒）不吃；馬祖快遞 / 伐木證書 / 四大洞窟吃',
+      not any(questdefs.get(i)['dragon'] for i in (2015, 2011, 2999, 2017)) and all(questdefs.get(i)['dragon'] for i in (2018, 2025, 2000, 2001, 2002, 2003)))
+check('沒量到巡路秒數（交寵物 / 猜謎）→ 不吃', not any(questdefs.get(i)['dragon'] for i in (2016, 2019, 3003)) and questdefs.get(2016)['walk_s'] is None)
+check('prereqs：1.82 任務要先完成成人儀式；成人儀式 / 洞窟沒有前置', questdefs.prereqs(2017, tasks) == [2999] and questdefs.prereqs(2999, tasks) == []
+      and questdefs.prereqs(2000, tasks) == [])
+check('四寶玉之謎 hp_every = 1（連戰）', questdefs.get(2010).get('hp_every') == 1)
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)
