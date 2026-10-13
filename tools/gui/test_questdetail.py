@@ -163,7 +163,7 @@ def install(shot, head=('恐龍博士(1.82)', 'tpl'), transfer=True, states=('di
     qd.notice_open = lambda: False
     import quest
     quest.check_dialog_irreversible = lambda: dialog or {'blocked': False, 'reason': '', 'body': ['x'], 'buttons': ['接受', '再見']}
-    qd.read_list = lambda tab, dy=250, learn=True: {'ok': True, 'rows': [{'title': '恐龍博士(1.82)', 'status': final}], 'gaps': 0}
+    qd.read_list = lambda tab, dy=250, learn=True, **k: {'ok': True, 'rows': [{'title': '恐龍博士(1.82)', 'status': final}], 'gaps': 0}
     qd.select_tab = lambda tab: True
     qd.save_tpl = lambda *a, **k: None
 
@@ -275,11 +275,11 @@ if 'up_3.png' in have:
 # ---- task_status（questrun 用）：純邏輯，換掉面板開關與列表讀取 ----
 _saved = (qd.open_detail, qd.close_detail, qd.read_list, qd.uikit.preflight)
 qd.open_detail, qd.close_detail, qd.uikit.preflight = (lambda: True), (lambda: True), (lambda src, fast=True: 0)
-qd.read_list = lambda tab, dy=qd.DEFAULT_DY: {'ok': True, 'rows': [{'title': '彌生和日美子(1.82)', 'status': '進行中', 'how': 'tpl'}], 'gaps': 0, 'tab': tab, 'pages': 1}
+qd.read_list = lambda tab, dy=qd.DEFAULT_DY, **k: {'ok': True, 'rows': [{'title': '彌生和日美子(1.82)', 'status': '進行中', 'how': 'tpl'}], 'gaps': 0, 'tab': tab, 'pages': 1}
 check('task_status：找到 → (0, 進行中)', qd.task_status('彌生和日美子(1.82)') == (0, '進行中'))
 check('task_status：列表沒有 → (0, None)', qd.task_status('亞姆的斧頭(1.82)') == (0, None))
 check('task_status：不在任務表 → (1, None)', qd.task_status('不存在的任務')[0] == 1)
-qd.read_list = lambda tab, dy=qd.DEFAULT_DY: {'ok': False, 'why': '截圖失敗', 'rows': [], 'gaps': 0}
+qd.read_list = lambda tab, dy=qd.DEFAULT_DY, **k: {'ok': False, 'why': '截圖失敗', 'rows': [], 'gaps': 0}
 check('task_status：讀失敗 → 121', qd.task_status('彌生和日美子(1.82)')[0] == qd.EXIT_NOT_FOUND)
 qd.open_detail = lambda: False
 check('task_status：面板打不開 → 120', qd.task_status('彌生和日美子(1.82)')[0] == qd.EXIT_NO_PANEL)
@@ -318,7 +318,7 @@ def run_world(w):
     qd.parse = lambda img, tpl=None, ocr_fn=None: w.rows()
     qd._learn_page = lambda *a, **k: None
     qd.select_tab = lambda tab: True
-    qd.scroll_top = lambda dy=qd.TOP_DY: True
+    qd.scroll_top = lambda dy=qd.TOP_DY, trust_arrow=True: True
     qd.load_tpl = lambda path=None: {'row': {}, 'head': {}}
     return REAL_READ_LIST('支線')
 
@@ -406,6 +406,72 @@ rc, res = qd.status_all(['不存在的任務名稱XYZ'], tools=FakeAll())
 check('任務名不在 TaskExplan → 用法錯、不碰', rc == 1 and res == {})
 rows = [{'title': T4, 'status': qd.DOING}, {'title': '黃金羚羊之謎(1.82)', 'status': qd.UNKNOWN}]
 check('all_found：狀態 ? 不算找到', qd.all_found(rows, [T4]) and not qd.all_found(rows, [T4, '黃金羚羊之謎(1.82)']))
+
+# ---- 7. review 1013b §1.2：SETTLE_S 降、沒有 ▲ 不往上捲、找不到才真的捲到頂重找 ----
+check('SETTLE_S ≤ 0.8（_stable_shot 負責等慣性停）；點列等待仍 1.5 秒', qd.SETTLE_S <= 0.8 and qd.ROW_CLICK_WAIT_MS == 1500)
+_k7 = (qd.live, qd.scroll, qd.sleep)
+_drags = []
+qd.scroll = lambda down, dy=qd.DEFAULT_DY: _drags.append((down, dy))
+qd.sleep = lambda s: None
+if 'ui/detail.png' in have and 'up_3.png' in have:
+    qd.live = lambda: have['ui/detail.png']
+    check('scroll_top：剛開的詳情沒有 ▲ → 回 arrow、0 次拖曳', qd.scroll_top() == 'arrow' and _drags == [], str(_drags))
+    _drags.clear()
+    check('scroll_top(trust_arrow=False)：照舊拖到兩頁相同才停', qd.scroll_top(qd.TOP_DY, False) is True and _drags == [(False, qd.TOP_DY)], str(_drags))
+    _drags.clear()
+    qd.live = lambda: have['up_3.png']
+    check('scroll_top：有 ▲ → 照舊往上拖', qd.scroll_top() is True and _drags and not _drags[0][0], str(_drags))
+qd.live, qd.scroll, qd.sleep = _k7
+
+
+class TopWorld(World):
+    """列表停在中段（off > 0），但 ▲ 偵測漏判（scroll_top 第一次回 arrow）；trust_arrow=False 才真的捲到頂"""
+    def __init__(self, off_rows=6):
+        super().__init__(15)
+        self.off = off_rows * 80
+        self.tops = []
+
+
+def run_top(w, stop_at):
+    def st(dy=qd.TOP_DY, trust_arrow=True):
+        w.tops.append(trust_arrow)
+        if trust_arrow:
+            return 'arrow'
+        w.off = 0
+        return True
+    qd.scroll = w.scroll
+    qd._stable_shot = lambda max_tries=4: object()
+    qd.parse = lambda img, tpl=None, ocr_fn=None: w.rows()
+    qd._learn_page = lambda *a, **k: None
+    qd.select_tab = lambda tab: True
+    qd.scroll_top = st
+    qd.load_tpl = lambda path=None: {'row': {}, 'head': {}}
+    qd.find_row = lambda rows, name: next((r for r in rows if r['title'] == name), None)
+    return REAL_READ_LIST('支線', stop_at=stop_at)
+
+
+_keep2 = (qd.scroll, qd._stable_shot, qd.parse, qd._learn_page, qd.select_tab, qd.scroll_top, qd.load_tpl, qd.find_row, qd.all_found)
+qd.all_found = lambda rows, titles: all(any(r['title'] == t and r['status'] != qd.UNKNOWN for r in rows) for t in titles)
+w = TopWorld()
+r = run_top(w, ['T2'])
+check('read_list：▲ 漏判、目標在上面（T2）→ 第一次沒找到 → 不信箭頭捲到頂重讀 → 找到', r.get('refetched') and w.tops == [True, False]
+      and any(x['title'] == 'T2' for x in r['rows']), f'{w.tops} {[x["title"] for x in r["rows"]][:4]}')
+w = TopWorld()
+r = run_top(w, ['T9'])
+check('read_list：目標在目前位置以下（T9）→ 第一次就找到，不重捲', not r.get('refetched') and w.tops == [True], str(w.tops))
+qd.scroll, qd._stable_shot, qd.parse, qd._learn_page, qd.select_tab, qd.scroll_top, qd.load_tpl, qd.find_row, qd.all_found = _keep2
+if 'g.png' in have:
+    install(have['g.png'])
+    _tops = []
+    _st = qd.scroll_top
+    qd.scroll_top = lambda dy=qd.TOP_DY, trust_arrow=True: (_tops.append(trust_arrow), 'arrow' if trust_arrow else True)[1]
+    rc = qd.accept('恐龍博士(1.82)')
+    check('accept：開頭沒 ▲ 又找不到 → 真的捲到頂再找一次，仍沒有 → 121', rc == qd.EXIT_NOT_FOUND and _tops == [True, False], str(_tops))
+    _tops.clear()
+    qd.scroll_top = lambda dy=qd.TOP_DY, trust_arrow=True: (_tops.append(trust_arrow), True)[1]
+    qd.accept('恐龍博士(1.82)')
+    check('accept：開頭有 ▲（已捲到頂）找不到 → 不重找', _tops == [True], str(_tops))
+    qd.scroll_top = _st
 
 print('\n失敗 %d 項' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

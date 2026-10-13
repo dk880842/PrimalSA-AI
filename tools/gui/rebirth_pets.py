@@ -613,13 +613,15 @@ class Tools:
             ass.close_panel()
         return rc
 
-    def catch_setup_many(self, assign, count):
-        """多人捉寵設置 + 勾自動存倉庫 / 自動抓寵（外掛面板只開一次）。assign = [(角色, 系別, 物種)] → (rc, 出錯的角色或 None)"""
+    def catch_setup_many(self, assign, count, reuse=False):
+        """多人捉寵設置 + 勾自動存倉庫 / 自動抓寵（外掛面板只開一次）。assign = [(角色, 系別, 物種)] → (rc, 出錯的角色或 None)。
+        reuse=True（petquest 同一輪第 2 批起，review 1013b §2.5-A）：沿用上一批的系別 / 物種下拉 —— 欄位 OCR 讀不到字（鯊魚系常讀不出）也不重選下拉，
+        只有讀到「別的字」才重選；可抓捕數 / 勾選照做，最後 _catch_verify 讀回驗證照舊"""
         conf = {r: (f, sp) for r, f, sp in assign}
 
         def fn(role):
             fam, sp = conf[role]
-            rc = self._catch_setup_pick(role, fam, sp, count)
+            rc = self._catch_setup_pick(role, fam, sp, count, reuse)
             if not rc:
                 rc = self._catch_toggles(role)
             if not rc:
@@ -643,9 +645,14 @@ class Tools:
     def _text_has(txt, name):
         return bool(txt) and (name in txt or (name[0] in txt and sum(c in txt for c in name) >= len(name) - 1))
 
-    def _catch_setup_pick(self, role, family, species, count):
-        fam_ok = self._field_is(OCR_FAMILY_FIELD, family)         # 欄位已經是目標（上次設過 / 預設）就不再開下拉（下拉開關狀態難判斷）
-        pet_ok = fam_ok and self._field_is(OCR_PET_FIELD, species)
+    def _field_ok(self, box, name, reuse):
+        """欄位是目標 → True；reuse 時欄位 OCR 讀不到任何字也當 True（上一批已設好並讀回驗證過；最後 _catch_verify 仍會讀回）"""
+        txt = ' '.join(t for t, _, _ in ocr_lines(box, '-Zooms', '2,3,4'))
+        return self._text_has(txt, name) or (reuse and not txt.strip())
+
+    def _catch_setup_pick(self, role, family, species, count, reuse=False):
+        fam_ok = self._field_ok(OCR_FAMILY_FIELD, family, reuse)  # 欄位已經是目標（上次設過 / 預設）就不再開下拉（下拉開關狀態難判斷）
+        pet_ok = fam_ok and self._field_ok(OCR_PET_FIELD, species, reuse)
         if fam_ok and pet_ok:
             n = parse_count(''.join(t for t, _, _ in ocr_lines(OCR_TAB_CATCH, '-Zooms', '2,3,4')))
             if n != count:

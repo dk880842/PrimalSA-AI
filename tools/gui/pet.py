@@ -3,6 +3,7 @@
 
 用法（專案根目錄；WSL / Windows 原生指令相同；角色名 DKB0 / DKBO 都收，輸出用真名 DKBO）：
   uv run --no-project python tools/gui/pet.py list [--role DKBO|all] [--json]           # 唯讀：每格 名字 / 狀態 / 等級
+  uv run --no-project python tools/gui/pet.py levels [--role all] [--slots 2,3,4,5] [--json]   # 唯讀：只讀等級 + 名字框點陣指紋 nh（練寵輪詢；不認名字）
   uv run --no-project python tools/gui/pet.py set-state DKBO 迪基格斯 出戰|等待|騎乘 [--slot N] [--allow-mount]
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
   uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1] [--allow-mount-store 名字]
@@ -15,6 +16,8 @@
   批次（2026-10-12）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 左欄頭像換角色連續做 → 關一次。目標字串 = 名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級
   uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、--timing、
+    --no-icache（不用身分跨程序快取：成長字串以名字框點陣完全相同為鍵、縮圖結果以整格像素 + 候選為鍵；只在 list / levels / set-state-many / rest-all 用，
+    存倉 / 取出 / 丟寵 / learn-species 一律現場 OCR；tools/.cache/pet-tpl/ident-cache-<版面>.json，7 天過期，2026-10-13 review 1013b §1.1）、
     --candidates 物種,物種（任務候選：沒名字的寵物 / 倉庫卡只在這些之間比縮圖，inlier + 主色都同意才算；有把握且登錄檔不矛盾 → 當 species，2026-10-13 卡坦 4 鯊 / 4 雞）
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
 
@@ -55,6 +58,7 @@ import time
 
 _T_START = time.time()
 import argparse  # noqa: E402
+import hashlib  # noqa: E402
 import json  # noqa: E402
 import re  # noqa: E402
 import sys  # noqa: E402
@@ -346,6 +350,77 @@ def level_from_rows(lvl_rows, ctx: dict) -> tuple:
     return v, 'ocr'
 
 
+# ---- 身分跨程序快取（2026-10-13 review 1013b §1.1）：同一張點陣不再 OCR / 比縮圖第二次 ----
+# 沒名字的寵物（騎寵布拉奇多斯、剛抓的任務寵）每讀一格要 OCR 成長字串（2 組設定）+ 縮圖比對約 2.5～3 秒，petquest 每段都是新的 pet.py 子程序。
+# 快取只做「完全相同的輸入 → 上次的結果」：成長字串以名字框二值化點陣（完全相同）為鍵、縮圖結果以整格 4537 點像素 + 候選名單為鍵，
+# 不改任何判定規則；OCR 讀錯的字串本來就過不了 parse_growth（≥ 2 行相同），不會進快取。
+# 只在 list / levels / set-state-many / rest-all 開（load_ctx(use_icache=True)）；store / take / petdrop / learn-species / rebirth_pets（抓寵登錄）
+# 一律現場 OCR，不用快取（丟寵、存倉的現場驗名不變）。檔案：petmatch.TPL_DIR / ident-cache-<版面>.json，含版本、每筆時間（7 天過期、各留最近 400 筆）。
+ICACHE_VER = 1
+ICACHE_TTL_S = 7 * 24 * 3600
+ICACHE_MAX = 400
+
+
+def rows_key(rows) -> str | None:
+    """二值化點陣列 → 穩定的 hash（跨程序相同；Python 內建 hash() 每個程序不同不能用）"""
+    return hashlib.sha1('\n'.join(rows).encode()).hexdigest()[:24] if rows else None
+
+
+def icache_path() -> Path:
+    return petmatch.TPL_DIR / f'ident-cache-{petmatch.LAYOUT}.json'
+
+
+def load_icache(now: float | None = None) -> dict:
+    """→ {'growth': {點陣鍵: [成長字串, ts]}, 'img': {像素鍵: [結果 dict, ts]}}；版本不符 / 壞檔 → 空；過期的丟掉"""
+    now = time.time() if now is None else now
+    try:
+        d = json.loads(icache_path().read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        d = {}
+    if not isinstance(d, dict) or d.get('ver') != ICACHE_VER:
+        d = {}
+    out = {}
+    for sec in ('growth', 'img'):
+        v = d.get(sec) if isinstance(d.get(sec), dict) else {}
+        out[sec] = {k: e for k, e in v.items() if isinstance(e, list) and len(e) == 2 and now - (e[1] or 0) <= ICACHE_TTL_S}
+    return out
+
+
+def save_icache(c: dict) -> None:
+    d = {'ver': ICACHE_VER}
+    for sec in ('growth', 'img'):
+        items = sorted((c.get(sec) or {}).items(), key=lambda kv: kv[1][1])[-ICACHE_MAX:]
+        d[sec] = dict(items)
+    p = icache_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix('.tmp')
+    tmp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
+    tmp.replace(p)
+
+
+def icache(ctx: dict) -> dict | None:
+    """ctx 有開快取（use_icache）→ 快取 dict（第一次用才讀檔）；沒開 → None"""
+    if not ctx.get('use_icache'):
+        return None
+    if 'icache' not in ctx:
+        ctx['icache'] = load_icache()
+    return ctx['icache']
+
+
+def icache_put(ctx: dict, sec: str, key, val) -> None:
+    c = icache(ctx)
+    if c is None or key is None:
+        return
+    c[sec][key] = [val, time.time()]
+    ctx['idirty'] = True
+
+
+def growth_known(name_rows, ctx: dict) -> bool:
+    """這張名字框點陣已知是成長字串（本程序讀過 / 快取有）→ 不是被橫幅蓋住的名字（read_slot 不必等橫幅重讀）"""
+    k = rows_key(name_rows)
+    return k is not None and (k in ctx.get('gcache', {}) or k in ((icache(ctx) or {}).get('growth') or {}))
+
+
 def resolve_name(name_rows, ctx: dict) -> tuple:
     """名字框的點陣 → (名字或 None, 'tpl' / 'ocr' / None, OCR 原文清單)。樣板優先；沒樣板才 OCR（精確命中 Monster 表才學）。
     名字框是「成長字串」（沒名字的新寵物）→ (None, 'growth', 原文)，字串用 resolve_ident 取"""
@@ -361,15 +436,21 @@ def resolve_ident(name_rows, ctx: dict) -> dict:
     if label:
         return {'name': label, 'via': 'tpl', 'raw': None, 'growth': None}
     gc = ctx.setdefault('gcache', {})
-    key = hash('\n'.join(name_rows)) if name_rows else None
+    key = rows_key(name_rows)
     if key is not None and key in gc:
         return {'name': None, 'via': 'growth', 'raw': None, 'growth': gc[key]}
+    hit = ((icache(ctx) or {}).get('growth') or {}).get(key) if key else None
+    if hit:                                                     # 跨程序快取：點陣完全相同 = 畫面文字完全相同
+        gc[key] = hit[0]
+        ctx['icache_hits'] = ctx.get('icache_hits', 0) + 1
+        return {'name': None, 'via': 'growth', 'raw': None, 'growth': hit[0], 'cached': True}
     if petmatch.ink(name_rows) >= petmatch.MIN_INK['name']:
         nm, raw, exact = ocr_pet_name()
         if not nm:
             g = petmatch.parse_growth(raw)
             if g:
                 gc[key] = g
+                icache_put(ctx, 'growth', key, g)
                 return {'name': None, 'via': 'growth', 'raw': raw, 'growth': g}
         if nm and exact and ctx['learn']:
             again, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
@@ -408,7 +489,8 @@ def ident_species(i: int, growth: str | None, ctx: dict) -> str | None:
 # img 只當顯示與「更嚴」的騎寵判斷（img 認成騎寵 → mountlike），不放寬任何不可逆動作的驗名。
 IMG_ON = True                                  # --no-img 關；fake_pet.install 也關（假面板沒畫頭像）
 IMG_ONLY: list | None = None                   # --candidates：任務候選物種（縮圖只在這些之間相對比較；load_ctx 預設帶入）
-IMG_EXTRA = ['朵拉比斯', '迪基格斯', '金布伊']    # 一定放進候選的常用物種（另加騎寵、名字樣板、物種登錄檔裡的）
+IMG_EXTRA = ['朵拉比斯', '迪基格斯', '金布伊']
+ICACHE_ON = True                               # --no-icache 關（身分跨程序快取，見 rows_key 上方說明）    # 一定放進候選的常用物種（另加騎寵、名字樣板、物種登錄檔裡的）
 
 
 def img_candidates(ctx: dict) -> list:
@@ -462,6 +544,19 @@ def img_ident(kind: str, idx: int, ctx: dict) -> dict | None:
     cells = M.read_cell(kind, cx, cy)
     if cells is None:
         return None
+    ikey = None
+    if icache(ctx) is not None:                              # 跨程序快取：整格像素 + 候選名單完全相同 → 比對結果必然相同
+        names = ctx.get('img_only') or img_candidates(ctx)
+        h = hashlib.sha1(f'{kind}|{cx},{cy}|{",".join(names)}|'.encode())
+        for pt in sorted(cells):
+            h.update(bytes(int(v) & 255 for v in cells[pt]))
+        ikey = h.hexdigest()[:24]
+        hit = ctx['icache']['img'].get(ikey)
+        if hit:
+            ctx['icache_hits'] = ctx.get('icache_hits', 0) + 1
+            r = dict(hit[0], img_ms=int((time.time() - t) * 1000), img_cached=True)
+            uikit.mark(f'img {kind} {idx + 1} (cache)')
+            return r
     try:
         r = img_match(cells, kind, cx, cy, ctx)
     except KeyError as e:                                   # --candidates 給了知識庫頭像沒有的名字
@@ -470,6 +565,8 @@ def img_ident(kind: str, idx: int, ctx: dict) -> dict | None:
             ctx['img_warned'] = True
         return None
     r['img_ms'] = int((time.time() - t) * 1000)
+    if ikey:
+        icache_put(ctx, 'img', ikey, {k: v for k, v in r.items() if k != 'img_ms'})
     uikit.mark(f'img {kind} {idx + 1}')
     return r
 
@@ -494,7 +591,8 @@ def read_slot(i: int, ctx: dict) -> dict:
         rows, extra = petmatch.grab([petmatch.BOX_NAME + ('name',), petmatch.BOX_LVL + ('lvl',)], extra=probes)
         if rows is None:
             break
-        known = (tpl.get('name') and petmatch.match_whole('name', rows[0], tpl)[0] is None) or (tpl.get('digit') and petmatch.read_level(rows[1], tpl) is None)
+        known = (tpl.get('name') and petmatch.match_whole('name', rows[0], tpl)[0] is None and not growth_known(rows[0], ctx)) \
+            or (tpl.get('digit') and petmatch.read_level(rows[1], tpl) is None)
         if not known or attempt == BANNER_RETRIES:
             break
         uikit.sleep(BANNER_WAIT_S)              # 樣板都有卻對不上：多半是 EXP 橫幅 / 浮字蓋住（掛機中常見），等它消失再讀
@@ -506,6 +604,7 @@ def read_slot(i: int, ctx: dict) -> dict:
         return d
     d['state'] = btn_state({s: extra[2 * k:2 * k + 2] for k, s in enumerate(STATES)})
     name_rows, lvl_rows = rows
+    d['nh'] = rows_key(name_rows)                            # 名字框點陣指紋：levels 輪詢比對「同一格還是同一隻」用
     ident = resolve_ident(name_rows, ctx)
     d['name'], d['via'], raw = ident['name'], ident['via'], ident['raw']
     if raw:
@@ -623,14 +722,15 @@ class Session:
         return False
 
 
-def load_ctx(learn: bool, img_only=None) -> dict:
+def load_ctx(learn: bool, img_only=None, use_icache: bool = False) -> dict:
     """讀樣板（順手清掉被錯標籤污染的等級單字樣板，有清就標 dirty、save_ctx 時寫回）。
-    img_only = 縮圖認物種只在這些物種之間做相對比較（任務候選，例：卡坦 4 鯊 / 4 雞；見 img_match）"""
+    img_only = 縮圖認物種只在這些物種之間做相對比較（任務候選，例：卡坦 4 鯊 / 4 雞；見 img_match）。
+    use_icache = 開身分跨程序快取（只給唯讀 / 改狀態的指令；存倉 / 取出 / 丟寵不開，見 ICACHE_VER 上方說明）"""
     tpl = petmatch.load_tpl()
     pruned = petmatch.prune_digits(tpl)
     if pruned:
         log(f'等級單字樣板清掉 {len(pruned)} 個可疑變體：{pruned}')
-    ctx = {'tpl': tpl, 'learn': learn, 'dirty': bool(pruned)}
+    ctx = {'tpl': tpl, 'learn': learn, 'dirty': bool(pruned), 'use_icache': bool(use_icache) and ICACHE_ON}
     img_only = img_only or IMG_ONLY
     if img_only:
         ctx['img_only'] = list(img_only)
@@ -638,6 +738,12 @@ def load_ctx(learn: bool, img_only=None) -> dict:
 
 
 def save_ctx(ctx: dict) -> None:
+    if ctx.get('idirty'):
+        try:
+            save_icache(ctx['icache'])
+        except OSError as e:
+            log(f'身分快取存檔失敗：{e}')
+        ctx['idirty'] = False
     if ctx.get('rdirty'):
         try:
             petmatch.save_species(ctx['reg'])
@@ -690,7 +796,7 @@ def list_roles(role_arg: str = 'all', as_json: bool = False, pause: bool = False
         print(f'pet：角色 {role_arg!r} 不認得（DKBO、DKBO2～5 或 all）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, {'roles': {}}, t0, '角色名不認得')
     info = {'roles': {}}
-    ctx = load_ctx(learn)
+    ctx = load_ctx(learn, use_icache=True)
     with Session(pause) as s:
         if s.rc:
             return _out(s.rc, info, t0)
@@ -704,6 +810,81 @@ def list_roles(role_arg: str = 'all', as_json: bool = False, pause: bool = False
                 print(f'{r}：')
                 for sl in slots:
                     print(fmt_slot(sl))
+        save_ctx(ctx)
+    info['icache_hits'] = ctx.get('icache_hits', 0)
+    return _out(0, info, t0)
+
+
+def read_level_slot(i: int, ctx: dict) -> dict:
+    """目前選中的寵物（已確認是第 i 格）→ 只讀等級：{'slot','empty','level','lv_via','nh'}（nh = 名字框點陣指紋，不認名字 / 身分、不 OCR 名字）。
+    等級樣板對不上時照 read_slot 等 EXP 橫幅消失再讀（最多 BANNER_RETRIES 次）"""
+    tpl = ctx['tpl']
+    rows = None
+    for attempt in range(BANNER_RETRIES + 1):
+        rows, _ = petmatch.grab([petmatch.BOX_NAME + ('name',), petmatch.BOX_LVL + ('lvl',)])
+        if rows is None or not tpl.get('digit') or petmatch.read_level(rows[1], tpl) is not None or attempt == BANNER_RETRIES:
+            break
+        uikit.sleep(BANNER_WAIT_S)
+        uikit.mark('banner-retry')
+    d = {'slot': i + 1, 'empty': False, 'level': None}
+    if rows is None:
+        d['err'] = '讀不到像素'
+        return d
+    d['nh'] = rows_key(rows[0])
+    lv, via = level_from_rows(rows[1], ctx)
+    if lv is not None:
+        d['level'], d['lv_via'] = lv, via
+    elif via:
+        d['lv_reject'] = via
+    return d
+
+
+def levels_role(role: str, ctx: dict, slots=None) -> tuple:
+    """面板已開：選角色 → 每個非空格（slots 有給 = 只讀這些格，1 起算）選取 + 只讀等級 → (rc, [格])。不改任何狀態"""
+    rc = select_role(role, ctx)
+    if rc:
+        return rc, []
+    f = scan_frames()
+    if f is None:
+        return uikit_fail(EXIT_PANEL, '讀不到面板像素'), []
+    out = []
+    for i in range(5):
+        if f['empty'][i]:
+            out.append({'slot': i + 1, 'empty': True})
+            continue
+        if slots and i + 1 not in slots:
+            continue
+        rc = select_slot(i, f)
+        if rc:
+            return rc, out
+        out.append(read_level_slot(i, ctx))
+        f = scan_frames() or f
+    uikit.mark(f'levels {role}')
+    return 0, out
+
+
+def list_levels(role_arg: str = 'all', slots=None, as_json: bool = False, pause: bool = False, learn: bool = True) -> int:
+    """唯讀：只讀等級（練寵輪詢用，2026-10-13 review 1013b §2.3）。不認名字 / 身分（呼叫端用上一次 list 的格位 + nh 指紋比對同一隻）"""
+    t0 = time.time()
+    roles = role_list(role_arg)
+    if not roles:
+        print(f'pet：角色 {role_arg!r} 不認得（DKBO、DKBO2～5 或 all）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, {'roles': {}}, t0, '角色名不認得')
+    if slots and not all(1 <= x <= 5 for x in slots):
+        return _out(uikit.EXIT_USAGE, {'roles': {}}, t0, f'--slots {slots} 要 1～5')
+    info = {'roles': {}}
+    ctx = load_ctx(learn, use_icache=True)
+    with Session(pause) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        for r in roles:
+            rc, sl = levels_role(r, ctx, slots)
+            info['roles'][r] = sl
+            if rc:
+                save_ctx(ctx)
+                return _out(rc, info, t0)
+            if not as_json:
+                print(f'{r}：' + '、'.join(f'{x["slot"]}:' + ('空' if x.get('empty') else f'Lv{x.get("level") if x.get("level") is not None else "?"}') for x in sl))
         save_ctx(ctx)
     return _out(0, info, t0)
 
@@ -826,7 +1007,7 @@ def set_state_many(role_arg: str, pet_text: str, state_text: str, allow_mount: b
     if not roles or target not in STATES or not want:
         print(f'pet：set-state-many 參數不對（角色 {role_arg!r}、狀態 {state_text!r}、寵物 {pet_text!r}）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
-    ctx = load_ctx(learn)
+    ctx = load_ctx(learn, use_icache=True)
     final = 0
     with Session(pause, need_calm=True) as s:
         if s.rc:
@@ -895,7 +1076,7 @@ def rest_all(role_arg: str = 'all', keep=None, only=None, dry_run: bool = False,
     if not roles:
         print(f'pet：角色 {role_arg!r} 不認得', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '角色名不認得')
-    ctx = load_ctx(learn)
+    ctx = load_ctx(learn, use_icache=True)
     final_rc = 0
     with Session(pause, need_calm=not dry_run) as s:
         if s.rc:
@@ -1911,9 +2092,14 @@ def main() -> int:
     cp.add_argument('--timing', action='store_true', help='最後一行 JSON 多一個 t 欄位：各階段毫秒')
     cp.add_argument('--no-img', action='store_true', help='不用縮圖比知識庫頭像認物種（名字認不出時的備援，petimg_match）')
     cp.add_argument('--candidates', default=None, metavar='名,名', help='任務候選物種：沒名字的寵物只在這些之間比縮圖（相對比較 + 主色；例 卡坦 4 鯊）')
+    cp.add_argument('--no-icache', action='store_true', help='不用身分跨程序快取（成長字串 / 縮圖結果；只影響 list / levels / set-state-many / rest-all）')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('list', help='唯讀：每格 名字 / 狀態 / 等級', parents=[cp])
     p.add_argument('--role', default='all')
+    p.add_argument('--json', action='store_true', help='不印表格，只印最後一行 JSON')
+    p = sub.add_parser('levels', help='唯讀：只讀等級（不認名字 / 身分；每格附名字框點陣指紋 nh）', parents=[cp])
+    p.add_argument('--role', default='all')
+    p.add_argument('--slots', default=None, help='只讀這些格（1 起算，逗號分隔；空格照列）')
     p.add_argument('--json', action='store_true', help='不印表格，只印最後一行 JSON')
     p = sub.add_parser('set-state', help='把某隻寵物改成 出戰 / 等待 / 騎乘', parents=[cp])
     p.add_argument('role')
@@ -1972,13 +2158,21 @@ def main() -> int:
         uikit.gui('pixel', '1,1')
         uikit.mark('server-start')
     learn = not a.no_learn
-    global IMG_ON, IMG_ONLY
+    global IMG_ON, IMG_ONLY, ICACHE_ON
     if a.no_img:
         IMG_ON = False
+    if a.no_icache:
+        ICACHE_ON = False
     if a.candidates:
         IMG_ONLY = [uikit.snap_pet(x.strip()) or x.strip() for x in a.candidates.split(',') if x.strip()]
     if a.cmd == 'list':
         return list_roles(a.role, a.json, a.pause_encounter, learn)
+    if a.cmd == 'levels':
+        try:
+            sl = [int(x) for x in a.slots.split(',') if x.strip()] if a.slots else None
+        except ValueError:
+            return _out(uikit.EXIT_USAGE, {'roles': {}}, time.time(), f'--slots {a.slots!r} 要數字')
+        return list_levels(a.role, sl, a.json, a.pause_encounter, learn)
     if a.cmd == 'set-state':
         return set_state(a.role, a.pet, a.state, a.slot, a.allow_mount, a.pause_encounter, learn)
     if a.cmd == 'store':

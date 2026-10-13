@@ -1036,6 +1036,59 @@ fl.pages = [{'解救老爺爺': 425, 'X任務': 310}]
 r = run_track(fl, '解救老爺爺')
 check('下緣的卡捲不動 → 點標題本身 205,425（避開 ▼）', r is True and fl.clicks == ['205 425'], f'{fl.drags} {fl.clicks}')
 
+# ================= review 1013b §1.4：追蹤卡片位置快取（樣板命中才點，對不上退回整輪掃描）=================
+quest.TRACK_POS = TMP / 'track-pos.json'
+
+
+class FakeListPx(FakeList):
+    """FakeList + 假 pixel：y 附近（±8）有卡片 → 依標題字決定深 / 淺點（同標題同圖樣、不同標題不同）；沒卡 → 全淺色"""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.pixels = 0
+
+    def gui(self, *a, **k):
+        if a and a[0] == 'pixel':
+            self.pixels += 1
+            out = []
+            for tok in str(a[1]).split():
+                x, y = map(int, tok.split(','))
+                card = next((n for n, cy in self.pages[self.pos].items() if abs(cy - y) <= 8), None)
+                dark = card and (hash((card, x // 2, (y - self.pages[self.pos][card]) // 3)) % 3 == 0)
+                out.append('60,40,20' if dark else '220,200,160')
+            return ' '.join(out)
+        return super().gui(*a, **k)
+
+
+quest.TRACK_POS.unlink(missing_ok=True)
+fl = FakeListPx([{'漆黑洞窟(二轉)': 310, '解救老爺爺': 366}], [{'up': False, 'down': False}], pos=0, has_tpl=False)
+r = run_track(fl, '解救老爺爺')
+check('位置快取：第一次照舊掃描（OCR）找到 → 點、記下 y + 標題列像素', r is True and fl.ocr == 1 and fl.clicks == ['205 382'] and quest.load_track_pos().get('解救老爺爺', {}).get('y') == 366, str(fl.clicks))
+fl2 = FakeListPx([{'漆黑洞窟(二轉)': 310, '解救老爺爺': 366}], [{'up': False, 'down': False}], pos=0, has_tpl=False)
+r = run_track(fl2, '解救老爺爺')
+check('位置快取：第二次同一張卡在同一位置 → 不 OCR、不拖、直接點（_HIT_MODE=pos）', r is True and fl2.ocr == 0 and fl2.drags == [] and fl2.clicks == ['205 382'] and quest._HIT_MODE == 'pos', f'{fl2.clicks} ocr={fl2.ocr}')
+fl3 = FakeListPx([{'漆黑洞窟(二轉)': 366, '解救老爺爺': 425}, {'解救老爺爺': 366}], [{'up': False, 'down': True}, {'up': True, 'down': False}], pos=0, has_tpl=False)
+r = run_track(fl3, '解救老爺爺')
+check('位置快取：上次的 y 現在是別的任務（漆黑洞窟(二轉)）→ 像素對不上、不點它 → 整輪掃描找到真的卡', r is True and fl3.ocr >= 1
+      and '205 382' in fl3.clicks and fl3.drags == ['down'] and len(fl3.clicks) == 1, f'{fl3.drags} {fl3.clicks}')
+fl4 = FakeListPx([{'解救老爺爺': 366}], [{'up': False, 'down': False}], pos=0, has_tpl=False)
+r = run_track(fl4, '解救老爺爺', click=False)
+check('位置快取：click=False（完成判斷）不走快取（0 次 pixel）', fl4.pixels == 0 and fl4.ocr >= 1, f'pixels={fl4.pixels}')
+fl5 = FakeListPx([{'解救老爺爺': 366}], [{'up': False, 'down': False}], pos=0, has_tpl=False)
+r = run_track(fl5, '解救老爺爺')
+check('位置快取：第三次仍命中（記錄沒被別的掃描弄壞）', r is True and fl5.ocr == 0 and quest._HIT_MODE == 'pos')
+a = [[60, 40, 20]] * 20 + [[220, 200, 160]] * 580
+b = [list(c) for c in a]
+b[5] = [220, 200, 160]
+check('track_sig_match：完全相同 → 吻合；差 1 點（一個筆畫）→ 不吻合；沒字（全淺）→ 不吻合',
+      quest.track_sig_match(a, [list(c) for c in a]) and not quest.track_sig_match(a, b) and not quest.track_sig_match([[220, 200, 160]] * 600, [[220, 200, 160]] * 600))
+_e = quest.load_track_pos()
+_e['解救老爺爺']['ts'] = 0
+quest.TRACK_POS.write_text(__import__('json').dumps(_e), encoding='utf-8')
+fl6 = FakeListPx([{'解救老爺爺': 366}], [{'up': False, 'down': False}], pos=0, has_tpl=False)
+run_track(fl6, '解救老爺爺')
+check('位置快取：超過 6 小時 → 不用、照舊掃描', fl6.ocr == 1)
+
 # ================= quest.close_stray_panel：誤開的組隊 / 切換面板自動關、不算驗證視窗 =================
 _so = (uikit.is_open, uikit.close_panel, quest.event, quest.log, uikit.known_panel, quest.snap)
 _closed = []
@@ -1460,6 +1513,82 @@ with contextlib.redirect_stdout(buf):
     questrun.run([2031], dry_run=True)
 txt = buf.getvalue()
 check('plan 2031：fight 步、前置、龍王必要、post、可丟道具都列出', all(k in txt for k in ('kind=fight', '耐久力回複藥', 'dragon_required', '英雄的祝福 5 人存個人倉庫', '薩姆吉爾的首飾')), txt[-400:])
+
+# ================= 2026-10-13 加速 review 第 2 輪（notes/review-speedup-1013b.md）=================
+# --- §2.2 --rested：petquest 練完已 rest-all → questrun 交件前不重做 ---
+f = Fake(status={D19: [questrun.DOING]}, quest=[(0, done_tail)])
+rc = go(f, [2019], after='none', pet_turnin=True, rested=True)
+check('卡坦 --pet-turnin --rested → 接取後不 rest-all（呼叫端剛做過）', rc == 0 and 'rest_all' not in f.names(), str(f.names()))
+f = Fake(status={D16: [questrun.PENDING, questrun.DONE]}, steps=[1])
+rc = go(f, [2016], after='none', pet_turnin=True, rested=True)
+n = f.names()
+check('恐龍博士 --pet-turnin --rested → 交寵物前也不 rest-all，照樣解散 → pet_turnin', rc == 0 and 'rest_all' not in n and n.index('disband') < n.index('pet_turnin'), str(n))
+f = Fake(status={D19: [questrun.DOING]}, quest=[(0, done_tail)])
+go(f, [2019], after='none', rested=True)
+check('--rested 沒配 --pet-turnin → 無作用（本來就不 rest-all）', 'rest_all' not in f.names())
+_seen2 = {}
+_orig_run2 = questrun.run
+questrun.run = lambda ids, dry, after, **k: _seen2.update(k=k) or 0
+try:
+    sys.argv = ['questrun.py', 'run', '2019', '--pet-turnin', '--rested', '--verify', 'defer']
+    quiet(questrun.main)
+    check('CLI --rested / --verify defer 傳到 run()', _seen2['k'].get('rested') is True and _seen2['k'].get('verify') == 'defer', str(_seen2.get('k')))
+finally:
+    questrun.run = _orig_run2
+
+# --- §2.1 --verify defer：沒風險事件 → run 結束不驗、留待驗清單；有風險照舊當場；依賴照舊先驗 ---
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail), (0, done_tail)])
+rc = go(f, [2017, 2015], verify='defer')
+check('defer：2 個任務沒風險事件 → 不逐人驗、待驗 [2015, 2017] 留在進度檔、照樣恢復掛機', rc == 0 and 'status_all' not in f.names()
+      and questrun.LAST.get('verify_pending') == ['2015', '2017'] and 'grind_start' in f.names(), str(questrun.LAST.get('verify_pending')))
+f = Fake(status={D17: [questrun.DOING]}, quest=[(30, []), (0, done_tail)])
+go(f, [2017], verify='defer')
+check('defer：有風險事件（30 隊伍散）→ 照舊當場驗', [c[1] for c in f.calls if c[0] == 'status_all'] == [(D17,)], str(f.names()))
+f = Fake(status={D99: [questrun.DOING], D17: [questrun.PENDING]}, quest=[(0, done_tail), (0, done_tail)])
+rc = go(f, [2999, 2017], verify='defer')
+sa = [c for c in f.calls if c[0] == 'status_all']
+check('defer：依賴任務（成人儀式 → 彌生）接取前照舊先驗前置；彌生本身延後', rc == 0 and [c[1] for c in sa] == [(D99,)]
+      and f.calls.index(sa[0]) < f.calls.index(('accept', D17)) and questrun.LAST.get('verify_pending') == ['2017'], str(sa))
+# 待驗 12 小時內保留（defer），超過 2 小時的 risk 模式照舊丟
+reset()
+import json as _j2  # noqa: E402
+questrun.PROGRESS.write_text(_j2.dumps({'tasks': {}, 'verify_pending': {'2017': questrun.time.time() - 5 * 3600}}), encoding='utf-8')
+f = Fake(status={D15: [questrun.DOING]}, quest=[(0, done_tail)])
+quiet(questrun.run, [2015], tools=f, after='none', verify='defer')
+check('defer：5 小時前的待驗 2017 仍保留（DEFER_KEEP_S 12 小時）', questrun.LAST.get('verify_pending') == ['2015', '2017'], str(questrun.LAST.get('verify_pending')))
+# questrun.py verify：沒給 ID = 驗待驗清單；全完成 → 不交接、清空
+f = Fake()
+rc = quiet(questrun.cmd_verify, [], '', tools=f)
+check('verify（待驗清單）：全員已完成 → 0、不交接（不關遇敵 / 不組隊）、清單清空', rc == 0 and [c[1] for c in f.calls if c[0] == 'status_all'] == [(D17, D15)]
+      and 'team_form' not in f.names() and 'enc_off' not in f.names() and questrun.LAST.get('verify_pending') == [], str(f.names()))
+# verify ID + --role：有人進行中 → 先交接 → bossretry --who → 再讀 → 0
+reset()
+f = Fake(boss=[(0, {})])
+f.all_q = [{'DKBO3': questrun.DOING}, {}]
+rc = quiet(questrun.cmd_verify, [2015], 'DKBO3,DKBO5', tools=f)
+n = f.names()
+check('verify 2015 --role DKBO3,DKBO5：DKBO3 進行中 → 交接（關遇敵 + 組隊）→ bossretry --who DKBO3 → 重讀 DKBO3 → 0', rc == 0
+      and ('status_all', (D15,), ('DKBO3', 'DKBO5')) in f.calls and n.index('team_form') < n.index('boss_retry')
+      and ('boss_retry', questdefs.get(2015)['track'], ('DKBO3',)) in f.calls and ('status_all', (D15,), ('DKBO3',)) in f.calls, str(f.calls))
+f = Fake(boss=[(144, {'msg': '假'})])
+f.all_q = [{'DKBO3': questrun.DOING}]
+rc = quiet(questrun.cmd_verify, [2015], 'DKBO3', tools=f)
+check('verify：bossretry 失敗 → 108', rc == questrun.EXIT_LAGGARD, str(rc))
+f = Fake()
+f.all_q = [{'DKBO3': questrun.PENDING}]
+rc = quiet(questrun.cmd_verify, [2015], 'DKBO3', tools=f)
+check('verify：待接取（沒接到）→ 108 不 bossretry、不交接', rc == questrun.EXIT_LAGGARD and 'boss_retry' not in f.names() and 'team_form' not in f.names())
+check('verify --role 不認得 → 用法錯誤', quiet(questrun.cmd_verify, [2015], 'XYZ', tools=Fake()) == uikit.EXIT_USAGE)
+# clear_pending：status --role all 讀到全員完成的任務移出待驗清單
+reset()
+questrun.PROGRESS.write_text(_j2.dumps({'tasks': {}, 'verify_pending': {'2017': questrun.time.time(), '2015': questrun.time.time()}}), encoding='utf-8')
+check('clear_pending：只讀了 2 人 → 不算驗過、不移', quiet(questrun.clear_pending, [2017], ['DKBO2', 'DKBO3']) == [])
+check('clear_pending：讀了全部 5 人 → 移掉 2017、2015 留著', quiet(questrun.clear_pending, [2017], questrun.ALL_ROLES) == [2017]
+      and list(questrun.load_progress()['verify_pending']) == ['2015'])
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    questrun.run([2017], dry_run=True, verify='defer')
+check('plan --verify defer 說明延後到呼叫端收尾', 'defer' in buf.getvalue() and '收尾' in buf.getvalue())
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

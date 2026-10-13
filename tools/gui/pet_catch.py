@@ -14,7 +14,8 @@
     交叉驗證：縮圖只在本次 --assign 的物種之間相對比較（petimg_match.rank_among，inlier + 主色都同意才算有把握）：
     有把握且是別的物種 → 矛盾，不登錄這隻、退出碼 15（EXIT_CATCH_SPECIES，印出哪人哪格）；沒把握 → 照來源登錄。
     之後 store-many / take-many 加 `--candidates <同一組物種>`：沒名字的寵物 / 倉庫卡先看登錄檔，認不得再用同一套相對比較，仍沒把握就 72 不取（不亂分）。
-    --poll 秒                  wait 輪詢間隔（預設 120；每次要開外掛面板，開前會先等戰鬥結束）
+    --poll 秒                  wait 輪詢間隔（預設：第一次依隻數 k×20+20 秒〔40～120〕、之後每 60 秒，review 1013b §2.4；給值 = 每次都等這麼久。每次要開外掛面板，開前會先等戰鬥結束）
+    --reuse-setup              沿用上一批的捉寵設置（petquest 同一輪第 2 批起）：系別 / 物種欄位 OCR 讀不到字就不重選下拉（讀到別的字才重選），可抓捕數 / 勾選照做，讀回驗證照舊
     --dry-run                  只印計畫
   uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）
   uv run --no-project python tools/gui/pet_catch.py --autoswap on|off [--roles ...]                 # 自動轉換戰寵
@@ -132,7 +133,18 @@ def register_catches(assign: list, tools=None) -> int:
     return 0
 
 
-def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S, poll: float = rp.CATCH_POLL_S) -> int:
+NEXT_POLL_S = 60.0                # 第一次輪詢之後的間隔（review 1013b §2.4）
+
+
+def first_poll_s(count: int) -> float:
+    """第一次輪詢等多久：依隻數估（實測自動抓寵約 15 秒 / 隻）k × 20 + 20，夾在 [40, CATCH_POLL_S]（4 隻 100 秒、1 隻 40 秒）"""
+    return float(max(40, min(int(rp.CATCH_POLL_S), int(count) * 20 + 20)))
+
+
+def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S,
+        poll: float | None = None, reuse_setup: bool = False) -> int:
+    """poll = None（預設）：第一次輪詢 first_poll_s(count)、之後每 NEXT_POLL_S；給值 = 每次都等這麼久（舊行為）。
+    reuse_setup = 沿用上一批的捉寵設置（petquest 第 2 批起；見 rebirth_pets.catch_setup_many reuse）"""
     T = tools or rp.Tools()
     print(f'計畫：{[(r, f, s, count) for r, f, s in assign]} 階段 {list(stages)}')
     if dry_run:
@@ -150,7 +162,7 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register
         if tools is None and uikit.is_open(bag.BAGANY):         # 2026-10-12 實機：拆分 / 存入後背包面板仍開著，外掛打不開
             uikit.close_panel(bag.BAGANY, known_open=True)
     if 'setup' in stages:
-        rc, bad = T.catch_setup_many(assign, count)              # 外掛面板只開一次：逐人捉寵設置 + 勾自動存倉庫 / 自動抓寵
+        rc, bad = (T.catch_setup_many(assign, count, reuse=True) if reuse_setup else T.catch_setup_many(assign, count))   # 外掛面板只開一次：逐人捉寵設置 + 勾自動存倉庫 / 自動抓寵
         if rc:
             print(f'pet_catch：{bad} 捉寵設置 / 勾選失敗 rc {rc}')
             return rc
@@ -159,8 +171,10 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register
     if 'wait' in stages:
         pending = {r for r, _, _ in assign}
         end = uikit.clock() + timeout
+        waits = 0
         while pending:
-            T.sleep(poll)
+            T.sleep(poll if poll else (first_poll_s(count) if not waits else NEXT_POLL_S))
+            waits += 1
             rc, st = T.catch_poll_many(sorted(pending))          # 一次開面板讀所有還沒抓完的人
             if rc:
                 return rc
@@ -276,7 +290,8 @@ def main(argv=None) -> int:
     ap.add_argument('--stages', default='bait,setup,wait,register')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--timeout', type=float, default=rp.CATCH_TIMEOUT_S)
-    ap.add_argument('--poll', type=float, default=rp.CATCH_POLL_S, help='wait 階段輪詢間隔秒（預設 120；每次要開外掛面板）')
+    ap.add_argument('--poll', type=float, default=None, help='wait 階段輪詢間隔秒（預設：第一次 k×20+20、之後 60；每次要開外掛面板）')
+    ap.add_argument('--reuse-setup', action='store_true', help='沿用上一批的捉寵設置（欄位讀不到字不重選下拉；讀回驗證照舊）')
     a = ap.parse_args(argv)
     if a.verify_battle:
         import winenv
@@ -306,7 +321,7 @@ def main(argv=None) -> int:
         return 2
     import winenv
     winenv.enable_server()
-    return run(assign, a.count, tuple(a.stages.split(',')), a.dry_run, timeout=a.timeout, poll=a.poll)
+    return run(assign, a.count, tuple(a.stages.split(',')), a.dry_run, timeout=a.timeout, poll=a.poll, reuse_setup=a.reuse_setup)
 
 
 if __name__ == '__main__':

@@ -115,6 +115,8 @@
 - 標題是固定字型 → 背景截圖縮成半解析度、取黑字（max(R,G,B)<140）→ 對 `tools/.cache/task-titles/<任務名>@<n>.png` 每個樣板做「黑字 IoU」滑動比對（任意垂直 / 水平位置，所以卡片在第幾格都行）。**一頁約 0.7 秒**（含啟動 PowerShell；腳本內 0.25～0.5 秒），OCR 一頁 3～7 秒、整輪（往下 + 往上捲）常 20～30 秒。
 - 實測分數：同標題 0.97～1.0；不同標題 / 隨機畫面 ≤ 0.4；被捲動遮一半的卡片 ≈ 0.6。判定 `HIT_MIN=0.85`，且同一列若有別的任務名樣板分數差 < 0.25 視為不確定 → 回 None（退回 OCR）。錯配率 0，寧可退回 OCR。
 - quest.py `track_task()`：該任務有樣板 → 每一頁先比樣板，**這頁沒命中就同一頁改 OCR**（`_find_on_page` 的 auto 模式；2026-10-12 前是樣板整輪捲完才退 OCR 再捲一輪）；沒樣板 → 直接 OCR。OCR 認出目標那一格就 `titlematch.learn()` 存樣板（每任務最多 6 個；已有同分樣板不重存），下次走樣板。樣板模組任何錯誤都只當「沒找到」。
+- **位置快取（2026-10-13 review 1013b §1.4，`quest.track_fast` / `remember_track`）**：掃描（樣板 / OCR 確認標題相符）點到的卡，記下標題中心 y + 那一列標題像素（5 列 × 120 點、每 2 px；同 y 最多 3 個變體）到 `tools/.cache/track-pos.json`（6 小時內有效）。
+  下次 `track_task(click=True)` 先只在該 y 讀一次像素，**每一點**都吻合（每通道差 ≤ 16，且有深色字點）才直接點（`_HIT_MODE=pos`，事件「位置快取命中」）；任何一點不同（換卡 / 捲動 / 高亮變了 / 只差一個筆畫的別的任務）→ 照舊整輪掃描，掃到同一 y 時把剛讀的像素補成新變體。下緣被裁要先捲的卡不記。click=False（完成判斷）不用。實機要確認：選中 / 未選中、剛領獎時的高亮會不會讓像素一直對不上（對不上只是退回掃描）。
 - 手動建樣板（列表上看得到該任務時）：`uv run --no-project python tools/gui/titlematch.py add "漆黑洞窟(一轉)" <標題中心y>`（y 用截圖座標，可用 `match` 或截圖量；也可 `--image 檔.png`）。`match` 即時列出看得到的樣板與分數；`find 任務名`、`list`。樣板檔名用 `--task` 傳的原字串（括號保留，全形轉半形），所以 `--task` 要前後一致。
 - add 有防呆：標題外框外一圈必須是亮米色底、高度 14～28、寬 24～170，否則拒絕（剛好捲動時會抓到木框）。**列表自動捲動會讓 y 在你量完後跑掉**，add 前最好剛 shot 完立刻下。
 - 現有樣板：初入石器、覲見村長、成人儀式（取自 notes/shots）、伐木證書、猜謎三兄弟（實機）；漆黑洞窟(一轉) 待 OCR 自動累積。
@@ -223,6 +225,8 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
 
 ## questdetail.py：任務詳情列表讀取 / 接取任務（P1，2026-10-11；計畫 notes/plan-182-script.md）
 入口 `uv run --no-project python tools/gui/questdetail.py status|list|accept|read-image|learn-image`（退出碼 120～128 見檔頭）；可 import（`read_list` / `status` / `accept` / `parse`）。
+- **捲動等待（2026-10-13 review 1013b §1.2）**：拖曳後固定等 `SETTLE_S` 1.5 → **0.8** 秒（之後 `_stable_shot` 還會拍到連兩張狀態條位置相同才收；0.5 沒有慣性實測依據，先取 0.8）；`scroll_top` 第一張就沒有黃色 ▲（`arrow_up`）= 已在頂端 → 不拖（回 `'arrow'`）。
+  防 ▲ 漏判：`read_list(stop_at / must)` 或 `accept` 找不到目標時，不信箭頭真的捲到頂再讀一次（`refetched`）；`status()` 全讀（沒有目標）不重讀。accept 點列後的等待仍 1.5 秒（`ROW_CLICK_WAIT_MS`）。實機要確認：0.8 秒時 `fallbacks` / `gaps` 有沒有變多。
 - **列表版面**（實測）：列 x 160～385、y 237～712；每列約 80 px，標題一行 + 棕色狀態條（x=180 取色 (169,139,110)，高約 23 px）；標題中心 ≈ 狀態條上緣 − 23。
   狀態字色：**黃 = 進行中（右邊箭頭鈕）、白 = 待接取、綠 = 已完成（右邊綠勾）**。**任務完成後會被排到分頁最後面**（成人儀式 / 初入石器 / 漆黑洞窟(一轉) 完成後都在底部），順序會變，所以一律靠標題而不是列號。
 - 列表可捲動時頂端有黃色 ▲、底部有 ▼ 蓋住列；只讀「標題中心 ≥ 262（有 ▲ 時 ≥ 276）、狀態條完整（≥ 20 px）」的列。拖曳 `drag 272 650 272 (650−dy)` 往下捲，**內容移動量約 2.2× dy（dy 120 → 約 260 px ≈ 3 列；dy 250 會一次跳超過一頁而漏列）**，小步 dy=100；2026-10-11 起預設改成一次捲「可見列數 − 1 列」（page_dy，5 列 ≈ dy 147），捲後驗證上一頁最後一列仍在新頁，沒有就退回小步重捲；拖完等慣性 1.5 s。往上捲到頂用 dy=300。
@@ -279,6 +283,9 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
   - **逐人驗證改「風險才當場、其餘批次」**（10-13 驗 20 次共 43 分、0 次抓到落後者）：`--verify risk`（預設）本任務有風險事件 —— quest.py 30 / 32 / 38 / 21 / 41、bossretry、全員重登、BOSS 後有人 HP 0 或讀不出、交寵物（解散逐人交）—— 才完成時當場 `verify_many`；
     沒有 → 進度檔 `verify_pending`，全部任務結束後其他 4 人**每人開一次詳情讀全部待驗任務**（`questdetail.status_all` 多標題）；下一任務的前置（`questdefs.prereqs` = Task 表 finishTasks，1.82 全部要先完成成人儀式）在待驗清單 → 接取前先批次驗；
     失敗退出時待驗留在進度檔（`LAST.verify_pending`），下次 questrun 結束再驗（超過 2 小時丟掉）。`--verify each` = 舊行為、`--verify off` / `--no-verify-all` 不驗。結果照寫 quest-events（「逐人驗證：{角色: 狀態}」）。
+    **`--verify defer`（2026-10-13 review 1013b §2.1，postrebirth / petquest 用）**：= risk，但 run 結束**不**批次驗，待驗留在進度檔（保留 `DEFER_KEEP_S` 12 小時），依賴任務接取前照舊先驗前置；
+    收尾由呼叫端 `questrun.py status --role all <全部任務>`（讀到全員已完成的任務自動移出待驗清單，JSON 多 `not_done_ids`）→ 有人沒完成 → `questrun.py verify <落後任務 ID…> --role <落後者>`
+    （`verify_many`：先讀；有人進行中才交接〔關遇敵 / 戰鬥設定 / 組隊〕→ `bossretry --who` 補人 → 再讀；待接取 / 補不上 108）。`questrun.py verify` 不給 ID = 驗進度檔待驗清單。省約 7 次 × 115～154 秒（postrebirth 每段結束各驗一次）。
   - **龍王的守護**：`--dragon` 只對 questdefs `dragon`（`WALK_S` 10-13 實測巡路 ≥ `DRAGON_WALK_MIN`＝120 秒：馬祖快遞 316、伐木證書 589、四寶玉 136、黃金羚羊 141、四大洞窟 220～678）的任務吃，`--dragon-all` 全吃；
     第一次 `depot_use.run(restore=False)` 從公共倉庫整疊取出、吃一顆、**剩的留在 DKBO 背包**（進度檔 `dragon_in_bag`），之後 `have=True` 直接從背包吃（背包其實沒有 → 92 → 改從倉庫取）；run 結束（成功或失敗；9 / 10 / 116 / 152 / 1 等要留畫面給人看的除外）才 `bag.depot_store` 整疊存回；
     中斷沒存到 → 下次 questrun 開頭（這次不吃時）或結束補存；存回失敗只警告、旗標留著。DKBO 背包空格需求 +1（龍王還不在背包時）。depot_use 判 buff 已在（`step=skip`）不再記「已吃」；questrun / depot_use 共用 `bag.buff_state`。
@@ -318,6 +325,9 @@ uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--confir
 - 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 → **173** 改單人逃跑）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
 - questrun 一律 `--after none`（中段不回練功）、`--dragon`（NO_DRAGON 的任務 questrun 自己不吃；紅暴必吃）。
 - 清背包：bag list 讀空格，**只有空格 < 門檻（① 6、② 8）的人才刪**；名單 = ui/bag.md 白名單（① PURGE1、② 加杉的手環 / 月光的手鐲 / 巴巴洛的許可證），龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪；先 `purge --dry-run`，有 `--confirm-drop` 才實刪；刪完仍不足 → 174（名單外不刪）。四大洞窟產物在 bag.PURGE_FORBID 永不刪。
+- **逐人驗證延到收尾（2026-10-13 review 1013b §2.1）**：questrun 段一律 `--verify defer`、petquest 帶 `--verify-defer`（內部 questrun 同樣 defer）：沒風險事件的任務不在各段結束各驗一次（每次 115～154 秒，約 7 次 ≈ 17 分），
+  待驗清單留在 questrun 進度檔；有風險事件的任務 questrun 照舊當場驗、依賴任務（1.82 → 成人儀式）接取前照舊先驗。finish：`questrun status --role all` → 全員完成的任務自動移出待驗清單 →
+  有人沒完成 → `questrun.py verify <not_done_ids> --role <落後者>`（進行中 → 交接 + bossretry --who 補人 → 再讀）→ 成功照常往下；待接取 / 補不上（108）→ 176。
 - 退出碼 170 參數 / 172 任務段（questrun 非 0）/ 173 紅暴沒龍王 / 174 清背包 / 175 寵物任務段（petquest 非 0）/ 176 收尾；9 / 10 透傳。離線測試 `test_postrebirth.py`。
 
 ### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12；`--who` 模式實機驗過 DKBO3 / DKBO5 補完四寶玉之謎；questrun 38 / 21 與逐人驗證自動呼叫）

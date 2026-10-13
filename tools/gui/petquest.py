@@ -10,6 +10,7 @@
     --confirm-drop      准丟獎勵寵（恐龍博士 布克布克、卡坦步 1 修寶、猜謎三兄弟 左迪洛斯；petdrop 驗名 + 只丟 1 級）；沒給 → 到丟寵段 168 停
     --from / --to       只跑某幾段（段名見 plan）；--fresh 不管進度檔從頭（預設：進度檔 tools/.cache/petquest.json 24 小時內記錄過的段直接跳過）
     --dry-run           = plan
+    --verify-defer      內部 questrun 帶 --verify defer（postrebirth 傳；沒風險事件的逐人驗證延到 postrebirth 收尾，交寵物仍是風險事件 → 當場驗）
   可 import：petquest.run(qid, tools=…, confirm_buy=…, confirm_drop=…) → 退出碼；結果在 petquest.LAST
 
 流程（各段失敗就停在該段、印手動指令；畫面不認得 9 / 斷線 10 一律透傳；進度檔記完成的段，重跑 = 續跑）：
@@ -20,12 +21,16 @@
                 （寵物欄只剩騎寵 + 4 空格；抓寵 / 練寵都不帶原戰寵）
     catch[N]    每輪每批可抓 = 抓寵者寵物欄空格（最少那人；正常 4）：分批抓到 5 隻，滿了會自動進個人倉庫（沒縮圖、成長字串沒登錄就取不出來）→ 所以一批 ≤ 空格數：
                 pet_catch.py --stages bait（公共倉庫誘餌取 k 拆 k）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 外掛「+」買 k 次（見上）→
-                pet_catch.py --stages setup,wait,register --count k（register = 依抓寵者登錄成長字串）→ 抓寵者把這批存公共（最後一批留 1 隻）
+                pet_catch.py --stages setup,wait,register --count k [--reuse-setup：第 2 批起沿用捉寵設置]（wait 第一次輪詢 k×20+20 秒、之後 60 秒；
+                register = 依抓寵者登錄成長字串）→ 抓寵者把這批存公共（最後一批留 1 隻）
                 pet.py store-many --pick last --skip-missing --candidates 本輪物種 → pet.py list 驗數量
     distribute[N]  pet.py take-many --depot public --plan "角色:物種,…" --candidates 本輪物種（每人每物種 1 隻；抓寵者自己留的那隻不取）→ list 驗每人每物種 1 隻
     train[N]    自動轉換戰寵 on（轉換級數使用者設 30）→ 第一種任務寵 5 人出戰 → pet_catch.py --verify-battle → grind.py start --spot 柯奧4F龜洞
-                → 每 POLL_S 秒 pet.py list 讀等級，全部 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25）→ 關遇敵 → 自動轉換戰寵 off → pet.py rest-all（任務寵改等待）
-    turnin[N]   questrun.py run <ID> --after none --pet-turnin（恐龍：解散逐人 pet_turnin；卡坦：隊長交一次）；卡坦第 1 輪交完讀步號 = 2 才算
+                → 每 POLL_S（30）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
+                  levels 那格變空 / nh 不同 → 改讀完整 list；全部連兩輪 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25；第二輪不降、最多升 TRAIN_STABLE_UP=10 級）
+                → 關遇敵 → 自動轉換戰寵 off → pet.py rest-all（任務寵改等待；成功記進度檔 rested）
+    turnin[N]   questrun.py run <ID> --after none --pet-turnin [--rested]（train 段 30 分內 rest-all 成功才帶：questrun 交件前不重做 rest-all）
+                （恐龍：解散逐人 pet_turnin；卡坦：隊長交一次）；卡坦第 1 輪交完讀步號 = 2 才算
     drop[N]     （--confirm-drop）petdrop.py all <獎勵寵> --confirm-name <獎勵寵> --max-level 1（恐龍 布克布克；卡坦第 1 輪 修寶）
     store_reward（卡坦）獎勵朵拉比斯（Lv1）5 人存個人倉庫
     restore     pet.py take-many --depot personal --plan "角色:朵拉比斯@原等級" → 朵拉比斯 5 人出戰 → pet_catch.py --lock 戰寵 --battle-pet 朵拉比斯（讀回）
@@ -82,7 +87,9 @@ BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
 PLUS_XY = (1295, 315)              # 外掛捉寵設置「可抓捕數 +」（紅區：只有 --confirm-buy-bait 才點；每按一次 +1、扣 50,000 石幣，2026-10-12 實測）
 PLUS_COST = 50000
 MONEY_BOX = (250, 5, 700, 40)      # 寵物面板頂部資源列（石幣 x≈335,y≈23，右邊依序鑽石 / 活力 / 聲望；ui/pet.md）—— OCR 框**待實機量**；讀不到就不買
-POLL_S = 120.0                     # 練寵讀等級間隔（每次開寵物面板約 15 秒）
+POLL_S = 30.0                      # 練寵讀等級間隔（2026-10-13 review 1013b §2.3：只讀等級 pet.py levels，跟 petwatch 一樣 30 秒；舊版 120 秒 + 每次讀 5 人全部身分 91 秒）
+TRAIN_STABLE_UP = 10              # 練寵確認：連兩輪都 ≥ 門檻、且第二輪比第一輪不降、最多升這麼多級（低等寵一場可升數級；讀錯值多半是大跳或下降）
+RESTED_S = 30 * 60                 # train 段 rest-all 成功後這麼久內的 turnin 段帶 --rested（questrun 交件前不重做）
 TRAIN_MAX_S = 45 * 60              # 練寵最多等這麼久（S5 約 9 分、S6 約 5 分）
 PROGRESS_TRUST_S = 24 * 3600
 TRAIN_SPOT = '柯奧4F龜洞'
@@ -221,6 +228,59 @@ def train_status(roles_slots: dict, need: dict, roles=ALL_ROLES) -> tuple:
             if not v or v < lv:
                 lag.setdefault(r, {})[sp] = v
     return not lag, lag
+
+
+def task_levels(roles_slots: dict, need: dict, roles=ALL_ROLES) -> dict:
+    """{角色: [格]} → {(角色, 物種): 等級或 None}（每人每個任務物種取最高；沒有該物種 = None）"""
+    out = {}
+    for r in roles:
+        slots = (roles_slots or {}).get(r) or []
+        for sp in need:
+            hits = [s.get('level') for s in slots if slot_species(s) == sp]
+            out[(r, sp)] = max((v for v in hits if v is not None), default=None)
+    return out
+
+
+def train_confirm(cur: dict, prev: dict, need: dict) -> tuple:
+    """本輪 / 上一輪讀值 {(角色, 物種): 等級} → (確定達標的鍵, 第一次讀到達標要下一輪確認的鍵)。
+    沿用 petwatch.confirm_due 的「連兩輪讀值都 ≥ 門檻才算」（OCR 偶發錯值不會連兩輪都達標），差值容許改成「不降、最多升 TRAIN_STABLE_UP 級」：
+    任務寵 1～30 級一場戰鬥可升好幾級，套 petwatch 的 ±2（77 級金布伊用）會一直確認不了"""
+    due, pending = [], []
+    for k, v in cur.items():
+        lv = need.get(k[1])
+        if v is None or lv is None or v < lv:
+            continue
+        p = prev.get(k)
+        if p is not None and p >= lv and 0 <= v - p <= TRAIN_STABLE_UP:
+            due.append(k)
+        else:
+            pending.append(k)
+    return due, pending
+
+
+def merge_levels(base: dict, lv: dict, need: dict) -> tuple:
+    """上一次完整 list 的格（身分）+ pet.py levels 只讀的等級 → (合併後 {角色: [格]}, None) 或 (None, 原因)。
+    任務寵那格在 levels 裡變空 / 沒讀到 / 名字框點陣指紋 nh 跟上次不同（換了隻、或被浮字蓋住）→ 不合併，呼叫端改讀完整 list"""
+    out = {}
+    for r, slots in (base or {}).items():
+        got = {x.get('slot'): x for x in (lv or {}).get(r) or []}
+        row = []
+        for s in slots or []:
+            if slot_species(s) in need:
+                x = got.get(s.get('slot'))
+                if not x or x.get('empty'):
+                    return None, f'{r} 第 {s.get("slot")} 格（{slot_species(s)}）levels 讀不到 / 變空格'
+                if s.get('nh') and x.get('nh') != s['nh']:
+                    return None, f'{r} 第 {s.get("slot")} 格名字框點陣跟上次不同（換了隻 / 被浮字蓋住）'
+                s = dict(s, level=x.get('level'))
+            row.append(s)
+        out[r] = row
+    return out, None
+
+
+def task_slots(roles_slots: dict, need: dict) -> list:
+    """任務寵所在的格號（各角色聯集，1 起算）→ pet.py levels --slots"""
+    return sorted({s.get('slot') for slots in (roles_slots or {}).values() for s in slots or [] if slot_species(s) in need and s.get('slot')})
 
 
 def parse_money(lines) -> tuple:
@@ -389,6 +449,16 @@ class Run:
     def pass_or(self, rc: int, code: int, msg: str, manual: str = '') -> int:
         return rc if rc in PASS else self.fail(code, msg, manual)
 
+    def verify_args(self) -> list:
+        """--verify-defer（postrebirth 傳）→ questrun 加 --verify defer（沒風險事件的逐人驗證延到 postrebirth 收尾）"""
+        return ['--verify', 'defer'] if self.o.get('verify_defer') else []
+
+    def pet_levels(self, slots) -> tuple:
+        """pet.py levels（只讀等級 + nh，不認名字）→ (rc, {角色: [格]})"""
+        args = ['levels', '--role', 'all', '--json'] + (['--slots', ','.join(map(str, slots))] if slots else [])
+        rc, lines = self.sub('pet.py', args, 600)
+        return rc, (last_json(lines).get('roles') or {})
+
     def pet_list(self, roles=ALL_ROLES, cand=None) -> tuple:
         args = ['list', '--role', 'all' if list(roles) == ALL_ROLES else ','.join(roles), '--json']
         if cand:
@@ -399,7 +469,7 @@ class Run:
 
     # -- 段 --
     def s_accept(self) -> int:
-        rc, _ = self.sub('questrun.py', ['run', self.qid, '--after', 'none'], 4 * 3600)
+        rc, _ = self.sub('questrun.py', ['run', self.qid, '--after', 'none'] + self.verify_args(), 4 * 3600)
         if rc == 0:
             event(f'任務 {self.qid}：questrun 回 0 = 任務已完成 → 跳過抓 / 練 / 交，只做收尾')
             self.p['already_done'] = True
@@ -541,7 +611,8 @@ class Run:
                     rc = self.buy_plus(r, k)
                     if rc:
                         return rc
-            rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', k, '--stages', 'setup,wait,register'], 3600)
+            reuse = ['--reuse-setup'] if bi > 0 else []                 # 第 2 批起沿用第 1 批的捉寵設置（讀回驗證照舊，review 1013b §2.5-A）
+            rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', k, '--stages', 'setup,wait,register'] + reuse, 3600)
             if rc:
                 return self.pass_or(rc, EXIT_CATCH, f'抓寵失敗 pet_catch rc={rc}（14 系別 / 物種選不到、15 縮圖矛盾、103 設定 / 逾時）',
                                     f'uv run --no-project python tools/gui/pet_catch.py --assign "{csv_assign(assign)}" --count {k} --stages setup,wait,register')
@@ -600,13 +671,34 @@ class Run:
             if rc:
                 return self.pass_or(rc, EXIT_TRAIN, f'練寵準備：{why} 失敗 rc={rc}', f'uv run --no-project python tools/gui/{script} {" ".join(map(str, args))}')
         t0 = self.T.clock()
+        need = rd['need']
+        base, prev = None, {}                                          # base = 最近一次完整 list（身分 + 格位 + nh）；之後只讀等級
         while True:
             self.T.sleep(POLL_S)
-            rc, rs = self.pet_list(ALL_ROLES, cand)
+            if base is None:
+                rc, rs = self.pet_list(ALL_ROLES, cand)
+                if not rc:
+                    base = rs
+            else:
+                rc, lv = self.pet_levels(task_slots(base, need))
+                rs, why = merge_levels(base, lv, need) if not rc else (None, None)
+                if why:
+                    event(f'{stage}：{why} → 改讀完整 list')
+                    rc, rs = self.pet_list(ALL_ROLES, cand)
+                    base = rs if not rc else None
             if rc in PASS:
                 return rc
-            ok, lag = train_status(rs, rd['need']) if not rc else (False, {'讀取失敗': rc})
-            event(f'{stage}：練寵進度 未達標 {lag}' if lag else f'{stage}：5 人任務寵全部達標')
+            if rc:
+                cur, lag = {}, {'讀取失敗': rc}
+                base = None
+            else:
+                cur = task_levels(rs, need)
+                lag = {f'{r}:{sp}': v for (r, sp), v in cur.items() if v is None or v < need[sp]}
+            due, pending = train_confirm(cur, prev, need)
+            prev = cur
+            ok = bool(cur) and len(due) == len(cur)
+            event(f'{stage}：5 人任務寵全部達標（連兩輪確認）' if ok else
+                  f'{stage}：練寵進度 未達標 {lag}' + (f'；第一次讀到達標、下一輪確認 {len(pending)} 隻' if pending else ''))
             if ok:
                 break
             if self.T.clock() - t0 > TRAIN_MAX_S:
@@ -619,6 +711,8 @@ class Run:
             rc, _ = self.sub(script, args, 1800)
             if rc:
                 return self.pass_or(rc, EXIT_TRAIN, f'練完：{why} 失敗 rc={rc}', f'uv run --no-project python tools/gui/{script} {" ".join(map(str, args))}')
+        self.p['rested'] = {'stage': stage.replace('train', 'turnin'), 'ts': self.T.clock()}   # 交件段帶 --rested（questrun 不重做 rest-all）
+        self.save()
         return 0
 
     def train_quiz(self) -> int:
@@ -659,12 +753,16 @@ class Run:
             rc = self.encounter_off()
             if rc:
                 return rc
-            rc, _ = self.sub('questrun.py', ['run', self.qid, '--after', 'none'], 3600)
+            rc, _ = self.sub('questrun.py', ['run', self.qid, '--after', 'none'] + self.verify_args(), 3600)
             return 0 if not rc else self.pass_or(rc, EXIT_TURNIN, f'交金豬 questrun rc={rc}', f'uv run --no-project python tools/gui/questrun.py run {self.qid} --after none')
         rounds = self.q['rounds']
         r = stage_round(stage)
         last = r == len(rounds)
-        rc, _ = self.sub('questrun.py', ['run', self.qid, '--after', 'none', '--pet-turnin'], 3600)
+        args = ['run', self.qid, '--after', 'none', '--pet-turnin']
+        rs_ = self.p.get('rested') or {}
+        if rs_.get('stage') == stage and 0 <= self.T.clock() - (rs_.get('ts') or 0) <= RESTED_S:   # 本輪 train 段剛 rest-all 成功 → questrun 交件前不重做（review 1013b §2.2）
+            args.append('--rested')
+        rc, _ = self.sub('questrun.py', args + self.verify_args(), 3600)
         manual = f'uv run --no-project python tools/gui/questrun.py run {self.qid} --after none --pet-turnin'
         if last:
             return 0 if not rc else self.pass_or(rc, EXIT_TURNIN, f'交寵物（最後一輪）questrun rc={rc}（預期 0）', manual)
@@ -760,12 +858,13 @@ def print_plan(qid: int, o: dict) -> None:
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
             print(f'  catch{sfx}   每批 ≤ 4 隻（{batches(q.get("count", 5), 4)}）：pet_catch.py --assign "{csv_assign(a)}" --count k --stages bait'
-                  f' → [誘餌不夠且 --confirm-buy-bait：外掛「+」買 k 次，每次讀石幣扣 {PLUS_COST}] → --stages setup,wait,register'
+                  f' → [誘餌不夠且 --confirm-buy-bait：外掛「+」買 k 次，每次讀石幣扣 {PLUS_COST}] → --stages setup,wait,register（第 2 批 --reuse-setup；第一次輪詢 k×20+20 秒、之後 60 秒）'
                   f' → pet.py store-many（抓寵者存公共，最後一批留 1）→ list 驗')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" --candidates {species_csv(a)} → list 驗每人每物種 1 隻')
-            print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒 list 讀等級（門檻 {rd["need"]}）'
-                  f' → 關遇敵 → autoswap off → rest-all')
-            print(f'  turnin{sfx}  questrun.py run {qid} --after none --pet-turnin' + ('（下一輪前讀步號要進到下一步）' if i < len(q['rounds']) else '（預期 0）'))
+            print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
+                  f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；連兩輪 ≥ 門檻 {rd["need"]}）→ 關遇敵 → autoswap off → rest-all')
+            print(f'  turnin{sfx}  questrun.py run {qid} --after none --pet-turnin --rested{" --verify defer" if o.get("verify_defer") else ""}'
+                  + ('（下一輪前讀步號要進到下一步）' if i < len(q['rounds']) else '（預期 0）'))
             if rd.get('drop'):
                 print(f'  drop{sfx}    petdrop.py all {rd["drop"]} --confirm-name {rd["drop"]} --max-level 1（要 --confirm-drop）')
         if q.get('store_reward'):
@@ -775,7 +874,7 @@ def print_plan(qid: int, o: dict) -> None:
 
 
 def run(qid, tools=None, confirm_buy: bool = False, confirm_drop: bool = False, from_stage: str | None = None, to_stage: str | None = None,
-        fresh: bool = False, dry_run: bool = False) -> int:
+        fresh: bool = False, dry_run: bool = False, verify_defer: bool = False) -> int:
     LAST.clear()
     try:
         qid = int(qid)
@@ -789,7 +888,7 @@ def run(qid, tools=None, confirm_buy: bool = False, confirm_drop: bool = False, 
         if s and s not in stages:
             print(f'petquest：段名 {s!r} 不在 {stages}', file=sys.stderr)
             return EXIT_ARGS
-    o = dict(confirm_buy=confirm_buy, confirm_drop=confirm_drop, fresh=fresh)
+    o = dict(confirm_buy=confirm_buy, confirm_drop=confirm_drop, fresh=fresh, verify_defer=verify_defer)
     if dry_run:
         print_plan(qid, o)
         return 0
@@ -830,13 +929,14 @@ def main(argv=None) -> int:
     ap.add_argument('--from', dest='from_stage', default=None)
     ap.add_argument('--to', dest='to_stage', default=None)
     ap.add_argument('--fresh', action='store_true', help='不管進度檔，從頭')
+    ap.add_argument('--verify-defer', action='store_true', help='內部 questrun 帶 --verify defer（沒風險事件的逐人驗證延到呼叫端收尾；postrebirth 用）')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)
     if a.cmd == 'run' and not a.dry_run:
         import winenv
         winenv.enable_server()
     rc = run(a.qid, confirm_buy=a.confirm_buy_bait, confirm_drop=a.confirm_drop, from_stage=a.from_stage, to_stage=a.to_stage,
-             fresh=a.fresh, dry_run=a.cmd == 'plan' or a.dry_run)
+             fresh=a.fresh, dry_run=a.cmd == 'plan' or a.dry_run, verify_defer=a.verify_defer)
     if a.cmd == 'run' and not a.dry_run:
         print(json.dumps(LAST, ensure_ascii=False, default=str))
     return rc

@@ -6,6 +6,7 @@ import io
 import json
 import sys
 import tempfile
+import time
 import types
 from pathlib import Path
 
@@ -1002,6 +1003,85 @@ fresh_tpl()
 g = new(pets=mk_pets(DKBO=[unn(0, '騎乘'), {'name': '朵拉比斯', 'state': '出戰', 'level': 1}, None, None, None]))
 rc, out, err = run(pet.store_many, 'DKBO', ['摩娜西普'], 'public', skip_missing=True)
 check('store-many --skip-missing：騎乘中的沒名字騎寵不擋「沒有就略過」', rc == 0 and depot_free(g) == 0 and last_json(out)['ops'][0].get('skipped'), f'rc={rc}')
+
+# ---- 身分跨程序快取 + levels（2026-10-13 review 1013b §1.1 / §2.3）----
+def name_ocr(g):
+    return sum(1 for b, _ in g.ocr_calls if b == tuple(petmatch.BOX_NAME))
+
+
+fresh_tpl()
+g = new(pets=five())
+rc, out, err = run(pet.list_roles, 'DKBO2')
+j1 = last_json(out)
+n_a = name_ocr(g)
+check('icache：第 1 次 list（新程序）沒名字的騎寵要 OCR 成長字串、寫進快取檔', rc == 0 and n_a > 0 and pet.icache_path().exists()
+      and json.loads(pet.icache_path().read_text(encoding='utf-8'))['ver'] == pet.ICACHE_VER, f'name OCR {n_a}')
+rc, out, err = run(pet.list_roles, 'DKBO2')
+j2 = last_json(out)
+check('icache：第 2 次 list（另一個 ctx = 模擬新子程序）點陣相同 → 0 次名字 OCR、結果相同、icache_hits ≥ 1',
+      rc == 0 and name_ocr(g) == n_a and j2['roles']['DKBO2'][0]['unnamed'] == GS[1] and j2['icache_hits'] >= 1
+      and j2['roles']['DKBO2'][0]['nh'] == j1['roles']['DKBO2'][0]['nh'], f'{name_ocr(g) - n_a} 次 {j2.get("icache_hits")}')
+ctx = pet.load_ctx(True)                                   # store / take / petdrop 用的 ctx：沒開快取
+g.panel, g.sel = True, 0
+rows, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
+n_b = name_ocr(g)
+r = pet.resolve_ident(rows[0], ctx)
+check('icache：store / take / petdrop 的 ctx（預設不開）→ 照樣現場 OCR（不取代存倉 / 丟寵的現場驗名）', r['growth'] == GS[1] and name_ocr(g) > n_b and not r.get('cached'))
+ctx = pet.load_ctx(True, use_icache=True)
+r = pet.resolve_ident(['0' * 10, '0' * 10], ctx)
+check('icache：沒墨點的點陣不查不寫', r['growth'] is None and not ctx.get('idirty'))
+_raw = json.loads(pet.icache_path().read_text(encoding='utf-8'))
+check('icache：過期（> 7 天）的丟掉；版本不符 → 空', pet.load_icache(now=time.time() + pet.ICACHE_TTL_S + 60)['growth'] == {}
+      and (pet.icache_path().write_text(json.dumps(dict(_raw, ver=0)), encoding='utf-8') or True) and pet.load_icache()['growth'] == {})
+pet.icache_path().write_text(json.dumps(_raw), encoding='utf-8')
+_c = {'growth': {f'k{i}': [str(i), i] for i in range(pet.ICACHE_MAX + 50)}, 'img': {}}
+pet.save_icache(_c)
+_l = json.loads(pet.icache_path().read_text(encoding='utf-8'))
+check('icache：每區只留最近 ICACHE_MAX 筆（依時間）', len(_l['growth']) == pet.ICACHE_MAX and f'k{pet.ICACHE_MAX + 49}' in _l['growth'] and 'k0' not in _l['growth'])
+pet.icache_path().write_text(json.dumps(_raw), encoding='utf-8')
+pet.ICACHE_ON = False
+rc, out, err = run(pet.list_roles, 'DKBO2')
+check('--no-icache → 照樣 OCR', name_ocr(g) > n_b + 1 and last_json(out)['icache_hits'] == 0)
+pet.ICACHE_ON = True
+# 縮圖結果快取：整格像素 + 候選完全相同才沿用
+import petimg_match as _M  # noqa: E402
+_sv = (pet.IMG_ON, _M.index, _M.cells_of, _M.read_cell, pet.img_match)
+_n = {'match': 0}
+_cells = {'v': {(1, 1): (10, 20, 30), (2, 2): (40, 50, 60)}}
+pet.IMG_ON = True
+_M.index = lambda: {'x': ['朵拉比斯']}
+_M.cells_of = lambda kind: [(i, 250, 200 + i) for i in range(5)]
+_M.read_cell = lambda kind, cx, cy: dict(_cells['v'])
+pet.img_match = lambda cells, kind, cx, cy, ctx: (_n.__setitem__('match', _n['match'] + 1), {'img_species': '克邦凱斯', 'img_score': 0.9})[1]
+try:
+    c1 = pet.load_ctx(True, ['克邦凱斯', '加克拉'], use_icache=True)
+    a1 = pet.img_ident('slot', 1, c1)
+    pet.save_ctx(c1)
+    c2 = pet.load_ctx(True, ['克邦凱斯', '加克拉'], use_icache=True)
+    a2 = pet.img_ident('slot', 1, c2)
+    check('縮圖快取：同一格像素 + 同候選 → 第 2 個程序不再比對（img_cached）', _n['match'] == 1 and a2['img_species'] == '克邦凱斯' and a2.get('img_cached'), str(_n))
+    c3 = pet.load_ctx(True, ['克邦凱斯', '邦恩吉'], use_icache=True)
+    pet.img_ident('slot', 1, c3)
+    _cells['v'] = {(1, 1): (10, 20, 31), (2, 2): (40, 50, 60)}
+    c4 = pet.load_ctx(True, ['克邦凱斯', '加克拉'], use_icache=True)
+    pet.img_ident('slot', 1, c4)
+    pet.img_ident('slot', 1, pet.load_ctx(True, ['克邦凱斯', '加克拉']))
+    check('縮圖快取：候選不同 / 像素差 1 / 沒開快取 → 都重比', _n['match'] == 4, str(_n))
+finally:
+    pet.IMG_ON, _M.index, _M.cells_of, _M.read_cell, pet.img_match = _sv
+# levels：只讀等級（不 OCR 名字），nh 與 list 相同
+g = new(pets=five())
+run(pet.list_roles, 'all')
+n_c = name_ocr(g)
+rc, out, err = run(pet.list_levels, 'all')
+lv = last_json(out)['roles']
+check('levels：5 人每格等級 + nh、0 次名字 OCR、沒點狀態鈕', rc == 0 and name_ocr(g) == n_c and g.state_clicks == []
+      and all(x['level'] == 1 for r in lv for x in lv[r] if not x.get('empty')) and lv['DKBO2'][0]['nh'] == j1['roles']['DKBO2'][0]['nh'], f'rc={rc} {lv.get("DKBO2")}')
+rc, out, err = run(pet.list_levels, 'DKBO3', [2])
+sl = last_json(out)['roles']['DKBO3']
+check('levels --slots 2：只讀第 2 格（空格照列）', rc == 0 and [x['slot'] for x in sl if not x.get('empty')] == [2] and any(x.get('empty') for x in sl), str(sl))
+rc, out, err = run(pet.list_levels, 'DKBO3', [7])
+check('levels --slots 超出 1～5 → 用法錯誤', rc == uikit.EXIT_USAGE)
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

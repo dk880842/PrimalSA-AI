@@ -146,4 +146,14 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
 ## 抓寵設定程式（pet_catch.py / rebirth_pets.py，2026-10-13）
 - 取誘餌：`bait_take_many` 背包面板只開一次；`bag.select_role` 頭像已選著不再點；`bag.find_item(hint=)` / `depot_take(hint=)` 先點上一人找到的倉庫格核對名稱（`bag.LAST['depot_slot']`）。
 - 捉寵設置：系別下拉（捲動）→ 物種下拉（不捲動，空白 / 沒目標列重試 `PICK_RETRY`=3 次、空白時重點下拉、失敗收起並記 `pick_why`）→ 讀可抓捕數 = N → 勾自動存倉庫 / 自動抓寵 → `_catch_verify` 讀回兩個欄位文字與兩個勾選。失敗退出碼 14，不默默關面板。
-- 輪詢：`catch_poll_many` 一次開外掛面板讀全部人，間隔 `CATCH_POLL_S`=120 秒；開面板前 `ass._many` → `wait_not_battle` 等戰鬥結束。
+- 輪詢：`catch_poll_many` 一次開外掛面板讀全部人；開面板前 `ass._many` → `wait_not_battle` 等戰鬥結束。間隔（2026-10-13 review 1013b §2.4）：`pet_catch.run` 沒給 `--poll` 時第一次等 `first_poll_s(k)` = k×20+20 秒（夾 40～`CATCH_POLL_S` 120；實測約 15 秒 / 隻）、之後每 `NEXT_POLL_S`=60 秒；給 `--poll` = 每次都等那麼久（舊行為）。
+- 第 2 批沿用設置（`--reuse-setup` / `catch_setup_many(reuse=True)`，review 1013b §2.5-A）：系別 / 物種欄位 OCR 讀不到字（鯊魚系常讀不出）不重選下拉，讀到別的字才重選；可抓捕數 = N 檢查、兩個勾選、`_catch_verify` 讀回都照做。
+
+## 身分跨程序快取 / 只讀等級（2026-10-13 review 1013b §1.1 / §2.3；離線測試通過，實機未驗證）
+- **成長字串快取**：沒名字的寵物（騎寵布拉奇多斯、剛抓的任務寵）名字框是成長字串，舊版每個 `pet.py` 子程序每格都要 OCR 2 組設定 + 縮圖比對（實測 3.5～4.5 秒 / 格，有名字的 1 秒）。
+  現在以**名字框二值化點陣完全相同**為鍵（`pet.rows_key`，sha1）記成長字串、以**整格 4537 點像素 + 候選名單完全相同**為鍵記縮圖比對結果，存 `tools/.cache/pet-tpl/ident-cache-<版面>.json`（`ver` 版本、每筆時間，7 天過期、各留最近 400 筆）。
+  只做「同樣輸入 → 上次的結果」，判定規則不變；OCR 讀錯的字串過不了 `parse_growth`（≥ 2 行相同）本來就不進快取。點陣在快取裡的格也不再等 EXP 橫幅重讀（`growth_known`）。
+- **只在** `list` / `levels` / `set-state-many` / `rest-all` 用（`load_ctx(use_icache=True)`）；`store` / `take` / `store-many` / `take-many` / `petdrop` / `learn-species` / `rebirth_pets`（抓寵登錄）一律現場 OCR，**存倉、取出、丟寵的現場驗名不變**。`--no-icache` 關；JSON 多 `icache_hits`。
+- **`pet.py levels [--role all] [--slots 2,3,4,5] [--json]`**：唯讀，每人選頭像 → 只點指定格 → 只讀等級（樣板 → OCR 共識，同 `level_from_rows`）+ 名字框點陣指紋 `nh`（不認名字 / 身分）。`list` 每格也多 `nh`。petquest 練寵輪詢：第一次 list、之後 levels，`nh` 對不上 / 格變空 → 那輪改讀 list。
+- 實機要確認：①同一隻寵物名字框點陣在不同時間是否真的完全相同（不同 → 只是快取沒中，照舊 OCR）；②levels 在快戰掛機中讀等級的穩定度、每人耗時。
+

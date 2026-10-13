@@ -593,13 +593,87 @@ def clear_leftovers(rounds: int = CLEAR_ROUNDS) -> str:
     return read_screen()['state']
 
 
+# ---- 追蹤卡片位置快取（2026-10-13 review 1013b §1.4）：同一張卡通常沒移動 → 先只在上次的 y 比一次標題列像素，命中才點 ----
+# 「樣板」= 上次掃描（titlematch / OCR 確認標題相符）命中那一刻在該 y 讀的標題列像素（5 列 × 120 點、每 2 px 一點）；最多留 3 個變體（選中 / 未選中底色）。
+# 名稱不符絕不點仍成立：點之前一定要現場像素跟「確認過標題的那張卡」**每一點**都吻合（每通道差 ≤ 16，且有字的深色點）；
+# 只差一個筆畫（漆黑洞窟(一轉) / (二轉)）也會有多點不同 → 對不上 → 退回整輪掃描（只是慢，不會點錯）。
+TRACK_POS = logpaths.p(ROOT / 'tools' / '.cache' / 'track-pos.json')        # 測試時 testenv 轉向暫存
+TRACK_POS_TTL_S = 6 * 3600
+TRACK_SIG_TOL, TRACK_SIG_NEED, TRACK_SIG_INK = 16, 1.0, 12
+TRACK_SIG_MAX = 3
+
+
+def track_sig_pts(y: int) -> list:
+    return [(x, y + dy) for dy in (-6, -3, 0, 3, 6) for x in range(90, 330, 2)]
+
+
+def read_track_sig(y: int) -> list | None:
+    """現場讀追蹤列表 y 那一列標題的像素（唯讀，一次 pixel）；讀不到 / 點數不對 → None"""
+    pts = track_sig_pts(y)
+    try:
+        out = gui('pixel', ' '.join(f'{x},{yy}' for x, yy in pts)).split()
+        cols = [[int(v) for v in c.split(',')] for c in out]
+    except Exception:
+        return None
+    return cols if len(cols) == len(pts) and all(len(c) == 3 for c in cols) else None
+
+
+def track_sig_match(a, b) -> bool:
+    """純函式：兩組標題列像素吻合（點數相同、兩邊都有字、≥ TRACK_SIG_NEED 的點每通道差 ≤ TRACK_SIG_TOL）"""
+    if not a or not b or len(a) != len(b):
+        return False
+    ink = lambda sig: sum(1 for c in sig if sum(c) < 330)          # noqa: E731  深棕標題字
+    if ink(a) < TRACK_SIG_INK or ink(b) < TRACK_SIG_INK:
+        return False
+    ok = sum(1 for c, d in zip(a, b) if all(abs(u - v) <= TRACK_SIG_TOL for u, v in zip(c, d)))
+    return ok >= TRACK_SIG_NEED * len(a)
+
+
+def load_track_pos() -> dict:
+    try:
+        d = json.loads(Path(TRACK_POS).read_text(encoding='utf-8'))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def remember_track(want: str, y: int, sig) -> None:
+    """掃描確認標題相符的卡 → 記 y + 標題列像素（同 y 累積變體，換了 y 就重來）"""
+    if not sig:
+        return
+    d = load_track_pos()
+    e = d.get(want) or {}
+    sigs = e.get('sigs') if e.get('y') == y else []
+    if not any(track_sig_match(sig, x) for x in sigs or []):
+        sigs = (list(sigs or []) + [sig])[-TRACK_SIG_MAX:]
+    d[want] = {'y': y, 'sigs': sigs, 'ts': time.time()}
+    try:
+        Path(TRACK_POS).parent.mkdir(parents=True, exist_ok=True)
+        Path(TRACK_POS).write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
+    except OSError:
+        pass
+
+
+def track_fast(want: str) -> tuple:
+    """上次的位置還是同一張卡？→ (y 或 None, 現場讀到的像素)。沒記錄 / 過期 / 讀不到 / 不吻合 → (None, …)"""
+    e = load_track_pos().get(want) or {}
+    y = e.get('y')
+    if not isinstance(y, int) or y > LIST_CLICK_Y_MAX or time.time() - (e.get('ts') or 0) > TRACK_POS_TTL_S or not e.get('sigs'):
+        return None, None
+    cur = read_track_sig(y)
+    if cur and any(track_sig_match(cur, x) for x in e['sigs']):
+        return y, cur
+    return None, cur
+
+
 def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | None:
     """掃一遍追蹤列表找標題 = want 的那一格並點它（開始巡路）。名稱不符絕不點。
     回傳：True 找到（click=True 時已點）、False 整個列表掃完沒有、None 途中畫面不再是主畫面（交回主迴圈，不算找不到）。
     一輪有明確終點：先看目前這頁 → 往上捲到頂（每頁都看）→ 再往下捲到底（已看過的頁不重看）；到頂 / 到底看 ▲ / ▼ 箭頭（讀不到才用像素取樣沒變判斷），不來回。
     辨識：該任務有標題樣板 → 每頁先用樣板比對（0.7 秒 / 頁，錯配率 0），沒命中**同一頁**改 OCR（3～7 秒，認出會學新樣板）；沒樣板 → 直接 OCR。
     （2026-10-12 前是樣板整輪捲完才退 OCR 再捲一輪，一次多拖 4 下 12～14 秒。）
-    點擊：標題太靠下緣（> LIST_CLICK_Y_MAX）的卡先捲上來再點（_reveal_low_card）。"""
+    點擊：標題太靠下緣（> LIST_CLICK_Y_MAX）的卡先捲上來再點（_reveal_low_card）。
+    click=True 時先試位置快取（track_fast：上次確認過標題的 y，標題列像素每點吻合才點；2026-10-13 review 1013b §1.4），不中才整輪掃描。"""
     gui('seq', PRIMER)
     ensure_task_tab()
     mode = 'auto' if _tm_has(want) else 'ocr'
@@ -607,6 +681,16 @@ def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | N
     global LAST_SCAN_NO_SCROLL, _HIT_MODE
     LAST_SCAN_NO_SCROLL = False
     _HIT_MODE = mode
+    miss_sig = None
+    if click:
+        fy, miss_sig = track_fast(want)
+        if fy is not None:
+            if read_screen()['state'] != 'idle':
+                return None
+            _HIT_MODE = 'pos'
+            gui('seq', f'click 205 {fy + CARD_DY}', note=f'點追蹤「{want}」（位置快取 y={fy}，標題列像素吻合；--task {want}）')
+            event(f'追蹤列表「{want}」位置快取命中（y={fy}，{time.time() - t0:.1f}s）→ 點 205,{fy + CARD_DY}')
+            return True
     try:
         y, ups, pages = _scan_track(want, mode, max_scrolls)
         cx = 205
@@ -618,6 +702,9 @@ def track_task(want: str, max_scrolls: int = 12, click: bool = True) -> bool | N
     log(f'追蹤列表掃描（{_HIT_MODE}）{"找到 y=%d" % y if y is not None else "沒找到"}，上 {ups} 格 / 下 {pages} 格，耗時 {time.time() - t0:.1f}s')
     if y is None:
         return False
+    if click and y <= LIST_CLICK_Y_MAX and cy == y + CARD_DY:          # 標題確認過、沒經過下緣捲動 → 記位置（快取沒中時現場讀的像素同一 y 就直接用）
+        fy0 = (load_track_pos().get(want) or {}).get('y')
+        remember_track(want, y, miss_sig if (miss_sig and fy0 == y and ups == 0 and pages == 0) else read_track_sig(y))
     if click:
         gui('seq', f'click {cx} {cy}', note=f'點追蹤「{want}」（{_HIT_MODE}，--task {want}）')
         event(f'追蹤列表找到「{want}」（{_HIT_MODE}）→ 點 {cx},{cy}')

@@ -53,8 +53,8 @@ class FakeT:
     def catch_start(self, role, count):
         return self._r('start', role)
 
-    def catch_setup_many(self, assign, count):
-        self.calls.append(('ass_open', tuple(r for r, _, _ in assign)))
+    def catch_setup_many(self, assign, count, reuse=False):
+        self.calls.append(('ass_open', tuple(r for r, _, _ in assign)) + (('reuse',) if reuse else ()))
         for r, fam, sp in assign:
             for tag in ('setup', 'start'):
                 rc = self._r(tag, r)
@@ -220,6 +220,57 @@ slept = []
 f3.sleep = slept.append
 pet_catch.run(A, stages=('wait',), tools=f3, poll=77)
 check('wait：--poll 秒數有帶進 sleep', slept == [77])
+# review 1013b §2.4：第一次輪詢依隻數估、之後 60 秒
+check('first_poll_s：4 隻 100、1 隻 40、5 隻 120（夾在 [40, 120]）', pet_catch.first_poll_s(4) == 100 and pet_catch.first_poll_s(1) == 40
+      and pet_catch.first_poll_s(5) == 120 and pet_catch.first_poll_s(9) == rp.CATCH_POLL_S)
+f3 = FT3({}, polls=[{'DKBO2': (2, True), 'DKBO3': (1, True)}, {'DKBO2': (1, True), 'DKBO3': (0, False)}, {'DKBO2': (0, False)}])
+slept = []
+f3.sleep = slept.append
+rc = pet_catch.run(A, count=4, stages=('wait',), tools=f3)
+check('wait 預設：4 隻第一次等 100 秒、之後每 60 秒', rc == 0 and slept == [100.0, 60.0, 60.0], str(slept))
+f3 = FT3({}, polls=[{'DKBO2': (0, False), 'DKBO3': (0, False)}])
+slept = []
+f3.sleep = slept.append
+pet_catch.run(A, count=1, stages=('wait',), tools=f3)
+check('wait 預設：第 2 批只抓 1 隻 → 40 秒就讀（舊版固定 120）', slept == [40.0], str(slept))
+# review 1013b §2.5-A：第 2 批沿用捉寵設置
+f = FakeT()
+pet_catch.run(A, count=1, stages=('setup',), tools=f, reuse_setup=True)
+check('--reuse-setup → catch_setup_many(reuse=True)', ('ass_open', ('DKBO2', 'DKBO3'), 'reuse') in f.calls, str(f.calls))
+f = FakeT()
+pet_catch.run(A, count=1, stages=('setup',), tools=f)
+check('預設不沿用', ('ass_open', ('DKBO2', 'DKBO3')) in f.calls)
+
+
+class R(rp.Tools):
+    """_catch_setup_pick reuse：欄位 OCR 結果可設；記錄有沒有開下拉"""
+    def __init__(self, fam, pet, n):
+        self.fam, self.pet, self.n, self.dd = fam, pet, n, []
+
+    def _pick_dropdown(self, dd, *a, **k):
+        self.dd.append(dd)
+        return True
+
+
+def pick_reuse(fam, pet, reuse, n=1):
+    t = R(fam, pet, n)
+    saved = (rp.ocr_lines, uikit.snap)
+    rp.ocr_lines = lambda box, *o: [((t.fam if box == rp.OCR_FAMILY_FIELD else t.pet if box == rp.OCR_PET_FIELD else f'可抓捕數 {t.n}'), 0, 0)]
+    uikit.snap = lambda *a, **k: None
+    try:
+        return t._catch_setup_pick('DKBO2', '鯊魚系', '克邦凱斯', 1, reuse), t.dd
+    finally:
+        rp.ocr_lines, uikit.snap = saved
+
+
+rc, dd = pick_reuse('', '', True)
+check('reuse：欄位 OCR 讀不到字（鯊魚系常讀不出）→ 不重選下拉、只驗可抓捕數', rc == 0 and dd == [], f'{rc} {dd}')
+rc, dd = pick_reuse('', '', False)
+check('不 reuse：欄位讀不到 → 照舊重選系別 / 物種下拉', rc == 0 and len(dd) == 2, f'{rc} {dd}')
+rc, dd = pick_reuse('火雞系', '火雞', True)
+check('reuse：欄位讀到別的字 → 照樣重選（不盲信上一批）', len(dd) == 2, f'{rc} {dd}')
+rc, dd = pick_reuse('', '', True, n=3)
+check('reuse：可抓捕數不對 → 照樣 4 停（不勾自動抓寵）', rc == 4 and dd == [], f'{rc} {dd}')
 
 # bag.find_item hint / select_role 已選著不重點頭像
 import bag

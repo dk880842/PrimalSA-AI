@@ -88,7 +88,9 @@ DEFAULT_DY = 100                                         # 小步捲動拖曳距
 ROW_PITCH = 80                                           # 列距（px）
 SCROLL_RATIO = 2.17                                      # 列表位移 / 拖曳距離（實測 dy 120 → 260 px）
 MAX_DY = 150                                             # 自動大步的上限
-SETTLE_S = 1.5                                           # 拖曳慣性
+SETTLE_S = 0.8                                           # 拖曳慣性：之後 _stable_shot 還會拍到「連兩張狀態條位置相同」才收（2026-10-13 review 1013b §1.2：
+                                                         # 1.5 → 0.8。0.5 沒有實測依據（慣性多久沒量過），先取 0.8；漏列另有 overlaps / merge_pages gaps 檢查）
+ROW_CLICK_WAIT_MS = 1500                                 # accept 點列後等中間標題換頁（沒改，跟捲動慣性無關）
 MAX_PAGES = 14
 
 
@@ -546,13 +548,17 @@ def scroll_page(prev_rows: list, tpl: dict, dy: int | None = None) -> tuple:
     return img, parse(img, tpl, _ocr_title), True
 
 
-def scroll_top(dy: int = TOP_DY) -> bool:
-    """捲到列表最上（連兩頁狀態條位置 + 狀態相同 = 到頂；最多 MAX_PAGES 次）。截圖失敗回 False"""
+def scroll_top(dy: int = TOP_DY, trust_arrow: bool = True):
+    """捲到列表最上（連兩頁狀態條位置 + 狀態相同 = 到頂；最多 MAX_PAGES 次）。截圖失敗回 False。
+    trust_arrow（預設，2026-10-13 review 1013b §1.2）：第一張就沒有黃色 ▲（arrow_up）= 已在頂端 → 不拖、回 'arrow'（真值）；
+    呼叫端找不到目標時要用 trust_arrow=False 重捲一次再找（防 ▲ 漏判漏列）"""
     last = None
-    for _ in range(MAX_PAGES):
+    for k in range(MAX_PAGES):
         img = _stable_shot()
         if img is None:
             return False
+        if k == 0 and trust_arrow and not arrow_up(img):
+            return 'arrow'
         sig = [(r['top'], r['status']) for r in visible_rows(img)]
         if sig == last:
             return True
@@ -561,14 +567,26 @@ def scroll_top(dy: int = TOP_DY) -> bool:
     return True
 
 
-def read_list(tab: str = '支線', dy: int | None = None, learn: bool = True, stop_at=None) -> dict:
+def read_list(tab: str = '支線', dy: int | None = None, learn: bool = True, stop_at=None, must=None) -> dict:
     """面板已開著：切到 tab → 捲到最上 → 逐頁讀到底 → {'ok','rows','gaps','tab','pages'}。
     rows = [{title, status, how}]（依列表順序）；title 為 None = 不認得（樣板與 OCR 都失敗）。gaps > 0 = 相鄰頁沒交集，可能漏列。
-    stop_at = 標題清單：全部都讀到（狀態不是 ?）就不再往下捲（逐人驗證用，省捲動）"""
+    stop_at = 標題清單：全部都讀到（狀態不是 ?）就不再往下捲（逐人驗證用，省捲動）。
+    開頭沒有 ▲ 就當已在頂端不拖（scroll_top 'arrow'）；之後 stop_at / must 的標題沒全找到 → 不信箭頭，真的捲到頂再讀一次（防 ▲ 漏判漏列）"""
     if not select_tab(tab):
         return {'ok': False, 'why': f'切不到 {tab} 分頁', 'rows': [], 'gaps': 0, 'tab': tab, 'pages': 0}
+    r = _read_list_once(tab, dy, learn, stop_at, True)
+    want = list(stop_at or []) + list(must or [])
+    if r.get('top') == 'arrow' and r['ok'] and want and not all_found(r['rows'], want):
+        r2 = _read_list_once(tab, dy, learn, stop_at, False)
+        r2['refetched'] = True
+        return r2
+    return r
+
+
+def _read_list_once(tab: str, dy, learn: bool, stop_at, trust_arrow: bool) -> dict:
     tpl = load_tpl()
-    if not scroll_top():
+    top = scroll_top(TOP_DY, trust_arrow)
+    if not top:
         return {'ok': False, 'why': '截圖失敗', 'rows': [], 'gaps': 0, 'tab': tab, 'pages': 0}
     pages = []
     last = None
@@ -594,7 +612,7 @@ def read_list(tab: str = '支線', dy: int | None = None, learn: bool = True, st
             break
     merged, gaps = merge_pages(pages)
     return {'ok': bool(merged), 'rows': [{'title': r['title'], 'status': r['status'], 'how': r['how']} for r in merged],
-            'gaps': gaps, 'tab': tab, 'pages': len(pages), 'fallbacks': fallbacks}
+            'gaps': gaps, 'tab': tab, 'pages': len(pages), 'fallbacks': fallbacks, 'top': top}
 
 
 def status(want: list | None = None, dy: int | None = None) -> dict:
@@ -636,7 +654,7 @@ def task_status(title: str, dy: int | None = None) -> tuple:
     if not open_detail():
         return uikit.fail(src, EXIT_NO_PANEL, '任務詳情打不開'), None
     try:
-        r = read_list(tab_of(name), dy)
+        r = read_list(tab_of(name), dy, must=[name])
     finally:
         close_detail()
     if not r['ok']:
@@ -783,27 +801,31 @@ def accept(title: str, dry_run: bool = False, dy: int | None = None, presses: in
     try:
         if not select_tab(tab):
             return uikit.fail(src, EXIT_NOT_FOUND, f'切不到 {tab} 分頁')
-        if not scroll_top():
-            return uikit.fail(src, EXIT_NO_PANEL, '截圖失敗')
         row = None
-        prev_sig = None
-        img = _stable_shot()
-        rows = None
-        for _ in range(MAX_PAGES):
-            if rows is not None:                              # 第 2 頁起一次捲「可見列數 − 1 列」，漏列退回小步
-                img, rows, _fb = scroll_page(rows, tpl, dy)
-            if img is None:
+        for trust in (True, False):                           # 開頭沒 ▲ 先當已在頂端；找不到再真的捲到頂重找一次（防 ▲ 漏判漏列）
+            top = scroll_top(TOP_DY, trust)
+            if not top:
                 return uikit.fail(src, EXIT_NO_PANEL, '截圖失敗')
-            if rows is None:
-                rows = parse(img, tpl, _ocr_title)
-            _learn_page(img, rows, tpl)
-            row = find_row(rows, name)
-            if row:
+            prev_sig = None
+            img = _stable_shot()
+            rows = None
+            for _ in range(MAX_PAGES):
+                if rows is not None:                          # 第 2 頁起一次捲「可見列數 − 1 列」，漏列退回小步
+                    img, rows, _fb = scroll_page(rows, tpl, dy)
+                if img is None:
+                    return uikit.fail(src, EXIT_NO_PANEL, '截圖失敗')
+                if rows is None:
+                    rows = parse(img, tpl, _ocr_title)
+                _learn_page(img, rows, tpl)
+                row = find_row(rows, name)
+                if row:
+                    break
+                sig = [(r['title'], r['status']) for r in rows]
+                if sig == prev_sig:
+                    break
+                prev_sig = sig
+            if row or top != 'arrow':
                 break
-            sig = [(r['title'], r['status']) for r in rows]
-            if sig == prev_sig:
-                break
-            prev_sig = sig
         if not row:
             return uikit.fail(src, EXIT_NOT_FOUND, f'列表裡找不到「{name}」')
         if skip_ok and row['status'] in (DONE, DOING):
@@ -812,7 +834,7 @@ def accept(title: str, dry_run: bool = False, dy: int | None = None, presses: in
             return 0
         if row['status'] != PENDING:
             return uikit.fail(src, EXIT_NOT_PENDING, f'「{name}」狀態是 {row["status"]}，不是待接取，不接（不傳送）')
-        if not uikit.safe_click(ROW_CLICK_X, row['cy'], PANEL, note=f'questdetail 選 {name}', wait_ms=int(SETTLE_S * 1000)):
+        if not uikit.safe_click(ROW_CLICK_X, row['cy'], PANEL, note=f'questdetail 選 {name}', wait_ms=ROW_CLICK_WAIT_MS):
             return uikit.fail(src, EXIT_NO_PANEL, '面板特徵消失，沒點')
         img = _stable_shot()
         if img is None:

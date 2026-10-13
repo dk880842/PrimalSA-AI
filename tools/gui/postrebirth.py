@@ -30,8 +30,11 @@
   dino       petquest.py run 2016 [--confirm-drop] [--confirm-buy-bait]                       失敗 175
   katan      petquest.py run 2019 …                                                            失敗 175
   quiz       petquest.py run 3003 …（練金布伊前 petwatch --exp-fruit 吃 2倍智慧果）            失敗 175
-  finish     questrun.py status --role all <全部任務>（JSON not_done 要空）→ pet.py list（5 人朵拉比斯出戰 + 騎寵騎乘）→ grind.py start --spot 地雷區（原地遇敵 + 5 人快戰確認）
-             失敗 176
+  finish     questrun.py status --role all <全部任務>（全員完成的任務自動移出 questrun 待驗清單）→ not_done 不空 → questrun.py verify <落後任務> --role <落後者>
+             （進行中 → 交接 → bossretry --who 補人 → 再讀；待接取 / 補不上 108）→ pet.py list（5 人朵拉比斯出戰 + 騎寵騎乘）→ grind.py start --spot 地雷區
+             （原地遇敵 + 5 人快戰確認）。失敗 176
+  逐人驗證：questrun 段一律 --verify defer、petquest 帶 --verify-defer（2026-10-13 review 1013b §2.1）：沒風險事件的任務不在各段結束各驗一次（每次 115～154 秒），
+             延到收尾那一次 status --role all；有風險事件（30 / 32 / 38 / 21 / 41 / bossretry / 重登 / BOSS 後 HP 0 / 交寵物）照舊當場驗，依賴任務接取前照舊先驗前置
   170 參數 / 段名不認得；171 保留不用（盤點失敗只警告）
 """
 import argparse
@@ -117,22 +120,24 @@ def group_by_names(plan: dict) -> list:
 
 def seg_cmds(seg: str, o: dict) -> list:
     """段 → [(腳本, 參數)]（plan 顯示與 run 共用）"""
-    pq = (['--confirm-drop'] if o.get('confirm_drop') else []) + (['--confirm-buy-bait'] if o.get('confirm_buy') else [])
+    pq = (['--confirm-drop'] if o.get('confirm_drop') else []) + (['--confirm-buy-bait'] if o.get('confirm_buy') else []) + ['--verify-defer']
+    vd = ['--verify', 'defer']         # 逐人驗證延到收尾（review 1013b §2.1）：有風險事件的任務 questrun 照舊當場驗
     return {
         'inventory': [('exp.py', ['read']), ('bag.py', ['list', 'all']), ('pet.py', ['list', '--role', 'all', '--json'])],
-        'adult': [('questrun.py', ['run', 2999, '--after', 'none', '--dragon'])],
-        'yayoi': [('questrun.py', ['run', 2017, '--after', 'none', '--dragon'])],
-        'hero': [('questrun.py', ['run', 2031, '--after', 'none'] + (HERO_DROP if o.get('confirm_drop') else []))],
-        'q182a': [('questrun.py', ['run'] + Q182A + ['--after', 'none', '--dragon'])],
+        'adult': [('questrun.py', ['run', 2999, '--after', 'none', '--dragon'] + vd)],
+        'yayoi': [('questrun.py', ['run', 2017, '--after', 'none', '--dragon'] + vd)],
+        'hero': [('questrun.py', ['run', 2031, '--after', 'none'] + vd + (HERO_DROP if o.get('confirm_drop') else []))],
+        'q182a': [('questrun.py', ['run'] + Q182A + ['--after', 'none', '--dragon'] + vd)],
         'bag1': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE1) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
-        'q182b': [('questrun.py', ['run'] + Q182B + ['--after', 'none', '--dragon'])],
+        'q182b': [('questrun.py', ['run'] + Q182B + ['--after', 'none', '--dragon'] + vd)],
         'bag2': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE2) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
-        'caves': [('questrun.py', ['run'] + CAVES + ['--after', 'none', '--dragon', '--max-min', 45])],
+        'caves': [('questrun.py', ['run'] + CAVES + ['--after', 'none', '--dragon', '--max-min', 45] + vd)],
         'dino': [('petquest.py', ['run', 2016] + pq)],
         'katan': [('petquest.py', ['run', 2019] + pq)],
         'quiz': [('petquest.py', ['run', 3003] + pq)],
         'finish': [('questrun.py', ['status', '--role', 'all'] + ALL_TASKS), ('pet.py', ['list', '--role', 'all', '--json']),
-                   ('grind.py', ['start', '--spot', o.get('spot', '地雷區')])],
+                   ('grind.py', ['start', '--spot', o.get('spot', '地雷區')]),
+                   ('questrun.py', ['verify', '<落後的任務 ID>', '--role', '<落後者>'])],
     }[seg]
 
 
@@ -297,13 +302,22 @@ class Run:
         cmds = seg_cmds('finish', self.o)
         script, args = cmds[0]
         rc, lines = self.sub(script, args, 3600)
-        nd = last_json(lines).get('not_done')
+        res = last_json(lines)
+        nd = res.get('not_done')
         if rc in PASS:
             return rc
         if rc or nd is None:
             return self.fail(EXIT_FINISH, f'收尾逐人讀任務狀態失敗 rc={rc}', fmt(script, args))
-        if nd:
-            return self.fail(EXIT_FINISH, f'收尾：還有任務沒全員完成 {nd}', fmt(script, args))
+        if nd:                                                         # 落後者（延後驗證才發現的）→ questrun verify：bossretry --who 補人 → 再讀（review 1013b §2.1）
+            ids = res.get('not_done_ids') or []
+            who = sorted({r for v in nd.values() for r in v})
+            if not ids:
+                return self.fail(EXIT_FINISH, f'收尾：還有任務沒全員完成 {nd}（questrun 沒給 not_done_ids）', fmt(script, args))
+            vargs = ['verify'] + ids + ['--role', ','.join(who)]
+            event(f'收尾：還有任務沒全員完成 {nd} → questrun verify 補人（bossretry --who）')
+            rc, _ = self.sub('questrun.py', vargs, 3 * 3600)
+            if rc:
+                return rc if rc in PASS else self.fail(EXIT_FINISH, f'收尾：落後者補不上 {nd}（questrun verify rc={rc}；108 = 待接取 / 補人後仍沒完成）', fmt('questrun.py', vargs))
         script, args = cmds[1]
         rc, lines = self.sub(script, args, 900)
         if rc:

@@ -23,15 +23,15 @@ uv run --no-project python tools/gui/petquest.py run 3003 --confirm-drop        
 ```
 - **段**：恐龍 `accept prep catch distribute train turnin drop restore`；卡坦 `accept prep catch1 distribute1 train1 turnin1 drop1 catch2 distribute2 train2 turnin2 store_reward restore`；猜謎 `accept step1 prep train turnin drop restore`（`plan` 印全文）。
 - **prep**：關遇敵 + 解散 → `pet.py list` 記 5 人原朵拉比斯等級（進度檔 `orig`）→ 取消鎖定戰寵 → 朵拉比斯存個人倉庫（寵物欄 = 騎寵 + 4 空格）。
-- **catch**：**每批 ≤ 抓寵者寵物欄空格（抓前 list 讀，最少那人；正常 4、獎勵寵沒丟就 3）**（5 隻一次抓會有 1 隻自動進個人倉庫，倉庫卡沒縮圖、成長字串沒登錄就取不出來）→ 每輪 [4, 1] 兩批：`pet_catch --stages bait` →（誘餌不夠：`--confirm-buy-bait` 才用外掛「+」買，**每按一次前後開寵物面板讀頂部石幣，要剛好 −50,000、鑽石不變，否則停**；石幣框 MONEY_BOX 待實機量，讀不到就不買）→ `--stages setup,wait,register` → 抓寵者 `store-many --pick last --skip-missing --candidates` 存公共（最後一批留 1）→ list 驗。
+- **catch**：**每批 ≤ 抓寵者寵物欄空格（抓前 list 讀，最少那人；正常 4、獎勵寵沒丟就 3）**（5 隻一次抓會有 1 隻自動進個人倉庫，倉庫卡沒縮圖、成長字串沒登錄就取不出來）→ 每輪 [4, 1] 兩批：`pet_catch --stages bait` →（誘餌不夠：`--confirm-buy-bait` 才用外掛「+」買，**每按一次前後開寵物面板讀頂部石幣，要剛好 −50,000、鑽石不變，否則停**；石幣框 MONEY_BOX 待實機量，讀不到就不買）→ `--stages setup,wait,register`（第 2 批起加 `--reuse-setup`：沿用第 1 批的系別 / 物種下拉，欄位 OCR 讀不到字不重選、讀到別的字才重選，讀回驗證照舊；wait 第一次輪詢 k×20+20 秒〔4 隻 100 秒、1 隻 40 秒〕、之後每 60 秒）→ 抓寵者 `store-many --pick last --skip-missing --candidates` 存公共（最後一批留 1）→ list 驗。
   - `rebirth_pets._split` 2026-10-13 改：整疊比要的少 → 按取消、回 92（bait_take 整疊存回公共）；舊版照輸入數量 → 拆分失敗 95。
 - **distribute**：`take-many --depot public --plan "角色:物種,…" --candidates`（抓寵者自己那種不取）→ list 驗每人每物種剛好 1 隻。
-- **train**：autoswap on → 第一種任務寵出戰 → `--verify-battle` → `grind.py start --spot 柯奧4F龜洞` → 每 120 秒 `pet.py list` 讀等級（恐龍 魯尼帖斯 18 / 貝魯卡 30、卡坦 25；最多 45 分）→ 關遇敵 → autoswap off → `rest-all --candidates`。猜謎：`grind.py start --spot 地雷區` → `petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --exp-fruit`。
-- **turnin**：`questrun.py run <ID> --after none --pet-turnin`（卡坦第 1 輪交完要讀到追蹤步號 2，否則 167）；猜謎 `questrun.py run 3003 --after none`。
+- **train**：autoswap on → 第一種任務寵出戰 → `--verify-battle` → `grind.py start --spot 柯奧4F龜洞` → **每 30 秒讀等級**（2026-10-13 review 1013b §2.3：第一次 `pet.py list`〔身分 + 格位 + 名字框指紋 nh〕，之後只 `pet.py levels --slots <任務寵格>`〔不認名字，約 5～6 秒 / 人〕；那格變空 / nh 不同 → 那輪改讀完整 list）；**連兩輪都 ≥ 門檻**（第二輪不降、最多升 10 級）才算（恐龍 魯尼帖斯 18 / 貝魯卡 30、卡坦 25；最多 45 分）→ 關遇敵 → autoswap off → `rest-all --candidates`（成功記進度檔 `rested`）。猜謎：`grind.py start --spot 地雷區` → `petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --exp-fruit`。
+- **turnin**：`questrun.py run <ID> --after none --pet-turnin --rested`（`--rested`：train 段 30 分內 rest-all 成功才帶，questrun 交件前不再 rest-all，每次省 30～90 秒；review 1013b §2.2）（卡坦第 1 輪交完要讀到追蹤步號 2，否則 167）；猜謎 `questrun.py run 3003 --after none`。postrebirth 呼叫時帶 `--verify-defer` → 內部 questrun 加 `--verify defer`（交寵物本身是風險事件，仍當場逐人驗）。
 - **drop**（`--confirm-drop` 才做，沒給 → 168 停）：`petdrop.py all 布克布克 / 修寶 / 左迪洛斯 --confirm-name 同名 --max-level 1`。
 - **restore**：卡坦先把獎勵 Lv1 朵拉比斯存個人（store_reward）→ `take-many --depot personal --plan "角色:朵拉比斯@原等級"` → 出戰 → `pet_catch --lock 戰寵 --battle-pet 朵拉比斯` → `ass.py pet all normal 攻擊 --no-resume` → list 驗 5 人朵拉比斯出戰、等級 = 原等級（猜謎 ≥ 原等級）。**不恢復掛機**（交給呼叫端 grind）。
 - 退出碼 160 參數 / 161 接取（猜謎步 1 沒金布伊 → 爬塔 quiztower 人工）/ 162 準備 / 163 誘餌 · 買 / 164 抓 / 165 分配 / 166 練 / 167 交 / 168 丟 / 169 換回；9 / 10 透傳。離線測試 `test_petquest.py`（假寵物欄 / 倉庫模擬器）。
-- **待實機**：①石幣讀取框；②「+」按前後讀可抓捕數；③分批抓（count 4 → 1）與每批存公共；④卡坦第 1 輪交完 questrun 回 117 / 155 + 步號 2；⑤練寵 list 輪詢在快戰中讀等級；⑥全流程耗時。
+- **待實機**：①石幣讀取框；②「+」按前後讀可抓捕數；③分批抓（count 4 → 1）與每批存公共；④卡坦第 1 輪交完 questrun 回 117 / 155 + 步號 2；⑤練寵 `pet.py levels` 輪詢在快戰中讀等級、nh 指紋會不會被 EXP 浮字弄亂（亂了只是改讀完整 list）；⑥全流程耗時；⑦`--reuse-setup` 第 2 批時欄位真的還是第 1 批的物種（遊戲抓完會不會重設欄位）；⑧抓寵第一次輪詢 100 / 40 秒是否太早（太早只是多開一次外掛面板）。
 
 ## 何時用
 - Task 步驟類型是交寵物（`psa.py steps <任務ID>` / `knowledge/quests/`：寵物 ID × 數量 + petLevel），或使用者說抓寵 / 練寵交任務。

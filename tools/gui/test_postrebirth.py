@@ -40,8 +40,9 @@ def pets_ok_json():
 class Fake:
     """rcs：{(腳本, 第一個參數): rc 或 [rc…]}；bag_lists：bag.py list 依序回傳的 bags dict"""
 
-    def __init__(self, rcs=None, bag_lists=None, not_done=None, pets=None):
+    def __init__(self, rcs=None, bag_lists=None, not_done=None, pets=None, not_done_ids=None):
         self.calls, self.rcs = [], dict(rcs or {})
+        self.not_done_ids = list(not_done_ids or [])
         self.bag_lists = list(bag_lists or [])
         self.not_done = not_done or {}
         self.pets = pets or pets_ok_json()
@@ -56,7 +57,7 @@ class Fake:
             b = self.bag_lists.pop(0) if len(self.bag_lists) > 1 else (self.bag_lists[0] if self.bag_lists else bags(14))
             return rc, [json.dumps({'bags': b, 'rc': rc}, ensure_ascii=False)]
         if script == 'questrun.py' and args[0] == 'status':
-            return rc, [json.dumps({'rc': rc, 'not_done': self.not_done}, ensure_ascii=False)]
+            return rc, [json.dumps({'rc': rc, 'not_done': self.not_done, 'not_done_ids': self.not_done_ids}, ensure_ascii=False)]
         if script == 'pet.py' and args[0] == 'list':
             return rc, [json.dumps(dict(self.pets, rc=rc), ensure_ascii=False)]
         return rc, []
@@ -136,9 +137,22 @@ check('questrun 回 9（驗證視窗）→ 透傳 9', rc == 9)
 f = Fake(rcs={('exp.py', 'read'): 101})
 rc = go(f, to_seg='inventory')
 check('盤點失敗只警告（不擋）', rc == 0 and pr.LAST['warnings'])
-f = Fake(not_done={'英雄島前傳（必做）': ['DKBO4']})
+f = Fake(not_done={'英雄島前傳（必做）': ['DKBO4'], '馬祖快遞(1.82)': ['DKBO2', 'DKBO4']}, not_done_ids=[2031, 2018])
 rc = go(f, from_seg='finish')
-check('收尾：status 有人沒完成 → 176、不 grind', rc == pr.EXIT_FINISH and not any(s == 'grind.py' for s, _ in f.calls))
+vc = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'verify']
+check('收尾：status 有人沒完成 → questrun verify 落後任務 --role 落後者（bossretry 補）→ 補上 → 照樣 grind', rc == 0
+      and vc == [('verify', '2031', '2018', '--role', 'DKBO2,DKBO4')] and f.calls[-1][0] == 'grind.py', str(f.calls))
+f = Fake(not_done={'英雄島前傳（必做）': ['DKBO4']}, not_done_ids=[2031], rcs={('questrun.py', 'verify'): 108})
+rc = go(f, from_seg='finish')
+check('收尾：補人失敗（verify 108）→ 176、不 grind', rc == pr.EXIT_FINISH and not any(s == 'grind.py' for s, _ in f.calls) and 'verify' in pr.LAST['info']['manual'])
+f = Fake(not_done={'英雄島前傳（必做）': ['DKBO4']}, not_done_ids=[2031], rcs={('questrun.py', 'verify'): 9})
+check('收尾：verify 回 9（驗證視窗）→ 透傳', go(f, from_seg='finish') == 9)
+f = Fake()
+go(f, confirm_drop=True)
+qr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
+pq = [a for s, a in f.calls if s == 'petquest.py']
+check('questrun 段一律 --verify defer、petquest 帶 --verify-defer（逐人驗證延到收尾）', qr and all('--verify' in a and a[a.index('--verify') + 1] == 'defer' for a in qr)
+      and pq and all('--verify-defer' in a for a in pq), str(qr[:2]))
 f = Fake(pets={'roles': {r: [{'name': '朵拉比斯', 'state': '等待'}] for r in pr.ALL_ROLES}})
 rc = go(f, from_seg='finish')
 check('收尾：寵物狀態不對 → 176', rc == pr.EXIT_FINISH and '寵物狀態' in pr.LAST['info']['msg'])

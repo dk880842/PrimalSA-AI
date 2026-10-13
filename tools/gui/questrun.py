@@ -51,11 +51,17 @@
                                  沒有 → 記進進度檔 verify_pending，全部任務結束後一次批次驗；下一個任務的前置（questdefs.prereqs，Task 表 finishTasks）在待驗清單 → 接取前先批次驗；
                                  失敗退出時待驗清單留在進度檔，下次 questrun 結束再驗（超過 2 小時的丟掉）
                      each        舊行為：每任務完成當場驗；off / --no-verify-all 不驗。詳情一開就已完成而跳過的任務預設不驗（--verify-skipped 才當場驗）
+                     defer       （2026-10-13 review 1013b §2.1，postrebirth / petquest 用）= risk，但 run 結束**不**批次驗：待驗清單留在進度檔（保留 12 小時），
+                                 依賴任務接取前照舊先驗；由呼叫端收尾 `questrun.py status --role all`（全部完成的任務自動移出待驗清單）
+                                 + `questrun.py verify <落後任務> --role <落後者>`（verify_many → bossretry --who 補人 → 再讀）處理
+  questrun.py verify [ID…] [--role 角色,…]：ID 有給 = 逐人驗這些任務（--role 預設其他 4 人）；沒給 = 驗進度檔待驗清單（12 小時內）。
+                 需要 bossretry 時先做交接（關遇敵 / 戰鬥設定 / 組隊）；驗過的移出待驗清單；仍落後 108
     5 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；quest.py 印「任務完成」（領獎後追蹤欄沒有該任務）即完成，不開詳情；沒有該字樣才讀一次詳情確認 → 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交寵物（--pet-turnin，預設關 = manual 步照舊 115；**未實機**）
                  defs.turnin（目前只有恐龍博士 2016：步 1 魯尼帖斯 / 步 2 貝魯卡，逐人「選擇」視窗）：pet.py rest-all（任務寵改等待）→ team.disband
                  → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 讀詳情；失敗 150。
                  defs.rest_pets（卡坦的願望 2019：隊長交一次 5 人完成，quest.py 預設流程交）：接取後第一片前先 pet.py rest-all。每任務只試一次
+                 --rested（petquest 練完已 rest-all --candidates 且退出碼 0 才帶）：接取後 / 交寵物前都不再 rest-all（2026-10-13 review 1013b §2.2，每次交件省 30～90 秒）
   紅暴 2031（2026-10-13 起納入；使用者：有龍王效果就組隊打到底；**未實機**）：前置 check_prereq（5 人 ≥80 級、背包各有耐久力回複藥，bag.team_read 開一次；不符 110）
                  → require_dragon（接取前沒 buff 就吃；都沒有 → 156）→ 接取「英雄島前傳（必做）」→ 每片 quest.py --stop-after-rewards 1（每步收片）
                  → 步 6 kind=fight（do_fight：全隊 HP < 80% 補血 → 便捷傳送「龍王守衛」5510:50,17 → team.form → quest.py --fight --step 6 → team.check；
@@ -157,7 +163,8 @@ FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出
 TEAM_FRESH_S = 30.0             # 隊伍在這麼多秒內驗過（form 成功 / quest.py 37）→ 接取前不重組、quest.py 加 --team-fresh（2026-10-12 解救老爺爺：開始前 4 次 + quest.py 啟動 1 次開關切換面板）
 DONE_TRUST_S = 2 * 3600         # 進度檔記「已完成」且在這段時間內 → 重啟續跑直接跳過（超過視為可能轉生 / 封印書重置過，重新讀一次詳情）
 DONE, DOING, PENDING = '已完成', '進行中', '待接取'
-VERIFY_MODES = ('risk', 'each', 'off')
+VERIFY_MODES = ('risk', 'each', 'off', 'defer')
+DEFER_KEEP_S = 12 * 3600        # --verify defer（postrebirth 整套約 5 小時）待驗清單保留多久；risk 模式仍用 DONE_TRUST_S
 BATTLE_OK_S = 30 * 60           # 戰鬥設定檢查 OK 後這麼久內（之間沒有重登 / bossretry）沿用，不再開外掛面板（review §5.1：19 次 run 開頭每次 11 秒）
 HP_FRESH_S = 5 * 60             # 全隊 HP 讀過（且沒人偏低）/ 剛補完血後這麼久內、之間沒有戰鬥 → 任務開始前沿用（review §5.2）
 HP_EVERY = 3                    # quest.py --hp-check-every 預設（路上一般戰鬥每幾場讀一次全隊 HP；questdefs hp_every 可覆寫，連戰任務 1）
@@ -532,8 +539,8 @@ def print_plan(defs, opts: dict) -> None:
             else:
                 print(f'  - 步 {st}：kind={sd["kind"]} → 停下交人（115）' + ('（加 --pet-turnin 可自動交，未實機）' if d.get('turnin') else ''))
         if d.get('rest_pets'):
-            print('  - 交寵物前：' + ('--pet-turnin：接取後第一片前 pet.py rest-all（任務寵改等待）' if opts.get('pet_turnin') else
-                                      '任務寵要先改等待（手動 pet.py rest-all，或加 --pet-turnin 自動）'))
+            print('  - 交寵物前：' + (('--rested：呼叫端剛 rest-all 過 → 不重做' if opts.get('rested') else '--pet-turnin：接取後第一片前 pet.py rest-all（任務寵改等待）')
+                                      if opts.get('pet_turnin') else '任務寵要先改等待（手動 pet.py rest-all，或加 --pet-turnin 自動）'))
         if d.get('stop_after_rewards'):
             print(f'  - 每片 quest.py 加 --stop-after-rewards {d["stop_after_rewards"]}（每步領完獎就收片、下一片前讀步號；停手前 settle_reward 補關領獎窗）')
         if d.get('reward_pets'):
@@ -561,11 +568,15 @@ def print_plan(defs, opts: dict) -> None:
         print(f'  - 逐人驗證（--verify {opts.get("verify", "risk")}）：' + {
             'risk': '本任務有風險事件（30/32/38/21/41、bossretry、重登、BOSS 後 HP 0、交寵物）才當場驗，否則延後到 run 結束批次驗'
                     + (f'；接取前先批次驗待驗的前置任務 {pre}' if pre else ''),
-            'each': '完成後當場逐人驗（舊行為）', 'off': '不驗'}[opts.get('verify', 'risk')])
+            'each': '完成後當場逐人驗（舊行為）', 'off': '不驗',
+            'defer': '同 risk，但沒風險事件的延後到呼叫端收尾（postrebirth finish：status --role all → questrun.py verify 補人）'
+                     + (f'；接取前先批次驗待驗的前置任務 {pre}' if pre else '')}[opts.get('verify', 'risk')])
     if not opts.get('dragon', False):
         print('[龍王的守護] 預設不吃（要吃加 --dragon；對 questdefs 標 dragon 的任務吃（除彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望），--dragon-all 全吃）')
     else:
         print(f'[龍王的守護] 剩的整疊留在 {LEADER} 背包，run 結束（含失敗）存回公共倉庫；中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 補存')
+    if opts.get('verify') == 'defer':
+        print('[逐人驗證] --verify defer：沒風險事件的任務 run 結束不驗，留在進度檔待驗清單（12 小時）給呼叫端收尾驗')
     if opts.get('verify', 'risk') == 'risk':
         print('[逐人驗證] 沒風險事件的任務延後：全部任務結束後其他 4 人每人開一次詳情批次讀（失敗退出留進度檔，下次 run 結束再驗）')
     if opts.get('drop_items'):
@@ -1196,7 +1207,10 @@ class Run:
             if rc:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
-        if self.o.get('pet_turnin') and d.get('rest_pets'):            # 卡坦的願望：隊長一次交，交前任務寵都要等待（10-10 一隻出戰 → 按完成 21 次不前進）
+        if self.o.get('pet_turnin') and self.o.get('rested') and self.rested != tid:
+            self.rested = tid                                          # --rested：呼叫端（petquest 練完）剛 rest-all 過且驗過 → 接取後 / 交寵物前都不重做（review 1013b §2.2）
+            event(f'任務 {tid}：--rested → 呼叫端剛做過 rest-all（任務寵已等待），交寵物前不重做')
+        if self.o.get('pet_turnin') and d.get('rest_pets') and self.rested != tid:   # 卡坦的願望：隊長一次交，交前任務寵都要等待（10-10 一隻出戰 → 按完成 21 次不前進）
             rc = T.pet_rest_all()
             if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
                 return rc
@@ -1475,13 +1489,13 @@ class Run:
         if mode == 'off':
             return 0
         tid = d['id']
-        if mode == 'each' or self.risk:
+        if mode == 'each' or self.risk:                                 # defer 同 risk：有風險事件照舊當場驗
             if mode != 'each':
                 event(f'任務 {tid}：本任務有風險事件 {self.risk} → 當場逐人驗')
             return self.verify_many([d])
         self.st.setdefault('verify_pending', {})[str(tid)] = time.time()
         self.save()
-        event(f'任務 {tid}：沒有風險事件 → 逐人驗證延後（run 結束 / 依賴它的任務接取前一次批次驗）')
+        event(f'任務 {tid}：沒有風險事件 → 逐人驗證延後（' + ('呼叫端收尾 / ' if mode == 'defer' else 'run 結束 / ') + '依賴它的任務接取前一次批次驗）')
         return 0
 
     def flush_verify(self, where: str) -> int:
@@ -1490,9 +1504,10 @@ class Run:
         if not pend or self.o.get('verify', 'risk') == 'off':
             return 0
         now = time.time()
-        for k in [k for k, t in pend.items() if now - (t or 0) > DONE_TRUST_S or not questdefs.get(int(k))]:
+        keep = DEFER_KEEP_S if self.o.get('verify') == 'defer' else DONE_TRUST_S
+        for k in [k for k, t in pend.items() if now - (t or 0) > keep or not questdefs.get(int(k))]:
             pend.pop(k, None)
-            event(f'{where}：待驗任務 {k} 已超過 {DONE_TRUST_S // 3600} 小時（或不認得），不驗、移出清單')
+            event(f'{where}：待驗任務 {k} 已超過 {keep // 3600} 小時（或不認得），不驗、移出清單')
         ds = [questdefs.get(int(k)) for k in pend]
         if not ds:
             self.save()
@@ -1505,11 +1520,11 @@ class Run:
         self.save()
         return rc
 
-    def verify_many(self, ds) -> int:
+    def verify_many(self, ds, roles=None) -> int:
         """逐人驗證（隊長本人剛確認過，不再讀）：其他 4 人各開一次詳情讀 ds 全部任務 → 有人不是「已完成」→ 進行中的 bossretry --who 落後者 → 再讀那幾個人那幾個任務；
-        仍不行 / 讀不到 / 待接取 → 108"""
+        仍不行 / 讀不到 / 待接取 → 108。roles = 要讀的人（questrun.py verify --role；預設隊長以外 4 人）"""
         T = self.T
-        roles = [r for r in ALL_ROLES if r != LEADER]
+        roles = list(roles) if roles else [r for r in ALL_ROLES if r != LEADER]
         todo = list(ds)
         for attempt in range(2):                                    # 0 = 第一次驗；1 = bossretry 補人後再驗
             ids = [d['id'] for d in todo]
@@ -1541,6 +1556,11 @@ class Run:
             if attempt or not self.o.get('boss_retry', True):
                 why = '補人後仍沒完成' if attempt else '--no-boss-retry'
                 return self.fail(EXIT_LAGGARD, f'任務 {[(d["id"], lag) for d, lag in lags]} 仍是進行中（{why}），停手交人', laggards=self.info['laggards'])
+            if getattr(self, 'need_handover', False):                 # questrun.py verify：讀狀態不用交接，要 bossretry 補人才先交接（關遇敵 / 戰鬥設定 / 組隊）
+                self.need_handover = False
+                hrc = self.handover()
+                if hrc:
+                    return hrc
             for d, lag in lags:
                 event(f'任務 {d["id"]}：{lag} 沒完成 → bossretry --who（落後者當隊長組 5 人重打 → 切回 DKBO 重組）')
                 brc, binfo = T.boss_retry(d['track'], who=lag, **self.br_kw())
@@ -1586,7 +1606,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False,
         battle_check: bool = True, pet_turnin: bool = False, drop_reward=None, confirm_drop=None,
         verify: str = 'risk', dragon_all: bool = False, hp_every: int = HP_EVERY, battle_cache: bool = True,
-        post: bool = True, drop_items=None, confirm_drop_items=None) -> int:
+        post: bool = True, drop_items=None, confirm_drop_items=None, rested: bool = False) -> int:
     """use_dragon 預設 False（2026-10-12 起不吃龍王的守護；--dragon 對 questdefs 標 dragon 的任務吃（NO_DRAGON 以外全部），dragon_all 全吃）。
     verify = risk（預設：風險事件才當場逐人驗，其餘 run 結束批次驗）/ each（舊行為：每任務完成當場驗）/ off；verify_all=False 相容舊參數 = off。
     drop_reward 要和 confirm_drop 名單完全相同才會丟（不可逆）"""
@@ -1622,7 +1642,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress,
                 team_hp_min=team_hp_min, boss_retry=boss_retry, verify=verify, verify_skipped=verify_skipped,
                 battle_check=battle_check, pet_turnin=pet_turnin, drop_reward=drops, dragon_all=dragon_all, hp_every=hp_every,
-                battle_cache=battle_cache, post=post, drop_items=ditems)
+                battle_cache=battle_cache, post=post, drop_items=ditems, rested=rested)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -1646,7 +1666,10 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
                 break
             r.write_log(d, t0)
             done.append(d['id'])
-    if not rc:
+    if not rc and verify == 'defer':
+        if r.st.get('verify_pending'):
+            event(f'--verify defer：待逐人驗證 {sorted(r.st["verify_pending"])} 留在進度檔（呼叫端收尾 status --role all / questrun.py verify 再驗）')
+    elif not rc:
         rc = r.flush_verify('全部任務結束')                            # 延後的逐人驗證一次批次讀（review §2-B）
     elif r.st.get('verify_pending'):
         event(f'失敗退出：待逐人驗證 {sorted(r.st["verify_pending"])} 留在進度檔，下次 questrun 結束（或依賴任務接取前）再驗')
@@ -1682,6 +1705,53 @@ def parse_roles(text: str):
     return out
 
 
+def clear_pending(ids, roles) -> list:
+    """逐人讀到 ids 這些任務「讀到的人全部已完成」→ 從進度檔待驗清單（verify_pending）移掉（讀到的人要涵蓋隊長以外 4 人才算驗過）。→ 移掉的 ID"""
+    if not ids or not set(ALL_ROLES) - {LEADER} <= set(roles or []):
+        return []
+    st = load_progress()
+    pend = st.get('verify_pending') or {}
+    gone = [i for i in ids if pend.pop(str(i), None) is not None]
+    if gone:
+        save_progress(st)
+        event(f'逐人讀狀態：{gone} 全員已完成 → 移出待驗清單')
+    return gone
+
+
+def cmd_verify(ids=None, role: str = '', tools=None, **opts) -> int:
+    """questrun.py verify：ID 有給 = 逐人驗這些任務；沒給 = 驗進度檔待驗清單（DEFER_KEEP_S 內）。roles 預設隊長以外 4 人。
+    讀狀態不交接；有人進行中要 bossretry 才先交接。驗過的移出待驗清單。→ 0 / 108 / 9 / 10 …；結果 LAST"""
+    LAST.clear()
+    roles = None
+    if role:
+        roles = parse_roles(role)
+        if roles is None:
+            print(f'questrun：--role {role} 有不認得的角色', file=sys.stderr)
+            return uikit.EXIT_USAGE
+    o = dict(verify='defer', boss_retry=True, battle_check=True, battle_cache=True, after='none')
+    o.update(opts)
+    T = tools or Tools()
+    r = Run(T, o)
+    r.need_handover = True
+    pend = r.st.setdefault('verify_pending', {})
+    if ids:
+        defs, bad = questdefs.resolve(ids)
+        if bad:
+            print(f'questrun：不認得的任務 ID {bad}', file=sys.stderr)
+            return uikit.EXIT_USAGE
+        event(f'verify：逐人驗 {[d["id"] for d in defs]}（{roles or "隊長以外 4 人"}）')
+        rc = r.verify_many(defs, roles)
+        if not rc:
+            for d in defs:
+                pend.pop(str(d['id']), None)
+            r.save()
+    else:
+        rc = r.flush_verify('verify（待驗清單）')
+    LAST.update(ok=rc == 0, rc=rc, info=r.info, verify_pending=sorted(pend))
+    event(f'verify 結束 rc={rc}' + (f'；仍待驗 {sorted(pend)}' if pend else ''))
+    return rc
+
+
 def cmd_status(ids, role: str = '') -> int:
     defs, bad = questdefs.resolve(ids)
     if bad:
@@ -1698,7 +1768,9 @@ def cmd_status(ids, role: str = '') -> int:
         for d in defs:
             print(f'{d["id"]} {d["detail"]}\t' + '\t'.join(str((res.get(r) or {}).get(d['detail'], '讀不到')) for r in roles))
         lag = {d['detail']: [r for r in roles if (res.get(r) or {}).get(d['detail']) != DONE] for d in defs}
-        print(json.dumps({'rc': rc, 'not_done': {k: v for k, v in lag.items() if v}}, ensure_ascii=False))
+        clear_pending([d['id'] for d in defs if not lag[d['detail']]], roles)
+        print(json.dumps({'rc': rc, 'not_done': {k: v for k, v in lag.items() if v},
+                          'not_done_ids': [d['id'] for d in defs if lag[d['detail']]]}, ensure_ascii=False))
         return rc
     res = questdetail.status([d['detail'] for d in defs])
     if not res.get('ok'):
@@ -1730,11 +1802,17 @@ def main() -> int:
         p.add_argument('--drop-items', default='', help='全部成功後 5 人刪掉這些背包獎勵道具（bag.purge；只限 questdefs drop_items，例：薩姆吉爾的首飾；要配 --confirm-drop-items）')
         p.add_argument('--confirm-drop-items', default='', help='--drop-items 的確認（名單要完全相同）')
         p.add_argument('--no-post', action='store_true', help='任務完成後不做 questdefs post 的獎勵存倉（紅暴：英雄的祝福存個人、龍王的守護存公共）')
+        p.add_argument('--rested', action='store_true', help='配 --pet-turnin：呼叫端剛 pet.py rest-all 過（petquest 練完）→ 交寵物前不重做 rest-all')
     p = sub.add_parser('plan')
     common(p)
     p = sub.add_parser('status')
     p.add_argument('ids', nargs='*')
     p.add_argument('--role', default='', help='逐人讀：all 或 DKBO3,DKBO5（每人 char.switch 一次，最後切回 DKBO）')
+    p = sub.add_parser('verify')
+    p.add_argument('ids', nargs='*')
+    p.add_argument('--role', default='', help='要讀的人（預設隊長以外 4 人）；postrebirth 收尾帶 status --role all 讀到的落後者')
+    p.add_argument('--no-boss-retry', action='store_true', help='有人進行中不補人，直接 108')
+    p.add_argument('--no-battle-check', action='store_true')
     p = sub.add_parser('run')
     common(p)
     p.add_argument('--dry-run', action='store_true')
@@ -1747,13 +1825,18 @@ def main() -> int:
     p.add_argument('--no-trust-progress', action='store_true', help='不信進度檔的「已完成」（預設 2 小時內的完成記錄直接跳過）')
     p.add_argument('--no-verify-all', action='store_true', help='= --verify off（相容舊旗標）')
     p.add_argument('--verify', default='risk', choices=VERIFY_MODES,
-                   help='逐人驗證：risk（預設）= 本任務有風險事件才當場驗、其餘 run 結束 / 依賴任務接取前批次驗；each = 舊行為每任務當場驗；off = 不驗')
+                   help='逐人驗證：risk（預設）= 本任務有風險事件才當場驗、其餘 run 結束 / 依賴任務接取前批次驗；each = 舊行為每任務當場驗；off = 不驗；'
+                        'defer = 同 risk 但 run 結束不驗（留給呼叫端收尾 status --role all / questrun.py verify；postrebirth / petquest 用）')
     p.add_argument('--hp-check-every', type=int, default=HP_EVERY, help='quest.py 片內全隊 HP：路上一般戰鬥每幾場讀一次（預設 %d；questdefs hp_every 優先；0 = 只在任務戰後讀）' % HP_EVERY)
     p.add_argument('--battle-check-always', action='store_true', help='交接一定查外掛戰鬥設定（預設 30 分內查過且沒重登 / bossretry → 沿用）')
     p.add_argument('--verify-skipped', action='store_true', help='詳情一開就已完成而跳過的任務也逐人驗（預設只驗本次跑完的）')
     a = ap.parse_args()
     if a.cmd == 'status':
         return cmd_status(a.ids, a.role)
+    if a.cmd == 'verify':
+        rc = cmd_verify(a.ids, a.role, boss_retry=not a.no_boss_retry, battle_check=not a.no_battle_check)
+        print(json.dumps(LAST, ensure_ascii=False, default=str))
+        return rc
     dry = a.cmd == 'plan' or a.dry_run
     kw = dict(max_slices=getattr(a, 'max_slices', MAX_SLICES), slice_s=getattr(a, 'slice_s', SLICE_S),
               max_min=getattr(a, 'max_min', MAX_MIN), hp_min=getattr(a, 'hp_min', HP_MIN),
@@ -1762,7 +1845,7 @@ def main() -> int:
               battle_check=not a.no_battle_check, pet_turnin=a.pet_turnin, drop_reward=a.drop_reward, confirm_drop=a.confirm_drop,
               verify=getattr(a, 'verify', 'risk'), dragon_all=a.dragon_all, hp_every=getattr(a, 'hp_check_every', HP_EVERY),
               battle_cache=not getattr(a, 'battle_check_always', False), post=not a.no_post, drop_items=a.drop_items,
-              confirm_drop_items=a.confirm_drop_items)
+              confirm_drop_items=a.confirm_drop_items, rested=a.rested)
     if a.dragon and a.no_dragon:
         print('questrun：--dragon 和 --no-dragon 不能同時給', file=sys.stderr)
         return uikit.EXIT_USAGE

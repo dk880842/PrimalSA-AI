@@ -184,7 +184,12 @@ class Sim:
         if cmd == 'list':
             if self.train_calls is not None:
                 self.train_calls += 1
-            return self.out(0, js={'roles': {r: [dict(p, slot=i + 1) for i, p in enumerate(self.bar[r])] for r in ROLES}, 'rc': 0})
+            return self.out(0, js={'roles': {r: [dict(p, slot=i + 1, nh=p['name']) for i, p in enumerate(self.bar[r])] for r in ROLES}, 'rc': 0})
+        if cmd == 'levels':                  # 只讀等級：格號 + 等級 + 名字框指紋（模擬用名字）
+            self.levels_calls = getattr(self, 'levels_calls', 0) + 1
+            sl = [int(x) for x in self.opt(args, '--slots', '').split(',') if x]
+            return self.out(0, js={'roles': {r: [{'slot': i + 1, 'level': p['level'], 'nh': p['name']} for i, p in enumerate(self.bar[r]) if not sl or i + 1 in sl]
+                                             for r in ROLES}, 'rc': 0})
         if cmd == 'store-many':
             roles = ROLES if self.opt(args, '--role') == 'all' else self.opt(args, '--role').split(',')
             depot = self.opt(args, '--depot')
@@ -228,12 +233,12 @@ class Sim:
         return self.out(2)
 
 
-def grow(sim, by=15):
+def grow(sim, by=2):
     """模擬練功：每次 list 前任務寵升 by 級"""
     orig = sim.pet
 
     def pet(args):
-        if args[0] == 'list' and any(c[0] == 'grind.py' for c in sim.calls) and not any(c == ('enc_off',) for c in sim.calls[[i for i, c in enumerate(sim.calls) if c[0] == 'grind.py'][-1]:]):
+        if args[0] in ('list', 'levels') and any(c[0] == 'grind.py' for c in sim.calls) and not any(c == ('enc_off',) for c in sim.calls[[i for i, c in enumerate(sim.calls) if c[0] == 'grind.py'][-1]:]):
             for r in ROLES:
                 for p in sim.bar[r]:
                     if p['name'] not in ('布拉奇多斯', '朵拉比斯', '金布伊'):
@@ -278,7 +283,16 @@ check('每人寵物欄 = 騎寵 + 原朵拉比斯出戰（等級 = 原等級）�
 check('分批抓 [4, 1]：bait 兩次、setup 兩次；誘餌 50 → 40', len([a for a in names(s, 'pet_catch.py') if 'bait' in a]) == 2 and s.bait == 40)
 check('抓前關遇敵 + 解散；收尾鎖定戰寵 + 一般動作攻擊', ('enc_off',) in s.calls and ('team.py', ('disband',)) in s.calls
       and any(a[:2] == ('--lock', '戰寵') for a in names(s, 'pet_catch.py')) and ('pet', 'all', 'normal', '攻擊', '--no-resume') in names(s, 'ass.py'))
-check('交寵物用 questrun --pet-turnin', ('run', '2016', '--after', 'none', '--pet-turnin') in names(s, 'questrun.py'))
+check('交寵物用 questrun --pet-turnin --rested（train 段剛 rest-all 過，questrun 不重做）', ('run', '2016', '--after', 'none', '--pet-turnin', '--rested') in names(s, 'questrun.py'), str(names(s, 'questrun.py')))
+pa = [a for a in names(s, 'pet.py') if a[0] in ('list', 'levels')]
+tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
+in_train = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels', 'rest-all')]
+in_train = in_train[:in_train.index('rest-all')]
+check('練寵輪詢：第一次 list（身分）、之後只 levels --slots 任務寵格', in_train[0] == 'list' and in_train[1:] and set(in_train[1:]) == {'levels'}
+      and all('--slots' in a for a in names(s, 'pet.py') if a[0] == 'levels'), str(in_train))
+pc = [a for a in names(s, 'pet_catch.py') if '--stages' in a and 'setup' in a[a.index('--stages') + 1]]
+check('抓寵第 1 批不帶 --reuse-setup、第 2 批帶（沿用捉寵設置）', len(pc) == 2 and '--reuse-setup' not in pc[0] and '--reuse-setup' in pc[1], str(pc))
+check('沒給 --verify-defer → questrun 不帶 --verify', not any('--verify' in a for a in names(s, 'questrun.py')))
 check('原朵拉比斯先存個人、最後 @原等級 取回', any(a[0] == 'take-many' and '朵拉比斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py')))
 check('完成後進度檔清空（下一轉從頭）', json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']['done'] == [])
 
@@ -413,6 +427,46 @@ finally:
     for k, v in keep.items():
         setattr(bag, k, v)
     rp.ocr_lines, uikit.gui, uikit.fail = keep_ocr, keep_gui, keep_fail
+
+# ---------------- review 1013b：--verify-defer / --rested 時效 / levels 合併 / 練寵確認
+s = grow(Sim(2016))
+rc = go(2016, s, confirm_drop=True, verify_defer=True)
+qa = names(s, 'questrun.py')
+check('--verify-defer → 接取 / 交件的 questrun 都帶 --verify defer', rc == 0 and qa and all('--verify' in a and a[a.index('--verify') + 1] == 'defer' for a in qa), str(qa))
+s = grow(Sim(2016))
+go(2016, s, confirm_drop=True, to_stage='train')
+s.clock = lambda: 10 ** 6                                  # 隔了很久才續跑交件 → 不信 rested
+go(2016, s, confirm_drop=True, from_stage='turnin', reset=False)
+check('rested 超過 RESTED_S 才續跑交件 → 不帶 --rested（questrun 自己 rest-all）', not any('--rested' in a for a in names(s, 'questrun.py') if '--pet-turnin' in a), str(names(s, 'questrun.py')))
+need = {'魯尼帖斯': 18}
+base = {'DKBO': [{'slot': 1, 'name': '布拉奇多斯'}, {'slot': 2, 'name': '魯尼帖斯', 'level': 3, 'nh': 'a'}]}
+m, why = pq.merge_levels(base, {'DKBO': [{'slot': 2, 'level': 9, 'nh': 'a'}]}, need)
+check('merge_levels：nh 相同 → 等級換新、其他格照舊', why is None and m['DKBO'][1]['level'] == 9 and m['DKBO'][0]['name'] == '布拉奇多斯')
+check('merge_levels：nh 不同 / 變空格 / 沒讀到 → 不合併（改讀完整 list）', pq.merge_levels(base, {'DKBO': [{'slot': 2, 'level': 9, 'nh': 'b'}]}, need)[0] is None
+      and pq.merge_levels(base, {'DKBO': [{'slot': 2, 'empty': True}]}, need)[0] is None and pq.merge_levels(base, {'DKBO': []}, need)[0] is None)
+check('task_slots：各角色任務寵格聯集', pq.task_slots({'A': [{'slot': 2, 'name': '魯尼帖斯'}], 'B': [{'slot': 3, 'name': '魯尼帖斯'}, {'slot': 1, 'name': 'x'}]}, need) == [2, 3])
+k = ('DKBO', '魯尼帖斯')
+check('train_confirm：第一次 ≥ 門檻 → pending；連兩輪 ≥ 且不降、升 ≤ 10 → due', pq.train_confirm({k: 18}, {}, need) == ([], [k]) and pq.train_confirm({k: 20}, {k: 18}, need) == ([k], []))
+check('train_confirm：前一輪沒達標 / 讀值下降 / 大跳（OCR 錯值）→ 不算', pq.train_confirm({k: 18}, {k: 17}, need)[0] == [] and pq.train_confirm({k: 19}, {k: 25}, need)[0] == []
+      and pq.train_confirm({k: 128}, {k: 18}, need)[0] == [] and pq.train_confirm({k: None}, {k: 20}, need) == ([], []))
+s = grow(Sim(2016))
+_lv = s.pet
+_bad = [1]
+
+
+def _pet(a):
+    rc, ls = _lv(a)
+    if a[0] == 'levels' and _bad:                            # 第一次 levels：魯尼帖斯那格指紋變了（被浮字蓋住）
+        _bad.pop()
+        ls = [ls[0].replace('"nh": "魯尼帖斯"', '"nh": "x"')]
+    return rc, ls
+
+
+s.pet = _pet
+rc = go(2016, s, confirm_drop=True)
+tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
+seq = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels')]
+check('levels 指紋對不上 → 那一輪改讀完整 list，之後回到只讀等級，仍練完', rc == 0 and seq[:3] == ['list', 'levels', 'list'] and seq[3] == 'levels', f'rc={rc} {seq[:6]}')
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)
