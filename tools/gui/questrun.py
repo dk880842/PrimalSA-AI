@@ -13,6 +13,8 @@
   questdefs dragon_required（紅暴 2031）不看 --dragon 一定吃，背包 / 公共倉庫都沒有 → 156（改走單人逃跑）；
   第一次從公共倉庫整疊取出，剩的**留在 DKBO 背包**，run 結束（成功或失敗；9 / 10 / 116 / 152 等畫面要留給人看的除外）才整疊存回公共倉庫；
   中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 開頭（不吃時）/ 結束補存。depot_use 判 buff 已在（skip）不計「已吃」
+  龍王用完（2026-10-14）：同一次 run 內第一次 depot_use 回 92 且 step=take（背包 / 倉庫都沒有）→ 記 dragon_unavailable（只在記憶體，每次 run 重置），
+  事件 log 記一次「龍王已用完，本次不再吃」，後續任務 / 片不再呼叫 depot_use；dragon_required（紅暴）照舊再試、不行 156；其他失敗（90 面板等）仍下一片再試
   uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態（當前角色）
   uv run --no-project python tools/gui/questrun.py status --role all|DKBO3,DKBO5 [任務ID …]   # 逐人：每人 char.switch → 開一次詳情讀這些任務 → 最後切回 DKBO（詳情面板沒有頭像列，只能切角色）
   可 import：questrun.run(ids, dry_run=False, after='grind', tools=None, ...) → 退出碼；結果 dict 在 questrun.LAST
@@ -602,6 +604,7 @@ class Run:
         self.pending = None
         self.run_dragons = 0                                           # 本次 run 吃的龍王的守護（LAST.dragon_used；進度檔累計另放 dragon_used_total）
         self.task_dragons = 0                                          # 目前任務吃的（quest-log 摘要用）
+        self.dragon_unavailable = False                                # 本次 run 龍王已用完（depot_use 92 take：背包 / 倉庫都沒有）→ 非 dragon_required 任務不再嘗試（2026-10-14）
         self.team_ok_at = 0.0                                          # 最近一次確認 5 人隊伍完整的時間（form 成功 / quest.py 37）；0 = 不新鮮
         self.mail_no_lost = False                                      # 信封發亮但信箱沒有「丟失的物品」（mail 112）→ 本次 run 不再因發亮開信箱
         self.hp_ok_at = 0.0                                            # 全隊 HP 確認夠的時間（讀了沒人偏低 / 剛補血）；有戰鬥 / 重登 / bossretry → 0（HP_FRESH_S）
@@ -689,6 +692,8 @@ class Run:
           none 背包與公共倉庫都沒有（92）/ fail 其他失敗"""
         if not self.dragon_wanted(d):
             return 'off'
+        if self.dragon_unavailable and not (d or {}).get('dragon_required'):
+            return 'off'                                               # 本次 run 已確認沒龍王：不再每片白開背包 / 倉庫（dragon_required 照舊再試、不行 156）
         active = self.T.dragon_active()                                # bag.buff_state：人形圖示在 = 還有效（不看時間）；2倍智慧果的 EXP 圖示不會誤判
         if not force and active:
             return 'active'
@@ -709,7 +714,12 @@ class Run:
                 self.st['dragon_in_bag'] = True                        # 取出後才失敗：龍王在 DKBO 背包，下次跳過取出、run 結束存回
             self.warn(f'龍王的守護失敗 rc={rc} {info}；這段不用龍王（會遇敵）')
             self.save()
-            return 'none' if rc == BAG_ITEM and info.get('step') == 'take' else 'fail'
+            if rc == BAG_ITEM and info.get('step') == 'take':
+                if not self.dragon_unavailable:
+                    self.dragon_unavailable = True
+                    event('龍王已用完（背包與公共倉庫都沒有），本次不再吃')
+                return 'none'
+            return 'fail'
         if info.get('step') == 'skip':                                 # depot_use 關遇敵、等戰鬥結束後再讀 buff 列已有圖示（review §3.4：舊版照算「已吃」）
             event('龍王的守護：depot_use 讀到 buff 列已有人形圖示（questrun 剛才讀時多半在戰鬥 / 轉場）→ 沒吃，不計數')
             return 'skip'

@@ -210,6 +210,8 @@ class Fake:
 
     def dragon(self, have=False):
         self.rec('dragon', have)
+        if getattr(self, 'dragon_take_fail', False):
+            return (92, {'step': 'take'})
         return (self.dragon_rc, {'warn': '已取出', 'step': 'use'} if self.dragon_rc else {'step': self.dragon_step})
 
     def dragon_store(self):
@@ -703,6 +705,19 @@ f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(
 rc = go(f, [2017], use_dragon=True, dragon_all=True)
 check('龍王失敗只警告、任務照跑', rc == 0 and f.names().count('quest') == 2)
 check('龍王取出後失敗 → 下次 have=True', ('dragon', True) in f.calls, str([c for c in f.calls if c[0] == 'dragon']))
+# 16a) 龍王用完（92 take）→ 本次 run 只試一次；其他失敗碼（90）仍每片再試；dragon_required 照舊再試
+f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, []), (0, [])], active=None)
+f.dragon_take_fail = True
+rc = go(f, [2017], use_dragon=True, dragon_all=True)
+check('龍王 92 take → 只呼叫一次 depot_use、任務照跑', rc == 0 and f.names().count('dragon') == 1 and f.names().count('quest') == 3, str(f.names()))
+f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], active=None, dragon_rc=90)
+go(f, [2017], use_dragon=True, dragon_all=True)
+check('龍王 90（面板）→ 每片再試', f.names().count('dragon') >= 2, str(f.names()))
+_r = questrun.Run(Fake(active=None), dict(dragon=True, dragon_all=True))
+_r.T.dragon_take_fail = True
+_r.ensure_dragon({'id': 1, 'dragon': True})
+check('ensure_dragon none → dragon_unavailable', _r.dragon_unavailable and _r.ensure_dragon({'id': 1, 'dragon': True}) == 'off' and _r.T.names().count('dragon') == 1)
+check('dragon_required 仍再試', _r.ensure_dragon({'id': 2031, 'dragon_required': True}) == 'none' and _r.T.names().count('dragon') == 2)
 f = Fake(status={D17: [questrun.DOING, questrun.DOING, questrun.DONE]}, quest=[(0, []), (0, [])], active=None)
 go(f, [2017], use_dragon=True, dragon_all=True)
 check('buff 列沒人形圖示 → 每次都吃（不看時間）', f.names().count('dragon') >= 2)
