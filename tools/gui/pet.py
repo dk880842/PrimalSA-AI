@@ -1929,7 +1929,7 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
                             slots = None
                             continue
                         rc = _store_body(r, nm, depot, sl['slot'] if sl else None, allow_slot1, ctx, op, nm if nm in ams else None, pre=(0, slots))
-                        if rc in (EXIT_NAME, EXIT_FORBID) and not op['clicked'] and predicted and attempt == 0:
+                        if rc in (EXIT_NAME, EXIT_FORBID, EXIT_SELECT) and not op['clicked'] and predicted and attempt == 0:
                             log(f'{r}：推算的寵物欄與現場不符（{op.get("msg")}），重讀一次')
                             uikit.mark('store-many relist')
                             slots = None

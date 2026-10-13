@@ -81,6 +81,7 @@ STAGES = ['preflight', 'boxes', 'store', 'catch', 'distribute', 'ride', 'battle'
 LEADER = 'DKBO'
 ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 FAMILY_NEIGHBORS = {'鯊魚系': (('犀牛', '牛系'), ('飛天蛙', '飛夭蛙', '蛙系'))}          # 外掛系別清單的上下鄰居（2026-10-12 實機）
+FAMILY_BELOW = {'雷龍系': '大象系'}                         # 系別清單中該列正下方的列（該列被清單上緣切掉時用下一列的位置判斷要往回捲）
 SPECIES_ORDER = {'鯊魚系': ['克邦凱斯', '加克拉', '加格', '邦恩吉'], '火雞系': ['火雞', '克克洛斯', '霍爾克', '奇寶']}   # 寵物下拉的列順序（第一列 y=421、列距 42、x=1115）；選中的藍底白字 OCR 讀不到時用位置
 FAMILY_OF = {'布拉奇多斯': '雷龍系'}            # 物種 → 外掛捉寵設置的系別（PetData 第 27 組；其他物種用 --family）
 BAIT = '寵物誘餌'
@@ -153,6 +154,13 @@ def pick_row(lines: list, ident: tuple) -> tuple:
             ok = uikit.snap_pet(t) == val
         if ok and not any(abs(y - h[2]) <= 15 for h in hits):          # 多個放大倍數會重複回同一列：y 差 ≤ 15 併成一個（2026-10-12）
             hits.append((t, x, y))
+    if not hits and kind == 'growth':                                  # OCR 常漏整段數字（'49/10/8/1' → '49//8/1'）：4 段裡讀到的 ≥ 3 段都相同、漏的當萬用，且只有一列這樣吻合才用（2026-10-13 DKBO5 / DKBO3 實機）
+        want = val.split('/')
+        for t, x, y in lines:
+            got = re.sub(r'\s+', '', t).split('/')
+            if len(got) == len(want) == 4 and sum(1 for g in got if g) >= 3 and all(not g or g == w for g, w in zip(got, want)) \
+                    and not any(abs(y - h[2]) <= 15 for h in hits):
+                hits.append((t, x, y))
     if len(hits) == 1:
         return hits[0], ''
     return None, f'{kind} {val!r}：下拉讀到 {[t for t, _, _ in lines]}，吻合 {len(hits)} 列（要剛好 1 列）'
@@ -729,7 +737,7 @@ class Tools:
                 uikit.snap('rebirth-catch-count')
                 return uikit.fail(SRC, 4, f'可抓捕數讀到 {n}，要 {count}（背包誘餌數不對？不勾自動抓寵）')
             return 0
-        if not self._pick_dropdown(CATCH_XY['family_dd'], CATCH_LIST_FAMILY, OCR_FAMILY_FIELD, ('name', family), scroll=True, snap_tag='family', plain=family):
+        if not fam_ok and not self._pick_dropdown(CATCH_XY['family_dd'], CATCH_LIST_FAMILY, OCR_FAMILY_FIELD, ('name', family), scroll=True, snap_tag='family', plain=family):
             return uikit.fail(SRC, EXIT_CATCH_PICK, f'{role} 捉寵系別選不到 {family}（{self.pick_why or "點了但欄位讀回不是它"}；沒勾自動抓寵）')
         if not self._pick_dropdown(CATCH_XY['pet_dd'], CATCH_LIST_PET, OCR_PET_FIELD, ('name', species), scroll=False, snap_tag='species', fam_species=SPECIES_ORDER.get(family)):
             return uikit.fail(SRC, EXIT_CATCH_PICK, f'{role} 捉寵物種選不到 {species}（{self.pick_why or "點了但欄位讀回不是它"}；沒勾自動抓寵）')
@@ -765,6 +773,10 @@ class Tools:
                     for (_, y2) in ys['n']:
                         if 70 <= y2 - y1 <= 100 and hit is None:
                             hit = (plain, x1, (y1 + y2) // 2)
+            if not hit and plain in FAMILY_BELOW and any(FAMILY_BELOW[plain] in t and y < 470 for t, _, y in lines):
+                uikit.gui('drag', '750', '520', '750', '566', note=f'rebirth_pets 捉寵清單往回捲一點（{plain} 被清單上緣切掉，只露出下一列 {FAMILY_BELOW[plain]}）')   # 2026-10-13 實機：雷龍系 在大象系正上方，捲到只剩半列時 OCR 讀不到、下一步就捲過頭
+                uikit.sleep(1.0)
+                continue
             if not hit and not scroll and ident[0] == 'name' and fam_species and ident[1] in fam_species:
                 hit = (ident[1], 1115, 421 + 42 * fam_species.index(ident[1]))      # 位置備援：只在 OCR 沒讀到時；點完照樣讀欄位驗證
             if hit:

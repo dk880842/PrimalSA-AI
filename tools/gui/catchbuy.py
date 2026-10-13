@@ -35,7 +35,15 @@ def parse_money(lines) -> tuple:
             if v.isdigit():
                 nums.append((x, int(v)))
     nums.sort(key=lambda a: a[0])
-    return (nums[0][1] if nums else None), (nums[1][1] if len(nums) > 1 else None)
+    ded = []
+    for x, v in nums:                                              # 多組 OCR 設定會把同一個數字讀多次（x 差 < 80）→ 合併，否則鑽石欄會變成石幣的重複（2026-10-13 實機誤停）
+        if ded and abs(x - ded[-1][0]) < 80:
+            continue
+        ded.append((x, v))
+    nums = ded
+    stone = next((v for x, v in nums if x < 450), None)
+    dia = next((v for x, v in nums if 450 <= x < 700), None)       # 鑽石欄在 x≈520～600；讀不到（OCR 常漏「0」）= None，不要拿 x≈808 的活力當鑽石（2026-10-13 實機誤停）
+    return stone, dia
 
 
 def money() -> tuple:
@@ -57,8 +65,13 @@ def press_plus(role, limit=None) -> tuple:
     try:
         if rc:
             return rc, None, None
-        read = lambda: rp.parse_count(''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, '-Zooms', '2,3,4')))   # noqa: E731
-        before = read()
+        def read(zero_ok=False):
+            txt = ''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, '-Zooms', '2,3,4'))
+            n = rp.parse_count(txt)
+            if n is None and zero_ok and '可抓捕數' in txt and not re.search(r'\d', re.sub(r'.*可抓捕數', '', txt)):
+                return 0                                           # 2026-10-13 實機：可抓捕數 = 0 時 OCR 常整個漏掉「0」只剩「可抓捕數:」「+」；按後必須讀到 1 才算數（_one 仍驗 +1 / 石幣剛好 -50000）
+            return n
+        before = read(zero_ok=True)
         if before is None or not ass.panel_open():
             return EXIT_BAIT, before, None
         if limit is not None and before >= limit:

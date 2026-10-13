@@ -73,6 +73,8 @@ def confirm_names_ok(ct: str, want: str) -> bool:
     import re
     import difflib
     t = re.sub(r'\s+', '', ct or '')
+    if re.search(r'丟棄[【\[（(]' + re.escape(re.sub(r'[\W_]+', '', want)) + r'[】\]）)]', t):
+        return True                                                # 多組 OCR 串起來時完整的【名字】優先（2026-10-13 多魯寶：殘字「【多魯嗎?」排在前面被非貪婪比對取走）
     m = re.search(r'丟棄[【\[（(]?(.*?)[】\]）)]?嗎', t) or re.search(r'[【\[（(]([^】\]）)]*)[】\]）)]', t)
     if not m:
         return False
