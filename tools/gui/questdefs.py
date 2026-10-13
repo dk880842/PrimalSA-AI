@@ -79,15 +79,20 @@ Q182 = [
          note='純巡路 + 對話（卡坦 / 霍爾特 / 盜賊基地最底層夢德族長，10-10 實測約 3 分）'),
     dict(id=3003, detail='猜謎三兄弟(1.82)', track='猜謎三兄弟', accept_npc='受理A 811:30,20', steps_total=3,
          steps={1: dict(kind='manual')}, bag_slots=1, boss=False, est_min=50, live=False, reward_pets=['左迪洛斯'],
+         pet_prep={2: dict(need='金布伊 Lv77（練寵）', petwatch='petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --exp-fruit')},
          note='步 1 爬塔（811→810 共 11 層，810 屬 noTaskNavigate 不能自動巡路）+ 金布伊 Lv77 要人 / 手動：每層點守衛 →「猜謎答題」→ 4 張寵物圖選一（玩家觸發的任務答題，准許查 quests/answers.md 作答；若不是此畫面一律當驗證停手）。'
               '接取：詳情 →「接藍暴任務」→「接受」要按 2 次，questdetail.accept 預設 presses=2 已支援；questrun 接取後進步 1 即停 115。'
               '步 2、3 預設：金布伊練到 77（約 9 分）後 `questrun run 3003` 續跑，點追蹤直接巡到 810 伊那多，不用重爬塔；交接前 5 人戰寵換金布伊；獎勵左迪洛斯（丟）'),
     dict(id=2016, detail='恐龍博士(1.82)', track='恐龍博士', accept_npc='恐龍博士哈魯 11006:11,11', steps_total=2,
          steps={1: dict(kind='manual'), 2: dict(kind='manual')}, bag_slots=0, boss=False, est_min=45, live=False,
          turnin=dict(kind='dino', steps={0: (1, 2), 1: (1, 2), 2: (2,)}), rest_pets=True, reward_pets=['布克布克'],
+         pet_prep={1: dict(need='魯尼帖斯（呼拔拔系）Lv18+ 每人 1 隻', assign='DKBO2:呼拔拔系:魯尼帖斯', count=5),
+                   2: dict(need='貝魯卡（老虎系）Lv30+ 每人 1 隻', assign='DKBO3:老虎系:貝魯卡', count=5)},
          note='交寵物類（Task type=7，要抓魯尼帖斯 Lv18+ ×5 / 貝魯卡 Lv30+ ×5，見 psa-pet-quest skill）：questrun 預設只負責接取，之後步 1、2 都停 115 交人（加 --pet-turnin：rest-all → 解散 → pet_turnin dino 5 人逐人交 → DKBO 重組，未實機）；交時解散逐人交，跳「選擇寵物」視窗要看名字點卡片（quest.py 不處理）；交前寵物改「等待」；獎勵布克布克（丟）'),
     dict(id=2019, detail='卡坦的願望(1.82)', track='卡坦的願望', accept_npc='卡坦 100:230,180', steps_total=2,
          steps={}, bag_slots=0, boss=False, est_min=80, live=False, rest_pets=True, reward_pets=['修寶', '朵拉比斯'],
+         pet_prep={1: dict(need='4 色鯊魚各 Lv25+，每人各 1 隻', assign='DKBO2:鯊魚系:克邦凱斯,DKBO3:鯊魚系:加克拉,DKBO4:鯊魚系:加格,DKBO5:鯊魚系:邦恩吉', count=5),
+                   2: dict(need='4 色火雞各 Lv25+，每人各 1 隻（步 1 交完、修寶丟掉、寵物欄空出後才抓）', assign='DKBO2:火雞系:火雞,DKBO3:火雞系:克克洛斯,DKBO4:火雞系:霍爾克,DKBO5:火雞系:奇寶', count=5)},
          note='交寵物（4 色鯊魚 / 4 色雞各 ≥25 級）；**交前先 `pet.py rest-all`**（10-10 一隻在出戰 → 按完成 21 次不前進）；隊長交一次 5 人完成；步 1 獎勵修寶（丟）、步 2 朵拉比斯（存個人倉庫）；寵物準備是手動流程'),
 ]
 
@@ -119,6 +124,21 @@ for _d in ALL:
 BY_ID = {d['id']: d for d in ALL}
 DEFAULT_ORDER = [d['id'] for d in Q182]
 STEP_KINDS = ('walk', 'manual')
+
+
+def pet_prep_hint(d: dict, step) -> str | None:
+    """d['pet_prep'] 有這一步 → 「需先抓 / 練寵」訊息（含下一步該跑的指令）；沒有 → None。
+    pet_prep[步] = dict(need=說明, assign='角色:系別:物種,…' + count=誘餌數 → pet_catch.py 指令 / petwatch='練寵指令')"""
+    pp = (d.get('pet_prep') or {}).get(step)
+    if not pp:
+        return None
+    if pp.get('petwatch'):
+        cmd = f'uv run --no-project python tools/gui/{pp["petwatch"]}'
+    elif pp.get('assign'):
+        cmd = f'uv run --no-project python tools/gui/pet_catch.py --assign "{pp["assign"]}" --count {pp.get("count", 5)}（先關原地遇敵、解散隊伍）'
+    else:
+        cmd = '見 psa-pet-quest SKILL.md'
+    return f'需先抓 / 練寵：步 {step} {pp["need"]}；下一步跑：{cmd}；寵物備妥後 `questrun run {d["id"]} --after none` 續跑'
 
 
 _ROWS: list = []

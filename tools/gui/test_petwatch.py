@@ -242,6 +242,37 @@ petwatch.STATE.unlink(missing_ok=True)
 rc = petwatch.main(['--once'])
 check('--once（沒 --apply）只讀不換', rc == 0 and len(scans) == 1 and not FT.calls)
 
+# --exp-fruit：開練前一律交給 depot_use（讀 buff 圖示決定吃不吃）
+import depot_use  # noqa: E402
+_calls = []
+
+
+def _fake_du(rc, step='done'):
+    def f(role, item, *a, **k):
+        _calls.append((role, item))
+        return rc, {'step': step}
+    return f
+
+
+_orig_du = depot_use.run
+check('--exp-fruit 旗標預設關', petwatch.main([], dry_args=True).exp_fruit is False and petwatch.main(['--exp-fruit'], dry_args=True).exp_fruit is True)
+depot_use.run = _fake_du(0)
+check('eat_exp_fruit：呼叫 depot_use DKBO 2倍智慧果', petwatch.eat_exp_fruit() == 0 and _calls == [('DKBO', '2倍智慧果')], str(_calls))
+depot_use.run = _fake_du(95, 'verify')
+check('eat_exp_fruit：95 回傳 rc（不拋例外）', petwatch.eat_exp_fruit() == 95)
+scans.clear(); _calls.clear()
+FT = FakeT()
+petwatch.tools = lambda: FT
+petwatch.STATE.unlink(missing_ok=True)
+depot_use.run = _fake_du(95, 'verify')
+rc = petwatch.main(['--once', '--exp-fruit'])
+check('--once --exp-fruit：吃失敗（95）照常掃一輪', rc == 0 and len(scans) == 1 and _calls == [('DKBO', '2倍智慧果')])
+depot_use.run = _fake_du(9)
+scans.clear()
+rc = petwatch.main(['--once', '--exp-fruit'])
+check('--exp-fruit：9 驗證視窗 → 停、不掃', rc == 9 and not scans)
+depot_use.run = _orig_du
+
 # 補血預設關（2026-10-13：練功不自動補血）
 check('預設不補血', petwatch.main([], dry_args=True).no_heal is True)
 check('--heal 才補血', petwatch.main(['--heal'], dry_args=True).no_heal is False)

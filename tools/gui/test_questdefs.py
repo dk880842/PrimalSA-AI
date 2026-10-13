@@ -84,5 +84,14 @@ check('沒量到巡路秒數（交寵物 / 猜謎）→ 不吃', not any(questde
 check('prereqs：1.82 任務要先完成成人儀式；成人儀式 / 洞窟沒有前置', questdefs.prereqs(2017, tasks) == [2999] and questdefs.prereqs(2999, tasks) == []
       and questdefs.prereqs(2000, tasks) == [])
 check('四寶玉之謎 hp_every = 1（連戰）', questdefs.get(2010).get('hp_every') == 1)
+
+# pet_prep：需先抓 / 練寵的步驟提示（questrun 追蹤沒反應 → 155）
+for _tid, _st in ((2019, 1), (2019, 2), (2016, 1), (2016, 2), (3003, 2)):
+    _h = questdefs.pet_prep_hint(questdefs.get(_tid), _st)
+    check(f'{_tid} 步 {_st} 有 pet_prep 提示', bool(_h) and '需先抓 / 練寵' in _h and f'questrun run {_tid}' in _h, str(_h))
+check('2019 步 2 提示 = pet_catch 火雞系', 'pet_catch.py' in questdefs.pet_prep_hint(questdefs.get(2019), 2) and '火雞系' in questdefs.pet_prep_hint(questdefs.get(2019), 2))
+check('3003 步 2 提示 = petwatch --exp-fruit', 'petwatch.py' in questdefs.pet_prep_hint(questdefs.get(3003), 2) and '--exp-fruit' in questdefs.pet_prep_hint(questdefs.get(3003), 2))
+check('沒設 pet_prep 的任務 / 步 → None', questdefs.pet_prep_hint(questdefs.get(2017), 1) is None and questdefs.pet_prep_hint(questdefs.get(2019), 3) is None)
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

@@ -492,6 +492,16 @@ f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, []), (0, [])]
 rc = go(f, [2017])
 check('3 且無 walk 步驟 → 先 unfreeze（刷新 + 出口格重踏）再重跑 quest', rc == 0 and f.names().count('unfreeze') == 1 and f.names().count('quest') == 2, str(f.names()))
 
+# 8-pp) 2019 卡坦步 2 需先抓雞：追蹤沒反應 → 不刷新，直接 155 + 指令；步號讀不到 → 照舊刷新後 112
+D19 = questdefs.get(2019)['detail']
+f = Fake(status={D19: [questrun.DOING]}, steps=[2] * 6, quest=[(3, [])] * 8)
+rc = go(f, [2019])
+check('2019 步 2 追蹤沒反應 → 155、不 unfreeze', rc == questrun.EXIT_NEEDPETS and 'unfreeze' not in f.names(), str(f.names()))
+check('155 訊息帶 pet_catch 指令與火雞系', 'pet_catch.py' in questrun.LAST['info'].get('msg', '') and '火雞系' in questrun.LAST['info'].get('msg', ''), questrun.LAST['info'].get('msg'))
+f = Fake(status={D19: [questrun.DOING]}, steps=[], quest=[(3, [])] * 8)
+rc = go(f, [2019])
+check('2019 步號讀不到 → 照舊 112（刷新重試）', rc == questrun.EXIT_STEP and f.names().count('unfreeze') >= 1, str(f.names()))
+
 # 8a) quest.py 18 領獎窗關不掉：重試成功續跑 / 仍失敗 152 / 畫面已不是 reward 不點（Fake.reward_rr）
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(18, []), (0, [])])
 rc = go(f, [2017])

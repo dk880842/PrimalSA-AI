@@ -10,6 +10,8 @@
   --back-slot 已不用（2026-10-13 起換回改用 pet.py 依名字找格、外掛下拉依 OCR 文字選；保留參數相容）。
   --max-tries N：同一角色換回失敗幾次就放棄（預設 2；放棄的人寫 errlog、不再重試，最後退出碼 4）
   uv run --no-project python tools/gui/petwatch.py --heal              # 兼做補血檢查（HP < --hp% / MP < --mp% 連 2 次 → heal_trip 補血再回 --spot）
+  --exp-fruit：開練前先跑 `depot_use.py DKBO 2倍智慧果`（由它讀 buff 圖示決定吃不吃；2026-10-13 play agent 憑印象判斷「已有 buff」沒吃、實際已過期，所以不要自己判斷跳過）；
+    失敗（95 沒看到 buff / 倉庫沒有果）只記 errlog 照常監測，9 / 10 驗證視窗 / 斷線才停
   補血預設**關**（2026-10-13 起；使用者規定練功不自動補血，psa-grind-no-auto-heal）；--no-heal 保留相容（= 預設，no-op）
 
 換回流程（2026-10-13 改：舊版盲點外掛下拉「第 2 項」，下拉順序每人不同 → DKBO2 / 3 / 5 又鎖回金布伊、每輪關開遇敵無限迴圈）：
@@ -396,6 +398,18 @@ def run_swaps(due: list, done: set, gave: set, tries: dict, st: dict, levels: di
                 errlog.add(f'petwatch 開回原地遇敵失敗：{e}', source='petwatch')
 
 
+def eat_exp_fruit() -> int:
+    """開練前吃 2倍智慧果：一律交給 depot_use（讀 buff 圖示決定吃不吃，不憑印象 / state.json 判斷）→ 退出碼（0 = 已有 / 吃到）"""
+    import depot_use
+    rc, info = depot_use.run('DKBO', '2倍智慧果')
+    if rc:
+        i = errlog.add(f'petwatch --exp-fruit：depot_use 2倍智慧果 rc={rc}（{info.get("step")}）', source='petwatch')
+        log(f'2倍智慧果沒吃到 rc={rc}（errlog #{i}），照常監測')
+    else:
+        log('2倍智慧果：' + ('buff 已在，沒重吃' if info.get('step') == 'skip' else '已吃（buff 圖示確認）'))
+    return rc
+
+
 def main(argv=None, dry_args: bool = False):
     """dry_args=True：只解析參數回 Namespace（測試用，不碰遊戲）"""
     if not dry_args:
@@ -416,6 +430,7 @@ def main(argv=None, dry_args: bool = False):
     ap.add_argument('--heal-every', type=int, default=15, help='補血檢查間隔秒數（預設 15）')
     ap.add_argument('--hp', type=int, default=40)
     ap.add_argument('--mp', type=int, default=20)
+    ap.add_argument('--exp-fruit', action='store_true', help='開練前先 depot_use DKBO 2倍智慧果（讀 buff 圖示決定吃不吃）')
     ap.add_argument('--for', dest='duration', type=int, default=0, help='跑幾秒後自己結束（測試用）')
     a = ap.parse_args(argv)
     a.no_heal = not heal_on(a)
@@ -432,6 +447,14 @@ def main(argv=None, dry_args: bool = False):
     if not take_lock():
         log('已有另一支 petwatch 在跑（tools/.cache/petwatch.lock），結束')
         return 3
+    if a.exp_fruit:
+        frc = eat_exp_fruit()
+        if frc in (9, 10):                                   # 驗證視窗 / 斷線：整個停
+            try:
+                LOCK.unlink()
+            except OSError:
+                pass
+            return frc
     st = load_state()
     done = set(st['done'])
     gave: set = set()                                   # 本次執行放棄的角色（不寫回下次：重跑 petwatch = 人工處理過、再試）

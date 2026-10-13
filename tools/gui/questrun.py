@@ -88,6 +88,7 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；「時間�
   151 丟獎勵寵失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；info.drop）
   153 任務接不下去：quest.py 40（任務 NPC 只有「再見」）且背包有空、信箱沒有丟失的物品（或處理 2 次後 NPC 仍只有再見）→ 停手回報（條件不符？請人看）
   154 背包滿自動處理失敗：讀空格 / 刪白名單失敗、刪完仍滿、mail.py 領取失敗（114 = 領了沒消失）
+  155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep：卡坦 2019 步 1 鯊 / 步 2 雞、恐龍博士、猜謎三兄弟步 2 金布伊）：不刷新重試，訊息直接寫下一步 pet_catch.py / petwatch.py 指令；manual 步（115）也附同一提示；步號讀不到照舊 112
   背包滿進信箱（2026-10-13 強盜的洞穴步 3：5 人背包滿 15 格，薩頓家的頭盔進系統郵件「這是您丟失的物品」→ 老人薩頓只剩再見）：
                  觸發 = quest.py 40 或片後信封發亮；做法 = make_room（空格 < 1 的人 bag.purge AUTO_PURGE）→ mail.run('claim')（帳號共用信箱一次領完）→ 續跑；
                  信封發亮但沒有丟失信（112）→ 本次 run 不再因發亮開信箱
@@ -121,6 +122,7 @@ EXIT_BATTLESET = 109                                                 # 戰鬥設
 EXIT_REWARD = 152                                                    # 領獎視窗關不掉（quest.py 18 → 重試仍失敗；152 grep 過沒被用）
 REWARD_RETRY_MAX = 3                                                 # 每個任務最多重試關領獎窗幾次（避免無限迴圈）
 EXIT_TURNIN, EXIT_DROP = 150, 151                                    # 交寵物 / 丟獎勵寵失敗（150～151 grep 過沒被用）
+EXIT_NEEDPETS = 155                                                   # 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep；155 grep 過沒被用）
 EXIT_BYE, EXIT_BAGMAIL = 153, 154                                    # 任務 NPC 只有再見（背包 / 信箱都不是原因）/ 背包滿自動處理失敗（153～154 grep 過沒被用）
 BYE_RECOVER_MAX = 2             # 每個任務 quest.py 40（NPC 只有再見）時最多做幾次「背包 / 信箱」處理
 HP_LOW_MAX = 5                  # 每個任務 quest.py 41（片內 HP 偏低）最多補血幾次，超過 111
@@ -505,7 +507,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 152 領獎窗關不掉 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -1013,7 +1015,7 @@ class Run:
                     return self.task_done(d, ts)
                 continue
             if kind == 'manual':
-                return self.fail(EXIT_MANUAL, f'任務 {tid} 步 {step} kind=manual：停下交人', step=step)
+                return self.fail(EXIT_MANUAL, f'任務 {tid} 步 {step} kind=manual：停下交人' + (('；' + questdefs.pet_prep_hint(d, step)) if questdefs.pet_prep_hint(d, step) else ''), step=step)
             if kind == 'walk' and from_pending:                         # 自動巡路優先：quest.py 回 3（追蹤沒反應）才用 walk 備援（2026-10-11 實測點追蹤會傳送 + 巡路）
                 rc = self.do_walk(d, step, sd)
                 if rc:
@@ -1136,6 +1138,11 @@ class Run:
                 continue
             if act == 'no_track':
                 st2, kind2, sd2 = self.special_step(d)
+                if d.get('pet_prep') and kind2 != 'walk':              # 步驟需要先抓 / 練寵（卡坦步 2 抓雞：追蹤本來就不會巡路）→ 不刷新 6 次，直接回明確退出碼 + 下一步指令
+                    stp = st2 if st2 is not None else self.T.read_step(d['track'])
+                    hint = questdefs.pet_prep_hint(d, stp) if stp is not None else None
+                    if hint:
+                        return self.fail(EXIT_NEEDPETS, f'任務 {tid}：追蹤沒反應，{hint}', step=stp, quest_rc=rc)
                 if kind2 == 'walk':
                     self.pending = (st2, kind2, sd2)
                     continue                                           # 下一圈 special_step 會走 walk

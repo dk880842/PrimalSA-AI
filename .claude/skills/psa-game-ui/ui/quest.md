@@ -234,6 +234,8 @@ uv run --no-project python tools/gui/test_quiztower.py [--full]          # 離�
 - 實測（2026-10-11 14:5x）：`status` 約 60～95 s（捲動等慣性為主），1.82 清單 19 項 + 其他 14 列全部讀出、與人工逐頁截圖 0 錯；`accept 成人儀式` 成功（傳送到 10204:14,6 儀式的審判，對話框按接受，詳情確認進行中，約 50 s）。
 
 ## questrun.py：1.82 任務驅動器（P2，2026-10-11；計畫 notes/plan-182-script.md）
+- **吃 2倍智慧果 / 龍王的守護一律跑 `uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果`（龍王同理，換道具名）**：由它讀 buff 圖示決定吃不吃（已有就 skip、沒有才取出吃並驗圖示，沒驗到回 95）；**不要憑印象或 state.json / watch 的 buff 顯示判斷「已經有」而跳過**（2026-10-13 play agent 判斷 DKBO 有 buff 沒吃，實際已過期）。練寵掛機（petwatch）可加 `petwatch.py --exp-fruit` 讓它開練前自己跑。
+- **退出碼 155 需先抓 / 練寵（2026-10-13）**：no_track（quest.py 3）時若 questdefs 該任務有 `pet_prep` 且讀得到步號在其中（2019 步 1 / 2、2016 步 1 / 2、3003 步 2）→ 直接 155（`info.step`），訊息含下一步 pet_catch.py / petwatch.py 指令，不跑刷新 6 次；步號讀不到 → 舊流程（刷新後 112）。離線測試 test_questrun（8-pp）、test_questdefs。「寵物面板殘留」：quest.py `close_stray_panel` 是在 questrun 重跑 quest.py 時關掉別的工具（petwatch 掃描 / pet.py）留下的面板；questrun 自己 rest-all 走 pet.Session 會關面板，未找到 questrun 自己遺留的路徑（根因待實機：疑為同時跑的 petwatch / pet_catch 輪詢）。
 入口 `uv run --no-project python tools/gui/questrun.py plan|run|status [任務ID …]`；資料表 `questdefs.py`（2999 / 2017 / 2015 live，2027 / 2018 / 2011 只有資料）；特殊步驟 `questhandlers.py`（walk：成人儀式步 1 走到 10204:188,13）。退出碼 110～119（見 questrun.py 檔頭）。
 - 流程：交接（關遇敵 → **戰鬥設定檢查** → DKBO、組隊）→ 每任務 task_status（已完成跳過 / 待接取接取 / 進行中續跑）→（`--dragon` 才）龍王的守護 → quest.py 迴圈依退出碼分支 → 詳情確認已完成 →（`--drop-reward` 才）丟獎勵寵 → 全部成功才 `grind.py start --spot 地雷區`；失敗不恢復。
 - **2026-10-12 預設變更 / 新旗標**（離線測試通過，**實機未驗證**）：

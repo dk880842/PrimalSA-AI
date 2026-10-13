@@ -49,6 +49,7 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 
 ### 3. 練（地點：柯奧4F龜洞 Lv80，練級傳送 → 柯奧山的小洞窟４樓 11004）
 - 外掛左欄勾「自動轉換戰寵」（轉換級數使用者已設 30，所有任務寵統一練到 30；練完**取消勾選**）。
+- **吃 2倍智慧果 / 龍王的守護一律跑 `uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果`（龍王同理，換道具名）**：由它讀 buff 圖示決定吃不吃（已有就 skip、沒有才取出吃並驗圖示，沒驗到回 95）；**不要憑印象或 state.json / watch 的 buff 顯示判斷「已經有」而跳過**（2026-10-13 play agent 判斷 DKBO 有 buff 沒吃，實際已過期）。練寵掛機可加 `petwatch.py --exp-fruit` 讓它開練前自己跑。
 - 每人第一隻按「出戰」390,703（規則 1）。
 - `/psa-quick-team` 組隊 → `/psa-grind-start`（原地遇敵 + 5 人快速戰鬥逐一確認）。
 - 監測：寵物面板逐人點頭像讀寵物等級；全部達標才收。交前逐人確認每隻都在、等級都到（否則整隊「條件不滿足」）。
@@ -174,4 +175,5 @@ uv run --no-project python tools/gui/rebirth_pets.py --from catch               
 - 舊分配流程（register 之前）：catcher 先 `learn-species`（縮圖），`store-many --pets 名,名,名 --depot public --pick last` 存 3 隻，再 `take --depot personal --index N` 取倉庫那隻 + `store-many` 存 1 隻；其他人 `take-many` 取。倉庫卡沒縮圖只靠成長字串：不同物種可能同字串 → 撞字串的卡要用縮圖（取出後 list 看 ≈物種）判斷；**不准盲給 `--index`**（2026-10-12 #294 取到左迪洛斯）：沒名字的卡用目標 `#成長字串`（`--expect-growth` / plan `DKBO4:#34/7/4/8`），同名多隻等級不同（朵拉比斯 Lv126 / Lv1）用 `朵拉比斯@126`：先 OCR 卡片下緣綠字等級挑對的那張，讀不出來且候選 ≥ 2 → 72 不取；只有 1 張候選才取、取完回寵物分頁驗等級。
 - 練：`pet_catch.py --autoswap on|off`（外掛一般設置「自動轉換戰寵」）；**開遇敵練寵前 `pet_catch.py --verify-battle`**（逐人確認有出戰寵，否則 105）；5 人約 5 分鐘全部 ≥30。出戰中的寵物 rest-all 讀不到名字 → `set-state 角色 物種 等待 --slot N` 或手動點休息。
 - 交：`questrun run 2019 --after none [--pet-turnin]`（`--pet-turnin` = 接取後先自動 `pet.py rest-all`；龍王 10-12 起預設不吃）：**步 1 交完會自動接著對步 2 的卡坦按完成，沒有雞時 quest.py 在「對話 ↔ 選擇對象面板」循環（現已 SELECT_LOOP_MAX=6 次停手 rc 29 → questrun 117）**；步 1 後 5 人各得修寶（`petdrop.py all 修寶 --confirm-name 修寶`）、寵物欄空出後才抓雞。
+- **questrun 退出碼 155（2026-10-13）**：追蹤沒反應且 `questdefs.pet_prep` 標了該步需先抓 / 練寵（卡坦步 1 鯊 / 步 2 雞、恐龍博士、猜謎三兄弟步 2 金布伊）→ 不再刷新重試 6 次（11:54～11:58 卡坦步 2 就是這樣停 112），訊息直接寫下一步 `pet_catch.py --assign …` / `petwatch.py …`；備妥後 `questrun run <ID> --after none` 續跑。步號讀不到仍走舊流程 112；manual 步（115）訊息也附同一提示。
 - 獎勵朵拉比斯（Lv1）存個人倉庫，取回 Lv126 那隻出戰（`take --pet 朵拉比斯 --expect-level 126` 或 take-many plan `朵拉比斯@126`）；外掛鎖定重勾一行 `pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯]`（外掛面板只開一次；寵物欄裡戰寵同名 2 隻會先擋 107，先把多的存倉）。
