@@ -22,8 +22,9 @@
   reward_pets （選填）任務獎勵寵物名（只給 plan 顯示；要丟由使用者下 --drop-reward / --confirm-drop，questrun 只丟 1 級）
   hp_every    （選填）片內全隊 HP 每幾場一般戰鬥讀一次（quest.py --hp-check-every；沒填 = questrun --hp-check-every 預設 3）；連戰任務填 1
   walk_s      （自動）2026-10-13 二轉後實跑 quest.py 自報的巡路秒數合計（WALK_S；沒量到 = None）
-  dragon      （自動）walk_s >= DRAGON_WALK_MIN 才 True：questrun --dragon 只對這些「長巡路」任務吃龍王的守護
-              （2026-10-13 review §3.2：亞姆的斧頭巡路 7 秒、夢幻洞窟 9 秒也各吃一顆 30 秒；--dragon-all 恢復每個任務都吃）
+  dragon      （自動）不在 NO_DRAGON 才 True：questrun --dragon 對這些任務吃龍王的守護（buff 還在就跳過）
+              （使用者 2026-10-13 定：除了 彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 之外全部都吃；
+               review §3.2 曾改成只吃長巡路，使用者否決。walk_s 仍保留供參考）
 前置依賴：prereqs(id) 讀 Task 表第 1 步的 finishTasks（1.82 全部要先完成成人儀式 2999）；questrun 逐人驗證延後時，依賴任務接取前先批次驗
 """
 from pathlib import Path
@@ -115,12 +116,13 @@ QCAVE = [
 # 2026-10-13 二轉後重做實測：每任務 quest.py 自報「走路不計時」秒數合計（notes/review-redundancy-1013.md §1）
 WALK_S = {2999: 43, 2017: 2, 2015: 7, 2027: 79, 2018: 316, 2011: 9, 2024: 63, 2020: 93, 2023: 43, 2028: 81, 2025: 589,
           2010: 136, 2014: 141, 2012: 35, 2013: 18, 2021: 70, 2000: 320, 2003: 220, 2001: 374, 2002: 678}
-DRAGON_WALK_MIN = 120           # 巡路 >= 這麼多秒才值得吃龍王（取出 + 吃約 30 秒；短路程最多遇 1 場一般戰鬥）
+DRAGON_WALK_MIN = 120           # （僅參考，不再決定吃不吃）長巡路門檻
+NO_DRAGON = {2017, 3003, 2016, 2019}   # 不吃龍王的任務：彌生和日美子、猜謎三兄弟、恐龍博士、卡坦的願望（使用者 2026-10-13）
 
 ALL = Q182 + QCAVE
 for _d in ALL:
     _d['walk_s'] = WALK_S.get(_d['id'])
-    _d['dragon'] = _d['walk_s'] is not None and _d['walk_s'] >= DRAGON_WALK_MIN
+    _d['dragon'] = _d['id'] not in NO_DRAGON
 BY_ID = {d['id']: d for d in ALL}
 DEFAULT_ORDER = [d['id'] for d in Q182]
 STEP_KINDS = ('walk', 'manual')

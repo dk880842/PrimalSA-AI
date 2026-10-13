@@ -33,7 +33,7 @@
                    2026-10-13：背包空格與全隊 HP 同一次開背包讀（bag.team_scan）；全隊 HP 5 分內確認過（讀了沒人偏低 / 剛補血）且之間 quest.py 說「本片戰鬥 0 場」→ 沿用不讀
     2 接取         team.form（距上次組隊 / 驗隊伍 ≤ TEAM_FRESH_S 秒就略過，例：交接剛組完）→ questdetail.accept(skip_ok, verify=False)：**整個任務只開一次詳情**，同一趟捲動讀狀態（已完成 → 跳過、進行中 → 續跑、待接取 → 傳送 → NPC 對話 → 接受，不重開詳情驗證，看對話框收起）；失敗 119
     3 跑步驟       迴圈（每片 ≤ --slice-s 秒，總計 ≤ --max-min 分，片數 ≤ --max-slices）：
-                   （--dragon 且 questdefs dragon 的長巡路任務才做）龍王的守護（人形圖示不在才吃：第一次 depot_use 公共倉庫整疊取出 → 吃 1 顆 → 剩的留在 DKBO 背包，之後直接從背包吃；吃完再關原地遇敵；
+                   （--dragon 且 questdefs dragon（NO_DRAGON 以外）的任務才做）龍王的守護（人形圖示不在才吃：第一次 depot_use 公共倉庫整疊取出 → 吃 1 顆 → 剩的留在 DKBO 背包，之後直接從背包吃；吃完再關原地遇敵；
                    遊戲還在自動巡路就這片先不吃 —— 2026-10-13 08:04 開背包途中抵達 NPC、對話框把背包藏起來 → depot_use 90）
                    → defs.steps 有 manual 步驟時 quest.read_step_no 讀步號 → 115（defs 有 turnin 且加 --pet-turnin：改跑交寵物，見下）；kind=walk 是備援：quest.py 先點追蹤讓遊戲自動巡路，只有回 3（追蹤沒反應 = 原地不動）才用 questhandlers.walk_step 走到定點
                    → quest.py --task <追蹤標題> --max-seconds N，依退出碼分支（見下）；
@@ -484,7 +484,7 @@ def print_plan(defs, opts: dict) -> None:
         if opts.get('dragon', False) and (opts.get('dragon_all') or d.get('dragon')):
             print(f'  - 每片前：龍王的守護（巡路 {d.get("walk_s")} 秒；buff 列看不到人形圖示才吃；第一次公共倉庫整疊取出，剩的留在 {LEADER} 背包，run 結束存回）')
         elif opts.get('dragon', False):
-            print(f'  - 龍王的守護：不吃（巡路 {d.get("walk_s")} 秒 < {questdefs.DRAGON_WALK_MIN} 秒或沒量過；--dragon-all 才吃）')
+            print(f'  - 龍王的守護：不吃（使用者指定不吃的任務 questdefs.NO_DRAGON；--dragon-all 才吃）')
         print(f'  - 迴圈：quest.py --task {d["track"]} --max-seconds {opts["slice_s"]}'
               + (f' --hp-check-min {opts.get("team_hp_min", TEAM_HP_MIN)} --hp-check-every {d.get("hp_every", opts.get("hp_every", HP_EVERY))}'
                  f'（片內：任務戰後 / 路上一般戰鬥每 N 場讀全隊 HP，偏低 41 → 補血續片）' if opts.get('team_hp_min', TEAM_HP_MIN) > 0 else '')
@@ -496,7 +496,7 @@ def print_plan(defs, opts: dict) -> None:
                     + (f'；接取前先批次驗待驗的前置任務 {pre}' if pre else ''),
             'each': '完成後當場逐人驗（舊行為）', 'off': '不驗'}[opts.get('verify', 'risk')])
     if not opts.get('dragon', False):
-        print('[龍王的守護] 預設不吃（要吃加 --dragon；只對 questdefs 標 dragon 的長巡路任務吃，--dragon-all 全吃）')
+        print('[龍王的守護] 預設不吃（要吃加 --dragon；對 questdefs 標 dragon 的任務吃（除彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望），--dragon-all 全吃）')
     else:
         print(f'[龍王的守護] 剩的整疊留在 {LEADER} 背包，run 結束（含失敗）存回公共倉庫；中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 補存')
     if opts.get('verify', 'risk') == 'risk':
@@ -596,7 +596,7 @@ class Run:
         return bool(self.hp_ok_at) and time.time() - self.hp_ok_at <= HP_FRESH_S
 
     def dragon_wanted(self, d) -> bool:
-        """--dragon 且（--dragon-all 或 questdefs 標 dragon = 長巡路任務）"""
+        """--dragon 且（--dragon-all 或 questdefs 標 dragon = NO_DRAGON 以外）"""
         return bool(self.o.get('dragon')) and (bool(self.o.get('dragon_all')) or bool((d or {}).get('dragon')))
 
     def ensure_dragon(self, d=None, force: bool = False):
@@ -1354,7 +1354,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False,
         battle_check: bool = True, pet_turnin: bool = False, drop_reward=None, confirm_drop=None,
         verify: str = 'risk', dragon_all: bool = False, hp_every: int = HP_EVERY, battle_cache: bool = True) -> int:
-    """use_dragon 預設 False（2026-10-12 起不吃龍王的守護；--dragon 只對 questdefs 標 dragon 的長巡路任務吃，dragon_all 全吃）。
+    """use_dragon 預設 False（2026-10-12 起不吃龍王的守護；--dragon 對 questdefs 標 dragon 的任務吃（NO_DRAGON 以外全部），dragon_all 全吃）。
     verify = risk（預設：風險事件才當場逐人驗，其餘 run 結束批次驗）/ each（舊行為：每任務完成當場驗）/ off；verify_all=False 相容舊參數 = off。
     drop_reward 要和 confirm_drop 名單完全相同才會丟（不可逆）"""
     LAST.clear()
@@ -1476,7 +1476,7 @@ def main() -> int:
     def common(p):
         p.add_argument('ids', nargs='*')
         p.add_argument('--after', default='grind', choices=['grind', 'none'])
-        p.add_argument('--dragon', action='store_true', help='長巡路任務（questdefs dragon）每片前吃龍王的守護（2026-10-12 起預設不吃）')
+        p.add_argument('--dragon', action='store_true', help='NO_DRAGON 以外的任務（questdefs dragon）每片前吃龍王的守護（2026-10-12 起預設不吃）')
         p.add_argument('--dragon-all', action='store_true', help='配 --dragon：每個任務都吃（不看 questdefs dragon）')
         p.add_argument('--no-dragon', action='store_true', help='相容舊指令：= 預設（不吃），no-op')
         p.add_argument('--spot', default=DEFAULT_SPOT)
