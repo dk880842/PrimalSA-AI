@@ -140,9 +140,13 @@ def loading_text(px: dict) -> bool:
     return sum(map(white, on)) >= LOADING_ON_MIN * len(on) and sum(map(white, off)) <= LOADING_OFF_MAX * len(off)
 
 
+# 英文版載入圖（2026-10-14：「Loading...」黃字 + 底部綠 / 橘雙進度條；綠條長度會變，只取左段 2 點 + 橘條 2 點）
+SIG_LOADING_BAR = _t([(200, 725, 8, 255, 18), (400, 725, 8, 255, 18), (200, 758, 255, 170, 13), (700, 758, 255, 170, 13)], TOL)
+
+
 def is_loading(px: dict) -> bool:
-    """載入畫面：舊三點特徵或「加載中」字形任一成立"""
-    return _match_safe(px, SIG_LOADING) or loading_text(px)
+    """載入畫面：舊三點特徵、「加載中」字形、英文版「Loading」雙進度條任一成立"""
+    return _match_safe(px, SIG_LOADING) or loading_text(px) or _match_safe(px, SIG_LOADING_BAR)
 # 「選擇對象」面板（點 NPC 後右側跳出的米色面板）
 SIG_SELECT = _t([(1112, 300, 104, 79, 48), (1112, 400, 104, 79, 48), (1112, 470, 104, 79, 48), (1416, 300, 93, 68, 36), (1416, 470, 93, 68, 36),
                  (1120, 470, 247, 216, 177), (1250, 490, 245, 229, 191), (1410, 470, 246, 219, 182)], TOL)

@@ -372,6 +372,11 @@ check('只有字形點（沒有舊三點）也認得載入畫面', S.is_loading(
 check('新插畫載入圖：is_loading 中、annotate = loading', S.is_loading(_px)
       and S.annotate(_px, {'state': 'unknown'}) == ['loading'])
 check('loading_text 缺點 → False', not S.loading_text({}))
+# 英文版 Loading... 雙進度條（2026-10-14 實機 quest rc 9 誤報）
+_bar = {(x, y): (r, g, b) for x, y, r, g, b, _ in S.SIG_LOADING_BAR}
+check('英文版載入圖（綠 / 橘雙進度條）：is_loading 中', S.is_loading(_bar))
+_bar2 = dict(_bar); _bar2[(200, 758)] = (56, 48, 38)
+check('橘條缺 → 不認載入畫面', not S.is_loading(_bar2))
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)
