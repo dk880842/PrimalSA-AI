@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""監測 5 個角色的練功寵（預設「金布伊」）等級，到門檻就把該角色的鎖定戰寵換回原戰寵（預設「朵拉比斯」）。同時兼做 heal.py --watch 的血量檢查。
+"""監測 5 個角色的練功寵（預設「金布伊」）等級，到門檻就把該角色的鎖定戰寵換回原戰寵（預設「朵拉比斯」）。加 --heal 才兼做 heal.py --watch 的血量檢查。
 
 用法（專案根目錄；一次只能跑一支，同時也不要跑 heal.py --watch，兩邊會搶畫面）：
   uv run --no-project python tools/gui/petwatch.py                     # 常駐：每 30 秒掃一輪，≥ 77 級就換回；5 人都換完就結束
@@ -9,7 +9,8 @@
   --pet / --level（= --target-level）：被監測的練功寵名與換回門檻；--back：換回的戰寵名；--pet-slot / --back-slot：
   兩隻在寵物欄的第幾格（1～4，預設 練功寵 3、戰寵 2；轉生後 布拉奇多斯騎寵第 1 格、朵拉比斯第 2 格；5 個角色排列要一樣）。
   換回時外掛下拉項目 y = 419 + 42×(戰寵格 − 1)（下拉順序 = 寵物欄順序）；寵物名只比對前 2 字（OCR 容錯）
-  uv run --no-project python tools/gui/petwatch.py --no-heal           # 不做補血檢查
+  uv run --no-project python tools/gui/petwatch.py --heal              # 兼做補血檢查（HP < --hp% / MP < --mp% 連 2 次 → heal_trip 補血再回 --spot）
+  補血預設**關**（2026-10-13 起；使用者規定練功不自動補血，psa-grind-no-auto-heal）；--no-heal 保留相容（= 預設，no-op）
 
 「鎖定戰寵」= 外掛 ASS →「一般設置」→ 鎖定戰寵（勾選框 + 下拉選寵物），鎖定後寵物面板的出戰 / 休息會被擋
 （「你已鎖定戰寵，請取消後再操作」）。所以換寵物流程是：取消鎖定 → 寵物面板「出戰」→ 外掛下拉選寵物 → 重新勾選。
@@ -290,8 +291,15 @@ def take_lock() -> bool:
     return True
 
 
-def main() -> int:
-    winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
+def heal_on(a) -> bool:
+    """純函式：要不要做補血檢查 —— 只有明確給 --heal 才做（--no-heal 優先、--once 不做）"""
+    return bool(getattr(a, 'heal', False)) and not getattr(a, 'no_heal', False) and not getattr(a, 'once', False)
+
+
+def main(argv=None, dry_args: bool = False):
+    """dry_args=True：只解析參數回 Namespace（測試用，不碰遊戲）"""
+    if not dry_args:
+        winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
     ap = argparse.ArgumentParser(description='監測練功寵（預設金布伊）等級，到門檻換回戰寵（預設朵拉比斯）')
     ap.add_argument('--once', action='store_true', help='只掃一輪（預設只讀；加 --apply 才換）')
     ap.add_argument('--apply', action='store_true', help='--once 時也執行換回')
@@ -302,12 +310,16 @@ def main() -> int:
     ap.add_argument('--back', default='朵拉比斯', help='換回的戰寵名（預設 朵拉比斯；轉生前的舊流程是 迪基格斯）')
     ap.add_argument('--back-slot', type=int, default=2, help='戰寵在寵物欄第幾格 1～4（預設 2；舊流程迪基格斯是第 1 格）')
     ap.add_argument('--spot', default='地雷區', choices=heal.SPOTS, help='補血後回去的練功點')
-    ap.add_argument('--no-heal', action='store_true', help='不做補血檢查')
+    ap.add_argument('--heal', action='store_true', help='兼做補血檢查（預設關：練功不自動補血）')
+    ap.add_argument('--no-heal', action='store_true', help='相容舊指令：= 預設（不補血），no-op')
     ap.add_argument('--heal-every', type=int, default=15, help='補血檢查間隔秒數（預設 15）')
     ap.add_argument('--hp', type=int, default=40)
     ap.add_argument('--mp', type=int, default=20)
     ap.add_argument('--for', dest='duration', type=int, default=0, help='跑幾秒後自己結束（測試用）')
-    a = ap.parse_args()
+    a = ap.parse_args(argv)
+    a.no_heal = not heal_on(a)
+    if dry_args:
+        return a
     try:
         configure(a.pet, a.pet_slot, a.back, a.back_slot)
     except ValueError as e:

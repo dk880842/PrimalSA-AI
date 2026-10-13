@@ -83,6 +83,13 @@ todo, ref = pet.plan_rest([sl(1, '迪基格斯', '出戰'), sl(2, '魯尼帖斯'
 check('plan_rest：--only 只處理指定名字', [x['slot'] for x in todo] == [2])
 todo, ref = pet.plan_rest([sl(1, '迪基格斯', '出戰', mountlike=True)], [], None)
 check('plan_rest：名字「像」騎寵（mountlike）不動', todo == [])
+_u = dict(sl(1, None, '出戰'), img_species='貝魯卡', img_score=0.93)
+todo, ref = pet.plan_rest([_u, sl(2, '迪基格斯', '出戰')], ['瑪斯貝卡'], None)
+check('plan_rest：名字讀不出但縮圖認得（貝魯卡，S5 恐龍博士）→ 照改等待', [x['slot'] for x in todo] == [1, 2] and ref == [], str(ref))
+todo, ref = pet.plan_rest([dict(sl(1, None, '出戰'), img_species='瑪斯貝卡')], ['瑪斯貝卡'], None)
+check('plan_rest：縮圖認成騎寵 / keep → 不當成可改（拒絕，不猜）', todo == [] and [r[0]['slot'] for r in ref] == [1])
+todo, ref = pet.plan_rest([_u, sl(2, '魯尼帖斯', '出戰')], ['瑪斯貝卡'], ['魯尼帖斯'])
+check('plan_rest：--only 用縮圖物種比（貝魯卡不在清單 → 不動）', [x['slot'] for x in todo] == [2] and ref == [])
 
 # ---------------- petmatch ----------------
 fresh_tpl()

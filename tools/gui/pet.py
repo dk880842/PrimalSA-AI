@@ -809,7 +809,9 @@ def set_state_many(role_arg: str, pet_text: str, state_text: str, allow_mount: b
 
 def plan_rest(slots: list, keep: list, only: list | None) -> tuple:
     """rest-all 的決策（純函式）→ (要改的格 [slot dict], 拒絕 [(slot, 原因)])。
-    只動狀態 = 出戰 的格；名字 = keep、像騎寵、狀態 = 騎乘 不動；--only 時只處理名字在清單內的；出戰但名字讀不出來 → 拒絕（不猜）"""
+    只動狀態 = 出戰 的格；名字 = keep、像騎寵、狀態 = 騎乘 不動；--only 時只處理名字在清單內的；出戰但名字讀不出來 → 拒絕（不猜）。
+    例外（2026-10-12 S5 恐龍博士：剛抓的貝魯卡沒名字、rest-all 拒絕，只好 set-state 逐人改）：名字讀不出、但縮圖比對認得物種
+    （img_species，且不是騎寵）→ 照改等待（改等待可逆；身分只用來顯示與 --only / keep 判斷，不拿去存倉）"""
     todo, refuse = [], []
     for s in slots:
         if s.get('empty') or s.get('state') != '出戰':
@@ -817,8 +819,10 @@ def plan_rest(slots: list, keep: list, only: list | None) -> tuple:
         nm = s.get('name')
         if s.get('mountlike') or (nm and nm in keep):
             continue
-        if not nm:
-            refuse.append((s, '名字讀不出來（OCR / 樣板都沒結果）'))
+        if not nm and s.get('img_species') and s['img_species'] not in keep and s['img_species'] not in uikit.MOUNTS:
+            nm = s['img_species']                                     # 縮圖認得：用來比 --only，下面照常判斷
+        elif not nm:
+            refuse.append((s, '名字讀不出來（OCR / 樣板 / 縮圖都沒結果）'))
             continue
         if only is not None and nm not in only:
             continue
@@ -850,7 +854,7 @@ def rest_all(role_arg: str = 'all', keep=None, only=None, dry_run: bool = False,
             for sl, why in refuse:
                 log(f'{r} 第 {sl["slot"]} 格（出戰）{why}，不動')
                 final_rc = final_rc or EXIT_NAME
-            names = [f'第 {x["slot"]} 格 {x["name"]}' for x in todo]
+            names = [f'第 {x["slot"]} 格 {x["name"] or "≈" + str(x.get("img_species"))}' for x in todo]
             info['rested'][r] = [x['slot'] for x in todo]
             print(f'{r}：' + (('改等待：' + '、'.join(names)) if todo else '沒有需要改的（出戰中的非騎寵 = 0）') + ('  [dry-run 不點]' if dry_run and todo else ''))
             if dry_run:
