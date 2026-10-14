@@ -537,6 +537,13 @@ def _pet_key(t: str) -> str:
     return re.sub(r'[\s·．.。,，:：\-_/\\|]+', '', t)
 
 
+def is_name_fragment(text) -> bool:
+    """名字框讀到的只是數字 / 斜線片段（成長字串殘段，例 2026-10-14 取出後讀成「65」、新抓的讀成「姍/9/5/6」）→ 不是寵物名。
+    Monster 表裡有「64」「65」這種非寵物的資料列，所以這類字串一律不當名字（pet_names / snap_pet / 名字樣板都排除）"""
+    t = re.sub(r'\s+', '', str(text or ''))
+    return bool(t) and bool(re.fullmatch(r'[\d/]+', t) or ('/' in t and re.search(r'\d', t)))
+
+
 def pet_names(path=None) -> dict:
     """Monster 表所有名稱（繁中 nameTn、簡中 nameCn、韓文 nameKr）→ 正式名（nameTn，缺就 nameCn）。同名不同寵不分（只要名字）"""
     p = Path(path) if path else MONSTER_TABLE
@@ -549,7 +556,7 @@ def pet_names(path=None) -> dict:
                 continue
             d = json.loads(ln)
             canon = d.get('nameTn') or d.get('nameCn')
-            if not canon:
+            if not canon or is_name_fragment(canon):              # 「64」「65」這類資料列不是寵物名（會把成長字串殘段當名字）
                 continue
             for k in ('nameTn', 'nameCn', 'nameKr'):
                 v = _pet_key(d.get(k))
@@ -565,7 +572,7 @@ def snap_pet(text, names=None, cutoff: float = SNAP_CUTOFF):
     """OCR 文字 → Monster 表正式名。完全相同優先；否則 difflib 相似度 ≥ cutoff 且「最佳唯一」（第二名正式名分數必須更低）才採用；
     其他（太像多個 / 差太多 / 空字串）→ None（對不上就拒絕，不猜）"""
     key = _pet_key(text)
-    if not key:
+    if not key or is_name_fragment(text):
         return None
     table = names if names is not None else pet_names()
     if key in table:

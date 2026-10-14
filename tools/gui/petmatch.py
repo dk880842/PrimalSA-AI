@@ -139,6 +139,8 @@ def match_whole(kind: str, rows, tpl: dict):
     img = pack(rows)
     best: dict = {}
     for label, vs in book.items():
+        if kind == 'name' and uikit.is_name_fragment(label):     # 數字 / 斜線片段不是名字（舊樣板污染，見 prune_names）
+            continue
         for h in vs:
             s = iou(img, int(h, 16), stride)
             if s > best.get(label, 0):
@@ -155,7 +157,7 @@ def match_whole(kind: str, rows, tpl: dict):
 
 def learn_whole(kind: str, label: str, rows, tpl: dict, log=None) -> bool:
     """把整塊圖加進樣板。標籤可疑（別的標籤 IoU 也 ≥ HIT_MIN）/ 墨點不足 / 已有幾乎相同變體 / 變體已滿 → False（不改 tpl）"""
-    if not rows or ink(rows) < MIN_INK[kind]:
+    if not rows or ink(rows) < MIN_INK[kind] or (kind == 'name' and uikit.is_name_fragment(label)):
         return False
     stride = len(rows[0]) + 2 * PAD
     img = pack(rows)
@@ -238,6 +240,15 @@ OUTLIER_IOU = 0.70                     # 同標籤、同尺寸的變體之間至
 
 def _same_size(a, b) -> bool:
     return abs(a[1] - b[1]) <= 3 and abs(a[2] - b[2]) <= 3
+
+
+def prune_names(tpl: dict) -> list:
+    """清掉標籤是數字 / 斜線片段的名字樣板（就地改 tpl['name']）→ 被刪的標籤（2026-10-14 學到「65」：取出後名字框暫時只顯示成長字串殘段）"""
+    book = tpl.get('name') or {}
+    bad = [k for k in book if uikit.is_name_fragment(k)]
+    for k in bad:
+        del book[k]
+    return bad
 
 
 def prune_digits(tpl: dict) -> list:
@@ -339,6 +350,14 @@ GROWTH_RE = re.compile(r'^\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d
 THUMB_N, THUMB_TOL = 4, 24               # 縮圖每列 4 點（pet.THUMB_X）、每通道容差
 
 
+_GROWTH_JUNK = re.compile(r"[\s'\"`.,:;|_~\-]")
+
+
+def growth_norm(t) -> str:
+    """OCR 行正規化：去空白與雜點標點（2026-10-14 40/9/5/6 讀成「姍/5/'6」），保留數字、/、漢字（漢字 = 被讀壞的欄）"""
+    return _GROWTH_JUNK.sub('', str(t or ''))
+
+
 def growth_fields(t) -> list:
     """'姍/9/6/5' → ['姍', '9', '6', '5']（去空白後以 / 切欄）"""
     return re.sub(r'\s+', '', str(t)).split('/')
@@ -349,11 +368,11 @@ def growth_compatible(line, whole: str) -> bool:
     (1) 去空白後是 whole 的子序列（掉字，#258 '34/8/8'）；或
     (2) 以 / 切欄、對齊完整字串的某一段連續欄（開頭或結尾被切掉都行），含數字的欄必須逐欄完全相等，不含數字的欄（Windows OCR 把兩位數讀成一個漢字，
         2026-10-14 實測 40/9/6/5 在寵物分頁讀成「姍/9/6/5」「姍/6/5」、倉庫分頁「姍/9/6」）當萬用欄；萬用欄最多 1 個、至少 2 欄數字相等"""
-    t = re.sub(r'\s+', '', str(line))
+    t = growth_norm(line)
     if not t:
         return False
     it = iter(whole)
-    if all(ch in it for ch in t):
+    if '/' in t and all(ch in it for ch in t):                    # 掉字子序列；至少要有 /（只剩「65」這種單段太短，什麼都像，2026-10-14）
         return True
     fs, ws = growth_fields(t), whole.split('/')
     if len(fs) > len(ws) or any(not f for f in fs):
@@ -376,7 +395,7 @@ def growth_compatible(line, whole: str) -> bool:
 def growth_consistent(lines, whole: str) -> bool:
     """OCR 各行全部跟 whole 不矛盾（完整行必須等於它、殘行 growth_compatible），且至少 1 行有內容（純函式）。
     名字框讀不出時拿「已知的成長字串」（寵物欄讀到的 / 登錄檔的）來核對現場這張是不是同一個字串用"""
-    ls = [str(t) for t in lines or [] if str(t).strip()]
+    ls = [growth_norm(t) for t in lines or [] if growth_norm(t)]
     if not ls or not GROWTH_RE.match(whole or ''):
         return False
     for t in ls:
@@ -392,7 +411,7 @@ def growth_consistent(lines, whole: str) -> bool:
 def _growth_full(lines) -> Counter:
     full = Counter()
     for t in lines or []:
-        m = GROWTH_RE.match(str(t))
+        m = GROWTH_RE.match(growth_norm(t))
         if m:
             full['/'.join(str(int(g)) for g in m.groups())] += 1
     return full
@@ -407,7 +426,7 @@ def parse_growth(lines) -> str | None:
     top = full.most_common()
     if len(top) == 1 and top[0][1] == 1:                       # 只有 1 行完整（2026-10-12 #258 '34/8/3/8' + 2 行 '34/8/8'；2026-10-14 '40/9/6/5' + '姍/9/6/5' + '姍/6/5'）
         whole = top[0][0]
-        rest = [t for t in lines if str(t).strip() and not GROWTH_RE.match(str(t))]
+        rest = [t for t in lines if growth_norm(t) and not GROWTH_RE.match(growth_norm(t))]
         if len(rest) >= 1 and all(growth_compatible(r, whole) for r in rest):
             return whole
         return None
@@ -423,7 +442,7 @@ def growth_guess(lines) -> str | None:
     if len(full) != 1:
         return None
     whole = next(iter(full))
-    rest = [t for t in lines if str(t).strip() and not GROWTH_RE.match(str(t))]
+    rest = [t for t in lines if growth_norm(t) and not GROWTH_RE.match(growth_norm(t))]
     return whole if all(growth_compatible(r, whole) for r in rest) else None
 
 

@@ -142,7 +142,8 @@ def family_for(species: str, family: str | None) -> str | None:
 
 def parse_growth_line(text) -> str | None:
     """一行 OCR 文字 → 'a/b/c/d'（整行恰好是成長字串才算；多一堆別的字 → None）"""
-    t = re.sub(r'\s+', '', str(text or ''))
+    import petmatch
+    t = petmatch.growth_norm(text)                                    # 同 pet.py 名字框：去空白 / 雜點標點（共用正規化）
     m = GROWTH_RE.fullmatch(t)
     return '/'.join(str(int(g)) for g in m.groups()) if m else None
 
@@ -170,10 +171,14 @@ def pick_row(lines: list, ident: tuple) -> tuple:
         if ok and not any(abs(y - h[2]) <= 15 for h in hits):          # 多個放大倍數會重複回同一列：y 差 ≤ 15 併成一個（2026-10-12）
             hits.append((t, x, y))
     if not hits and kind == 'growth':                                  # OCR 常漏整段數字（'49/10/8/1' → '49//8/1'）：4 段裡讀到的 ≥ 3 段都相同、漏的當萬用，且只有一列這樣吻合才用（2026-10-13 DKBO5 / DKBO3 實機）
+        import petmatch
+
+        def loose(t, v):                                               # 漏段（'49//8/1'）或某段被讀成漢字（'姍/9/5/6'，petmatch 共用規則；限 4 段）
+            return growth_partial(t, v) or (len(petmatch.growth_fields(petmatch.growth_norm(t))) == 4 and petmatch.growth_compatible(t, v))
         for t, x, y in lines:
-            if not growth_partial(t, val):
+            if not loose(t, val):
                 continue
-            amb = [o for o in others if o != val and growth_partial(t, o)]
+            amb = [o for o in others if o != val and loose(t, o)]
             if amb:                                                    # 漏的那段剛好是兩隻的差別 → 分不出來，停
                 return None, f'{kind} {val!r}：下拉「{t}」漏段，也可能是同角色的 {amb}（歧義，不選）'
             if not any(abs(y - h[2]) <= 15 for h in hits):

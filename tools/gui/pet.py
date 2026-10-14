@@ -811,7 +811,10 @@ def load_ctx(learn: bool, img_only=None, use_icache: bool = False) -> dict:
     pruned = petmatch.prune_digits(tpl)
     if pruned:
         log(f'等級單字樣板清掉 {len(pruned)} 個可疑變體：{pruned}')
-    ctx = {'tpl': tpl, 'learn': learn, 'dirty': bool(pruned), 'use_icache': bool(use_icache) and ICACHE_ON}
+    bad_names = petmatch.prune_names(tpl)
+    if bad_names:
+        log(f'名字樣板清掉數字 / 斜線片段標籤：{bad_names}')
+    ctx = {'tpl': tpl, 'learn': learn, 'dirty': bool(pruned or bad_names), 'use_icache': bool(use_icache) and ICACHE_ON}
     img_only = img_only or IMG_ONLY
     if img_only:
         ctx['img_only'] = list(img_only)
@@ -1926,7 +1929,8 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格，物種 {sp}），不是預期的 {want}！停手交人處理，不自動存回')
         if t.get('growth') and idn2['growth'] != t['growth']:
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），成長字串不是 {t["growth"]}！停手交人處理，不自動存回')
-    elif nm2 is None and unreadable_target(idn2, 'slot', new_slot - 1, t, ctx):   # 名字框讀不出：候選字串登錄 + 縮圖一致（共用規則）
+    elif nm2 is None and unreadable_target(idn2, 'slot', new_slot - 1, dict(t, growth=t.get('growth') or idn.get('growth')), ctx):
+        # 名字框讀不出（2026-10-14 取出後讀成「65」）：取前卡片的成長字串 + 登錄 + 縮圖一致（共用規則）
         info['species'] = t.get('name')
     elif (want and nm2 != want and not (nm2 is None and img_target('slot', new_slot - 1, idn2, t, ctx, info))) or t.get('growth'):
         return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {fmt_target(t)}！停手交人處理，不自動存回')
@@ -2216,7 +2220,7 @@ def unreadable_learn_reason(cur: dict, slot_no: int, sp: str, confirm: str) -> t
     if not petmatch.GROWTH_RE.match(confirm or ''):
         return EXIT_NAME, f'--confirm-growth {confirm!r} 不是 a/b/c/d'
     lines = [str(t) for t in cur.get('ocr') or [] if str(t).strip()]
-    full = {'/'.join(str(int(g)) for g in m.groups()) for t in lines for m in [petmatch.GROWTH_RE.match(t)] if m}
+    full = {'/'.join(str(int(g)) for g in m.groups()) for t in lines for m in [petmatch.GROWTH_RE.match(petmatch.growth_norm(t))] if m}
     if full - {confirm}:
         return EXIT_NAME, f'名字框 OCR 讀到別的成長字串 {sorted(full - {confirm})}（{lines}）'
     if not any(petmatch.growth_compatible(t, confirm) for t in lines):

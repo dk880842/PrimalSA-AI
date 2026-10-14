@@ -1191,5 +1191,49 @@ try:
 finally:
     pet.img_ident, pet.species_reg = _svi
 
+# ---- 2026-10-14 續 2：取出後名字框讀成「65」（Monster 表有「65」這列、還被學成名字樣板）；新抓的 40/9/5/6 讀成「姍/9/5/6」「姍/5/'6」----
+check('is_name_fragment：數字 / 斜線片段不是名字', uikit.is_name_fragment('65') and uikit.is_name_fragment('姍/9/5/6') and uikit.is_name_fragment('43/9/6/5')
+      and not uikit.is_name_fragment('朵拉比斯') and not uikit.is_name_fragment('2D貝魯卡') and not uikit.is_name_fragment(''))
+check('snap_pet / pet_names：「65」「64」不當寵物名', uikit.snap_pet('65') is None and uikit.snap_pet('姍/9/5/6') is None and '65' not in uikit.pet_names()
+      and uikit.snap_pet('朵拉比斯') == '朵拉比斯')
+_t = {'name': {'65': ['ff'], '朵拉比斯': ['ff']}}
+check('prune_names：清掉片段標籤、留正常名字', petmatch.prune_names(_t) == ['65'] and list(_t['name']) == ['朵拉比斯'])
+_rows = ['1111111111'] * 6
+_t = {'name': {}}
+check('learn_whole：片段標籤不學；match_whole：片段標籤（舊污染）不比', not petmatch.learn_whole('name', '65', _rows, _t) and _t['name'] == {}
+      and petmatch.match_whole('name', _rows, {'name': {'65': [format(petmatch.pack(_rows), 'x')]}})[0] is None)
+L2 = ['姍/9/5/6', '40/9/5/6', "姍/5/'6", '姍/9/5/6']               # 實機 DKBO2 第 2 格（含 5,6 倍加讀那行）
+check('parse_growth：雜點標點（姍/5/\'6）正規化後 → 40/9/5/6', petmatch.parse_growth(L2) == '40/9/5/6' and petmatch.growth_norm("姍/5/'6") == '姍/5/6')
+_sv3 = (pet._petwatch, petmatch.match_whole, petmatch.ink)
+petmatch.match_whole = lambda *a, **k: (None, 0.0, None)
+petmatch.ink = lambda rows: 999
+try:
+    _pw2 = _PW([['姍/9/5/6', '40/9/5/6', "姍/5/'6"], [], ['姍/9/5/6']])
+    pet._petwatch = lambda: _pw2
+    r = pet.resolve_ident(['2' * 5], pet.load_ctx(False))
+    check('resolve_ident：實機 40/9/5/6 的 OCR → growth（register 用同一條路）', r['growth'] == '40/9/5/6' and r['name'] is None, str(r))
+    _pw3 = _PW([['65'], ['65'], []])
+    pet._petwatch = lambda: _pw3
+    r = pet.resolve_ident(['3' * 5], pet.load_ctx(False))
+    check('resolve_ident：名字框只讀到「65」→ 名字 None（不當名字比對）', r['name'] is None and r['growth'] is None, str(r))
+finally:
+    pet._petwatch, petmatch.match_whole, petmatch.ink = _sv3
+_svi = (pet.img_ident, pet.species_reg)
+pet.species_reg = lambda ctx: {'growth': {'43/9/6/5': '魯尼帖斯'}}
+pet.img_ident = lambda kind, k, ctx: {'img_species': '魯尼帖斯'}
+try:
+    after = {'name': None, 'growth': None, 'raw': ['43/9/6', '姍/9/6/5']}       # 取後讀不完整
+    check('take 取後：目標只給物種名 → 用取前卡片的成長字串當候選（登錄 + 縮圖一致才過）',
+          pet.unreadable_target(after, 'slot', 1, {'name': '魯尼帖斯', 'growth': '43/9/6/5'}, {})
+          and not pet.unreadable_target(after, 'slot', 1, {'name': '魯尼帖斯'}, {})
+          and not pet.unreadable_target({'name': None, 'growth': None, 'raw': ['65']}, 'slot', 1, {'name': '魯尼帖斯', 'growth': '43/9/6/5'}, {}))
+finally:
+    pet.img_ident, pet.species_reg = _svi
+import rebirth_pets as _rp  # noqa: E402
+check('rebirth_pets.pick_row：下拉「姍/9/5/6」用同一套容錯認成 40/9/5/6；同角色別隻也像 → 歧義不選',
+      _rp.pick_row([('姍/9/5/6', 10, 100)], ('growth', '40/9/5/6'))[0] is not None
+      and _rp.pick_row([('姍/9/5/6', 10, 100)], ('growth', '40/9/5/6', ['41/9/5/6']))[0] is None
+      and _rp.parse_growth_line("40/9/5/'6") == '40/9/5/6')
+
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)
