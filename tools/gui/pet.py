@@ -23,8 +23,9 @@
   uv run --no-project python tools/gui/pet.py depot-list --depot public[,personal] [--role DKBO2,DKBO3] [--candidates 魯尼帖斯,貝魯卡]   # 唯讀：倉庫卡片 + 各物種張數（只選卡不存取）
   uv run --no-project python tools/gui/pet.py reset-name [--role all|DKBO2,DKBO3] [--slot N] [--dry-run]   # 名字框是成長字串的寵物 → 還原物種名（鉛筆 → 輸入框留空 → 確認）
   uv run --no-project python tools/gui/pet.py depot-fix-names --depot public[,personal] [--role DKBO|all] [--limit N] [--dry-run]   # 倉庫成長字串卡 → 取出 → 還原名字 → 存回原倉庫
-  還原名字（2026-10-14 使用者實測 + 實機量）：鉛筆 700,180 →「修改名字」視窗（標題 OCR + 特徵 ✕ 936,224 / 確認 607,520 / 取消 822,520）→ 讀整個視窗沒有費用字樣
-    （鑽石 / 石幣 / 費用…，有就按取消、67 停手，鐵則 3）→ 輸入框像素只有灰字提示（= 空）→ 按確認 → 重讀名字框必須是 Monster 表物種名才算成功（成長字串 → 物種順手記進登錄檔當備援）。
+  還原名字（2026-10-14 使用者實測 + 實機量；同日使用者簡化流程）：等鉛筆特徵 → 點鉛筆 700,180 → 固定等 1 秒 → 點確認 607,520（「修改名字」視窗特徵守門，不在不點 → 66）→ 視為成功
+    （不再讀標題 / 費用字樣 / 輸入框、不重讀名字、不登錄物種）。單按確認不花錢，花錢一定要第二個提示窗：按確認後正常零成本等視窗關；出現 CONFIRM 提示窗 / 視窗沒關 →
+    讀字、按取消 822,520 / 提示的取消，有費用字樣 67 停手（鐵則 3），其他 66；絕不點提示窗的確定。
     時機：store / store-many 存倉前名字框是成長字串 → 先還原再存（失敗不存；--no-rename 關）；depot-fix-names 修倉庫卡（寵物欄沒空格 → 跳過列在 skipped）；
     petquest 抓完一批 register 後、存公共 / 分配前跑 reset-name。
   名字框讀不出（2026-10-14 40/9/6/5：Windows OCR 把「40」讀成「姍」）：先加讀 -Zooms 5,6；仍讀不出 → list 給 unreadable=True、guess=候選字串（只有一種完整字串、
@@ -62,7 +63,7 @@
   並給 --confirm-growth 當第二重確認）；store 時會把「成長字串 → 物種」記進登錄檔，倉庫卡（沒縮圖）之後靠字串認。沒登錄 = 不知道是什麼 → --pet 物種名找不到（72）、store 拒絕（73）。
   物種是騎寵（布拉奇多斯）→ mountlike，store 要 --allow-mount-store 完全同名。
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；pet 自己 66 / 67 / 70～78）：
-  66 還原名字失敗（看不到鉛筆鈕 / 沒出現「修改名字」視窗 / 標題不對 / 輸入框不是空的 / 按確認後名字不是物種名 / 跳出不認得的提示）→ 已按取消（點得到時），不重點
+  66 還原名字失敗（看不到鉛筆鈕 / 視窗特徵不在沒點確認 / 按確認後視窗沒關 / 跳出沒費用字樣的提示）→ 已按取消（點得到時），不重點
   67 還原名字途中讀到費用字樣（鑽石 / 石幣 / 費用…）→ 已按取消、停手（鐵則 3）
   70 寵物面板打不開 / 中途消失（沒點任何面板內座標）
   71 左欄角色或寵物格沒選到（黃框不對 / 頭像名字樣板不符）
@@ -2823,7 +2824,7 @@ def learn_species_cmd(role_arg: str, slot_no: int, species_text: str, confirm_gr
 # 名字框右邊的鉛筆鈕 → 「修改名字」視窗（輸入框灰字「點擊輸入內容」、藍「確認」/ 紅「取消」、右上 ✕）→ 輸入框留空直接按確認 → 名字馬上變回原始物種名。
 # 所以名字框顯示成長字串（a/b/c/d）的沒名字寵物一律還原成物種名，之後只靠名字辨識（名字為主，見 NAME_FIRST）；成長字串登錄檔 / learn-species 退為備援。
 # 視窗開著時底下的寵物面板會被壓暗（寵物面板 ✕ 1310,108 由 (197,71,49) 變 (102,36,23)）→ uikit.is_open(PET) 為 False，視窗內點擊一律經 RENAME 面板驗證。
-# 鐵則 3：視窗 / 之後跳出的提示只要讀到費用字樣（FEE_WORDS）→ 按取消、停手（EXIT_FEE），不按確認。
+# 鐵則 3：按確認後若跳出提示窗 / 視窗沒關，讀到費用字樣（FEE_WORDS）→ 按取消、停手（EXIT_FEE），不按提示的確定。
 EXIT_RENAME, EXIT_FEE = 66, 67
 RENAME_ON = True                    # --no-rename：store / store-many 前不自動還原名字（成長字串照舊靠登錄檔 + 縮圖）
 PENCIL_XY = (700, 180)              # 鉛筆鈕（uikit.PET forbidden 'rename'，只有 rename_selected 以 allow=('rename',) 點）
@@ -2832,47 +2833,15 @@ RENAME_SIG = [(936, 224, 191, 74, 49, 30), (560, 505, 85, 128, 191, 30), (660, 5
               (870, 535, 177, 66, 41, 30), (700, 300, 241, 213, 179, 20), (540, 410, 223, 187, 147, 16)]   # ✕ 紅、確認藍 ×2、取消橘 ×2、米底、輸入框底
 RENAME = uikit.Panel('PETRENAME', None, RENAME_SIG, (936, 224))
 RENAME_OK_XY, RENAME_CANCEL_XY = (607, 520), (822, 520)
-RENAME_TITLE_BOX = (600, 200, 240, 52)        # 標題「修改名字」：-Dark 120 -Zooms 2,3 實測兩行都讀對
-RENAME_TEXT_BOX = (480, 200, 480, 420)        # 整個視窗（讀費用字樣）
-RENAME_INPUT_BOX = (510, 380, 412, 62)        # 輸入框：OCR 讀不到灰字提示 → 用像素（每 3 px 取樣，約 2900 點）
-INPUT_BG, INPUT_PH = (223, 187, 147), (207, 161, 112)    # 輸入框底色 / 灰字「點擊輸入內容」色（實機：2721 點底色、約 120 點灰字或兩者之間的邊緣色）
-INPUT_TOL, INPUT_PH_MIN = 12, 20
+RENAME_TEXT_BOX = (480, 200, 480, 420)        # 整個視窗（只在出現提示窗 / 視窗沒關時讀費用字樣）
 FEE_WORDS = ('鑽石', '鑽', '石幣', '金幣', '費用', '花費', '扣除', '消耗', '付費', '收費', '價格', '元寶')
-RENAME_WAIT_S, RENAME_DONE_S = 2.0, 4.0
+RENAME_WAIT_S, RENAME_DONE_S, RENAME_OPEN_S = 2.0, 4.0, 1.0     # 等鉛筆特徵 / 按確認後等視窗關 / 點鉛筆後固定等視窗開
 RENAME_OCR = [('-Dark', 120, '-Zooms', '2,3'), ('-Dark', 0, '-Zooms', '2,3')]
 
 
 def fee_words(lines) -> list:
     """純函式：OCR 行裡出現的費用字樣（鐵則 3 的停手依據）"""
     return sorted({w for t in lines or [] for w in FEE_WORDS if w in str(t)})
-
-
-def _on_segment(c, a, b, tol: int) -> bool:
-    """顏色 c 在 a → b 的連線上（含兩端外推 30%）且離線 ≤ tol（反鋸齒邊緣色是底色與字色的混合）"""
-    v = [b[k] - a[k] for k in range(3)]
-    w = [c[k] - a[k] for k in range(3)]
-    vv = sum(x * x for x in v) or 1
-    t = max(-0.3, min(1.3, sum(v[k] * w[k] for k in range(3)) / vv))
-    return all(abs(c[k] - (a[k] + t * v[k])) <= tol for k in range(3))
-
-
-def input_empty(cols) -> tuple:
-    """純函式：輸入框取樣點 → (只有灰字提示 = 空?, 灰字點數)。每點都是「底色 ↔ 灰字色」的混合 + 灰字點 ≥ INPUT_PH_MIN → 空；
-    有任何別的顏色（打了字、別的視窗蓋住）或沒有灰字 → 不空（不按確認）"""
-    if not cols:
-        return False, 0
-    ph = 0
-    for c in cols:
-        if not _on_segment(c, INPUT_BG, INPUT_PH, INPUT_TOL):
-            return False, ph
-        if any(abs(c[k] - INPUT_BG[k]) > INPUT_TOL for k in range(3)):
-            ph += 1
-    return ph >= INPUT_PH_MIN, ph
-
-
-def input_pts() -> list:
-    x0, y0, w, h = RENAME_INPUT_BOX
-    return [(x, y) for y in range(y0, y0 + h, 3) for x in range(x0, x0 + w, 3)]
 
 
 def wait_sig(sig, secs: float) -> bool:
@@ -2883,11 +2852,6 @@ def wait_sig(sig, secs: float) -> bool:
         if uikit.clock() >= end:
             return False
         uikit.sleep(POLL_S)
-
-
-def is_species_name(name) -> bool:
-    """名字是 Monster 表的正式物種名（不是成長字串片段 / 自取名）"""
-    return bool(name) and uikit.pet_names().get(uikit._pet_key(name)) == name
 
 
 def _rename_ocr(box) -> list:
@@ -2928,70 +2892,36 @@ def _rename_popup(info: dict, what: str) -> int:
 
 
 def rename_selected(role: str, i: int, cur: dict, ctx: dict, info: dict) -> int:
-    """寵物分頁、第 i 格（0 起算）已選中、cur = read_slot 結果（名字框是成長字串）→ 點鉛筆 → 驗「修改名字」視窗（標題 + 沒有費用字樣 + 輸入框空）
-    → 按確認 → 重讀名字框，必須是 Monster 表物種名才算成功。→ 0 / EXIT_RENAME 66 / EXIT_FEE 67 / EXIT_PANEL 70。
-    成功：info['new_name']；成長字串 → 物種記進登錄檔（備援）；原本的物種判斷（登錄 / 縮圖）跟新名字不同 → info['rename_species_differs']（名字為準）"""
+    """寵物分頁、第 i 格（0 起算）已選中、cur = read_slot 結果（名字框是成長字串）→ 等鉛筆特徵 → 點鉛筆 → 固定等 RENAME_OPEN_S
+    → 點確認（RENAME 視窗特徵守門，不在就不點）→ 視為成功（2026-10-14 使用者簡化：不讀標題 / 費用字樣 / 輸入框、不重讀名字）。
+    單按「確認」本身不花錢，花錢一定要第二個提示窗：按確認後正常零成本等視窗關；出現 CONFIRM 提示窗或視窗沒關 → _rename_popup（讀字、按取消、費用字樣 67）。
+    → 0 / EXIT_RENAME 66 / EXIT_FEE 67 / EXIT_PANEL 70。info 不填 new_name（要名字的呼叫端自己 read_slot）"""
     growth = cur.get('unnamed') or cur.get('guess')
     tag = f'{role} 第 {i + 1} 格 ?({growth})'
     info['rename_from'] = growth
     if not wait_sig(PENCIL_SIG, RENAME_WAIT_S):                          # EXP 橫幅蓋住 → 等它消失
         uikit.snap('pet-rename-pencil')
         return uikit_fail(EXIT_RENAME, f'{tag}：看不到名字框右邊的鉛筆鈕（{PENCIL_XY}），沒點')
-    if uikit.is_open(RENAME):
-        return uikit_fail(EXIT_RENAME, f'{tag}：修改名字視窗已經開著（上次沒關？），不點')
     if not uikit.safe_click(PENCIL_XY[0], PENCIL_XY[1], uikit.PET, note=f'pet 改名 {tag} 點鉛筆', allow=('rename',), wait_ms=CLICK_WAIT_MS):
         return uikit_fail(EXIT_PANEL, f'{tag}：寵物面板特徵不在，沒點鉛筆')
     info['rename_clicked'] = True
     uikit.mark('rename pencil')
-    if not wait_sig(RENAME.sig, RENAME_WAIT_S):
-        if uikit.is_open(uikit.PET):
-            uikit.snap('pet-rename-noopen')
-            return uikit_fail(EXIT_RENAME, f'{tag}：點了鉛筆但沒出現「修改名字」視窗（面板沒變）')
-        return _rename_popup(info, f'{tag}：點了鉛筆後出現的不是「修改名字」視窗')
-    title = _rename_ocr(RENAME_TITLE_BOX)
-    if not any('修改' in t or '名字' in t for t in title):
-        _rename_cancel(info, '標題不是修改名字')
-        uikit.snap('pet-rename-title')
-        return uikit_fail(EXIT_RENAME, f'{tag}：視窗標題讀到 {title}，不是「修改名字」→ 已取消')
-    lines = _rename_ocr(RENAME_TEXT_BOX)
-    fee = fee_words(lines)
-    info['rename_ocr'] = lines
-    if fee:
-        path = uikit.snap('pet-rename-fee')
-        _rename_cancel(info, f'費用字樣 {fee}')
-        return uikit_fail(EXIT_FEE, f'{tag}：修改名字視窗有費用字樣 {fee}（{lines}）→ 已按取消、停手（鐵則 3）；截圖 {path}')
-    empty, ph = input_empty(uikit.px(input_pts()))
-    info['rename_input_ph'] = ph
-    if not empty:
-        path = uikit.snap('pet-rename-input')
-        _rename_cancel(info, '輸入框不是空的')
-        return uikit_fail(EXIT_RENAME, f'{tag}：輸入框不是只有灰字提示（灰字點 {ph}；可能有殘留文字）→ 已取消；截圖 {path}')
+    uikit.sleep(RENAME_OPEN_S)
     if not uikit.safe_click(RENAME_OK_XY[0], RENAME_OK_XY[1], RENAME, note=f'pet 改名 {tag} 輸入框留空 → 確認'):
-        return uikit_fail(EXIT_RENAME, f'{tag}：按確認前視窗特徵不在，沒點')
+        if uikit.is_open(CONFIRM):
+            return _rename_popup(info, f'{tag}：點了鉛筆後出現的是提示窗')
+        uikit.snap('pet-rename-noopen')
+        return uikit_fail(EXIT_RENAME, f'{tag}：點了鉛筆但「修改名字」視窗特徵不在，沒點確認')
     info['rename_confirmed'] = True
     uikit.mark('rename ok')
     end = uikit.clock() + RENAME_DONE_S
-    while True:                                                          # 等視窗關、寵物面板回來（不再壓暗）
+    while True:                                                          # 等視窗關、寵物面板回來（不再壓暗）；跳提示 / 沒關 → 讀字、取消
         if uikit.is_open(uikit.PET) and not uikit.is_open(RENAME) and not uikit.is_open(CONFIRM):
             break
         if uikit.clock() >= end:
             return _rename_popup(info, f'{tag}：按確認後「修改名字」視窗沒關 / 出現別的視窗')
         uikit.sleep(POLL_S)
-    idn = read_ident(ctx, 6, 0.5)                                        # 「完成」浮字可能蓋住名字框 → 多讀幾次
-    name = idn['name']
-    if not is_species_name(name):
-        path = uikit.snap('pet-rename-after')
-        return uikit_fail(EXIT_RENAME, f'{tag}：按確認後名字框是 {name or idn.get("growth") or idn.get("raw")}，不是物種名；截圖 {path}')
-    info['new_name'] = name
-    exp = cur.get('species') or cur.get('img_species')
-    if exp and _skey(exp) != _skey(name):
-        info['rename_species_differs'] = exp
-        log(f'{tag} 還原名字是 {name}，跟原本判斷的物種 {exp} 不同 → 以名字為準')
-    g = cur.get('unnamed')
-    if g and petmatch.learn_species(species_reg(ctx), name, None, g):    # 備援：成長字串 → 物種（名字是遊戲給的，標籤可信）
-        ctx['rdirty'] = True
-    uikit.mark('rename verified')
-    print(f'pet：{tag} 名字還原為 {name}')
+    print(f'pet：{tag} 已按確認（名字還原，視為成功）')
     return 0
 
 
@@ -3162,8 +3092,10 @@ def _fix_depot(depot: str, rs: list, ctx: dict, info: dict, dry_run: bool) -> in
             return uikit_fail(EXIT_PANEL, info['msg'])
         rn = {}
         rc = rename_slot(role, {'slot': slot, 'unnamed': c['growth']}, ctx, rn)
-        rec.update({k: rn[k] for k in ('new_name', 'rename_species_differs', 'rename_cancelled') if k in rn})
-        name = rn.get('new_name') or rn.get('already')
+        rec.update({k: rn[k] for k in ('rename_cancelled',) if k in rn})
+        name = rn.get('already')
+        if not rc and not name:                                          # rename_selected 不再回名字 → 自己讀名字框（store 本來就會再讀）
+            name = read_slot(slot - 1, ctx).get('name')
         if rc or not name:
             info['msg'] = f'{role} 第 {slot} 格 ?({c["growth"]}) 還原名字失敗 rc={rc}（寵物留在寵物欄，沒存回 {depot}；{rn.get("rename_cancelled") or ""}）'
             info['failed'].append(dict(rec, rc=rc, why=info['msg']))

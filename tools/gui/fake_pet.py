@@ -152,11 +152,6 @@ class Game:
             for sx, sy, sr, sg, sb, _ in pet.RENAME_SIG:
                 if (x, y) == (sx, sy):
                     return (sr, sg, sb)
-            bx, by, bw, bh = pet.RENAME_INPUT_BOX
-            if bx <= x < bx + bw and by <= y < by + bh:
-                if self.rename_input_dirty and 700 <= x < 760 and 400 <= y < 420:
-                    return (40, 30, 20)                          # 打了字
-                return pet.INPUT_PH if 620 <= x < 810 and 398 <= y < 422 and (x + y) % 4 == 0 else pet.INPUT_BG
         elif not dv and self.cur() and (x, y) in [(px_, py_) for px_, py_, *_ in pet.PENCIL_SIG]:
             if self._banner_now:
                 return (250, 250, 250)
@@ -413,8 +408,6 @@ class Game:
             return ['存入寵物'] if self.sel_kind == 'pet' else ['取出寵物']
         if tuple(box) == pet.CONFIRM_BOX:
             return list(self.confirm_text) if self.dialog else []
-        if tuple(box) == pet.RENAME_TITLE_BOX:
-            return ['修改名字'] if self.rename else []
         if tuple(box) == pet.RENAME_TEXT_BOX:
             return (['修改名字', '確詔'] + list(self.rename_fee_text)) if self.rename else []
         if self.view == 'depot' and len(box) == 4 and tuple(box[2:]) == tuple(pet.CARD_LVL_BOX[2:]):     # 倉庫卡下緣綠字等級
