@@ -134,8 +134,12 @@ def pick_in_window(want: str, dry_run: bool = False) -> int:
     if dry_run:
         return 0
     uikit.gui('click', str(CARD_CLICK_X), str(cy), note=f'選擇視窗：點「{want}」卡')
-    uikit.sleep(0.8)
-    cols = uikit.px([(CARD_PROBE_X, cy)])
+    cols = None
+    for _ in range(6):                                 # 選中高亮最多等 3 秒（2026-10-14 恐龍博士：0.8 秒就讀會是米白，實機高亮約 1 秒才出現 → 誤判 124）
+        uikit.sleep(0.5)
+        cols = uikit.px([(CARD_PROBE_X, cy)])
+        if cols and is_yellow(cols[0]):
+            break
     if not cols or not is_yellow(cols[0]):
         log(f'點卡後底色 {cols} 不是黃色（沒選中），不按確定')
         uikit.snap('pet-turnin-notsel')
