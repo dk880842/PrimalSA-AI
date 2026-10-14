@@ -281,7 +281,7 @@ def bye_button_only() -> bool:
 
 def loading_screen() -> bool:
     """現場讀「加載中」字形點（+ 舊三點）→ 是不是地圖轉場的載入畫面（screen_sigs.is_loading）"""
-    pts = [(x, y) for x, y, _ in screen_sigs.LOADING_TEXT_PTS] + [(x, y) for x, y, *_ in screen_sigs.SIG_LOADING + screen_sigs.SIG_LOADING_BAR]
+    pts = screen_sigs.loading_probe_points()
     try:
         out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
         cols = [tuple(int(v) for v in c.split(',')) for c in out]
