@@ -506,5 +506,73 @@ s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
 check('全新開跑（寵物欄沒任務寵、沒開始標記）→ 不數倉庫', rc == 0 and getattr(s, 'depot_lists', 0) == 0)
 
+# ---------------- distribute 冪等（2026-10-14 恐龍博士：重跑重複取、DKBO5 取不到 72）
+AS16 = pq.QUESTS[2016]['rounds'][0]['assign']
+ex, tk = pq.distribute_actions(AS16, {r: [P('布拉奇多斯', '騎乘'), P('朵拉比斯')] for r in ROLES})
+check('distribute_actions：全空 → 8 隻都要取（= take_plan）', not ex and tk == pq.take_plan(AS16))
+ex, tk = pq.distribute_actions(AS16, {r: [P('布拉奇多斯', '騎乘'), P('魯尼帖斯'), P('貝魯卡')] for r in ROLES})
+check('distribute_actions：全齊 → 不取不存', not ex and not tk)
+ex, tk = pq.distribute_actions(AS16, {**{r: [P('魯尼帖斯'), P('貝魯卡')] for r in ROLES}, 'DKBO': [P('魯尼帖斯'), P('魯尼帖斯'), P('貝魯卡')], 'DKBO5': [P('魯尼帖斯')]})
+check('distribute_actions：DKBO 多 1 魯尼帖斯 → extras；DKBO5 缺貝魯卡 → takes', ex == {'DKBO': {'魯尼帖斯': 1}} and tk == [('DKBO5', '貝魯卡')], f'{ex} {tk}')
+ex, tk = pq.distribute_actions(AS16, {r: [{'img_species': '魯尼帖斯', 'state': '等待'}, {'unnamed': '1/2/3/4', 'species': '貝魯卡', 'state': '等待'}] for r in ROLES})
+check('distribute_actions：只有縮圖認得的格不算持有（會取）、unnamed + species 算', all(sp == '魯尼帖斯' for _, sp in tk) and len(tk) == 4, str(tk))
+
+
+def dist_sim(pub=4):
+    """模擬 catch 做完：抓寵者各留 1 隻、其餘在公共（魯尼帖斯 / 貝魯卡各 pub 隻）"""
+    s = Sim(2016)
+    s.bar['DKBO2'].append(P('魯尼帖斯'))
+    s.bar['DKBO3'].append(P('貝魯卡'))
+    s.public = [P('魯尼帖斯') for _ in range(pub)] + [P('貝魯卡') for _ in range(pub)]
+    return s
+
+
+def dist_run(s, reset=True):
+    return go(2016, s, from_stage='distribute', to_stage='distribute', reset=reset)
+
+
+def each_one(s):
+    return all(sum(1 for p in s.bar[r] if p['name'] == sp) == 1 for r in ROLES for sp in ('魯尼帖斯', '貝魯卡'))
+
+
+s = dist_sim()
+rc = dist_run(s)
+check('distribute 全新：8 隻取完、每人每物種 1 隻、公共剩 0', rc == 0 and each_one(s) and not s.public, f'rc={rc}')
+s.calls.clear()
+rc = dist_run(s, reset=False)
+check('distribute 重跑（全齊）→ 不呼叫 take-many / store-many、rc 0', rc == 0 and not any(a[0] in ('take-many', 'store-many') for a in names(s, 'pet.py')) and each_one(s), str(s.calls))
+s.bar['DKBO'].append(P('魯尼帖斯'))                           # 多取 1 隻
+s.calls.clear()
+rc = dist_run(s, reset=False)
+st = [a for a in names(s, 'pet.py') if a[0] == 'store-many']
+check('distribute 多取 → 先 store-many 存回公共（DKBO 魯尼帖斯 --pick last）、不再取、數量剛好', rc == 0 and len(st) == 1 and 'DKBO' in st[0] and '魯尼帖斯' in st[0] and '--pick' in st[0]
+      and not any(a[0] == 'take-many' for a in names(s, 'pet.py')) and each_one(s) and len(s.public) == 1, f'rc={rc} {st} {len(s.public)}')
+s = dist_sim()
+rc = dist_run(s)
+s.bar['DKBO5'] = [p for p in s.bar['DKBO5'] if p['name'] != '貝魯卡']
+s.public.append(P('貝魯卡'))
+s.calls.clear()
+rc = dist_run(s, reset=False)
+tm = [a for a in names(s, 'pet.py') if a[0] == 'take-many']
+check('distribute 缺 1 人 → take-many 只放 DKBO5:貝魯卡', rc == 0 and len(tm) == 1 and tm[0][tm[0].index('--plan') + 1] == 'DKBO5:貝魯卡' and each_one(s), str(tm))
+s = dist_sim(pub=3)                                          # 公共魯尼帖斯只有 3 隻：第 4 人取不到（72），前 3 人已取到
+rc = dist_run(s)
+check('distribute take-many 中途失敗 → 165', rc == pq.EXIT_DIST, f'rc={rc}')
+s.public += [P('魯尼帖斯'), P('貝魯卡')]                           # 各補回 1 隻
+s.calls.clear()
+rc = dist_run(s, reset=False)
+tm = [a for a in names(s, 'pet.py') if a[0] == 'take-many']
+check('distribute 失敗後續跑 → 自動只補缺的（沒重複取）、每人每物種剛好 1', rc == 0 and each_one(s) and len(tm) == 1 and tm[0][tm[0].index('--plan') + 1] == 'DKBO5:魯尼帖斯,DKBO5:貝魯卡', f'rc={rc} {tm}')
+s = Sim(2019)                                                # 卡坦兩輪套用同一套
+for r in ROLES:
+    s.bar[r] = s.bar[r][:1]                                  # prep 已把朵拉比斯存個人倉庫（寵物欄只剩騎寵）
+for r, sp in (('DKBO2', '克邦凱斯'), ('DKBO3', '加克拉'), ('DKBO4', '加格'), ('DKBO5', '邦恩吉')):
+    s.bar[r].append(P(sp))
+    s.public += [P(sp) for _ in range(4)]
+rc = go(2019, s, from_stage='distribute1', to_stage='distribute1')
+s.calls.clear()
+rc2 = go(2019, s, from_stage='distribute1', to_stage='distribute1', reset=False)
+check('卡坦 distribute1：第一次取齊、重跑不重複取', rc == 0 and rc2 == 0 and not any(a[0] == 'take-many' for a in names(s, 'pet.py')), f'{rc} {rc2}')
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

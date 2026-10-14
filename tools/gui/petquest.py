@@ -27,7 +27,9 @@
                 中途失敗（2026-10-14 恐龍博士：DKBO3 物種選不到、DKBO2 已勾自動抓寵照抓）：pet_catch 失敗時自己把自動抓寵勾掉；
                 續跑（進度檔 catch_started / 抓寵者寵物欄已有任務寵）→ pet.py depot-list 數實際已抓（寵物欄 + 公共 + 抓寵者個人倉庫，recount_plan）→
                 個人倉庫溢出的取回、寵物欄的存公共（夠了就留 1 隻）→ 只補剩餘隻數（剩餘相同的抓寵者一組），進度檔 got_<段> = 每人已抓
-    distribute[N]  pet.py take-many --depot public --plan "角色:物種,…" --candidates 本輪物種（每人每物種 1 隻；抓寵者自己留的那隻不取）→ list 驗每人每物種 1 隻
+    distribute[N]  冪等（2026-10-14 恐龍博士：重跑重複取、DKBO5 取不到 72）：先 pet.py list 讀 5 人寵物欄，用嚴格身分（名字 / 登錄成長字串 + 縮圖一致；只有縮圖不算）數每人每物種已持有 →
+                多的先 store-many --pick last 存回公共 → pet.py take-many --depot public --plan 只放還缺的（抓寵者自己留的那隻不取；都齊了不取）→ list 驗每人每物種 1 隻
+                take-many 中途失敗：訊息帶已取到的；重跑自動只補缺的（卡坦兩輪同樣套用）
     train[N]    自動轉換戰寵 on（轉換級數使用者設 30）→ 第一種任務寵 5 人出戰 → pet_catch.py --verify-battle → grind.py start --spot 柯奧4F龜洞
                 → 每 POLL_S（30）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
                   levels 那格變空 / nh 不同 → 改讀完整 list；全部連兩輪 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25；第二輪不降、最多升 TRAIN_STABLE_UP=10 級）
@@ -162,6 +164,35 @@ def slot_species(sl: dict) -> str | None:
     if not sl or sl.get('empty'):
         return None
     return sl.get('name') or sl.get('species') or sl.get('img_species')
+
+
+def strict_species(sl: dict) -> str | None:
+    """pet.py list 的一格 → 嚴格身分（名字；或名字框讀不出但成長字串登錄 + 縮圖一致才填的 species）。只有縮圖 img_species 不算（空格 / 認不出 None）"""
+    if not sl or sl.get('empty'):
+        return None
+    return sl.get('name') or (sl.get('species') if sl.get('unnamed') else None)
+
+
+def held_counts(slots, species) -> dict:
+    """寵物欄 → {物種: 嚴格身分隻數}（只列 species）"""
+    ids = [strict_species(s) for s in slots or []]
+    return {sp: sum(1 for i in ids if i == sp) for sp in species}
+
+
+def distribute_actions(assign, roles_slots: dict, roles=ALL_ROLES) -> tuple:
+    """純函式（distribute 冪等）：每人每物種剛好 1 隻 →
+    (extras {角色: {物種: 多的隻數}}（要先存回公共）, takes [(角色, 物種)]（還缺的；抓寵者自己那種不取，缺了留給事後驗證報錯）)"""
+    catcher = {sp: r for r, _, sp in assign}
+    sps = [sp for _, _, sp in assign]
+    extras, takes = {}, []
+    for r in roles:
+        held = held_counts((roles_slots or {}).get(r), sps)
+        for sp in sps:
+            if held[sp] > 1:
+                extras.setdefault(r, {})[sp] = held[sp] - 1
+            elif held[sp] == 0 and catcher[sp] != r:
+                takes.append((r, sp))
+    return extras, takes
 
 
 def free_slots(slots, size: int = 5) -> int:
@@ -689,10 +720,27 @@ class Run:
             return 0
         assign = self.round_conf(stage)['assign']
         cand = species_csv(assign)
-        plan = ','.join(f'{r}:{sp}' for r, sp in take_plan(assign))
-        rc, _ = self.sub('pet.py', ['take-many', '--depot', 'public', '--plan', plan, '--candidates', cand], 3600)
+        rc, rs = self.pet_list(ALL_ROLES, cand)                  # 冪等：先讀 5 人寵物欄，已持有的不重取、多的先存回公共
         if rc:
-            return self.pass_or(rc, EXIT_DIST, f'公共倉庫分配 take-many 失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py take-many --depot public --plan "{plan}" --candidates {cand}')
+            return self.pass_or(rc, EXIT_DIST, f'分配前讀寵物欄失敗 pet rc={rc}')
+        extras, takes = distribute_actions(assign, rs)
+        for r, d in extras.items():
+            pets = ','.join(sp for sp, n in d.items() for _ in range(n))
+            event(f'{stage}：{r} 持有多餘任務寵 {d} → 存回公共倉庫')
+            rc, _ = self.sub('pet.py', ['store-many', '--role', r, '--pets', pets, '--depot', 'public', '--pick', 'last', '--candidates', cand], 1800)
+            if rc:
+                return self.pass_or(rc, EXIT_DIST, f'多取的任務寵存回公共失敗 pet rc={rc}',
+                                    f'uv run --no-project python tools/gui/pet.py store-many --role {r} --pets {pets} --depot public --pick last --candidates {cand}')
+        if not takes:
+            event(f'{stage}：5 人都已持有各物種 → 不取')
+        else:
+            plan = ','.join(f'{r}:{sp}' for r, sp in takes)
+            event(f'{stage}：還缺 {len(takes)} 隻 → take-many {plan}')
+            rc, lines = self.sub('pet.py', ['take-many', '--depot', 'public', '--plan', plan, '--candidates', cand], 3600)
+            if rc:
+                done = [f'{o.get("role")}:{o.get("pet") or o.get("target") or o.get("name")}' for o in (last_json(lines).get('ops') or []) if isinstance(o, dict) and o.get('ok')]
+                return self.pass_or(rc, EXIT_DIST, f'公共倉庫分配 take-many 失敗 pet rc={rc}' + (f'（已取到 {done}）' if done else '') + '；重跑會先讀寵物欄只補缺的',
+                                    f'重跑 uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}（自動只補缺的）')
         rc, rs = self.pet_list(ALL_ROLES, cand)
         if rc:
             return self.pass_or(rc, EXIT_DIST, f'分配後讀寵物欄失敗 pet rc={rc}')
