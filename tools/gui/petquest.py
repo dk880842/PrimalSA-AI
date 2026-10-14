@@ -896,10 +896,14 @@ class Run:
         if self.q['kind'] == 'catch' and not self.p.get('already_done'):
             if [r for r in ALL_ROLES if not orig.get(r)]:
                 return self.fail(EXIT_ARGS, f'進度檔沒有 5 人原{BATTLE_PET}等級 {orig} → 不盲取（同名多隻）', '手動 pet.py take-many --depot personal --plan "DKBO:朵拉比斯@等級,…"')
-            plan = ','.join(f'{r}:{BATTLE_PET}@{orig[r]}' for r in ALL_ROLES)
-            rc, _ = self.sub('pet.py', ['take-many', '--depot', 'personal', '--plan', plan], 1800)
-            if rc:
-                return self.pass_or(rc, EXIT_RESTORE, f'取回原{BATTLE_PET}失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py take-many --depot personal --plan "{plan}"')
+            rc0, rs0 = self.pet_list()                                    # 續跑：已有原等級的戰寵在寵物欄的人不再取（take-many 對同名多隻會取到別隻，2026-10-14 恐龍博士手動取回後續跑）
+            have = {r for r in ALL_ROLES if rc0 == 0 and any(slot_species(s) == BATTLE_PET and s.get('level') == orig[r] for s in rs0.get(r) or [])}
+            todo = [r for r in ALL_ROLES if r not in have]
+            plan = ','.join(f'{r}:{BATTLE_PET}@{orig[r]}' for r in todo)
+            if todo:
+                rc, _ = self.sub('pet.py', ['take-many', '--depot', 'personal', '--plan', plan], 1800)
+                if rc:
+                    return self.pass_or(rc, EXIT_RESTORE, f'取回原{BATTLE_PET}失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py take-many --depot personal --plan "{plan}"')
             rc, _ = self.sub('pet.py', ['set-state-many', '--role', 'all', BATTLE_PET, '出戰'], 900)
             if rc:
                 return self.pass_or(rc, EXIT_RESTORE, f'{BATTLE_PET} 出戰失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-many --role all {BATTLE_PET} 出戰')
