@@ -156,7 +156,7 @@ def main() -> int:
     except FileNotFoundError:
         print('SKIP 沒有 tools/.cache/item-images（先跑 tools/extract/item_images.py）')
         return 0
-    bag.ITEM_MATCH = 'auto'
+    bag.ITEM_MATCH = 'iconocr'                 # 本檔測縮圖層（2026-10-14 前的 auto）；名字樣板層見 test_itemname_match.py
     get, truth = screen('b5.png')
     # b5：0 大地的羈絆、1 火的羽毛飾品、2 風的鎖、3 水的戒指、4 一號簽類、5～7 千年龜的殼、8 寵物誘餌、9 / 14 空
     st = install(get)
@@ -185,7 +185,7 @@ def main() -> int:
     bag.read_bag_names_ocr = lambda: ([i < 9 for i in range(15)], {i: bag.read_slot_name(i) for i in range(9)})
     r = bag._names_in_bag(['寵物誘餌'])
     check('ocr 模式：不截圖、照舊 OCR', st['shots'] == 0 and r['found']['寵物誘餌'] == 8 and r['by'] == {'寵物誘餌': 'ocr'}, (st, r))
-    bag.ITEM_MATCH = 'auto'
+    bag.ITEM_MATCH = 'iconocr'                 # 本檔測縮圖層（2026-10-14 前的 auto）；名字樣板層見 test_itemname_match.py
 
     # ---- list：read_bag_items ----
     st = install(get, texts={4: '一號簽'})

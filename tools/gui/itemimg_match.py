@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """背包 / 倉庫道具格縮圖 ↔ GameClient 道具 Sprite 的像素比對（只用標準函式庫）。2026-10-14 階段 2（notes/plan-item-icon-match.md）。
 
-接線（2026-10-14 階段 3 / 4）：bag.py 的 find_item / find_items / list_all / item_slots 先用本模組挑格（bag.ITEM_MATCH / 環境變數 PSA_ITEM_MATCH=auto|icon|ocr），
+接線（2026-10-14 階段 3 / 4）：bag.py 的 find_item / find_items / list_all / item_slots 用本模組挑格（bag.ITEM_MATCH / 環境變數 PSA_ITEM_MATCH；
+2026-10-14 起預設 auto 先用名字樣板 itemname_match，名字沒認出的格才比縮圖；iconocr = 舊 auto），
 動作類（use / store / take / drop / purge）照舊開彈窗 / 提示窗核對名稱。比對核心與寵物縮圖（petimg_match）共用 imgmatch.py。
 
 圖示來源：tools/extract/item_images.py 抽出的 tools/.cache/item-images/<imageId>.png + index.tsv（不進 git；沒抽就丟 FileNotFoundError）。
