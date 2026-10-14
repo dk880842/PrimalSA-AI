@@ -19,7 +19,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py drop DKBO 名稱 --confirm-name 名稱               # 丟棄背包道具（名稱必須完全對上）
   uv run --no-project python tools/gui/bag.py drop-spare-bow DKBO                                  # 武器格已是精靈王之弓時，丟背包裡多的那一把（轉生任務 16F 多給的；武器格不動）
   uv run --no-project python tools/gui/bag.py list all|DKBO,DKBO3                                  # 唯讀：每人背包每格名稱 + 空格數（面板開一次逐人切頭像）
-  uv run --no-project python tools/gui/bag.py purge all|DKBO2,DKBO3 --names 名稱,名稱 [--dry-run]   # 刪除管理批次刪：只勾名單內道具 → 提示窗清單必須是名單子集且條數 = 像素勾選數才按確定，否則 X 停手
+  uv run --no-project python tools/gui/bag.py purge all|DKBO2,DKBO3 --names 名稱,名稱 [--dry-run]   # 刪除管理批次刪：只勾名單內道具 → 提示窗綠字清單逐條核對 = 勾選名稱（del_list_check）才按確定，否則存圖 + X 停手
   uv run --no-project python tools/gui/bag.py store all 千年龜的殼 --depot public --all-copies --skip-missing   # 同名多格（不疊加）全部存
 最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
 背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
@@ -32,7 +32,7 @@ AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md
   93 防護擋下（要丟的名稱是精靈王之弓 / 不是預期名稱 / 沒給舊武器名稱…），零丟棄點擊；purge：名單含保護道具、像素勾選與目標不一致（已取消刪除）
   94 倉庫 / 背包滿
   95 動作後驗證失敗（不重點；請人看 snap）
-  96 彈窗 / 提示窗名稱 OCR 對不上或讀不到（不點確定）；purge：提示窗清單不是名單子集 / 條數不符（已按 X、取消刪除）
+  96 彈窗 / 提示窗名稱 OCR 對不上或讀不到（不點確定）；purge：提示窗清單核對不過（有保護 / 名單外道具、判不出、條數不符；已存圖、按 X、取消刪除）
 
 防護原則：
   - 丟棄：彈窗名稱與提示窗名稱都必須模糊吻合「預期名稱」，且不能吻合 PROTECT（精靈王之弓…）；任何一塊讀不到 = 不丟。
@@ -772,7 +772,12 @@ DELCONFIRM_SIG = [(946, 208, 197, 73, 49, 24), (645, 557, 57, 101, 159, 24), (78
                   (520, 300, 237, 211, 175, 24), (560, 545, 245, 213, 179, 24)]
 DELCONFIRM = uikit.Panel('BAGDELOK', None, DELCONFIRM_SIG, DELX_XY, esc_close=False)
 DEL_LIST_BOX = (500, 300, 430, 160)
-DEL_LIST_ZOOMS = ('2', '3', '4', '5')                     # 每個 zoom 單獨 OCR、各自數條目（同一份 OCR 結果裡 zoom 2 / 3 會重複）
+# 提示窗清單 OCR（2026-10-14 根因）：清單是亮綠字 (40,240,0)、置中、名稱會在行尾斷開（「…|龍」+「的魅力之笛*1|…」），3 種以上就 2～3 行。
+# 舊版 `-Dark 0` 不二值化、每個 zoom 各叫一次 ocr.ps1：Windows OCR 常整行漏讀（062858 樣本 zoom 2 / 3 / 5 都漏中間行）→ 條數不符 96；
+# 單條時又常把「馬」讀成「1丐」、豎琴只讀到「的豎琴」→ 「的豎琴」被當成保護的「風的豎琴」→ 96。
+# 改成：第一輪 `-Green 150`（只留綠字，白色問句與米黃底全白）4 個 zoom 一次 ocr.ps1；判不過再加 `-Dark 0` 一輪合併判（見 del_list_ok）。
+DEL_LIST_PASSES = [('g', ('-Green', 150, '-Zooms', '2,3,4,5')), ('d', ('-Dark', 0, '-Zooms', '2,3,4,5'))]
+DEL_LINE_TOL = 12                                           # 同一行的 y 容差（行距實測 41）
 MARK_DXY = (29, -27)
 MARK_PROBE = [(dx, dy) for dx in (-6, -3, 0, 3, 6) for dy in (-6, -3, 0, 3, 6)]
 MARK_MIN = 12                                   # 25 點至少幾點是紅（實測勾了 ≈ 20、沒勾 0：名稱字是黑白）
@@ -826,52 +831,220 @@ def purge_target(text, names) -> str | None:
     return next((n for n in names if name_match(t, n)), None)
 
 
+DEL_SPLIT = re.compile(r"[*+'’‘`´]\s*[0-9lI]*\s*[|丨｜]?|[|丨｜]")      # 條目結尾「*1|」：* 常讀成 + / '，| 常讀成 丨 / l，數量偶爾掉
+DEL_QUESTION = re.compile(r'是否|批量|刪除道具|删除道具|道具[?？]')
+
+
 def del_entries(lines) -> list:
-    """純函式：提示窗某一個 zoom 的 OCR 行 → 條目清單（去掉「是否批量刪除道具?」行、行與行串起來再用 | 切、去 *數量）"""
-    body = ''.join(re.sub(r'\s+', '', str(t)) for t in lines or [] if '是否' not in str(t) and '刪除' not in str(t))
+    """純函式：提示窗某一個 zoom 的 OCR 行（依 y 排好）→ 條目清單。行與行直接串起來（名稱會在行尾斷開），
+    「是否批量刪除道具?」問句從出現處截掉（不二值化時偶爾和清單黏成同一行），再用 *數量| 切、去數量"""
+    body = ''
+    for t in lines or []:
+        t = re.sub(r'\s+', '', str(t))
+        m = DEL_QUESTION.search(t)
+        body += t[:m.start()] if m else t
     out = []
-    for e in re.split(r'[|丨｜]', body):
-        e = re.sub(r'\*?\d*$', '', e.strip()).rstrip('*')
-        if e:
+    for e in DEL_SPLIT.split(body):
+        e = e.strip().lstrip('lI').rstrip('0123456789*')
+        if norm_name(e):
             out.append(e)
     return out
 
 
-def del_entry_name(entry, names) -> str | None:
-    """純函式：條目是否就是名單內某個名稱（OCR 會掉「*」和重複字：巴巴洛→巴洛）→ 名稱 / None。
-    條目長度不得比名稱長 2 字以上（兩個條目黏在一起時「完全包含」會誤過）；被保護的名稱一律 None"""
-    e = norm_name(entry)
-    if not e or purge_guard(e):
-        return None
+_item_names: list | None = None
+
+
+def item_names() -> list:
+    """Item 表所有繁中名稱（norm_name 後去重）；讀不到 = []（只剩保護名單當「別的道具」）"""
+    global _item_names
+    if _item_names is None:
+        out = set()
+        try:
+            with open(uikit.ROOT / 'knowledge' / 'data' / 'tables' / 'Item.jsonl', encoding='utf-8') as f:
+                for ln in f:
+                    m = re.search(r'"nameTn"\s*:\s*"([^"]*)"', ln)
+                    if m and norm_name(m.group(1)):
+                        out.add(norm_name(m.group(1)))
+        except OSError:
+            pass
+        _item_names = sorted(out)
+    return _item_names
+
+
+def _subseq(a: str, b: str) -> bool:
+    """a 的字依序都出現在 b 裡（OCR 掉字後的片段）"""
+    it = iter(b)
+    return all(c in it for c in a)
+
+
+def _ratio(a: str, b: str) -> float:
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
+def _window(a: str, b: str) -> float:
+    """b 在 a 裡的最佳子字串視窗相似度（同 name_match 的視窗；a 比 b 短時就是整段比）"""
+    n = len(b)
+    return max(_ratio(a[i:i + n], b) for i in range(max(1, len(a) - n + 1)))
+
+
+def del_classify(entry, names, others=None) -> tuple:
+    """純函式：提示窗一個條目 → ('target', 名稱) / ('protected', 保護名) / ('other', 別的道具名) / ('unknown', None)。
+    names = 這次勾的名稱；others = 其他道具名（預設 Item 表全部，扣掉 names）。規則（2026-10-14 重寫）：
+      - 條目是某個勾選名稱的「片段」（字依序都在名稱裡，例：「的豎琴」⊂ 空想的豎琴）時，不會被判成保護 / 別的道具，
+        但同時也是保護 / 別的道具的片段（「的豎琴」⊂ 風的豎琴）→ unknown（要靠別的 zoom 讀全名）
+      - 吻合保護名稱（PROTECT + PURGE_FORBID，相似度或視窗 ≥ 0.8）且不是勾選名稱的片段 → protected（整批不刪）
+      - 對勾選名稱相似度 ≥ 0.72 且嚴格高於任何別的道具 → target；條目不得比名稱長 2 字以上（兩條黏在一起）
+      - 掉字片段（≥ 60% 長）只是某勾選名稱的片段、不是任何別的道具 / 保護名的片段 → target
+      - 對別的道具相似度 ≥ 0.8 且高於勾選名稱 → other
+    條目開頭的數字 / l 會試「去掉」與「保留」兩種讀法（「1丐祖的矛」→「丐祖的矛」；2倍智慧果 的 2 要保留）"""
+    e0 = norm_name(entry).translate(OCR_CONFUSE)
+    vs = [v for v in dict.fromkeys([e0, e0.lstrip('0123456789lI')]) if len(v) >= 2]
+    if not vs:
+        return 'unknown', None
+    prot = [norm_name(p).translate(OCR_CONFUSE) for p in list(PROTECT) + PURGE_FORBID]
+    tgt = {}
     for n in names:
-        w = norm_name(n)
-        if not w or len(e) > len(w) + 2:
-            continue
-        if difflib.SequenceMatcher(None, e, w).ratio() >= 0.72:
-            return n
-        if len(e) >= max(2, -(-len(w) * 3 // 5)) and all(c in w for c in e):     # 掉字：條目每個字都在名稱裡、且至少 60% 長
-            return n
-    return None
+        w = norm_name(n).translate(OCR_CONFUSE)
+        if w and w not in prot and not purge_guard(n):
+            tgt.setdefault(w, n)
+    if not tgt:
+        return 'unknown', None
+    oth = [o.translate(OCR_CONFUSE) for o in (item_names() if others is None else [norm_name(x) for x in others])]
+    oth = [o for o in dict.fromkeys(oth) if o and o not in tgt and o not in prot]
+
+    frag_t = any(_subseq(v, w) for v in vs for w in tgt)
+    t_best, t_name = 0.0, None
+    for v in vs:
+        for w, n in tgt.items():
+            if len(v) <= len(w) + 2:
+                r = _ratio(v, w)
+                if r > t_best:
+                    t_best, t_name = r, n
+    t_frag = next((n for v in vs for w, n in tgt.items() if _subseq(v, w) and len(v) >= -(-len(w) * 3 // 5)), None)
+
+    p_best, p_name = 0.0, None
+    for v in vs:
+        for w, p in zip(prot, list(PROTECT) + PURGE_FORBID):
+            r = max(_ratio(v, w), _window(v, w))
+            if r > p_best:
+                p_best, p_name = r, p
+    p_frag = any(_subseq(v, w) for v in vs for w in prot)
+    if p_best >= 0.8 and not frag_t:
+        return 'protected', p_name
+
+    o_best, o_name = 0.0, None
+    for v in vs:
+        for o in oth:
+            if len(v) > len(o) + 2 or len(o) > len(v) * 3:
+                continue
+            sm = difflib.SequenceMatcher(None, v, o)
+            if sm.real_quick_ratio() <= o_best or sm.quick_ratio() <= o_best:
+                continue
+            r = sm.ratio()
+            if r > o_best:
+                o_best, o_name = r, o
+    o_frag = any(_subseq(v, o) and len(v) >= -(-len(o) * 3 // 5) for v in vs for o in oth)
+
+    if p_best >= 0.8 and p_best >= t_best:
+        return 'unknown', None                        # 勾選名稱與保護名稱共有的片段：不判
+    if t_best >= 0.72 and t_best > max(o_best, p_best):
+        return 'target', t_name
+    if t_frag and not o_frag and not p_frag:
+        return 'target', t_frag
+    if o_best >= 0.8 and o_best > t_best and not frag_t:
+        return 'other', o_name
+    return 'unknown', None
 
 
-def del_list_ok(zoom_lines, names, n_marked: int) -> tuple:
-    """純函式：{zoom: OCR 行} → (ok, 說明)。全部 zoom 的每個條目都必須是名單內名稱；至少一個 zoom 的條目數 == 勾選數；
-    任何 zoom 的條目數 > 勾選數 → 不過（多出來的就是名單外 / 黏字）"""
-    counts, seen = [], []
-    for z, lines in zoom_lines.items():
-        ents = del_entries(lines)
-        counts.append(len(ents))
-        for e in ents:
-            if not del_entry_name(e, names):
-                return False, f'zoom {z} 條目 {e!r} 不在名單 {list(names)} 內（或被保護）'
-        seen += ents
-    if not seen:
+def del_entry_name(entry, names, others=None) -> str | None:
+    """純函式：條目是不是名單內某個名稱 → 名稱 / None（見 del_classify；保護 / 別的道具 / 判不出都 None）"""
+    kind, n = del_classify(entry, names, others)
+    return n if kind == 'target' else None
+
+
+def _reading_texts(lines) -> list:
+    """一個 zoom 的行（str 或 ocr.ps1 的 dict）→ 依 y 排序的文字（str 沒有 y，維持原順序）"""
+    ds = [ln if isinstance(ln, dict) else {'text': ln} for ln in lines or []]
+    if all('y' in d for d in ds):
+        ds = sorted(ds, key=lambda d: d['y'])
+    return [str(d.get('text', '')) for d in ds]
+
+
+def _reading_ys(lines) -> list | None:
+    """一個 zoom 有字（去掉問句後）的行的 y；行是純 str（測試 / 舊格式）→ None（不做完整度檢查）"""
+    ys = []
+    for ln in lines or []:
+        if not isinstance(ln, dict) or 'y' not in ln:
+            return None
+        t = re.sub(r'\s+', '', str(ln.get('text', '')))
+        m = DEL_QUESTION.search(t)
+        if norm_name(t[:m.start()] if m else t):
+            ys.append(ln['y'])
+    return ys
+
+
+def del_list_ok(readings, names, n_marked: int, others=None) -> tuple:
+    """純函式：{讀法: 行} → (ok, 說明)。讀法 = (pass, zoom) 或 zoom 字串；行 = str 或 ocr.ps1 的 dict（有 y 才做漏行檢查）。
+    1. 任何讀法、任何條目吻合保護名稱 → 不過。
+    2. 行數：所有讀法有字的行依 y 分群，≥ 2 個讀法讀到的群才算真的行；漏任何一行的讀法不採用（Windows OCR 會整行漏讀）。
+    3. 候選讀法 = 沒漏行、條目數 == 勾選數（像素勾選）。沒有候選 → 不過。
+    4. 逐位置合併：每個位置至少一個候選讀法判成勾選名稱、沒有候選把它判成別的名稱 / 別的道具；位置名稱的多重集合 == 勾選名稱多重集合。
+    names = 每個勾選格的名稱（同名多格就重複列）"""
+    want = list(names)
+    ents = {k: del_entries(_reading_texts(v)) for k, v in readings.items()}
+    cls = {k: [del_classify(e, want, others) for e in es] for k, es in ents.items()}
+    for k, cs in cls.items():
+        for e, (kind, n) in zip(ents[k], cs):
+            if kind == 'protected':
+                return False, f'讀法 {k} 條目 {e!r} 吻合保護道具 {n}'
+    if not any(ents.values()):
         return False, '提示窗讀不到任何條目'
-    if max(counts) > n_marked:
-        return False, f'條目數 {counts} 多於勾選數 {n_marked}'
-    if n_marked not in counts:
-        return False, f'條目數 {counts} 與勾選數 {n_marked} 不一致'
-    return True, f'條目 {seen}'
+    ys = {k: _reading_ys(v) for k, v in readings.items()}
+    groups = []                                             # [y, 讀到的讀法集合]
+    for k, yy in ys.items():
+        for y in yy or []:
+            g = next((g for g in groups if abs(g[0] - y) <= DEL_LINE_TOL), None)
+            if g:
+                g[1].add(k)
+            else:
+                groups.append([y, {k}])
+    real = [g for g in groups if len(g[1]) >= 2] or groups
+    complete = {k for k in readings if ys[k] is None or all(k in g[1] for g in real)}
+    cand = [k for k in readings if k in complete and len(ents[k]) == n_marked]
+    if not cand:
+        return False, f'沒有完整讀法的條目數 = 勾選數 {n_marked}（各讀法條目數 { {str(k): len(v) for k, v in ents.items()} }，行數 {len(real)}）'
+    got = []
+    for i in range(n_marked):
+        cs = [cls[k][i] for k in cand]
+        tn = {n for kind, n in cs if kind == 'target'}
+        bad = [(kind, n) for kind, n in cs if kind in ('other', 'protected')]
+        if bad:
+            return False, f'第 {i + 1} 條被判成別的道具 {bad}（讀到 {[ents[k][i] for k in cand]}）'
+        if len(tn) != 1:
+            return False, f'第 {i + 1} 條判不出唯一名稱 {sorted(tn)}（讀到 {[ents[k][i] for k in cand]}）'
+        got.append(tn.pop())
+    if sorted(got) != sorted(want):
+        return False, f'條目 {got} 與勾選 {want} 不一致'
+    return True, f'條目 {got}（候選讀法 {len(cand)} 個）'
+
+
+def del_list_read(passes=None) -> dict:
+    """提示窗開著：依 passes 讀清單 → {(pass, zoom): [行 dict]}（每個 pass 一次 ocr.ps1、4 個 zoom）"""
+    out = {}
+    for tag, opts in passes or DEL_LIST_PASSES:
+        for ln in uikit.ocr_lines(DEL_LIST_BOX, *opts):
+            out.setdefault((tag, ln.get('zoom')), []).append(ln)
+    return out
+
+
+def del_list_check(names, n_marked: int) -> tuple:
+    """提示窗開著：綠字一輪判；不過再加不二值化一輪合併判 → (ok, 說明, {讀法: [文字]})"""
+    rd = del_list_read(DEL_LIST_PASSES[:1])
+    ok, why = del_list_ok(rd, names, n_marked)
+    if not ok:
+        rd.update(del_list_read(DEL_LIST_PASSES[1:]))
+        ok, why = del_list_ok(rd, names, n_marked)
+    return ok, why, {f'{k[0]}{k[1]}': [str(d.get('text', '')) for d in v] for k, v in rd.items()}
 
 
 def _leave_delmode() -> bool:
@@ -932,12 +1105,12 @@ def purge_role(role: str, names, dry_run: bool = False) -> tuple:
     if not uikit.is_open(DELCONFIRM):
         _leave_delmode()
         return _fail(EXIT_VERIFY, '按了刪除選中但提示窗沒出現', 'bag-purge-noconfirm'), info
-    zl = {z: uikit.ocr(DEL_LIST_BOX, '-Dark', 0, '-Zooms', z) for z in DEL_LIST_ZOOMS}
-    ok, why = del_list_ok(zl, [tg[i] for i in want], len(want))
-    info['confirm_ocr'] = {z: [t for t in v if t.strip()] for z, v in zl.items()}
+    ok, why, info['confirm_ocr'] = del_list_check([tg[i] for i in want], len(want))
     if not ok:
+        shot = uikit.snap(f'bag-purge-list-{role}')         # 提示窗還開著時存圖（舊版 X 之後才存，看不到清單）
         _leave_delmode()
-        return _fail(EXIT_NAME, f'{role} 提示窗清單核對不過：{why} → 按 X 取消', f'bag-purge-list-{role}'), info
+        ocr_s = json.dumps(info['confirm_ocr'], ensure_ascii=False)[:600]
+        return _fail(EXIT_NAME, f'{role} 提示窗清單核對不過：{why} → 按 X 取消；OCR {ocr_s}；截圖 {shot}'), info
     log(f'{role} 提示窗清單核對通過：{why}')
     if not uikit.safe_click(DELOK_XY[0], DELOK_XY[1], DELCONFIRM, note=f'bag purge {role} 確定刪除 {[tg[i] for i in want]}', wait_ms=700):
         _leave_delmode()

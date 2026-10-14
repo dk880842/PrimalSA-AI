@@ -484,8 +484,8 @@ def safe_click(x: int, y: int, panel: Panel, note: str = '', allow=(), wait_ms: 
 
 
 # ---- OCR ----
-def ocr(box, *opts) -> list:
-    """ocr.ps1 → 文字行清單；逾時 / 失敗回 []（同 petwatch.ocr）"""
+def ocr_lines(box, *opts) -> list:
+    """ocr.ps1 → 原始行 [{'text','x','y','zoom'}]（-Zooms 多倍率時每行帶 zoom、y = 截圖座標中心）；逾時 / 失敗回 []"""
     import subprocess
     try:
         r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
@@ -495,7 +495,12 @@ def ocr(box, *opts) -> list:
         d = json.loads((r.stdout.strip().splitlines() or [''])[-1])
     except json.JSONDecodeError:
         return []
-    return [ln['text'] for ln in d.get('lines', [])] if d.get('ok') else []
+    return [ln for ln in d.get('lines', []) if isinstance(ln, dict)] if d.get('ok') else []
+
+
+def ocr(box, *opts) -> list:
+    """ocr.ps1 → 文字行清單；逾時 / 失敗回 []（同 petwatch.ocr）"""
+    return [ln.get('text', '') for ln in ocr_lines(box, *opts)]
 
 
 # ---- 人物名（與 watch 同一套：charstate.norm_char → charname）----

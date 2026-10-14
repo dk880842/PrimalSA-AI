@@ -421,6 +421,7 @@ class FakeBag:
         uikit.is_open = self.is_open
         uikit.gui = self.gui
         uikit.ocr = self.ocr
+        uikit.ocr_lines = lambda box, *o: [{'text': t} for t in self.ocr(box, *o)]   # 絕不呼叫真的 ocr.ps1（會截遊戲畫面）
         uikit.px = self.px
         uikit.open_panel_ex = lambda p, **k: (True, True)
         uikit.close_panel = lambda p, known_open=False: True
@@ -657,6 +658,41 @@ check('del_list_ok：多一條名單外 → 不過', not bag.del_list_ok({'2': [
 check('del_list_ok：條數 > 勾選數 → 不過', not bag.del_list_ok({'2': ['巴巴洛的許可證*1|巴巴洛的許可證*1|']}, B, 1)[0])
 check('del_list_ok：條數 < 勾選數（每個 zoom 都少）→ 不過', not bag.del_list_ok({'2': ['巴巴洛的許可證*1|'], '3': ['巴巴洛的許可證1|']}, B, 2)[0])
 check('del_list_ok：讀不到 → 不過', not bag.del_list_ok({'2': ['是否批量刪除道具?']}, B, 1)[0])
+# 2026-10-14：3 種以上整行漏讀 / 馬祖的矛「1丐祖的矛」/ 空想的豎琴「的豎琴」被當風的豎琴 → 96（實樣 fixtures/bag_dellist_ocr.json）
+check('del_entries：問句黏在清單同一行 → 截掉問句、清單保留', bag.del_entries(['馬祖的矛*1|是否批量刪除道具?']) == ['馬祖的矛'])
+check("del_entries：* 讀成 + / '、數量掉、| 讀成 l", bag.del_entries(["儀之兜'1|亞姆亞姆的斧頭'龍", '的魅力之笛+1丨龍之槍*ll老爺爺', '的護身符+1|'])
+      == ['儀之兜', '亞姆亞姆的斧頭', '龍的魅力之笛', '龍之槍', '老爺爺的護身符'])
+_T = ['空想的豎琴', '馬祖的矛', '巴巴洛的許可證']
+check('del_classify：1丐祖的矛 / 祖的矛 → 馬祖的矛', bag.del_classify('1丐祖的矛', _T) == ('target', '馬祖的矛') and bag.del_classify('祖的矛', _T) == ('target', '馬祖的矛'))
+check('del_classify：「的豎琴」是空想的豎琴也是風的豎琴的片段 → unknown（不判保護、也不判勾選）', bag.del_classify('的豎琴', _T) == ('unknown', None))
+check('del_classify：風的豎琴 / 黏著風的豎琴 / 2倍智慧果 → protected', bag.del_classify('風的豎琴', _T)[0] == 'protected'
+      and bag.del_classify('空想的豎琴風的豎琴', _T)[0] == 'protected' and bag.del_classify('倍智慧果', _T)[0] == 'protected')
+check('del_classify：名單外的真道具（龍之鎧）→ other', bag.del_classify('龍之鎧', ['龍之槍']) == ('other', '龍之鎧'))
+check('del_list_ok：「的豎琴」單獨 → 不過；別的 zoom 讀到全名 → 過',
+      not bag.del_list_ok({'2': ['的豎琴*1|']}, ['空想的豎琴'], 1)[0] and bag.del_list_ok({'2': ['的豎琴*1|'], '3': ['空想的豎琴*1|']}, ['空想的豎琴'], 1)[0])
+check('del_list_ok：任何 zoom 讀到保護道具 → 不過', not bag.del_list_ok({'2': ['空想的豎琴*1|'], '3': ['風的豎琴*1|']}, ['空想的豎琴'], 1)[0])
+check('del_list_ok：兩個候選 zoom 同位置判成不同名稱 → 不過',
+      not bag.del_list_ok({'2': ['龍之槍*1|龍之鎧*1|'], '3': ['龍之鎧*1|龍之槍*1|']}, ['龍之槍', '龍之鎧'], 2)[0])
+_DL = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'bag_dellist_ocr.json').read_text(encoding='utf-8'))['cases']
+for _name, _c in _DL.items():
+    _n = _c['names']
+    _g = {k: v for k, v in _c['readings'].items() if k.startswith('g')}
+    check(f'del_list_ok 實樣 {_name}：兩輪 / 只有綠字一輪都過', bag.del_list_ok(_c['readings'], _n, len(_n))[0] and bag.del_list_ok(_g, _n, len(_n))[0],
+          str(bag.del_list_ok(_c['readings'], _n, len(_n))))
+_c = _DL['062858-5items']
+_d = {k: v for k, v in _c['readings'].items() if k.startswith('d')}
+check('del_list_ok 實樣：不二值化一輪 zoom 2/3/5 漏中間行 → 只採沒漏行的 zoom 4，仍過', bag.del_list_ok(_d, _c['names'], 5)[0])
+check('del_list_ok 實樣：漏行的 zoom 單獨 → 不過（舊版 96 的情況，不會誤過）', not bag.del_list_ok({'d2': _d['d2']}, _c['names'], 5)[0])
+_c = _DL['062554-6items']
+check('del_list_ok 實樣：名單把龍之鎧換成龍之槍 → 不過', not bag.del_list_ok(_c['readings'], [n.replace('龍之鎧', '龍之槍') for n in _c['names']], 6)[0])
+check('del_list_ok 實樣：馬祖的矛當成馬祖的斧頭 → 不過；勾選數 2 → 不過',
+      not bag.del_list_ok(_DL['mazu-spear']['readings'], ['馬祖的斧頭'], 1)[0] and not bag.del_list_ok(_DL['mazu-spear']['readings'], ['馬祖的矛'] * 2, 2)[0])
+_calls = []
+_orig_ol = uikit.ocr_lines
+uikit.ocr_lines = lambda box, *o: (_calls.append(o[0]), [{'text': '的豎琴*1|', 'y': 369, 'zoom': 2}] if o[0] == '-Green' else [{'text': '空想的豎琴*1|', 'y': 369, 'zoom': 2}, {'text': '是否批量刪除道具?', 'y': 447, 'zoom': 2}])[1]
+_ok, _why, _rd = bag.del_list_check(['空想的豎琴'], 1)
+check('del_list_check：綠字一輪判不過 → 加不二值化一輪合併判', _ok and _calls == ['-Green', '-Dark'] and set(_rd) == {'g2', 'd2'}, str((_ok, _why, _calls)))
+uikit.ocr_lines = _orig_ol
 check('purge_target：名單內 / 名單外 / 保護', bag.purge_target('巴巴洛的許 可證 巴巴洛的許 可證', B) == '巴巴洛的許可證'
       and bag.purge_target('千年龜的殼', B) is None and bag.purge_target('精靈王之弓', ['精靈王之弓']) is None)
 _mk = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'bag_mark_px.json').read_text(encoding='utf-8'))
@@ -768,6 +804,11 @@ check('purge：提示窗多一條名單外 → 96、按 X、取消刪除、沒�
 fb = FakeDelBag({'DKBO2': W}, list_override=['巴洛的許可證1|', '是否量刪除道具?、']).install()
 rc, d = quiet(bag.purge, ['DKBO2'], B)
 check('purge：OCR 掉字 / 掉 * 仍過', rc == 0 and fb.deleted == B)
+fb = FakeDelBag({'DKBO2': W}, list_override=['風的豎琴*1|', '是否批量刪除道具?']).install()
+_snaps = []
+uikit.snap = lambda tag: (_snaps.append((tag, fb.delconfirm)), None)[1]
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：核對不過 → 提示窗還開著時存圖、再按 X、96', rc == 96 and _snaps == [('bag-purge-list-DKBO2', True)] and fb.deleted == [] and bag.DELX_XY in fb.clicks, str(_snaps))
 fb = FakeDelBag({'DKBO2': W}, drop_first_mark=True).install()
 rc, d = quiet(bag.purge, ['DKBO2'], B)
 check('purge：第一下勾沒吃到 → 補點一次成功', rc == 0 and fb.deleted == B and fb.clicks.count(bag.slot_xy(2)) == 2)
