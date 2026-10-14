@@ -2,6 +2,7 @@
 """pet.py ↔ petimg_match 接線離線測試（不碰遊戲）：2026-10-14 起縮圖為主（候選限定 judge）+ 名字 / 成長字串第二道確認。
 用法：uv run --no-project python tools/gui/test_pet_img.py
 需要 tools/.cache/pet-images（tools/extract/pet_images.py 匯出）與固定截圖 fixtures/petimg/；沒有就整個略過（回 0）。
+2026-10-14 晚起名字為主（名字讀到物種名不跑縮圖，舊行為用 pet.NAME_FIRST=False 測）。
 驗：名字讀不出 → 縮圖認得（img_species）但沒有 unnamed 身分照拒存；沒名字新寵物字串沒登錄 → 縮圖升為 species；登錄 / 名字與縮圖一致 → img+reg / img+name；
 衝突 → ident_conflict、slot_ident None、存倉拒絕、find_slot 找不到（72）；不在候選 → None，開集只給 list 的 img_guess（不進 species）；
 騎寵只會更嚴；被浮字蓋住 → 等它消失重拍、仍蓋住不硬認；take 的 img_target 只用候選限定；IMG_ON 關掉不截圖不讀點。"""
@@ -141,8 +142,14 @@ def main() -> int:
           and pet.slot_ident(d) is None, d.get('ident_conflict'))
     check('衝突格 find_slot 找不到（72）且訊息含衝突', pet.find_slot([d], '奇寶', None)[0] is None and '衝突' in pet.find_slot([d], '奇寶', None)[1])
     check('衝突格 guard_store 拒絕', '衝突' in (pet.guard_store(d, True) or ''))
-    # 有名字：名字與縮圖衝突 → 不確定
+    # 有名字：名字為主（2026-10-14 晚）→ 採用名字、不跑縮圖
     pet.resolve_ident = lambda rows, c: {'name': '朵拉比斯', 'via': 'tpl', 'raw': None, 'growth': None}
+    n0 = stat['shots']
+    d = pet.read_slot(1, ctx0())
+    check('名字為主：名字格不跑縮圖（零截圖）、species_src name、沒有衝突', stat['shots'] == n0 and d.get('species_src') == 'name' and not d.get('ident_conflict')
+          and pet.slot_ident(d) == '朵拉比斯' and d.get('img_species') is None, str({k: d.get(k) for k in ('species_src', 'ident_conflict')}))
+    # --img-first（舊：縮圖為主）：名字與縮圖衝突 → 不確定
+    pet.NAME_FIRST = False
     d = pet.read_slot(1, ctx0())              # 格 2 實際是奇寶（不在候選）：縮圖認不出是誰，但「朵拉比斯」自己的分數遠低於 KEEP_FLOOR → 縮圖不像 → 衝突
     check('名字格、縮圖根本不像名字（分數 < KEEP_FLOOR）→ 衝突', d['name'] == '朵拉比斯' and '不像' in (d.get('ident_conflict') or '') and pet.slot_ident(d) is None,
           d.get('ident_conflict'))
@@ -151,6 +158,7 @@ def main() -> int:
     pet.resolve_ident = lambda rows, c: {'name': '瑪斯貝卡', 'via': 'tpl', 'raw': None, 'growth': None}
     d = pet.read_slot(0, ctx0())
     check('名字與縮圖一致 → species_src img+name', d.get('species_src') == 'img+name' and not d.get('ident_conflict'))
+    pet.NAME_FIRST = True
     pet.resolve_ident = real_ri
 
     # ---- 被浮字橫幅蓋住：等它消失重拍；一直蓋住 → 不硬認（照文字）----
@@ -164,7 +172,11 @@ def main() -> int:
     stat = use_shot(CACHE / 'bn_0.png', darken=dark)
     pet.resolve_ident = lambda rows, c: {'name': '瑪斯貝卡', 'via': 'tpl', 'raw': None, 'growth': None}
     d = pet.read_slot(0, ctx0())
-    check('一直蓋住 → img_occluded、img_species None、照名字（不硬認）', d.get('img_occluded') and d.get('img_species') is None
+    check('名字為主：縮圖被蓋住也不用等（有名字零截圖）', stat['shots'] == 0 and pet.slot_ident(d) == '瑪斯貝卡', stat)
+    pet.NAME_FIRST = False
+    d = pet.read_slot(0, ctx0())
+    pet.NAME_FIRST = True
+    check('--img-first：一直蓋住 → img_occluded、img_species None、照名字（不硬認）', d.get('img_occluded') and d.get('img_species') is None
           and pet.slot_ident(d) == '瑪斯貝卡' and stat['shots'] == pet.IMG_OCC_POLLS + 1, stat)
     pet.resolve_ident = real_ri
     stat = use_shot(CACHE / 'bn_0.png')
@@ -189,7 +201,11 @@ def main() -> int:
     check('img_conflict：卡 2 名字說加格、縮圖克邦凱斯 → 衝突', bool(pet.img_conflict('card', 1, ctx0(), '加格')))
     check('img_conflict：名字克邦凱斯 → 無衝突', pet.img_conflict('card', 1, ctx0(), '克邦凱斯') is None)
     ci = pet.card_ident(1, {'name': '加格', 'growth': None}, ctx0())
-    check('card_ident：卡片名字與縮圖衝突 → species None、src conflict', ci['species'] is None and ci['src'] == 'conflict', ci)
+    check('card_ident 名字為主：卡片名字加格 → 採用（src name，不比縮圖）', ci['species'] == '加格' and ci['src'] == 'name', ci)
+    pet.NAME_FIRST = False
+    ci = pet.card_ident(1, {'name': '加格', 'growth': None}, ctx0())
+    pet.NAME_FIRST = True
+    check('card_ident --img-first：卡片名字與縮圖衝突 → species None、src conflict', ci['species'] is None and ci['src'] == 'conflict', ci)
     ci = pet.card_ident(1, {'name': None, 'growth': '50/10/6/9'}, dict(ctx0(), img_only=SHARKS))
     check('card_ident：字串沒登錄 → 縮圖 img', ci['species'] == '克邦凱斯' and ci['src'] == 'img', ci)
 
@@ -230,8 +246,10 @@ def partial_cards():
     check('卡 1 被蓋住：字串登錄布拉奇多斯 + 區塊比對同 → img+reg（img_species 仍 None）',
           ci['species'] == '布拉奇多斯' and ci['src'] == 'img+reg' and ci.get('img') is None and ci.get('img_partial') == '布拉奇多斯'
           and ci.get('img_occluded') and stat['shots'] == pet.IMG_OCC_POLLS + 1, ci)
+    pet.NAME_FIRST = False
     ci = pet.card_ident(0, {'name': '摩娜西普', 'growth': None}, ctx0())
-    check('卡 1 被蓋住：名字說摩娜西普、區塊比對布拉奇多斯 → 衝突', ci['species'] is None and ci['src'] == 'conflict', ci.get('conflict'))
+    pet.NAME_FIRST = True
+    check('--img-first 卡 1 被蓋住：名字說摩娜西普、區塊比對布拉奇多斯 → 衝突', ci['species'] is None and ci['src'] == 'conflict', ci.get('conflict'))
     ci = pet.card_ident(1, {'name': None, 'growth': '1/2/3/4'}, dict(ctx0(), img_only=['摩娜西普', '朵拉比斯', '布拉奇多斯']))
     check('卡 2 被蓋住：沒有文字物種 → 區塊比對不單獨升為身分', ci['species'] is None and ci.get('img') is None and ci.get('img_partial') == '摩娜西普', ci)
     r = pet.img_ident('card', 1, ctx0(), ['摩娜西普'])

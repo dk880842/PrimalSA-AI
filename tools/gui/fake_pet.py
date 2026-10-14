@@ -124,6 +124,14 @@ class Game:
         self.banner = 0                  # >0：接下來這麼多次「大塊取樣」（>5000 點）名字框被 EXP 橫幅蓋住（雜訊）
         self._banner_now = False
         self.slow_ui = 0                 # >0：點完先延遲這麼多次 pixel 才反映
+        self.rename = False              # 「修改名字」視窗開著（點鉛筆 700,180 開；底下寵物面板壓暗）
+        self.rename_dead = False         # 點鉛筆沒反應
+        self.rename_fee_text = []        # 修改名字視窗裡多讀到的字（測費用字樣）
+        self.rename_input_dirty = False  # 輸入框不是空的（有殘留文字）
+        self.rename_after_popup = None   # 按確認後跳出的提示（通用確認窗）文字；None = 直接還原
+        self.rename_result = None        # 按確認後名字框變成什麼（None = 原物種名 p['name']）
+        self.rename_keep = False         # 按確認後視窗不關
+        self.rename_clicks = []          # 改名相關點擊（鉛筆 / 確認 / 取消 / ✕）
         self._pending = []
 
     # ---- 畫面 ----
@@ -134,12 +142,27 @@ class Game:
         if (x, y) == (1300, 745):
             return (254, 0, 0) if self.hud and not self.panel else (0, 0, 0)
         if (x, y) == (1310, 108):
-            return (197, 71, 49) if self.panel else (0, 0, 0)
+            return ((102, 36, 23) if self.rename else (197, 71, 49)) if self.panel else (0, 0, 0)    # 修改名字視窗開著 → 寵物面板壓暗
         if (x, y) == (706, 295):
             return (122, 227, 0) if self.battle and not self.panel else (0, 0, 0)
         if not self.panel:
             return (0, 0, 0)
         dv = self.view == 'depot'
+        if self.rename:
+            for sx, sy, sr, sg, sb, _ in pet.RENAME_SIG:
+                if (x, y) == (sx, sy):
+                    return (sr, sg, sb)
+            bx, by, bw, bh = pet.RENAME_INPUT_BOX
+            if bx <= x < bx + bw and by <= y < by + bh:
+                if self.rename_input_dirty and 700 <= x < 760 and 400 <= y < 420:
+                    return (40, 30, 20)                          # 打了字
+                return pet.INPUT_PH if 620 <= x < 810 and 398 <= y < 422 and (x + y) % 4 == 0 else pet.INPUT_BG
+        elif not dv and self.cur() and (x, y) in [(px_, py_) for px_, py_, *_ in pet.PENCIL_SIG]:
+            if self._banner_now:
+                return (250, 250, 250)
+            for sx, sy, sr, sg, sb, _ in pet.PENCIL_SIG:
+                if (x, y) == (sx, sy):
+                    return (sr, sg, sb)
         if self.dialog:
             for sx, sy, sr, sg, sb, _ in pet.CONFIRM_SIG:
                 if (x, y) == (sx, sy):
@@ -263,6 +286,21 @@ class Game:
             if xy == uikit.PET.open_xy and self.hud:
                 self.panel = True
             return
+        if self.rename:
+            self.rename_clicks.append(xy)
+            if xy == pet.RENAME_OK_XY:
+                if self.rename_after_popup is not None:
+                    self.rename = False
+                    self.dialog, self.dialog_pending, self.confirm_text = True, None, list(self.rename_after_popup)
+                    return
+                p = self.cur()
+                if p:
+                    p['name'] = self.rename_result or p['name']
+                    p.pop('unnamed', None)
+                self.rename = self.rename_keep
+            elif xy in (pet.RENAME_CANCEL_XY, pet.RENAME.close_xy):
+                self.rename = False
+            return
         if self.dialog:
             self.dialog_clicks.append(xy)
             if xy == pet.CONFIRM_OK_XY:
@@ -275,6 +313,11 @@ class Game:
             return
         if xy == uikit.PET.close_xy:
             self.panel = False
+            return
+        if xy == pet.PENCIL_XY and self.view == 'pet':
+            self.rename_clicks.append(xy)
+            if self.cur() and not self.rename_dead:
+                self.rename = True
             return
         if xy == pet.DEPOT_TAB_XY:
             self.depot_clicks.append(xy)
@@ -370,6 +413,10 @@ class Game:
             return ['存入寵物'] if self.sel_kind == 'pet' else ['取出寵物']
         if tuple(box) == pet.CONFIRM_BOX:
             return list(self.confirm_text) if self.dialog else []
+        if tuple(box) == pet.RENAME_TITLE_BOX:
+            return ['修改名字'] if self.rename else []
+        if tuple(box) == pet.RENAME_TEXT_BOX:
+            return (['修改名字', '確詔'] + list(self.rename_fee_text)) if self.rename else []
         if self.view == 'depot' and len(box) == 4 and tuple(box[2:]) == tuple(pet.CARD_LVL_BOX[2:]):     # 倉庫卡下緣綠字等級
             for idx in range(20):
                 cx, cy = pet.card_xy(idx)

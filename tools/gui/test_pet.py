@@ -42,6 +42,7 @@ def fresh_tpl():
 
 def new(**kw):
     g = install(Game(**kw))
+    pet.RENAME_ON = False          # 本檔測舊流程（成長字串卡 = --no-rename）；存倉前還原名字 / reset-name / depot-fix-names 見 test_pet_rename.py
     GAMES.append(g)
     return g
 
@@ -1240,8 +1241,12 @@ try:
           pet.card_ident(0, {'name': None, 'growth': None}, {})['src'] == 'img'
           and pet.card_ident(0, {'name': None, 'growth': '40/9/6/5'}, {})['src'] == 'img+reg'
           and pet.card_ident(0, {'name': None, 'growth': None, 'guess': '43/9/6/6'}, {})['src'] == 'conflict')
-    check('card_ident：名字 / 登錄物種與縮圖不同 → 衝突（species None）',
-          pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] is None and pet.card_ident(0, {'name': None, 'growth': '43/9/6/6'}, {})['src'] == 'conflict')
+    check('card_ident：名字為主（2026-10-14 晚）→ 名字讀到朵拉比斯就採用（縮圖說魯尼帖斯也不比）；登錄物種與縮圖不同 → 衝突（species None）',
+          pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] == '朵拉比斯' and pet.card_ident(0, {'name': '朵拉比斯'}, {})['src'] == 'name'
+          and pet.card_ident(0, {'name': None, 'growth': '43/9/6/6'}, {})['src'] == 'conflict')
+    pet.NAME_FIRST = False
+    check('card_ident --img-first（舊：縮圖為主）：名字與縮圖不同 → 衝突', pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] is None)
+    pet.NAME_FIRST = True
     _IMG['v'] = None
     check('card_ident：縮圖沒把握 → 舊規則（名字 → 名字；成長字串登錄 → 登錄）',
           pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] == '朵拉比斯' and pet.card_ident(0, {'name': None, 'growth': '43/9/6/6'}, {})['species'] == '貝魯卡')

@@ -232,6 +232,8 @@ class Sim:
             cnt = lambda ps: {n: sum(1 for p in ps if p['name'] == n) for n in {p['name'] for p in ps}}    # noqa: E731
             roles = self.opt(args, '--role').split(',')
             return self.out(0, js={'counts': {'public': cnt(self.public), 'personal': {r: cnt(self.personal[r]) for r in roles}}, 'rc': 0})
+        if cmd == 'reset-name':                 # 還原名字（模擬：名字本來就是物種名，只記呼叫；reset_rc 模擬失敗 / 費用字樣）
+            return self.out(getattr(self, 'reset_rc', 0))
         if cmd == 'set-state-many':
             name, st = args[3], args[4]
             for r in ROLES:
@@ -611,6 +613,31 @@ rc = go(2019, s, from_stage='distribute1', to_stage='distribute1')
 s.calls.clear()
 rc2 = go(2019, s, from_stage='distribute1', to_stage='distribute1', reset=False)
 check('卡坦 distribute1：第一次取齊、重跑不重複取', rc == 0 and rc2 == 0 and not any(a[0] == 'take-many' for a in names(s, 'pet.py')), f'{rc} {rc2}')
+
+# ---------------- 還原名字（2026-10-14）：抓完一批 register 後、存公共前 reset-name 抓寵者
+s = grow(Sim(2016))
+rc = go(2016, s, confirm_drop=True)
+seq = [(c[0], c[1][0] if c[0] == 'pet.py' else c[1][c[1].index('--stages') + 1] if '--stages' in c[1] else '') for c in s.calls
+       if c[0] in ('pet.py', 'pet_catch.py')]
+rn = [a for a in names(s, 'pet.py') if a[0] == 'reset-name']
+i_reg = [i for i, x in enumerate(seq) if x == ('pet_catch.py', 'setup,wait,register')]
+i_rn = [i for i, x in enumerate(seq) if x == ('pet.py', 'reset-name')]
+i_st = [i for i, x in enumerate(seq) if x[0] == 'pet.py' and x[1] == 'store-many']
+check('每批 register 後都 reset-name 抓寵者（DKBO2,DKBO3），且在該批 store-many 之前', rc == 0 and len(rn) == 2 and rn[0] == ('reset-name', '--role', 'DKBO2,DKBO3')
+      and all(r < n for r, n in zip(i_reg, i_rn)) and any(n < st for n in i_rn for st in i_st), f'rc={rc} {rn} {seq}')
+s = grow(Sim(2016))
+s.reset_rc = 66
+rc = go(2016, s, confirm_drop=True)
+check('reset-name 一般失敗（66）→ 只記事件、照常跑完', rc == 0, f'rc={rc}')
+s = grow(Sim(2016))
+s.reset_rc = pq.PET_FEE
+rc = go(2016, s, confirm_drop=True)
+check('reset-name 讀到費用字樣（67）→ 165 停手、沒存公共', rc == pq.EXIT_DIST and not any(a[0] == 'store-many' and '--depot' in a and a[a.index('--depot') + 1] == 'public'
+      for a in names(s, 'pet.py')) and '鐵則 3' in pq.LAST['info'].get('msg', ''), f'rc={rc} {pq.LAST.get("info")}')
+s = grow(Sim(2016))
+s.reset_rc = 9
+rc = go(2016, s, confirm_drop=True)
+check('reset-name 驗證視窗（9）→ 透傳 9', rc == 9, f'rc={rc}')
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

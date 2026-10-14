@@ -22,7 +22,8 @@
     catch[N]    每輪每批可抓 = 抓寵者寵物欄空格（最少那人；正常 4）：分批抓到 5 隻，滿了會自動進個人倉庫（沒縮圖、成長字串沒登錄就取不出來）→ 所以一批 ≤ 空格數：
                 pet_catch.py --stages bait（公共倉庫誘餌取 k 拆 k）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 外掛「+」買 k 次（見上）→
                 pet_catch.py --stages setup,wait,register --count k [--reuse-setup：第 2 批起沿用捉寵設置]（wait 第一次輪詢 k×20+20 秒、之後 60 秒；
-                register = 依抓寵者登錄成長字串）→ 抓寵者把這批存公共（最後一批留 1 隻）
+                register = 依抓寵者登錄成長字串）→ pet.py reset-name --role <抓寵者>（2026-10-14：成長字串的新寵物還原物種名，之後靠名字認；
+                讀到費用字樣 pet 67 → 165 停手，其他失敗只記事件照常往下）→ 抓寵者把這批存公共（最後一批留 1 隻）
                 pet.py store-many --pick last --skip-missing --candidates 本輪物種 → pet.py list 驗數量
                 中途失敗（2026-10-14 恐龍博士：DKBO3 物種選不到、DKBO2 已勾自動抓寵照抓）：pet_catch 失敗時自己把自動抓寵勾掉；
                 續跑（進度檔 catch_started / 抓寵者寵物欄已有任務寵）→ pet.py depot-list 數實際已抓（寵物欄 + 公共 + 抓寵者個人倉庫，recount_plan）→
@@ -89,6 +90,7 @@ LEADER = 'DKBO'
 ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 BATTLE_PET = '朵拉比斯'
 BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
+PET_FEE = 67                       # pet.EXIT_FEE：還原名字時讀到費用字樣（鐵則 3）
 import catchbuy  # noqa: E402  外掛「+」買可抓捕數的共用邏輯（rebirth_pets 同一份）
 PLUS_XY, PLUS_COST, MONEY_BOX = catchbuy.PLUS_XY, catchbuy.PLUS_COST, catchbuy.MONEY_BOX      # 紅區：只有 --confirm-buy-bait 才點
 POLL_S = 30.0                      # 練寵讀等級間隔（2026-10-13 review 1013b §2.3：只讀等級 pet.py levels，跟 petwatch 一樣 30 秒；舊版 120 秒 + 每次讀 5 人全部身分 91 秒）
@@ -708,6 +710,9 @@ class Run:
                 return self.pass_or(rc, EXIT_CATCH, f'抓寵失敗 pet_catch rc={rc}（14 系別 / 物種選不到、15 縮圖矛盾、16 新寵物名字讀不出、17 新寵物沒登錄、103 設定 / 逾時）；'
                                     f'已取消自動抓寵，重跑會先數實際已抓（含倉庫）再補',
                                     f'uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}（或 pet_catch.py --catch-off 後手動）'), rs
+            rc = self.reset_names([r for r, _, _ in assign])           # 抓完這批：成長字串的新寵物還原成物種名（之後存倉 / 分配都靠名字認）
+            if rc:
+                return rc, rs
             n_store = store_after_batch(k, last)
             if n_store:
                 pets = ','.join(sp for _, _, sp in assign for _ in range(n_store))
@@ -731,6 +736,18 @@ class Run:
             self.save()
             event(f'{stage}：第 {bi + 1}/{len(plan)} 批抓 {k} 隻完成（累計 {got}）')
         return 0, rs
+
+    def reset_names(self, roles) -> int:
+        """pet.py reset-name --role <抓寵者>（2026-10-14：名字框是成長字串的新寵物 → 輸入框留空按確認 = 還原物種名）。
+        費用字樣（pet 67）→ 停手（鐵則 3）；驗證視窗 / 斷線透傳；其他失敗只記事件、照常往下（store-many 仍有登錄檔 + 縮圖備援、存前也會再還原一次）"""
+        rc, _ = self.sub('pet.py', ['reset-name', '--role', ','.join(roles)], 900)
+        if rc in PASS:
+            return rc
+        if rc == PET_FEE:
+            return self.fail(EXIT_DIST, f'還原名字時讀到費用字樣（pet rc={rc}）→ 已按取消、停手（鐵則 3）', '看 tools/.cache/ui-log/*pet-rename* 截圖，確認改名是否收費')
+        if rc:
+            event(f'還原名字失敗 pet rc={rc}（{",".join(roles)}）→ 照常往下（存倉前會再試、成長字串登錄檔備援）')
+        return 0
 
     def save_pre(self, rs) -> None:
         fn = getattr(self.T, 'save_catch_pre', None)
@@ -1001,7 +1018,7 @@ def print_plan(qid: int, o: dict) -> None:
             a = rd['assign']
             print(f'  catch{sfx}   每批 ≤ 4 隻（{batches(q.get("count", 5), 4)}）：pet_catch.py --assign "{csv_assign(a)}" --count k --stages bait'
                   f' → [誘餌不夠且 --confirm-buy-bait：外掛「+」買 k 次，每次讀石幣扣 {PLUS_COST}] → --stages setup,wait,register（第 2 批 --reuse-setup；第一次輪詢 k×20+20 秒、之後 60 秒）'
-                  f' → pet.py store-many（抓寵者存公共，最後一批留 1）→ list 驗')
+                  f' → pet.py reset-name --role 抓寵者（成長字串還原物種名）→ pet.py store-many（抓寵者存公共，最後一批留 1）→ list 驗')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" --candidates {species_csv(a)} → list 驗每人每物種 1 隻')
             print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
                   f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；連兩輪 ≥ 門檻 {rd["need"]}）→ 關遇敵 → autoswap off → rest-all')

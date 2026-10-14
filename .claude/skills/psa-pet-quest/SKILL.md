@@ -12,6 +12,13 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 **多人一律用批次版**（2026-10-12）：`pet.py store-many / take-many [--plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"] / set-state-many`、`bag.py store|take all 名稱 [--skip-missing]`、`pet_catch.py --lock / --autoswap`：面板只開一次、倉庫分頁 / 子分頁只切一次、左欄頭像換人連續做完再關（不要一人一次開關）；新抓的寵物沒名字（名字框是成長字串）見下方「轉生後寵物重整」。
 
 
+## 新寵物一律還原名字、辨識改名字為主（2026-10-14 晚，使用者實測、使用者定）
+- 寵物面板名字框右邊鉛筆 →「修改名字」→ **輸入框留空按確認 = 名字變回物種名**（不扣費）。成長字串（a/b/c/d）的沒名字寵物一律還原，之後只靠名字認（不再靠 learn-species / 成長字串登錄檔 / 縮圖；那些退為備援）。
+- `pet.py reset-name --role DKBO2,DKBO3`：寵物欄成長字串的全部還原（騎寵也可以，改名不改狀態）；`pet.py store / store-many` 存倉前也會自動先還原（`--no-rename` 關）；
+  倉庫裡已經是成長字串的卡：`pet.py depot-fix-names --depot public,personal --role all`（取出 → 還原 → 存回原倉庫；寵物欄沒空格就跳過列出）。
+- **petquest catch**：每批 `pet_catch --stages setup,wait,register` 之後、存公共前自動跑 `reset-name --role <抓寵者>`；讀到費用字樣（pet 67）→ 165 停手（鐵則 3），其他失敗只記事件照常往下。
+- 任何一步讀到「鑽石 / 石幣 / 費用…」→ 按取消、退出碼 67 停手；細節 / 座標 / 實測見 `../psa-game-ui/ui/pet.md`「還原名字 + 名字為主」。
+
 ## 讀寵物身分變快 / 變準（2026-10-14 petglyph）
 - 成長字串（沒名字的新寵物）改用字形樣板讀（不 OCR，不會再把 40 讀成「姍」）；倉庫 `depot-list` 一次讀全部卡片上的白字 / 綠字，**不再逐張選卡**（掛機中選卡會被戰鬥結束刷新跳回寵物欄第 1 格 → 讀到別隻）；`take` 找卡先點卡片字像目標的那張（等級同時對上的優先）。細節 / 實測見 `../psa-game-ui/ui/pet.md`「字形樣板讀字」。
 - 候選內縮圖決勝加第三關投票：卡坦倉庫卡 奇寶 / 克克洛斯（冠毛被字蓋住）不再 None。
