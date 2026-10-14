@@ -42,6 +42,74 @@ def fake_cell(iid, kind, cx, cy, shift=(0, 0), tag=True, recolor=None):
     return cells
 
 
+OCC_X0, OCC_Y0 = 765, 225      # fixtures/petimg/occ_<角色>.png = thumb-<角色>-personal.png 裁 (765,225)～(1295,330)：倉庫第 1 排 5 張卡
+
+
+def occ_getter(role):
+    """2026-10-14 play agent 被浮字橫幅蓋住的倉庫分頁（DKBO2 卡 1、2 蓋上半；DKBO3 卡 1、2 幾乎整張）→ get(x, y)（截圖座標）"""
+    p = HERE / 'fixtures' / 'petimg' / f'occ_{role}.png'
+    if not p.exists():
+        return None
+    w, h, bpp, rows = pngread.decode(p.read_bytes())
+
+    def get(x, y):
+        if 0 <= x - OCC_X0 < w and 0 <= y - OCC_Y0 < h:
+            return tuple(rows[y - OCC_Y0][(x - OCC_X0) * bpp:(x - OCC_X0) * bpp + 3])
+        return None
+    return get
+
+
+def darkened(get, cx, cy, bottom, k=0.56):
+    """合成浮字橫幅：格心上方到 dy=bottom 的列乘 k（實測橫幅 ≈ 原色 × 0.56）"""
+    def g(x, y):
+        c = get(x, y)
+        if c is not None and y - cy <= bottom and abs(x - cx) <= 62:
+            return tuple(int(v * k) for v in c)
+        return c
+    return g
+
+
+def test_partial(names16):
+    """被蓋住時的區塊比對（imgmatch.covered_rows / keep_rows + judge partial）"""
+    import imgmatch
+    rows = imgmatch.covered_rows(lambda x, y: (100, 90, 80) if y < 10 else (230, 210, 180), 0, 0,
+                                 [(dx, dy) for dx in (-5, 5) for dy in range(-20, 21, 4)], imgmatch.dimmed_beige, 4)
+    check('covered_rows：壓暗的取點列 ±pad', min(rows) == -24 and max(rows) == 12, (min(rows), max(rows)))
+    g = imgmatch.keep_rows({(0, y): (1, 1, 1) for y in range(-5, 6)}, 0, drop={-5, -4}, y_min=-3, y_max=3)
+    check('keep_rows：drop + y_min / y_max', sorted(q[1] for q in g) == list(range(-3, 4)) and isinstance(g, imgmatch.Grid))
+    g2 = occ_getter('DKBO2')
+    g3 = occ_getter('DKBO3')
+    if g2 is None or g3 is None:
+        print('SKIP 沒有 fixtures/petimg/occ_DKBO2.png / occ_DKBO3.png')
+        return
+    want2 = {1: '布拉奇多斯', 2: '摩娜西普', 3: '摩娜西普', 4: '布拉奇多斯', 5: '迪基格斯'}
+    for i, sp in want2.items():
+        _, cx, cy = M.cells_of('card')[i - 1]
+        r = M.judge(g2, 'card', cx, cy, names16)
+        if i <= 2:
+            check(f'被蓋住 DKBO2 卡 {i}：區塊比對認出 {sp}', r['occluded'] and r['partial'] and r['species'] == sp and r['stage'] == 'partial',
+                  f"{r['best_species']} {r['score']} / {r['second']} vis {r.get('vis')}")
+            r0 = M.judge(g2, 'card', cx, cy, names16, partial=False)
+            check(f'被蓋住 DKBO2 卡 {i}：partial=False → 照舊不認', r0['occluded'] and r0['species'] is None and r0['stage'] == 'occluded')
+            absent = [n for n in names16 if n not in M.family_of(sp)]
+            ra = M.judge(g2, 'card', cx, cy, absent, family_stage=False)
+            check(f'被蓋住 DKBO2 卡 {i}：真物種不在候選 → 不冒充', ra['species'] is None, f"{ra['best_species']} {ra['score']}")
+        else:
+            check(f'沒蓋住 DKBO2 卡 {i}：全圖（不是區塊比對）', not r['occluded'] and not r['partial'] and r['species'] == sp, r['score'])
+    for i in (1, 2):
+        _, cx, cy = M.cells_of('card')[i - 1]
+        r = M.judge(g3, 'card', cx, cy, names16)
+        check(f'幾乎整張被蓋住 DKBO3 卡 {i}：沒蓋住的列不夠 → 不認', r['occluded'] and r['species'] is None and r.get('vis', 1) < M.PARTIAL_MIN_VIS,
+              f"vis {r.get('vis')}")
+    # 合成：沒蓋住的格把上方蓋到 dy=-10 → 遮擋偵測到、區塊比對認出（全圖照舊不認）
+    _, cx, cy = M.cells_of('card')[2]
+    gd = darkened(g2, cx, cy, -10)
+    r = M.judge(gd, 'card', cx, cy, names16)
+    check('合成橫幅蓋上方 → 區塊比對認出摩娜西普', r['occluded'] and r['species'] == '摩娜西普', f"{r['score']} / {r['second']} vis {r.get('vis')}")
+    r = M.judge(darkened(g2, cx, cy, 30), 'card', cx, cy, names16)
+    check('合成橫幅蓋到 dy=30 → 不認', r['occluded'] and r['species'] is None, r.get('vis'))
+
+
 def main() -> int:
     if not (M.IMG_DIR / 'index.tsv').exists():
         print('SKIP 沒有 tools/.cache/pet-images（先跑 tools/extract/pet_images.py）')
@@ -169,6 +237,7 @@ def main() -> int:
     check('rank_among 單一候選也要過門檻', r['species'] == '加克拉')
     r = M.rank_among(fake_cell(M.ids_for(['朵拉比斯'])[0], 'slot', cx, cy), 'slot', cx, cy, sharks)
     check('rank_among 候選裡沒有 → None', r['species'] is None and not r['ok'])
+    test_partial(names16)
     print('全部通過' if not fails else f'{fails} 項失敗')
     return 1 if fails else 0
 

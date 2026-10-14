@@ -561,8 +561,19 @@ def combine_ident(text_sp, im) -> tuple:
     """純函式：文字（名字 = 1 種；成長字串登錄 = 0～多種）+ 縮圖結果 → (物種或 None, 來源, 衝突說明或 None)。
     縮圖有把握：文字沒有 → (縮圖, 'img')；文字含它 → (那個名字, 'img+text')；文字不含 → (None, 'conflict', 說明)。
     縮圖沒把握：文字說的物種（有頭像的）每一個自己的分數都 < KEEP_FLOOR（縮圖根本不像）→ 衝突；否則 (None, None, None)，呼叫端照舊用文字。
-    沒讀 / 被蓋住（im None 或 img_occluded）→ (None, None, None)"""
+    沒讀 / 被蓋住（im None 或 img_occluded）→ (None, None, None)。
+    被蓋住但區塊比對有把握（img_partial_species，只比沒蓋住的列、門檻較嚴）→ 只拿來跟文字互相確認：同 → (名字, 'img+text')；
+    不同 → 衝突；沒有文字 → (None, None, None)（**不單獨升為身分**）"""
     isp = (im or {}).get('img_species')
+    psp = (im or {}).get('img_partial_species')
+    if not isp and psp:
+        text_sp = [t for t in dict.fromkeys(text_sp or []) if t]
+        if not text_sp:
+            return None, None, None
+        hit = next((t for t in text_sp if _skey(t) == _skey(psp)), None)
+        if hit:
+            return hit, 'img+text', None
+        return None, 'conflict', f'文字是 {"/".join(text_sp)}、縮圖（被浮字蓋住，只比沒蓋住的列）是 {psp}（{im.get("img_score")}）'
     if not isp:
         ks = (im or {}).get('img_keep') or {}
         kind = (im or {}).get('img_kind')
@@ -584,7 +595,8 @@ def combine_ident(text_sp, im) -> tuple:
 # 候選限定：呼叫端 --candidates / 任務定義（ctx['img_only']），否則「已知清單」（騎寵 + IMG_EXTRA + 名字樣板學過的 + 物種登錄檔裡的），
 # 再加文字（名字 / 成長字串登錄）說的物種與騎寵；文字沒獨立確認時再加第一名的同系別（petimg_match.judge，粗篩 4 個 → rank_among：inlier + 主色 + 投票）。
 # 名字樣板 / 成長字串字形是第二道確認：兩者都有且不同 → 衝突（ident_conflict）→ 身分 None → store / set-state / take 72（不確定）。
-# 被浮字橫幅蓋住（judge 的遮擋偵測）→ 每 IMG_OCC_WAIT_S 重拍、最多 IMG_OCC_POLLS 次；仍蓋住 → 縮圖這次不算（不硬認），身分只剩文字（= 舊行為）。
+# 被浮字橫幅蓋住（judge 的遮擋偵測）→ 每 IMG_OCC_WAIT_S 重拍、最多 IMG_OCC_POLLS 次；仍蓋住 → 區塊比對（只比沒蓋住的列、門檻較嚴）有把握時
+# 只跟文字互相確認 / 抓衝突（img_partial_species，不單獨升為身分）；沒把握 → 縮圖這次不算（不硬認），身分只剩文字（= 舊行為）。
 # 開集（全部 Monster）只在 list（ctx['img_open']）、文字與候選縮圖都認不出時算一次 → img_guess（顯示參考），**不進 img_species / species、不准據以存取**。
 # 存取的安全規則不變：騎寵 / 第 1 格 / 騎乘 / 出戰（guard_store）、按鈕前現場驗證、取出後再驗。
 IMG_ON = True                                  # --no-img 關（回到純文字辨識）；fake_pet.install 也關（假面板沒畫頭像）
@@ -593,7 +605,7 @@ IMG_EXTRA = ['朵拉比斯', '迪基格斯', '金布伊']   # 一定放進已知
 ICACHE_ON = True                               # --no-icache 關（身分跨程序快取，見 rows_key 上方說明）
 IMG_OCC_POLLS, IMG_OCC_WAIT_S = 5, 0.4         # 縮圖被浮字蓋住：重拍間隔 / 次數（EXP 橫幅每 3～6 秒蓋 1.2～1.6 秒）
 IMG_FAMILY_TASK = True                         # 任務候選（--candidates）也做同系別第二輪（離線卡坦截圖驗過不退步才開）
-IMG_KEY_VER = 'v2'                             # 身分快取 img 鍵的版本（2026-10-14 judge 結果格式）
+IMG_KEY_VER = 'v3'                             # 身分快取 img 鍵的版本（2026-10-14 judge 結果格式；v3 = 加區塊比對 img_partial_species）
 
 
 def img_candidates(ctx: dict) -> list:
@@ -615,14 +627,16 @@ def img_names(ctx: dict, text=()) -> list:
     return list(dict.fromkeys(base + [t for t in text if t] + list(uikit.MOUNTS)))
 
 
-def img_match(get, kind: str, cx: int, cy: int, ctx: dict, text=()) -> dict:
+def img_match(get, kind: str, cx: int, cy: int, ctx: dict, text=(), partial: bool = True) -> dict:
     """已讀好的畫面（get(x,y) 或 {(x,y): rgb}）→ {'img_species'（有把握才有值）, 'img_score', 'img_best', 'img_second', 'img_hist',
-    'img_stage'（cand / family / occluded / none）, 'img_occluded', 'img_occ'}（petimg_match.judge）"""
+    'img_stage'（cand / family / partial / occluded / none）, 'img_occluded', 'img_occ', 'img_partial_species'（被蓋住時區塊比對有把握的物種）}（petimg_match.judge）"""
     import petimg_match as M
     text = [t for t in dict.fromkeys(text) if t]
     fam = IMG_FAMILY_TASK or not ctx.get('img_only')
-    r = M.judge(get, kind, cx, cy, img_names(ctx, text), keep=text, family_stage=fam, quick=bool(ctx.get('img_quick')))
-    return {'img_species': r['species'] if r['ok'] else None, 'img_score': r['score'], 'img_best': r['best_species'],
+    r = M.judge(get, kind, cx, cy, img_names(ctx, text), keep=text, family_stage=fam, quick=bool(ctx.get('img_quick')), partial=partial)
+    part = bool(r.get('partial'))                       # 被蓋住時的區塊比對：不進 img_species（只給 combine_ident 跟文字互相確認）
+    return {'img_species': r['species'] if r['ok'] and not part else None,
+            'img_partial_species': r['species'] if r['ok'] and part else None, 'img_score': r['score'], 'img_best': r['best_species'],
             'img_second': [r['second_species'], r['second']], 'img_hist': [r['hist'], r['hist_second']],
             'img_stage': r['stage'], 'img_occluded': r['occluded'], 'img_occ': r['occ'], 'img_keep': r.get('keep_scores') or {},
             'img_kind': kind}
@@ -687,7 +701,7 @@ def img_ident(kind: str, idx: int, ctx: dict, text=()) -> dict | None:
                 uikit.mark(f'img {kind} {idx + 1} (cache)')
                 return dict(hit[0], img_ms=int((time.time() - t) * 1000), img_cached=True)
         try:
-            r = img_match(get, kind, cx, cy, ctx, text)
+            r = img_match(get, kind, cx, cy, ctx, text, partial=attempt == IMG_OCC_POLLS)   # 區塊比對只在最後一次（重拍都還蓋住）
         except KeyError as e:                                   # --candidates 給了知識庫頭像沒有的名字
             if not ctx.get('img_warned'):
                 log(f'縮圖認物種：{e}')
@@ -699,7 +713,11 @@ def img_ident(kind: str, idx: int, ctx: dict, text=()) -> dict | None:
         uikit.sleep(IMG_OCC_WAIT_S)                            # 被浮字橫幅蓋住：等它消失重拍（不硬認）
     r['img_ms'] = int((time.time() - t) * 1000)
     if r['img_occluded']:
-        log(f'{"寵物格" if kind == "slot" else "倉庫卡"} {idx + 1} 縮圖一直被浮字蓋住（{r["img_occ"]} 點），這次不用縮圖')
+        if r.get('img_partial_species'):
+            log(f'{"寵物格" if kind == "slot" else "倉庫卡"} {idx + 1} 縮圖一直被浮字蓋住（{r["img_occ"]} 點），'
+                f'沒蓋住的列像 {r["img_partial_species"]}（{r["img_score"]}），只拿來跟文字互相確認')
+        else:
+            log(f'{"寵物格" if kind == "slot" else "倉庫卡"} {idx + 1} 縮圖一直被浮字蓋住（{r["img_occ"]} 點），這次不用縮圖')
     elif ikey:
         icache_put(ctx, 'img', ikey, {k: v for k, v in r.items() if k != 'img_ms'})
     uikit.mark(f'img {kind} {idx + 1}')
@@ -881,7 +899,8 @@ def read_slot(i: int, ctx: dict) -> dict:
         d.update(img_open_guess('slot', i, ctx))              # 開集參考（只顯示，不准據以存取）
     ocr_texts = ([d['name']] if d['name'] else []) + d.get('ocr', [])
     d['mountlike'] = any(uikit.is_mount_like(t) for t in ocr_texts) or d.get('species') in uikit.MOUNTS \
-        or d.get('img_species') in uikit.MOUNTS or d.get('img_guess') in uikit.MOUNTS   # 縮圖（含開集參考）認成騎寵只會更嚴（多擋），不會放行
+        or d.get('img_species') in uikit.MOUNTS or d.get('img_guess') in uikit.MOUNTS \
+        or d.get('img_partial_species') in uikit.MOUNTS   # 縮圖（含開集參考、被蓋住的區塊比對）認成騎寵只會更嚴（多擋），不會放行
     return d
 
 
@@ -2554,6 +2573,8 @@ def card_ident(k: int, idn: dict, ctx: dict) -> dict:
         d['img_score'] = im.get('img_score')
         if im.get('img_occluded'):
             d['img_occluded'] = True
+        if im.get('img_partial_species'):
+            d['img_partial'] = im['img_partial_species']             # 被蓋住時區塊比對的結果（只跟文字互相確認）
     sp, src, why = combine_ident(text, im)
     if why:
         d['species'], d['src'], d['conflict'] = None, 'conflict', why

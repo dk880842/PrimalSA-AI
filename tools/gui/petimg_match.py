@@ -317,30 +317,17 @@ def _shortlist(cells, kind, cx, cy, ids, keep_ids, n=JUDGE_SHORT) -> list:
     return out + [i for i in keep_ids if i not in out]
 
 
-def judge(get, kind: str, cx: int, cy: int, names, keep=(), family_stage: bool = True, quick: bool = False) -> dict:
-    """候選限定的主判定（pet.py 縮圖為主用）：
-      1. 遮擋偵測：被浮字橫幅 / 遮罩蓋住 → occluded=True、ok=False（不硬認；呼叫端等它消失重讀）。
-      2. 候選 names（沒有頭像的名字略過）粗篩留 JUDGE_SHORT 個（keep = 文字說的物種，一定留著比）→ rank_among（inlier + 主色 + 投票）。
-      3. family_stage：第一名過門檻 → 加第一名的同系別（換色版）再比一次，以第二輪為準
-         （候選裡只有兄弟時防兄弟頂替；例：克克洛斯 對 [奇寶] 單獨比 0.76；文字說奇寶時也一樣要比，否則兄弟會被「確認」）。
-      keep_scores = {keep 物種: 它自己的最佳 inlier 分數}：呼叫端用來判斷「文字說的物種縮圖根本不像」（見 pet.combine_ident 的 KEEP_FLOOR）。
-    quick=True 且有 keep（大量唯讀清點，例：depot-list 卡片字已讀出名字）：候選只用 keep + 同系別前 JUDGE_QUICK 個（不比其他已知物種），
-      約快 2 倍；文字整個讀錯成別系物種時只剩 KEEP_FLOOR（縮圖不像）擋得到，所以存取前的確認不要用 quick。
-    開集（全部 Monster）不在這裡：只當參考，不准據以存取（見 match(names=None)）。
-    → rank_among 的欄位 + {'occ', 'occluded', 'stage': 'cand'|'family'|'occluded'|'none'}"""
-    occ = occlusion(get, kind, cx, cy)
-    empty = {'species': None, 'imageId': None, 'best_species': None, 'score': 0.0, 'second': 0.0, 'second_species': None,
-             'hist': 0.0, 'hist_second': 0.0, 'hist_best': None, 'ok': False, 'ranked': [], 'tiebreak': None, 'occ': occ}
-    if occ >= OCC_MIN[kind]:
-        return dict(empty, occluded=True, stage='occluded')
-    have = {n for ns in index().values() for n in ns}
-    if quick and any(n in have for n in keep):
-        names = []
-    names = [n for n in dict.fromkeys(list(names) + list(keep)) if n in have]
-    if not names:
-        return dict(empty, occluded=False, stage='none')
-    keep = [n for n in keep if n in have]
-    cells = _cells(get, kind, cx, cy)
+# 被蓋住時的退路「區塊比對」（2026-10-14 離線評估，見 ui/pet.md「區塊比對」）：只比沒被橫幅蓋住的列（covered_rows ±OCC_PAD 丟掉），
+# 門檻比平常嚴；沒被蓋住時仍用全圖（只比下半會讓易混組分差變小：寵物格 左迪洛斯 / 瑪斯貝卡 / 火雞系等最小分差 0.113 → 0.005）。
+OCC_PAD = 4                                       # 取點每 4 列一點 → 每個壓暗點蓋 ±4 列
+PARTIAL_MIN_VIS = 0.25                            # 沒蓋住的列至少佔可見範圍這麼多才比（太少 → 照舊不認；0.20 時合成遮擋有 2 格冒充）
+PARTIAL_MIN = {'slot': 0.80, 'card': 0.65}        # 區塊比對的分數門檻（平常 0.70 / 0.55；0.75 / 0.60 時合成遮擋有冒充）
+PARTIAL_MARGIN = 0.15                             # 與第二名（不同物種）至少差這麼多；不接受只靠第三關投票判定
+PARTIAL_HIST = 0.05                               # 主色分差至少這麼多（同平常；DKBO2 卡 1 實例 布拉奇多斯 vs 同系 波益達布 主色差 0.080）
+
+
+def _judge_cells(cells, kind, cx, cy, names, keep, family_stage, quick) -> dict:
+    """judge 的候選比對部分（已去遮擋的 cells）：粗篩 → rank_among → 同系別第二輪 → keep_scores"""
     ids, keep_ids = ids_for(names), ids_for(keep) if keep else []
     memo = {}
     short = _shortlist(cells, kind, cx, cy, ids, keep_ids)
@@ -354,7 +341,57 @@ def judge(get, kind: str, cx: int, cy: int, names, keep=(), family_stage: bool =
             r, stage = _among_ids(cells, kind, cx, cy, short2, memo), 'family'
     ks = {n: round(max(memo[i][0][0] for i in ids_for([n]) if i in memo), 3) for n in keep
           if any(i in memo for i in ids_for([n]))}
-    return dict(r, occ=occ, occluded=False, stage=stage, keep_scores=ks)
+    return dict(r, stage=stage, keep_scores=ks)
+
+
+def partial_ok(r: dict, kind: str) -> bool:
+    """區塊比對結果是否夠把握（比平常嚴：分數、與第二名分差、主色分差都要過；只靠投票的不算）"""
+    return (r['best_species'] is not None and r['score'] >= PARTIAL_MIN[kind] and r['score'] - r['second'] >= PARTIAL_MARGIN
+            and r['hist_best'] == r['best_species'] and r['hist'] - r['hist_second'] >= PARTIAL_HIST)
+
+
+def judge(get, kind: str, cx: int, cy: int, names, keep=(), family_stage: bool = True, quick: bool = False,
+          partial: bool = True) -> dict:
+    """候選限定的主判定（pet.py 縮圖為主用）：
+      1. 遮擋偵測：被浮字橫幅 / 遮罩蓋住 → occluded=True。partial=False → ok=False（不硬認；呼叫端等它消失重讀）；
+         partial=True → 區塊比對：只用沒被蓋住的列（covered_rows）比，門檻較嚴（partial_ok），結果標 partial=True、stage='partial'
+         （沒蓋住的列 < PARTIAL_MIN_VIS → 不比、ok=False）。pet.py 只拿它跟文字互相確認 / 抓衝突，不單獨升為身分。
+      2. 候選 names（沒有頭像的名字略過）粗篩留 JUDGE_SHORT 個（keep = 文字說的物種，一定留著比）→ rank_among（inlier + 主色 + 投票）。
+      3. family_stage：第一名過門檻 → 加第一名的同系別（換色版）再比一次，以第二輪為準
+         （候選裡只有兄弟時防兄弟頂替；例：克克洛斯 對 [奇寶] 單獨比 0.76；文字說奇寶時也一樣要比，否則兄弟會被「確認」）。
+      keep_scores = {keep 物種: 它自己的最佳 inlier 分數}：呼叫端用來判斷「文字說的物種縮圖根本不像」（見 pet.combine_ident 的 KEEP_FLOOR）。
+    quick=True 且有 keep（大量唯讀清點，例：depot-list 卡片字已讀出名字）：候選只用 keep + 同系別前 JUDGE_QUICK 個（不比其他已知物種），
+      約快 2 倍；文字整個讀錯成別系物種時只剩 KEEP_FLOOR（縮圖不像）擋得到，所以存取前的確認不要用 quick。
+    開集（全部 Monster）不在這裡：只當參考，不准據以存取（見 match(names=None)）。
+    → rank_among 的欄位 + {'occ', 'occluded', 'partial', 'vis', 'stage': 'cand'|'family'|'partial'|'occluded'|'none'}"""
+    occ = occlusion(get, kind, cx, cy)
+    empty = {'species': None, 'imageId': None, 'best_species': None, 'score': 0.0, 'second': 0.0, 'second_species': None,
+             'hist': 0.0, 'hist_second': 0.0, 'hist_best': None, 'ok': False, 'ranked': [], 'tiebreak': None, 'occ': occ,
+             'partial': False}
+    occluded = occ >= OCC_MIN[kind]
+    if occluded and not partial:
+        return dict(empty, occluded=True, stage='occluded')
+    have = {n for ns in index().values() for n in ns}
+    if quick and any(n in have for n in keep):
+        names = []
+    names = [n for n in dict.fromkeys(list(names) + list(keep)) if n in have]
+    if not names:
+        return dict(empty, occluded=occluded, stage='occluded' if occluded else 'none')
+    keep = [n for n in keep if n in have]
+    cells = _cells(get, kind, cx, cy)
+    if not occluded:
+        return dict(_judge_cells(cells, kind, cx, cy, names, keep, family_stage, quick), occ=occ, occluded=False, partial=False)
+    # 被蓋住 → 區塊比對（只比沒蓋住的列）
+    y0, y1 = KINDS[kind]['clip'][1], KINDS[kind]['clip'][3]
+    bad = imgmatch.covered_rows((lambda x, y: get.get((x, y))) if isinstance(get, dict) else get, cx, cy, OCC_PTS[kind],
+                                imgmatch.dimmed_beige, OCC_PAD)
+    vis = round(sum(1 for y in range(y0, y1 + 1) if y not in bad) / (y1 - y0 + 1), 3)
+    if vis < PARTIAL_MIN_VIS:
+        return dict(empty, occluded=True, stage='occluded', vis=vis)
+    r = _judge_cells(imgmatch.keep_rows(cells, cy, bad), kind, cx, cy, names, keep, family_stage, quick)
+    ok = r['ok'] and partial_ok(r, kind)
+    return dict(r, ok=ok, species=r['best_species'] if ok else None, imageId=r['imageId'] if ok else None,
+                occ=occ, occluded=True, partial=True, vis=vis, stage='partial')
 
 
 def _tiebreak(cells, kind, a, b) -> dict:

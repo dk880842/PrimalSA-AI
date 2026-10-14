@@ -200,8 +200,42 @@ def main() -> int:
     check('fmt_slot 衝突標 !衝突', '!衝突' in s, s)
 
     task_candidates()
+    partial_cards()
     print('全部通過' if not fails else f'{fails} 項失敗')
     return 1 if fails else 0
+
+
+def partial_cards():
+    """被浮字蓋住、重拍都還蓋住 → 區塊比對（只比沒蓋住的列）只跟文字互相確認 / 抓衝突，不單獨升為身分
+    （fixtures/petimg/occ_DKBO2.png：卡 1 布拉奇多斯 47/9/8/1、卡 2 摩娜西普，上半被 EXP 橫幅蓋住）"""
+    import test_petimg_match as T
+    g2 = T.occ_getter('DKBO2')
+    if g2 is None:
+        print('SKIP 沒有 fixtures/petimg/occ_DKBO2.png')
+        return
+    stat = {'shots': 0}
+
+    def shot_getter(tag='img'):
+        stat['shots'] += 1
+        return g2
+    uikit.shot_getter = shot_getter
+    uikit.px = lambda pts: [g2(x, y) for x, y in pts]
+    uikit.sleep = lambda s: None
+    check('combine_ident：區塊比對 = 文字 → img+text', pet.combine_ident(['瑪斯貝卡'], {'img_partial_species': '瑪斯貝卡'}) == ('瑪斯貝卡', 'img+text', None))
+    sp, src, why = pet.combine_ident(['朵拉比斯'], {'img_partial_species': '瑪斯貝卡', 'img_score': 0.85})
+    check('combine_ident：區塊比對 ≠ 文字 → 衝突', sp is None and src == 'conflict' and '蓋住' in why, why)
+    check('combine_ident：只有區塊比對、沒有文字 → 不升為身分', pet.combine_ident([], {'img_partial_species': '瑪斯貝卡'}) == (None, None, None))
+    c = dict(ctx0(), reg={'thumb': {}, 'growth': {'47/9/8/1': '布拉奇多斯'}})
+    ci = pet.card_ident(0, {'name': None, 'growth': '47/9/8/1'}, c)
+    check('卡 1 被蓋住：字串登錄布拉奇多斯 + 區塊比對同 → img+reg（img_species 仍 None）',
+          ci['species'] == '布拉奇多斯' and ci['src'] == 'img+reg' and ci.get('img') is None and ci.get('img_partial') == '布拉奇多斯'
+          and ci.get('img_occluded') and stat['shots'] == pet.IMG_OCC_POLLS + 1, ci)
+    ci = pet.card_ident(0, {'name': '摩娜西普', 'growth': None}, ctx0())
+    check('卡 1 被蓋住：名字說摩娜西普、區塊比對布拉奇多斯 → 衝突', ci['species'] is None and ci['src'] == 'conflict', ci.get('conflict'))
+    ci = pet.card_ident(1, {'name': None, 'growth': '1/2/3/4'}, dict(ctx0(), img_only=['摩娜西普', '朵拉比斯', '布拉奇多斯']))
+    check('卡 2 被蓋住：沒有文字物種 → 區塊比對不單獨升為身分', ci['species'] is None and ci.get('img') is None and ci.get('img_partial') == '摩娜西普', ci)
+    r = pet.img_ident('card', 1, ctx0(), ['摩娜西普'])
+    check('img_ident：區塊比對只在最後一次（前面重拍 partial=False）', r['img_stage'] == 'partial' and r['img_partial_species'] == '摩娜西普', r['img_stage'])
 
 
 SHARKS = ['克邦凱斯', '加克拉', '加格', '邦恩吉']

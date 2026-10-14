@@ -8,8 +8,10 @@
   3. 位置：期望中心附近先粗找（位移步 coarse_step、樣板每 coarse_stride 點取 1）再細找（全點、±1）。
   4. 判定 classify：第一名 ≥ 門檻且與第二名（不同 group）差 ≥ margin；前兩名都過門檻但太近 → tiebreak（只看兩樣板顏色差很大的點投票）。
   5. 候選內相對比較 rank_among：逐點 inlier + 主色直方圖（color_score）都同意才判定，分差不夠再 tiebreak（換色版：卡坦鯊 / 雞）。
-  6. 遮擋偵測 occlusion：格子外圍「本來是固定底色」的點被浮動 EXP 橫幅 / 半透明遮罩壓暗 → 點數 ≥ 門檻 = 被蓋住，呼叫端不硬認、等它消失重讀。
+  6. 遮擋偵測 occlusion / covered_rows / keep_rows：格子外圍「本來是固定底色」的點被浮動 EXP 橫幅 / 半透明遮罩壓暗 → 點數 ≥ 門檻 = 被蓋住，呼叫端不硬認、等它消失重讀。
      取點 / 判斷式由呼叫端給（背包格、寵物格、倉庫卡各一套）；dimmed_beige 是寵物面板米色底被壓暗的共用判斷式。
+     區塊比對（2026-10-14）：covered_rows 找出被蓋住的列、keep_rows 只留沒蓋住的列再比（寵物 judge 被蓋住時的退路，門檻較嚴）；
+     道具格離線評估後不用（只比下半時不在候選的圖冒充變多，見 ui/bag.md）。
   7. 大量樣板的粗篩快取：coarse_cache 把 {key: 粗樣板} 壓縮存到磁碟，戳記不符自動重算。
 
 本模組不讀任何遊戲畫面、不知道版面；版面（倍率 / 中心偏移 / 遮罩 / 遮擋取點）由呼叫端決定。
@@ -296,6 +298,27 @@ def occlusion(get, cx: int, cy: int, pts, pred) -> int:
         if c is not None and pred(c):
             n += 1
     return n
+
+
+def covered_rows(get, cx: int, cy: int, pts, pred, pad: int) -> set:
+    """遮擋取點 pts（相對格心）中 pred 成立（被壓暗）的點 → 被橫幅蓋住的列（相對格心的 dy，各 ±pad）。
+    浮字橫幅是一條橫帶：取點在格子左右兩側每隔幾列一點，pad 補上取點之間的列"""
+    get = as_getter(get)
+    bad = set()
+    for dx, dy in pts:
+        c = get(cx + dx, cy + dy)
+        if c is not None and pred(c):
+            bad.update(range(dy - pad, dy + pad + 1))
+    return bad
+
+
+def keep_rows(cells: dict, cy: int, drop=(), y_min=None, y_max=None):
+    """區塊比對（只比部分列）：丟掉 dy（相對格心 cy）在 drop 裡、或 < y_min、或 > y_max 的點 → Grid。
+    樣板落在被丟掉的點上不算分母（score 只數讀得到的點），所以等於只用剩下的列比對。
+    離線評估（2026-10-14，notes 見 ui/pet.md「區塊比對」）：沒被蓋住時只比下半會讓易混組分差變小、不在候選的冒充變多 → 只當被蓋住時的退路"""
+    drop = set(drop)
+    return Grid({q: c for q, c in cells.items() if (q[1] - cy) not in drop
+                 and (y_min is None or q[1] - cy >= y_min) and (y_max is None or q[1] - cy <= y_max)})
 
 
 def dimmed_beige(c) -> bool:

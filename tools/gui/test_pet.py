@@ -1143,7 +1143,7 @@ pet.IMG_ON = True
 _M.index = lambda: {'x': ['朵拉比斯']}
 _M.cells_of = lambda kind: [(i, 250, 200 + i) for i in range(5)]
 _M.read_cell = lambda kind, cx, cy: dict(_cells['v'])
-pet.img_match = lambda cells, kind, cx, cy, ctx, text=(): (_n.__setitem__('match', _n['match'] + 1), {'img_species': '克邦凱斯', 'img_score': 0.9, 'img_occluded': False})[1]
+pet.img_match = lambda cells, kind, cx, cy, ctx, text=(), partial=True: (_n.__setitem__('match', _n['match'] + 1), {'img_species': '克邦凱斯', 'img_score': 0.9, 'img_occluded': False})[1]
 try:
     c1 = pet.load_ctx(True, ['克邦凱斯', '加克拉'], use_icache=True)
     a1 = pet.img_ident('slot', 1, c1)
