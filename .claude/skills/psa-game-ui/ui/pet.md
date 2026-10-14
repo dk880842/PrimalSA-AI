@@ -137,13 +137,21 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
 - **時機**：
   1. `pet.py reset-name [--role all|DKBO2,DKBO3] [--slot N] [--dry-run]`：面板開一次、左欄頭像換人，每格名字框是成長字串（或讀不出但像成長字串）就還原；騎寵也還原（改名不改狀態，使用者 DKBO 騎寵實測）。失敗立即停。
   2. **`store` / `store-many` 存倉前**：選中格名字框是成長字串、守門（騎寵 / 第 1 格 / 騎乘…）都過了 → 先還原再存；還原失敗就不存（66 / 67）；`--no-rename` 關（照舊存成長字串卡）。
-  3. `pet.py depot-fix-names --depot public[,personal] [--role DKBO|all] [--dry-run]`：倉庫裡成長字串的卡（卡片白字字形 / 選卡讀名字框）→ `_take_in_depot`（以成長字串核對）取出 → 寵物分頁還原名字 →
+  3. `pet.py depot-fix-names --depot public[,personal] [--role DKBO|all] [--limit N] [--dry-run]`：倉庫裡成長字串的卡（卡片白字字形 / 選卡讀名字框）→ `_take_in_depot`（以成長字串核對）取出 → 寵物分頁還原名字 →
      `_store_body` 存回**原倉庫**（公共回公共、個人回個人；騎寵物種是剛從倉庫取出、等待中、名字完全相同才放行）。公共倉庫用 `--role` 裡第一個寵物欄有空格的人；**寵物欄沒空格 → 跳過列在 `skipped`，不為騰位子存別的寵物**；
      取出前就被擋（零點擊）→ `failed` 繼續下一張；取出後 / 改名 / 存回失敗 → 停（寵物留在寵物欄，結果列出）。名字 / 成長字串都讀不出的卡只列出不動。
   4. petquest 抓完一批（pet_catch register）後、存公共 / 分配前跑 `reset-name --role <抓寵者>`（67 → 165 停；其他失敗只記事件照常往下）。
 - **名字為主（`pet.NAME_FIRST`，`--img-first` 回下一段的縮圖為主）**：寵物格名字框 / 倉庫卡白字先用整名樣板（petmatch 名字樣板、petglyph 卡片名字整塊圖）讀、讀不到才 OCR；
   **讀到 Monster 表物種名就採用（`species_src: name`）、不跑縮圖**（list / depot-list / store / take 的取前取後核對都一樣，`img_conflict(named=True)` 直接略過）；
   縮圖只在名字讀不出（成長字串、浮字橫幅蓋住、沒樣板又 OCR 不準的新名字）時補，衝突仍走 `ident_conflict`。`species.json` 成長字串登錄檔 / `learn-species` 退為備援（不刪）。
+- **實機（2026-10-14 21:00～21:06，庫塔伊洞窟地雷區快戰掛機中，`--pause-encounter` 關遇敵等戰鬥結束、做完開回）**：
+  | 指令 | 結果 | 耗時 |
+  |---|---|---|
+  | (a) `reset-name --role DKBO2 --slot 1 --pause-encounter` | DKBO2 騎寵（騎乘中）51/9/8/1 → 布拉奇多斯，rc 0；視窗 OCR `['確詔','一修改名字']`、輸入框灰字點 136；騎乘狀態不變 | 15.7 s（點鉛筆 → 視窗驗證 + 確認 3.6 s、重讀 0.7 s；含關 / 開遇敵） |
+  | (b) `depot-fix-names --role DKBO2 --depot personal --limit 1 --pause-encounter` | 個人倉庫第 1 格 ?(47/9/8/1) 取到寵物欄第 3 格 → 還原布拉奇多斯 → 存回個人倉庫（重排到第 9 格），rc 0；寵物欄回原樣 | 57.7 s（preflight 13.3 s、存後逐張找卡 13.2 s） |
+  | (c) `list --role all --no-icache` | 有名字的 7 格全 `species_src name`、零縮圖；只有 DKBO3～5 騎寵成長字串那 3 格跑縮圖（img+reg）；全部讀到名字的角色不截縮圖用的圖 | 20.2～24.5 s（掛機中 EXP 橫幅重讀 3～5 s） |
+  | (c) `depot-list --depot public,personal --role DKBO2 --no-icache` | 13 張卡：有名字的 12 張全 `src name`、零縮圖；只有成長字串卡 49/9/7/2 跑縮圖 | 18.0 s |
+  實機前的狀態：DKBO 騎寵使用者已手動還原；DKBO3～5 騎寵、DKBO2～5 個人倉庫各 2 張舊騎寵布拉奇多斯（DKBO2 剩 1 張）還是成長字串（公共倉庫沒有成長字串卡）。**按確認後跳提示 / 費用字樣的路徑只有離線測試**（實機沒出現過費用字樣）。
 - 離線測試 `test_pet_rename.py`（假面板 `fake_pet.Game` 加修改名字視窗：成功 / dry-run / 費用字樣 / 輸入框不空 / 視窗沒出現 / 確認後跳提示 / 名字是片段 / 視窗不關 / store 前還原 / --no-rename / depot-fix-names 公共 + 個人 + 寵物欄滿 + 改名費用 / 名字為主不跑縮圖）。
 
 ## 縮圖為主（2026-10-14 早上～晚上；使用者：「先把縮圖的功能寫進腳本，寵物跟道具應該可以共用」）

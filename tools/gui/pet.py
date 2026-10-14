@@ -22,7 +22,7 @@
   uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
   uv run --no-project python tools/gui/pet.py depot-list --depot public[,personal] [--role DKBO2,DKBO3] [--candidates 魯尼帖斯,貝魯卡]   # 唯讀：倉庫卡片 + 各物種張數（只選卡不存取）
   uv run --no-project python tools/gui/pet.py reset-name [--role all|DKBO2,DKBO3] [--slot N] [--dry-run]   # 名字框是成長字串的寵物 → 還原物種名（鉛筆 → 輸入框留空 → 確認）
-  uv run --no-project python tools/gui/pet.py depot-fix-names --depot public[,personal] [--role DKBO|all] [--dry-run]   # 倉庫成長字串卡 → 取出 → 還原名字 → 存回原倉庫
+  uv run --no-project python tools/gui/pet.py depot-fix-names --depot public[,personal] [--role DKBO|all] [--limit N] [--dry-run]   # 倉庫成長字串卡 → 取出 → 還原名字 → 存回原倉庫
   還原名字（2026-10-14 使用者實測 + 實機量）：鉛筆 700,180 →「修改名字」視窗（標題 OCR + 特徵 ✕ 936,224 / 確認 607,520 / 取消 822,520）→ 讀整個視窗沒有費用字樣
     （鑽石 / 石幣 / 費用…，有就按取消、67 停手，鐵則 3）→ 輸入框像素只有灰字提示（= 空）→ 按確認 → 重讀名字框必須是 Monster 表物種名才算成功（成長字串 → 物種順手記進登錄檔當備援）。
     時機：store / store-many 存倉前名字框是成長字串 → 先還原再存（失敗不存；--no-rename 關）；depot-fix-names 修倉庫卡（寵物欄沒空格 → 跳過列在 skipped）；
@@ -928,7 +928,7 @@ def list_role(role: str, ctx: dict) -> tuple:
     f = scan_frames()
     if f is None:
         return uikit_fail(EXIT_PANEL, '讀不到面板像素'), []
-    ctx['img_frame'] = img_frame(ctx, fresh=True) if IMG_ON and not ctx.get('no_img') and not all(f['empty']) else None   # 5 格縮圖共用一張截圖
+    ctx['img_frame'] = None              # 5 格縮圖共用一張截圖：第一次真的要比縮圖才截（名字為主：全部讀到名字的角色不截圖，省 0.3～0.7 s）
     try:
         return _list_slots(role, f, ctx)
     finally:
@@ -2630,7 +2630,7 @@ def read_depot_cards(depot: str, ctx: dict) -> tuple:
         return rc, []
     out = []
     gl = glyph_cards(d)                                  # 先讀卡片上的字（不選卡）：讀得出名字 / 成長字串的卡不用點（2026-10-14 掛機中選卡會被戰鬥結束刷新跳回）
-    ctx['img_frame'] = img_frame(ctx, fresh=True) if IMG_ON and not ctx.get('no_img') else None   # 全部卡片縮圖共用一張截圖
+    ctx['img_frame'] = None                              # 全部卡片縮圖共用一張截圖：第一張要比縮圖的卡才截（名字都讀到 = 不截）
     ctx['img_quick'] = True                              # 唯讀清點：卡片字已讀出名字的卡只跟同系別比（petimg_match.judge quick）
     try:
         return _read_cards(d, depot, gl, ctx, out)
@@ -3069,14 +3069,15 @@ def reset_names(role_arg: str = 'all', slot_no: int | None = None, dry_run: bool
     return _out(final, info, t0, msg)
 
 
-def depot_fix_names(role_arg: str = 'DKBO', depots=('public',), dry_run: bool = False, pause: bool = False, learn: bool = True) -> int:
+def depot_fix_names(role_arg: str = 'DKBO', depots=('public',), dry_run: bool = False, pause: bool = False, learn: bool = True,
+                    limit: int | None = None) -> int:
     """倉庫裡名字是成長字串的卡：取出到寵物欄 → 還原名字 → 存回原倉庫（公共回公共、個人回個人）。
     公共倉庫用 --role 裡第一個寵物欄有空格的角色；個人倉庫逐人。寵物欄沒空格 → 跳過並列在 skipped（不為騰位子存別的寵物）。
     取出 / 存回走 _take_in_depot / _store_body 同一套驗證；存回時騎寵物種（剛從倉庫取出、等待中、名字完全相同）照放行。
     失敗：取出前就被擋（零點擊）→ 記 failed、繼續下一張；取出後失敗 / 改名費用字樣 / 存回失敗 → 停（寵物欄留著那隻，結果列出）"""
     t0 = time.time()
     roles = roles_multi(role_arg)
-    info = {'cmd': 'depot-fix-names', 'dry_run': dry_run, 'fixed': [], 'todo': [], 'skipped': [], 'failed': []}
+    info = {'cmd': 'depot-fix-names', 'dry_run': dry_run, 'fixed': [], 'todo': [], 'skipped': [], 'failed': [], 'limit': limit}
     if not roles or not depots or any(x not in ('personal', 'public') for x in depots):
         print(f'pet：depot-fix-names 參數不對（角色 {role_arg!r}、倉庫 {depots!r}）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
@@ -3089,7 +3090,7 @@ def depot_fix_names(role_arg: str = 'DKBO', depots=('public',), dry_run: bool = 
         try:
             for depot, rs in jobs:
                 final = _fix_depot(depot, rs, ctx, info, dry_run)
-                if final:
+                if final or (limit is not None and len(info['fixed']) >= limit):
                     break
         finally:
             save_ctx(ctx)
@@ -3131,7 +3132,7 @@ def _fix_depot(depot: str, rs: list, ctx: dict, info: dict, dry_run: bool) -> in
         if not done:                                                     # 第一輪：名字 / 成長字串都讀不出的卡列出來（不猜、不動）
             info['skipped'] += [{'depot': depot, 'role': seen_role, 'index': c['index'], 'why': '卡片名字 / 成長字串都讀不出（不猜）'}
                                 for c in cards if not c.get('name') and not c.get('growth')]
-        if not todo:
+        if not todo or (info.get('limit') is not None and len(info['fixed']) >= info['limit']):
             break
         if dry_run or role is None:
             why = 'dry-run' if dry_run else f'{"/".join(rs)} 寵物欄都沒空格（不為騰位子存別的寵物）'
@@ -3251,6 +3252,7 @@ def main() -> int:
     p.add_argument('--role', default='DKBO', help='公共倉庫：用第一個寵物欄有空格的角色；個人倉庫：逐人（逗號分隔 / all）')
     p.add_argument('--depot', default='public', help='public / personal / public,personal')
     p.add_argument('--dry-run', action='store_true', help='只列出要修的卡（唯讀）')
+    p.add_argument('--limit', type=int, default=None, help='最多修幾張（實機試跑用；預設全部）')
     p = sub.add_parser('learn-species', help='登錄「某格沒名字的寵物是什麼物種」（縮圖 + 成長字串）', parents=[cp])
     p.add_argument('role')
     p.add_argument('slot', type=int)
@@ -3319,7 +3321,7 @@ def main() -> int:
     if a.cmd == 'reset-name':
         return reset_names(a.role, a.slot, a.dry_run, a.pause_encounter, learn)
     if a.cmd == 'depot-fix-names':
-        return depot_fix_names(a.role, [x.strip() for x in a.depot.split(',') if x.strip()], a.dry_run, a.pause_encounter, learn)
+        return depot_fix_names(a.role, [x.strip() for x in a.depot.split(',') if x.strip()], a.dry_run, a.pause_encounter, learn, a.limit)
     if a.cmd == 'learn-species':
         return learn_species_cmd(a.role, a.slot, a.species, a.confirm_growth, a.pause_encounter)
     split = lambda t: None if t is None else [x.strip() for x in t.split(',') if x.strip()]    # noqa: E731

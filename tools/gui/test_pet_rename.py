@@ -220,6 +220,12 @@ check('depot-fix-names：rc 0、公共 3 張都有名字（魯尼帖斯 / 貝魯
 check('  fixed 4 筆（公共 2、DKBO 個人 1、DKBO2 個人 1）、寵物欄回到原樣', len(j['fixed']) == 4 and [x['depot'] for x in j['fixed']].count('public') == 2
       and all([p and p['name'] for p in g.pets[r]] == ['瑪斯貝卡', '迪基格斯', None, None, None] for r in ('DKBO', 'DKBO2')), str(j['fixed']))
 check('  個人倉庫的布拉奇多斯（騎寵種，剛取出、等待中）存回個人', any(x['depot'] == 'personal' and x.get('new_name') == BRA for x in j['fixed']))
+fresh_tpl()
+dep = mk_depot(DKBO={'public': [U('43/9/6/5'), U('41/9/6/5', '貝魯卡')]})
+g = new(pets=mk_pets(), depot=dep)
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'], limit=1)
+j = last_json(out)
+check('--limit 1：只修 1 張就停（另一張仍是成長字串）', rc == 0 and len(j['fixed']) == 1 and sum(1 for c in g.depot['DKBO']['public'] if c and c.get('unnamed')) == 1, f'rc={rc} {j["fixed"]}')
 # 寵物欄滿 → 跳過、列出
 fresh_tpl()
 full = [{'name': n, 'state': '等待', 'level': 1} for n in ('瑪斯貝卡', '迪基格斯', '朵拉比斯', '摩娜西普', '巴朵蘭恩')]
