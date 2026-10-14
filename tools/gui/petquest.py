@@ -426,12 +426,13 @@ class Run:
         return rc, (last_json(lines).get('roles') or {})
 
     def pet_list(self, roles=ALL_ROLES, cand=None) -> tuple:
-        args = ['list', '--role', 'all' if list(roles) == ALL_ROLES else ','.join(roles), '--json']
+        args = ['list', '--role', 'all', '--json']          # pet.py list --role 只收單一角色或 all（逗號分隔會 rc 1，2026-10-14 恐龍博士 164）→ 一律 all 再依 roles 過濾
         if cand:
             args += ['--candidates', cand]
         rc, lines = self.sub('pet.py', args, 600)
         d = last_json(lines)
-        return rc, (d.get('roles') or {})
+        got = d.get('roles') or {}
+        return rc, (got if list(roles) == ALL_ROLES else {r: v for r, v in got.items() if r in roles})
 
     # -- 段 --
     def s_accept(self) -> int:
