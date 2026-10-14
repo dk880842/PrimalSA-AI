@@ -152,6 +152,35 @@ check('accept_task：卡片路徑對話防護 126 → 97、不 fallback', quiet(
 check('accept_task：卡片路徑 9 透傳', quiet(rs.accept_task, 2, CardT(True, card_rc=9)) == 9)
 check('task_name 各轉', [rs.task_name(i) for i in range(1, 6)] == [f'漆黑洞窟({c}轉)' for c in '一二三四五'])
 
+# 2026-10-15 四轉：--from accept 被 preflight 留下的村長對話框擋住（97）→ 認得選單就直接在對話框接
+check('is_menu_dialog：漆黑洞窟 / 再見 = 選單；接受 / 再見、完成、空 → 不是', rs.is_menu_dialog(['漆黑洞窟', '再見'], '漆黑洞窟(四轉)')
+      and not rs.is_menu_dialog(['接受', '再見'], '漆黑洞窟(四轉)') and not rs.is_menu_dialog(['完成'], '漆黑洞窟(四轉)')
+      and not rs.is_menu_dialog([], '漆黑洞窟(四轉)') and not rs.is_menu_dialog(['漆黑洞窟'], '漆黑洞窟(四轉)') and not rs.is_menu_dialog(None, '漆黑洞窟(四轉)'))
+
+
+class DlgT(CardT):
+    def __init__(self, btns, dlg_rc=0, **k):
+        super().__init__(True, **k)
+        self.btns, self.dlg_rc, self.dlg = btns, dlg_rc, []
+
+    def open_dialog_buttons(self):
+        return self.btns
+
+    def accept_open_dialog(self, title):
+        self.dlg.append(title)
+        return self.dlg_rc
+
+
+c = DlgT(['漆黑洞窟', '再見'])
+check('accept_task：對話框開著是村長選單 → 直接在對話框接，不點卡、不開詳情', quiet(rs.accept_task, 4, c) == 0 and c.dlg == ['漆黑洞窟(四轉)'] and not c.cards and not c.titles
+      and rs.LAST.get('via') == 'dialog')
+c = DlgT(['確定'])
+check('accept_task：對話框開著但不是村長選單 → 97、什麼都不點', quiet(rs.accept_task, 4, c) == 97 and not c.dlg and not c.cards and not c.titles)
+c = DlgT(['漆黑洞窟', '再見'], dlg_rc=127)
+check('accept_task：對話框接取失敗 127 → 97；9 透傳', quiet(rs.accept_task, 4, c) == 97 and quiet(rs.accept_task, 4, DlgT(['漆黑洞窟', '再見'], dlg_rc=9)) == 9)
+c = DlgT(None)
+check('accept_task：沒有對話框 → 照舊點卡', quiet(rs.accept_task, 4, c) == 0 and c.cards == ['漆黑洞窟(四轉)'] and not c.dlg)
+
 # ================= rebirth_steps：獎勵寵 diff =================
 def P(slot, name=None, level=None, state='等待', empty=False, mountlike=False):
     return {'slot': slot, 'empty': empty, 'name': name, 'level': level, 'state': state, 'unnamed': None, 'mountlike': mountlike}
@@ -251,6 +280,15 @@ class GateT:
     def transition(self): return None
     def center_text(self): self.calls.append('center'); return self.utext
     def chat_text(self): self.calls.append('chat'); return self.chat
+    def dialog_buttons(self): self.calls.append('buttons'); return getattr(self, 'btns', ['確定'])
+
+    def accept_dialog(self, title):
+        self.calls.append(('accept', title))
+        rc = getattr(self, 'acc_rc', 0)
+        if not rc:
+            self.st, self.p = getattr(self, 'st_after', 'walking'), (2000, 54, 97)     # 接完：對話框收起、人在瑪麗娜絲村
+            self.after = list(getattr(self, 'after2', []))
+        return rc
 
 
 T = GateT(after=[(3, (300, 121, 170))])
@@ -277,6 +315,26 @@ T = GateT(card=None)
 check('level_gate：掃描途中畫面變了 → screen', quiet(rs.level_gate, 4, T)['kind'] == 'screen')
 T = GateT(state='dialog')
 check('level_gate：直接出現對話框（沒傳送）→ dialog', quiet(rs.level_gate, 4, T)['kind'] == 'dialog')
+T = GateT(state='dialog', pos=(60050, 25, 24))
+T.btns = ['漆黑洞窟', '再見']
+T.after2 = [(6, (300, 96, 228))]
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：點卡被傳到村長選單（任務沒接）→ 接任務 → 再點卡 → teleport、accepted', g['kind'] == 'teleport' and g['accepted'] is True
+      and [c for c in T.calls if c != 'buttons'] == [('card', '漆黑洞窟(四轉)'), ('accept', '漆黑洞窟(四轉)'), ('card', '漆黑洞窟(四轉)')], str((g, T.calls)))
+T = GateT(state='dialog', pos=(60050, 25, 24))
+T.btns, T.st_after = ['漆黑洞窟', '再見'], 'dialog'
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：接完再點卡又是對話框 → dialog（只接一次）', g['kind'] == 'dialog' and g['accepted'] is True and T.calls.count(('accept', '漆黑洞窟(四轉)')) == 1, str(g))
+T = GateT(state='dialog', pos=(60050, 25, 24))
+T.btns, T.acc_rc = ['漆黑洞窟', '再見'], 127
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：村長選單接取失敗 → accept_fail（rc）、不再點卡', g['kind'] == 'accept_fail' and g['rc'] == 127 and T.calls.count(('card', '漆黑洞窟(四轉)')) == 1)
+T = GateT(state='dialog', pos=(60050, 25, 24))
+T.btns = ['漆黑洞窟', '再見']
+T.after2 = [(4, (300, 96, 228))]
+T.card_seq = None
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：接完人在村子（2000）不算 moved，等到吉魯島才 teleport', g['kind'] == 'teleport', str(g))
 T = GateT(after=[(2, (2006, 21, 8))])
 check('level_gate：換到別張地圖 → moved', quiet(rs.level_gate, 4, T)['kind'] == 'moved')
 T = GateT(state='idle', chat='系統：DKBO3未達到3轉131級禁止傳送')

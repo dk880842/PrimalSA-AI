@@ -4,12 +4,14 @@
 用法（專案根目錄；一次只能跑一支，同時也不要跑 heal.py --watch，兩邊會搶畫面）：
   uv run --no-project python tools/gui/petwatch.py                     # 常駐：每 30 秒掃一輪，連 2 輪都 ≥ 77 級就換回；5 人都換完（或放棄）就結束
   uv run --no-project python tools/gui/petwatch.py --once              # 只掃一輪（只讀，不換、不補血；加 --apply 才會換：≥ 門檻的人會馬上再掃一次確認）
-  uv run --no-project python tools/gui/petwatch.py --interval 30 --target-level 77 --spot 地雷區
+  uv run --no-project python tools/gui/petwatch.py --interval 30 --target-level 77 [--spot 點名]
   uv run --no-project python tools/gui/petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --pet-slot 3   # 全部參數（以上是預設值）
   --pet / --level（= --target-level）：被監測的練功寵名與換回門檻；--back：換回的戰寵名；--pet-slot：練功寵在寵物欄第幾格（1～5，5 個角色排列要一樣，只用來讀等級）。
   --back-slot 已不用（2026-10-13 起換回改用 pet.py 依名字找格、外掛下拉依 OCR 文字選；保留參數相容）。
   --max-tries N：同一角色換回失敗幾次就放棄（預設 2；放棄的人寫 errlog、不再重試，最後退出碼 4）
-  uv run --no-project python tools/gui/petwatch.py --heal              # 兼做補血檢查（HP < --hp% / MP < --mp% 連 2 次 → heal_trip 補血再回 --spot）
+  uv run --no-project python tools/gui/petwatch.py --heal              # 兼做補血檢查（HP < --hp% / MP < --mp% 連 2 次 → heal_trip 補血再回練功點）
+  --spot：補血後回去的練功點；預設不給（2026-10-15 起不寫死地雷區）= 開跑時所在的練功點 → 現在所在的練功點 → 依隊長等級 auto（spots.auto_spot，
+    轉數取 grind 快取 / HUD）；都決定不了就不補血、記 errlog（heal_spot）
   --exp-fruit：開練前先跑 `depot_use.py DKBO 2倍智慧果`（由它讀 buff 圖示決定吃不吃；2026-10-13 play agent 憑印象判斷「已有 buff」沒吃、實際已過期，所以不要自己判斷跳過）；
     失敗（95 沒看到 buff / 倉庫沒有果）只記 errlog 照常監測，9 / 10 驗證視窗 / 斷線才停
   補血預設**關**（2026-10-13 起；使用者規定練功不自動補血，psa-grind-no-auto-heal）；--no-heal 保留相容（= 預設，no-op）
@@ -338,6 +340,24 @@ def save_state(st: dict) -> None:
     STATE.write_text(json.dumps(st, ensure_ascii=False), encoding='utf-8')
 
 
+def here_spot():
+    """現在所在練功點（grind.here_spot：HUD 地圖 ID → spots）；測試替換"""
+    import grind
+    return grind.here_spot()
+
+
+def heal_spot(a):
+    """補血後回去的點（heal.SPOTS 內才算）：--spot 明講 > 開跑時所在練功點（a.home）> 現在所在練功點 > 依隊長等級 auto（grind.auto_spot_now）> None"""
+    if a.spot:
+        return a.spot
+    for sp in (getattr(a, 'home', None), here_spot()):
+        if sp in heal.SPOTS:
+            return sp
+    import grind
+    sp = grind.auto_spot_now()
+    return sp if sp in heal.SPOTS else None
+
+
 def take_lock() -> bool:
     """鎖檔：內容 = PID；PID 還活著就拒絕（WSL 用 /proc、Windows 用 tasklist 判斷）"""
     try:
@@ -424,7 +444,7 @@ def main(argv=None, dry_args: bool = False):
     ap.add_argument('--back', default='朵拉比斯', help='換回的戰寵名（預設 朵拉比斯；轉生前的舊流程是 迪基格斯）')
     ap.add_argument('--back-slot', type=int, default=2, help='相容舊指令（換回改依名字找格、下拉讀字選，不再用格號）')
     ap.add_argument('--max-tries', type=int, default=MAX_TRIES, help=f'同一角色換回失敗幾次就放棄（預設 {MAX_TRIES}）')
-    ap.add_argument('--spot', default='地雷區', choices=heal.SPOTS, help='補血後回去的練功點')
+    ap.add_argument('--spot', default=None, choices=heal.SPOTS, help='補血後回去的練功點（預設：開跑時所在練功點 → 現在所在 → 依等級 auto）')
     ap.add_argument('--heal', action='store_true', help='兼做補血檢查（預設關：練功不自動補血）')
     ap.add_argument('--no-heal', action='store_true', help='相容舊指令：= 預設（不補血），no-op')
     ap.add_argument('--heal-every', type=int, default=15, help='補血檢查間隔秒數（預設 15）')
@@ -455,6 +475,9 @@ def main(argv=None, dry_args: bool = False):
             except OSError:
                 pass
             return frc
+    if not a.no_heal and not a.once and not a.spot:
+        a.home = here_spot()                            # 開跑時所在練功點 = 補血後回去的點
+        log(f'補血後回 {a.home or "（目前不在練功點，補血時再依位置 / 等級決定）"}')
     st = load_state()
     done = set(st['done'])
     gave: set = set()                                   # 本次執行放棄的角色（不寫回下次：重跑 petwatch = 人工處理過、再試）
@@ -483,10 +506,14 @@ def main(argv=None, dry_args: bool = False):
                     hits += 1
                     if hits < 2 and last_ts is None:
                         time.sleep(3)
-                if hits >= 2:
-                    log(f'血 / 魔太低（HP {s.get("hpPct")}%，MP {s.get("mpPct")}%），回村補血')
+                sp = heal_spot(a) if hits >= 2 else None
+                if hits >= 2 and not sp:
+                    i = errlog.add('petwatch 要補血但決定不了回哪個練功點（不在練功點、讀不到等級），這次不補血', source='petwatch')
+                    log(f'血 / 魔太低但不知道補完回哪個練功點 → 不補血（errlog #{i}）；可用 --spot 指定')
+                elif hits >= 2:
+                    log(f'血 / 魔太低（HP {s.get("hpPct")}%，MP {s.get("mpPct")}%），回村補血，補完回 {sp}')
                     try:
-                        heal.heal_trip(a.spot)
+                        heal.heal_trip(sp)
                     except RuntimeError as e:
                         i = errlog.add(f'petwatch 補血失敗：{e}', source='petwatch')
                         log(f'補血流程失敗：{e}（errlog #{i}）；停止，請人工處理')

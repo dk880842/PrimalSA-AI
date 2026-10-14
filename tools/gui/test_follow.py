@@ -397,5 +397,84 @@ check('heal.py 不再自帶 1920 座標表（只讀 spots）', "'波拉島2': (7
 check('spots.HEAL_SPOTS_1920 值照舊', spots.HEAL_SPOTS_1920 == {'柯奧4F龜洞': (567, 216, 11004), '波拉島': (718, 138, 500), '波拉島2': (759, 198, 502),
       '地雷區': (759, 245, 60049), '地雷區2': (759, 288, 60050), '海主人隧道': (571, 405, 31401)})
 check('spots.HEAL_SPOTS（2880 版）不受影響', spots.HEAL_SPOTS['波拉島'] == (1100, 231, 500))
+
+# 最高點（地雷區）：換到並確認掛機 → follow 結束（0）、寫 quest-events；已在最高點 → 結束；dry-run / 掛機未恢復不結束（2026-10-15）
+check('spots.is_top：地雷區 / 地雷區2 是、波拉島不是', spots.is_top('地雷區') and spots.is_top('地雷區2') and not spots.is_top('波拉島') and not spots.is_top(None))
+check('spots.level_num = follow.level_of', follow.level_of is spots.level_num)
+w = install(World(lv=(4, 120), map_=500))
+f = mk(w, trans=4)
+rc = f.step()
+ev = follow.EVENT_LOG.read_text(encoding='utf-8') if follow.EVENT_LOG.exists() else ''
+check('120 級在波拉島 → start 地雷區 → 確認後 follow 結束 0、寫事件', rc == 0 and ('start', '地雷區') in w.runs and '最高練功點 地雷區' in ev, f'{rc} {w.runs}')
+w = install(World(lv=(4, 120), map_=500))
+w.start_rc = {'地雷區': 55}
+f = mk(w, trans=4)
+check('換地雷區沒確認掛機（55）→ 不結束', f.step() is None)
+w = install(World(lv=(4, 130), map_=60050))
+f = mk(w, trans=4)
+check('啟動時已在地雷區2（≥120）→ 不 start、直接結束 0', f.step() == 0 and not any(m == 'start' for m, _ in w.runs), str(w.runs))
+w = install(World(lv=(4, 130), map_=60050))
+f = mk(w, trans=4)
+f.unrecovered = True
+check('已在地雷區但掛機未恢復 → 不結束（先 ensure）', f.step() is None)
+w = install(World(lv=(4, 120), map_=500))
+f = mk(w, trans=4, dry_run=True)
+check('dry-run 換到地雷區不結束', f.step() is None and f.step() is None)
+w = install(World(lv=(4, 119), map_=500))
+f = mk(w, trans=4)
+check('119 級在波拉島 → 不換、不結束', f.step() is None and not w.runs)
+
+# ensure_running：已有同轉數的不重開；轉數不同先停再起；起法 = spawn(argv) 帶 --trans / --no-heal
+SP = {'alive': None, 'spawned': [], 'stopped': 0}
+_ao, _so = follow.alive_other, follow.stop_other
+follow.alive_other = lambda: SP['alive']
+
+
+def _stop2():
+    SP['stopped'] += 1
+    SP['alive'] = None
+    return 0
+
+
+follow.stop_other = _stop2
+
+
+def _spawn(argv, log):
+    SP['spawned'].append(argv)
+    SP['alive'] = 555
+    return 555
+
+
+follow.STATE_FILE.write_text('{"pid": 111, "trans": 4}', encoding='utf-8')
+SP.update(alive=111)
+r = follow.ensure_running(4, spawn=_spawn)
+check('ensure_running：同轉數的在跑 → running、不重開', r['action'] == 'running' and r['pid'] == 111 and not SP['spawned'])
+r = follow.ensure_running(3, spawn=_spawn)
+check('ensure_running：轉數不同 → 先停再起', SP['stopped'] == 1 and r['action'] == 'started' and SP['spawned'][-1][-3:] == ['--trans', '3', '--no-heal']
+      and SP['spawned'][-1][1].endswith('grind.py') and SP['spawned'][-1][2] == 'follow', str(SP))
+SP.update(alive=None, spawned=[])
+r = follow.ensure_running(2, spawn=lambda argv, log: 9)         # 起了但沒寫 pid
+check('ensure_running：起了但等不到 follow.pid → fail', r['action'] == 'fail' and 'follow.pid' in r['why'])
+r = follow.ensure_running(2, spawn=lambda argv, log: (_ for _ in ()).throw(OSError('no')))
+check('ensure_running：spawn OSError → fail', r['action'] == 'fail' and '起不來' in r['why'])
+follow.alive_other, follow.stop_other = _ao, _so
+
+# winenv.spawn_detached：POSIX 用 start_new_session（不碰真程序：popen 假的）
+import winenv  # noqa: E402
+got = {}
+
+
+class _P:
+    pid = 77
+
+
+def _popen(argv, **kw):
+    got.update(kw, argv=argv)
+    return _P()
+
+
+pid = winenv.spawn_detached(['x', 'y'], TMP / 'sp.log', popen=_popen)
+check('spawn_detached：回 pid、stdin DEVNULL、POSIX 新 session、log 附加', pid == 77 and got['stdin'] == winenv.subprocess.DEVNULL
+      and (got.get('start_new_session') is True if os.name != 'nt' else bool(got.get('creationflags'))) and (TMP / 'sp.log').exists(), str({k: v for k, v in got.items() if k != 'env'}))
 print(f'\n失敗 {fails} 項' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

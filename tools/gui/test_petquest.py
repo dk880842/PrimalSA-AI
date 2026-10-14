@@ -308,6 +308,7 @@ check('分批抓 [4, 1]：bait 兩次、setup 兩次；誘餌 50 → 40', len([a
 check('抓前關遇敵 + 解散；收尾鎖定戰寵 + 一般動作攻擊', ('enc_off',) in s.calls and ('team.py', ('disband',)) in s.calls
       and any(a[:2] == ('--lock', '戰寵') for a in names(s, 'pet_catch.py')) and ('pet', 'all', 'normal', '攻擊', '--no-resume') in names(s, 'ass.py'))
 check('交寵物用 questrun --pet-turnin --rested（train 段剛 rest-all 過，questrun 不重做）', ('run', '2016', '--after', 'none', '--pet-turnin', '--rested') in names(s, 'questrun.py'), str(names(s, 'questrun.py')))
+check('恐龍博士練寵固定 80 級練功區：grind.py start --spot 波拉島（使用者 2026-10-15 指定）', pq.TRAIN_SPOT == '波拉島' and ('start', '--spot', '波拉島') in names(s, 'grind.py'), str(names(s, 'grind.py')))
 pa = [a for a in names(s, 'pet.py') if a[0] in ('list', 'levels')]
 tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
 in_train = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels', 'rest-all')]
@@ -383,7 +384,7 @@ s = Sim(3003)
 rc = go(3003, s, confirm_drop=True)
 check('猜謎三兄弟 happy：步 1 拿金布伊 → 出戰 + 鎖定 → grind 地雷區 → petwatch --exp-fruit → 交 → 丟左迪洛斯 → 朵拉比斯出戰', rc == 0
       and ('--pet', '金布伊', '--level', '77', '--back', '朵拉比斯', '--exp-fruit') in names(s, 'petwatch.py')
-      and ('start', '--spot', '地雷區') in names(s, 'grind.py') and ('all', '左迪洛斯', '--confirm-name', '左迪洛斯', '--max-level', '1') in names(s, 'petdrop.py')
+      and ('start',) in names(s, 'grind.py') and not any('--spot' in a for a in names(s, 'grind.py')) and ('all', '左迪洛斯', '--confirm-name', '左迪洛斯', '--max-level', '1') in names(s, 'petdrop.py')
       and not any(p['name'] == '左迪洛斯' for r in ROLES for p in s.bar[r]), f'rc={rc} {pq.LAST.get("info")}')
 check('猜謎：quest.py 步 1 --stop-after-rewards 1', names(s, 'quest.py') == [('--task', '猜謎三兄弟', '--stop-after-rewards', '1', '--max-seconds', '900')])
 s = Sim(3003)

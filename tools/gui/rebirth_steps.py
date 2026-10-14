@@ -8,7 +8,8 @@
   uv run --no-project python tools/gui/rebirth_steps.py drop-reward --trans 3 [--dry-run]   # 轉生後丟 5 人的獎勵寵（見下）
   可 import：accept_task(n, T=None)、level_gate(n, T=None)、judge_gate_text(text)、reward_name(n)、find_new_lv1(before, after)、drop_rewards(n, before, T=None, dry_run=False)
 
-接任務（accept_task）：先看任務追蹤欄——有標題精確等於「漆黑洞窟(N轉)」的卡片（titlematch 圖樣板；沒樣板 / 不確定不用 OCR）→ quest.track_task 點卡片巡路到村長 →
+接任務（accept_task）：畫面已開著對話框（--from accept 時 preflight 留下的村長選單）→ 是「漆黑洞窟 / 再見」選單就直接接（翻頁 → 接受 → 驗進行中），
+  別的對話框 → 不點、97。否則先看任務追蹤欄——有標題精確等於「漆黑洞窟(N轉)」的卡片（titlematch 圖樣板；沒樣板 / 不確定不用 OCR）→ quest.track_task 點卡片巡路到村長 →
   questdetail._after_transfer（選單頁翻頁 → 接受 → 驗進行中）；沒有卡、或點卡後 20 秒沒對話框才 fallback：questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)。任務詳情列表 / 中間標題用樣板精確比對（(三轉) / (五轉) 只差一字也分得開，
   標題對不上就不傳送、不亂點）；傳送到村長後對話框第 1 頁是選單（左鈕「漆黑洞窟」）→ 先點左鈕翻頁（questdetail 2d0e38d 的選單頁邏輯）→ 第 2 頁「接受」→
   重開詳情驗證「進行中」。已進行中 = 跳過（回 0）；已完成 = 失敗（轉生 / 封印書後任務會重置，已完成表示轉數不對）。
@@ -52,14 +53,29 @@ def accept_task(n: int, T=None) -> int:
     title = task_name(n)
     T = T or _AcceptTools()
     rc = None
+    # 對話框已開著（2026-10-15 四轉：preflight 點卡被傳到村長選單、84 停下後 --from accept 被對話框擋住 → 97）：
+    # 是村長選單「漆黑洞窟 / 再見」→ 直接在這個對話框接（翻頁 → 接受 → 驗進行中）；是別的對話框 → 不點、失敗
+    try:
+        btns = T.open_dialog_buttons()
+    except AttributeError:                                           # 測試用假 T 沒實作 → 當沒有對話框
+        btns = None
+    if btns is not None:
+        if not is_menu_dialog(btns, title):
+            LAST.update(via='dialog', accept_rc=None, buttons=btns)
+            return uikit.fail(SRC, EXIT_ACCEPT, f'畫面停在別的 NPC 對話框（按鈕 {btns}），不是瑪麗娜絲村長選單「漆黑洞窟 / 再見」→ 不點，請人工關掉再跑')
+        print(f'{SRC}：對話框開著且是村長選單「漆黑洞窟 / 再見」→ 直接接「{title}」', flush=True)
+        LAST['via'] = 'dialog'
+        rc = T.accept_open_dialog(title)
     # 先看任務追蹤欄（使用者規定）：有標題「精確」相符的卡片 → 點卡片自動巡路到村長 → 選單翻頁 → 接受 → 驗進行中；
     # 沒有卡 / 比對不確定（沒樣板、分數不夠）→ 才走任務詳情 fallback。卡片路徑只在「點了卡但 20 秒沒出現對話框」時退回 fallback（沒按過任何鈕）
     try:
-        card = T.card_visible(title)
+        card = False if rc is not None else T.card_visible(title)
     except AttributeError:                                           # 測試用假 T 沒實作 → 當沒有卡
         card = False
-    LAST['via'] = 'detail'
-    if card:
+    LAST.setdefault('via', 'detail')
+    if rc is not None:
+        pass
+    elif card:
         LAST['via'] = 'tracker'
         print(f'{SRC}：追蹤欄有「{title}」卡片 → 點卡片巡路到村長接取', flush=True)
         rc = T.accept_card(title)
@@ -87,6 +103,18 @@ _NO_DIALOG = 125                                                     # = questde
 
 
 class _AcceptTools:
+    def open_dialog_buttons(self):
+        """畫面上已有 NPC 對話框 → 按鈕文字 list（含不可逆關鍵字 / 內文讀不到 → []，不會被當成選單）；沒有對話框 → None"""
+        if uikit.screen().get('state') != 'dialog':
+            return None
+        import quest
+        g = quest.check_dialog_irreversible()
+        return [] if g.get('blocked') else list(g.get('buttons') or [])
+
+    def accept_open_dialog(self, title):
+        import questdetail
+        return questdetail._after_transfer(SRC, title, 2, True)
+
     def card_visible(self, title):
         """追蹤欄目前這頁有標題精確等於 title 的卡片（titlematch 圖樣板，(三轉) / (五轉) 分得開；沒樣板 / 不確定 = False，不用 OCR 模糊比對）"""
         import quest
@@ -111,6 +139,13 @@ class _AcceptTools:
     def accept_state(self):
         import questdetail
         return questdetail.LAST.get('state')
+
+
+def is_menu_dialog(buttons, title: str) -> bool:
+    """純函式：對話框按鈕是不是瑪麗娜絲村長的選單頁（左鈕 = 任務名去括號「漆黑洞窟」、後面有「再見」；2026-10-12 / 10-15 實機）"""
+    import questdetail
+    b = [str(x or '') for x in (buttons or [])]
+    return len(b) >= 2 and questdetail.menu_button_matches(b[0], title) and any('再見' in x for x in b[1:])
 
 
 # ---- 等級門檻：點追蹤卡 = 等級檢查（2026-10-14 使用者說法）----
@@ -157,7 +192,10 @@ def level_gate(n: int, T=None, wait_s: float = GATE_WAIT_S) -> dict:
     blocked  跳「未達條件」視窗（提示視窗 → 已點 ✕ 關掉，closed=True；別種視窗讀到關鍵字 → closed=False 沒點）或聊天區有同樣訊息；who = 誰不夠
     nocard   追蹤欄掃完沒有這張卡（標題對不上絕不點；任務多半沒接）
     unknown  跳出視窗但讀不出「未達到 / 禁止傳送 / 條件不足 / 等級不足」→ 可能是驗證視窗，什麼都沒點（呼叫端回 9）
-    dialog   點卡後直接出現 NPC 對話框（沒傳送，例：任務其實沒接 → 村長）→ 沒按
+    dialog   點卡後出現 NPC 對話框（沒傳送）且不是瑪麗娜絲村長的選單頁「漆黑洞窟 / 再見」→ 沒按
+             （2026-10-15 四轉實跑：任務其實還沒接，點卡被傳到村長選單 → 舊版直接 84。現在認得選單頁就 accept_dialog
+               〔questdetail._after_transfer：左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗進行中〕→ 再點卡做門檻，結果帶 accepted=True；
+               接取失敗 → accept_fail（rc = questdetail 退出碼）；接完再點卡又是對話框 → dialog）
     moved    換到別張地圖（不是吉魯島 / 漆黑）
     screen   掃追蹤欄途中畫面不再是主畫面（戰鬥等），沒點
     timeout  wait_s 秒內沒傳送、沒視窗、聊天區也沒有未達訊息"""
@@ -174,6 +212,7 @@ def level_gate(n: int, T=None, wait_s: float = GATE_WAIT_S) -> dict:
     t_end = T.clock() + wait_s
     unk = 0
     pos = pos0
+    accepted = False
     while T.clock() < t_end:
         T.sleep(1.0)
         if T.notice():                                              # 米色「提示」視窗（questdetail 同一個特徵）
@@ -187,12 +226,24 @@ def level_gate(n: int, T=None, wait_s: float = GATE_WAIT_S) -> dict:
         if p:
             pos = p
             if past_gate(p):
-                return {'kind': 'teleport', 'pos': p}
+                return {'kind': 'teleport', 'pos': p, 'accepted': accepted}
             if pos0 and p[0] != pos0[0]:
                 return {'kind': 'moved', 'pos': p}
         st = T.state()
         if st == 'dialog':
-            return {'kind': 'dialog', 'pos': pos}
+            if accepted or not is_menu_dialog(T.dialog_buttons(), title):
+                return {'kind': 'dialog', 'pos': pos, 'accepted': accepted}
+            print(f'{SRC}：點卡後是瑪麗娜絲村長選單「漆黑洞窟 / 再見」（任務還沒接）→ 接任務後再點卡做門檻', flush=True)
+            arc = T.accept_dialog(title)
+            if arc:
+                return {'kind': 'accept_fail', 'rc': arc, 'pos': pos, 'accepted': False}
+            accepted = True
+            pos0 = T.pos() or pos                                   # 人現在在村子：之後換圖要跟這裡比
+            hit = T.click_card(title)
+            if not hit:
+                return {'kind': 'screen' if hit is None else 'nocard', 'pos': pos0, 'accepted': True}
+            t_end, unk = T.clock() + wait_s, 0
+            continue
         if st in ('unknown', 'error') and not T.transition():
             unk += 1
             if unk >= GATE_UNKNOWN_N:
@@ -231,6 +282,17 @@ class _GateTools:
     def notice(self):
         import questdetail
         return questdetail.notice_open()
+
+    def dialog_buttons(self):
+        """目前對話框按鈕文字（quest.check_dialog_irreversible；含不可逆關鍵字 / 內文讀不到 → [] = 不當選單）"""
+        import quest
+        g = quest.check_dialog_irreversible()
+        return [] if g.get('blocked') else list(g.get('buttons') or [])
+
+    def accept_dialog(self, title):
+        """對話框已開在村長選單頁：questdetail._after_transfer（左鈕翻頁 → 接受 → 重開詳情驗進行中）→ questdetail 退出碼"""
+        import questdetail
+        return questdetail._after_transfer(SRC, title, 2, True)
 
     def notice_text(self):
         return ''.join(uikit.ocr(NOTICE_TEXT_BOX, '-Zooms', '2,3'))

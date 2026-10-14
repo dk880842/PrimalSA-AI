@@ -5,7 +5,11 @@
   uv run --no-project python tools/gui/grind.py follow [--every 15] [--buffer 0] [--spot-table real] [--trans 1] [--until-level N] [--dry-run]
         [--no-heal] [--hp 40] [--mp 20] [--check-every 20] [--stall-min 45]
   uv run --no-project python tools/gui/grind.py follow --stop        # 結束另一個在跑的 follow
-背景常駐（WSL）：nohup setsid uv run --no-project python tools/gui/grind.py follow > tools/.cache/follow.log 2>&1 &
+背景常駐：平常不用手動起——「去練功」（grind.py start 不給 --spot，grind.go）確認掛機後，未滿地雷區會自動背景起
+  `grind.py follow --no-heal --trans N`（ensure_running → winenv.spawn_detached；WSL = setsid 新 session、Windows = DETACHED_PROCESS；輸出 tools/.cache/follow.log；
+  已有同轉數的在跑不重開、轉數不同先停再起）。手動起（WSL）：nohup setsid uv run --no-project python tools/gui/grind.py follow --no-heal --trans N > tools/.cache/follow.log 2>&1 &
+結束條件（使用者 2026-10-15）：換到最高一檔（地雷區 / 地雷區2，spots.is_top）且 grind start 確認掛機 → 退出 0 + quest-events.log 一行；
+  啟動 / 某一輪時已在最高一檔（且掛機沒有未恢復）→ 同樣結束（≥120 在地雷區不再監測）。dry-run 不結束。
 
 做什麼：每 --every 秒讀隊長等級（state.hud.level，即 psa-hud 狀態列那個數字；watch 不在才退回 heal.stat()，連續 2 次一致才採用；
 轉數用 --trans（預設 1，不從 HUD 讀，因為轉數位會被讀錯；等級文字容忍「0轉26級 / 1轉26級 / 轉24, / 24,」，見 level_of；地圖 ID 取 state.hud.map.id；轉生後要重啟）、等級只升不降，讀到比已確認低的視為誤讀）→ 依換點表（spots.FOLLOW，實測真門檻：1 柯奧龜洞、10 阿布龜洞、20 海主人隧道、45 五兄弟洞窟、
@@ -22,7 +26,7 @@ grind.run('check')，快速 / 自動戰鬥關了或遇敵鈕關了 → grind.run
 鎖：tools/.cache/follow.pid（單一實例）、換點之間持 grind.lock；--stop 寫 tools/.cache/follow.stop 通知結束。
 
 退出碼（grind 50～59 段；共用 0 / 8 / 9 / 10 見 uikit）：
-  0 到 --until-level 或被 --stop    8 已有另一個 follow 在跑    9 疑似驗證視窗    10 netwatch halt
+  0 到 --until-level、被 --stop、或已在 / 換到最高點（地雷區）並確認掛機    8 已有另一個 follow 在跑    9 疑似驗證視窗    10 netwatch halt
 掛機未恢復（ensure / start 失敗）：每 30 秒重試 ensure 直到成功；另外 watch 讀到遇敵鈕關超過 60 秒也補 ensure；連 3 次失敗才停。
   57 補血失敗    59 連續讀不到等級    其餘 = grind.run 連 3 次失敗的退出碼（50～58）
 """
@@ -80,16 +84,7 @@ def note(msg: str) -> None:
         pass
 
 
-def level_of(text) -> int | None:
-    """HUD 等級文字 → 等級整數；轉數不採用（HUD 會把 1 轉讀成 0 轉，轉數用 --trans）。
-    容忍的格式：「1轉12級」「0轉26級」→ 取「N級」；「轉24,」「1轉24,」「24,」這類只讀到數字、沒有「級」的殘缺字串 → 取轉字之後 / 整串的數字。
-    讀不出、不在 1～200 之間 → None（呼叫端算一次讀不到）"""
-    s = str(text or '')
-    m = re.search(r'(\d+)\s*級', s) or re.search(r'轉\s*(\d+)', s) or re.fullmatch(r'\s*(\d{1,3})\s*[,，.。]?\s*', s)
-    if not m:
-        return None
-    n = int(m[1])
-    return n if 1 <= n <= 200 else None
+level_of = spots.level_num            # HUD 等級文字 → 等級整數（轉數不採用；實作在 spots.level_num，grind 去練功也用）
 
 
 # ---- 讀取（測試替換）----
@@ -342,7 +337,7 @@ class Follow:
         if rc == 0:
             self.cur, self.last_switch, self.fails, self.unrecovered = target, int(time.time()), 0, False
             note(f'已換到 {target} 掛機中')
-            return None
+            return self.top_done(target)
         if rc in (uikit.EXIT_IN_BATTLE,):
             return None                               # 有人在用畫面：下一輪再試
         if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
@@ -353,9 +348,17 @@ class Follow:
                 self.cur, self.last_switch, self.fails = target, int(time.time()), 0
                 rc2 = self.grind_run('ensure')
                 self.unrecovered = bool(rc2)
-                return self.fail(rc2, f'抵達 {target} 後 ensure 失敗（{rc2}）') if rc2 else None
+                return self.fail(rc2, f'抵達 {target} 後 ensure 失敗（{rc2}）') if rc2 else self.top_done(target)
             return self.on_blocked(target, old)
         return self.fail(rc, f'換到 {target} 失敗（grind 退出碼 {rc}）')
+
+    def top_done(self, target):
+        """換到最高一檔（地雷區，spots.is_top）且掛機已確認 → 0 = follow 結束（使用者 2026-10-15：≥120 在地雷區就不再監測）；其他 None 繼續。dry-run 不結束"""
+        if self.a.dry_run or not spots.is_top(target):
+            return None
+        note(f'已在最高練功點 {target} 掛機（確認過），follow 結束')
+        self.write_state('stopped')
+        return 0
 
     def fail(self, rc, msg):
         self.fails += 1
@@ -497,6 +500,10 @@ class Follow:
         table = spots.FOLLOW
         target = spots.spot_for(trans, level, self.a.buffer, table)
         same = self.cur and target and (self.cur == target or spots.same_tier(self.cur, target))
+        if same and spots.is_top(target) and not self.a.dry_run and not self.unrecovered:
+            note(f'{trans}轉{level}級已在最高練功點 {self.cur}，不再監測，follow 結束')
+            self.write_state('stopped')
+            return 0
         if target and not same and clock() >= self.block_until.get(target, 0):
             rc = self.switch(target)
             if rc is not None:
@@ -541,6 +548,48 @@ def stop_other() -> int:
         pass
     print(f'follow：已通知 pid {pid} 結束' + ('' if not battleguard.pid_alive(pid) else '（60 秒內還沒結束，可能正在換點）'))
     return 0
+
+
+def read_state() -> dict:
+    """tools/.cache/follow.json（在跑的 follow 自己寫的狀態：trans / level / spot …）；讀不到 {}"""
+    try:
+        d = json.loads(STATE_FILE.read_text(encoding='utf-8'))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+LOG_FILE = CACHE / 'follow.log'
+SPAWN_WAIT = 15.0                     # 背景起 follow 後等它寫 follow.pid 的上限（秒）
+
+
+def ensure_running(trans: int, no_heal: bool = True, spawn=None, wait: float = SPAWN_WAIT) -> dict:
+    """「去練功」用：確保有一支 follow（帶 --trans trans、預設 --no-heal）在背景跑。
+    已有 follow 在跑且轉數相同（follow.json 的 trans；讀不到也算相同）→ 不重開；轉數不同 → 先 --stop 再起新的。
+    背景起法 = winenv.spawn_detached（WSL：setsid 新 session；Windows：DETACHED_PROCESS），輸出附加到 tools/.cache/follow.log。
+    回 {'action': 'running' | 'started' | 'fail', 'pid': …, 'why': …}；spawn 可換（測試）"""
+    pid = alive_other()
+    if pid:
+        st = read_state()
+        t = st.get('trans')
+        if st.get('pid') != pid or t in (None, trans):              # 狀態檔不是它寫的（剛起）/ 轉數相同 → 當作同一支，不重開
+            return {'action': 'running', 'pid': pid}
+        log(f'在跑的 follow（pid {pid}）轉數 {t} ≠ {trans} → 先停掉再起')
+        stop_other()
+    import winenv
+    argv = [sys.executable, str(HERE / 'grind.py'), 'follow', '--trans', str(int(trans))] + (['--no-heal'] if no_heal else [])
+    try:
+        CACHE.mkdir(parents=True, exist_ok=True)
+        spid = (spawn or winenv.spawn_detached)(argv, LOG_FILE)
+    except OSError as e:
+        return {'action': 'fail', 'pid': None, 'why': f'起不來：{e}'}
+    end = clock() + wait
+    while clock() < end:
+        got = alive_other()
+        if got:
+            return {'action': 'started', 'pid': got}
+        sleep(0.5)
+    return {'action': 'fail', 'pid': spid, 'why': f'{wait:.0f} 秒內沒看到 follow.pid（看 {LOG_FILE}）'}
 
 
 def run(a) -> int:

@@ -701,6 +701,16 @@ rc, sts, msg, info = ass.set_pet_many({'DKBO3': {'normal': '猛擊'}, 'DKBO': {'
 check('技能名依文字找（DKBO3 學了猛擊 → 第 4 項）；DKBO 沒這技能 → rc 12、DKBO3 已改、DKBO 不亂點',
       rc == ass.EXIT_NO_OPTION and g.pets['DKBO3']['normal'] == '猛擊' and g.pets['DKBO']['normal'] == '攻擊' and info['role'] == 'DKBO'
       and not [c for c in g.clicks if c[0] == ass.PET_OPT_X and g.role == 'DKBO' and c[1] > 700] and not g.panel, f'{rc} {msg}')
+g = PGame(skills={'DKBO2': []})                 # 剛轉生 Lv1 戰寵：下拉只有 攻擊 / 防禦（2026-10-15 四轉 rebirth 87）
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '忠犬'}, 'DKBO': {'normal': '忠犬'}}, skip_missing=True)
+check('skip_missing：DKBO2 下拉沒有忠犬 → 收下拉（點回下拉鈕）、記 skipped、繼續 DKBO 改成忠犬、rc 0',
+      rc == 0 and sts['DKBO2'] == {'normal': '攻擊', 'skipped': '忠犬'} and g.pets['DKBO2']['normal'] == '攻擊' and g.pets['DKBO']['normal'] == '忠犬'
+      and g.clicks.count(ass.PET_DD['normal']) == 3 and len([c for c in g.clicks if c[0] == ass.PET_OPT_X]) == 1 and not g.panel, f'{rc} {sts} {g.clicks}')
+g = PGame(skills={'DKBO2': []})
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '忠犬'}, 'DKBO': {'normal': '忠犬'}})
+check('沒給 skip_missing → 照舊 rc 12 停在 DKBO2', rc == ass.EXIT_NO_OPTION and info['role'] == 'DKBO2' and g.pets['DKBO']['normal'] == '攻擊')
 g = PGame()
 g.ocr_fail = {'DKBO2'}
 psetup(g)

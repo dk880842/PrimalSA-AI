@@ -2,11 +2,20 @@
 """開始 / 恢復練功（P5）。計畫：notes/plan-scriptify.md §3。取代 psa-grind-start 的手動截圖流程。只用標準函式庫。
 
 用法（專案根目錄；WSL / Windows 原生指令相同）：
-  uv run --no-project python tools/gui/grind.py start --spot 地雷區2|auto|here [--heal] [--confirm-secs 30] [--no-fix]
+  uv run --no-project python tools/gui/grind.py start [--trans N] [--no-follow] [--heal] [--confirm-secs 30] [--no-fix]   # 「去練功」（= --spot auto，見下）
+  uv run --no-project python tools/gui/grind.py start --spot 地雷區2|here [--heal] [--confirm-secs 30] [--no-fix]          # 固定點（不起 follow；有 follow 在跑先停）
   uv run --no-project python tools/gui/grind.py ensure [--confirm-secs 30] [--no-fix]   # 不傳送：補血回來 / 任務後 / 重登後用
   uv run --no-project python tools/gui/grind.py follow [--every 15] [--buffer 0] [--until-level N] [--dry-run] | --stop   # 依等級自動換練功點（常駐；見 follow.py）
   uv run --no-project python tools/gui/grind.py check                                   # 唯讀：5 人快速戰鬥 / 自動戰鬥 + 遇敵鈕，不改任何東西
 最後一行是 JSON（rc、耗時、各步秒數、EXP 命中數…）；同內容寫 tools/.cache/grind.json。
+
+去練功（使用者 2026-10-15；`start` 不給 --spot 或 --spot auto；可 import：grind.go(trans=None, trans_hint=None, …)）：
+  有 follow 在跑先停（它持 grind.lock）→ 依當下隊長等級選點（spots.auto_spot = AUTO 表 + spots.learn 學到的門檻）→ 傳送 → 外掛 → 遇敵 → EXP 確認 →
+  選到最高一檔（地雷區 ≥120，spots.is_top）→ 結束，不起 follow；未滿 → 背景常駐 `grind.py follow --no-heal --trans N`（follow.ensure_running：
+  winenv.spawn_detached，已有同轉數的在跑不重開；輸出 tools/.cache/follow.log），follow 換到地雷區確認掛機後自己結束。follow 起不來只記 errlog（退出碼仍 0）。
+  轉數（HUD 轉數位會讀錯，不用）：--trans 明講 > 背包讀隊長等級字（bag.levels，成功寫 tools/.cache/trans.json）> trans_hint > 快取 > HUD（警告）。
+  JSON 帶 trans / trans_src / level_num / follow（{'action': none|skip|running|started|fail, 'pid'}）；notes/quest-events.log 記一行「grind：去練功…」。
+  任何腳本都不寫死 --spot 地雷區（四轉後寫死導致在 1 級點掛 6 小時）；只有使用者指定的固定點（恐龍博士 / 卡坦練寵 = 波拉島）才帶 --spot。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；grind 自己 50～58）：
   0  已確認掛機中（start / ensure：30 秒內看到 ≥2 次 EXP 橫幅；check：5 人設定都對 + 遇敵開）
@@ -94,6 +103,7 @@ clock = time.time
 
 _marks: list = []
 _t0 = 0.0
+LAST: dict = {}                       # 最近一次 run 的 {'info': {...}}（go() / 呼叫端 / 測試讀）
 
 
 ass.wait_cover_hook = lambda timeout=BANNER_WAIT: wait_banner_gone(timeout)     # ass.select_role 頭像被遮住時，先用 EXP 橫幅偵測等
@@ -295,6 +305,53 @@ def fix_settings(info: dict) -> int:
     return 0
 
 
+# ---- 隊長轉數（去練功 auto 選點 / follow --trans 用）----
+TRANS_FILE = CACHE / 'trans.json'
+
+
+def save_trans(trans: int, level=None, src: str = '') -> None:
+    """記下最近一次可靠讀到的隊長轉數（背包讀字 / rebirth 轉生確認）；寫檔失敗不丟例外"""
+    try:
+        TRANS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        TRANS_FILE.write_text(json.dumps({'trans': int(trans), 'level': level, 'src': src, 'ts': int(time.time())}, ensure_ascii=False), encoding='utf-8')
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def load_trans() -> int | None:
+    try:
+        t = json.loads(TRANS_FILE.read_text(encoding='utf-8')).get('trans')
+        return t if isinstance(t, int) and 0 <= t <= 5 else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def read_leader_bag():
+    """背包面板讀隊長等級字（bag.levels，rebirth 判轉數用的同一套）→ (轉, 級) 或 None（測試替換）"""
+    import bag
+    rc, lv = bag.levels([LEADER])
+    return None if rc else lv.get(LEADER)
+
+
+def leader_trans(hint=None) -> tuple:
+    """→ (轉數或 None, 背包讀到的等級或 None, 來源 'bag' | 'hint' | 'cache' | '')。
+    順序：背包讀隊長（可靠，成功順便寫快取）→ 呼叫端給的 hint（rebirth_pets 的 --trans）→ tools/.cache/trans.json → 都沒有 None"""
+    try:
+        v = read_leader_bag()
+    except Exception as e:                    # 讀不到不擋練功：退回下一個來源
+        log(f'背包讀隊長轉數失敗：{e}')
+        v = None
+    if v and v[0] is not None:
+        save_trans(v[0], v[1], 'bag')
+        return v[0], v[1], 'bag'
+    if hint is not None:
+        return int(hint), None, 'hint'
+    c = load_trans()
+    if c is not None:
+        return c, None, 'cache'
+    return None, None, ''
+
+
 def choose_spot(spot: str, trans: int, level: int, cur_map) -> tuple:
     """→ (目的點名或 None = 不傳送, 錯誤訊息或 '')。here = 不傳送；auto 依等級；已在同點 / 同檔點 = 不傳送"""
     if spot == 'here':
@@ -318,6 +375,31 @@ def choose_spot(spot: str, trans: int, level: int, cur_map) -> tuple:
 def read_map() -> int | None:
     p = walk.wait_pos(4, None, 0.5)
     return p[0] if p else None
+
+
+def here_spot() -> str | None:
+    """現在所在的練功點名（heal.stat 的 pos 地圖 ID → spots.spot_of_map）；讀不到 / 不在練功點 None"""
+    try:
+        return spots.spot_of_map(map_id_of_pos(heal.stat().get('pos')))
+    except Exception:
+        return None
+
+
+def auto_spot_now() -> str | None:
+    """不開面板的「依等級該去哪」：HUD 等級數字 + 轉數（快取 tools/.cache/trans.json，沒有才用 HUD 轉數位）→ spots.auto_spot；讀不到 None。
+    petwatch 補血後決定回哪用（不傳送、不讀背包）"""
+    try:
+        txt = heal.stat().get('level')
+    except Exception:
+        return None
+    level = spots.level_num(txt)
+    if not level:
+        return None
+    t = load_trans()
+    if t is None:
+        lv = spots.parse_level(txt)
+        t = lv[0] if lv else 0
+    return spots.auto_spot(t, level)
 
 
 def map_id_of_pos(pos) -> int | None:
@@ -351,13 +433,17 @@ def finish(rc: int, mode: str, info: dict, t_start: float) -> int:
 
 
 def run(mode: str, spot: str | None = None, confirm_secs: float = CONFIRM_SECS, fix: bool = True, do_heal: bool = False,
-        ignore_watchers: bool = False) -> int:
+        ignore_watchers: bool = False, trans: int | None = None, trans_hint: int | None = None, post=None) -> int:
     """ignore_watchers：呼叫端本身就是 petwatch / heal --watch / netwatch（正卡在 guard 裡、不會同時動），略過它們的偵測；
-    quest 的 battle.lock 仍然有效（由 uikit.preflight 擋）"""
+    quest 的 battle.lock 仍然有效（由 uikit.preflight 擋）。
+    trans：start --spot auto 用的隊長轉數（明講就用；沒給 → leader_trans：背包讀 → trans_hint → 快取）。
+    post(info) → 退出碼：成功（0）後、印最後一行 JSON 前呼叫（go() 用來起 follow，結果一起寫進 JSON）"""
     global _t0, ACTIVE
     t_start = _t0 = clock()
     _marks.clear()
     info: dict = {}
+    LAST.clear()
+    LAST['info'] = info
     other = None if ignore_watchers else _other_running()
     if other:
         print(f'{SRC}：{other} 在跑，會搶畫面 → 不動作', file=sys.stderr)
@@ -366,7 +452,10 @@ def run(mode: str, spot: str | None = None, confirm_secs: float = CONFIRM_SECS, 
         return finish(uikit.EXIT_IN_BATTLE, mode, info, t_start)
     ACTIVE = True
     try:
-        return finish(_run(mode, spot, confirm_secs, fix, do_heal, info), mode, info, t_start)
+        rc = _run(mode, spot, confirm_secs, fix, do_heal, info, trans, trans_hint)
+        if rc == 0 and post:
+            rc = post(info)
+        return finish(rc, mode, info, t_start)
     except SystemExit as e:                  # netwatch.guard 停手（10）
         finish(int(e.code or 0) or uikit.EXIT_HALT, mode, info, t_start)
         raise
@@ -375,7 +464,7 @@ def run(mode: str, spot: str | None = None, confirm_secs: float = CONFIRM_SECS, 
         release_lock()
 
 
-def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: dict) -> int:
+def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: dict, trans=None, trans_hint=None) -> int:
     rc = uikit.preflight(SRC)
     if rc:
         return rc
@@ -421,17 +510,27 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
     if mode == 'start':
         s = heal.stat()
         lv = spots.parse_level(s.get('level'))
-        trans, level = lv if lv else (0, 0)
         cur = read_map()
         info.update(level=s.get('level'), from_map=cur)     # from_map = 換點「前」所在地圖（舊名 cur_map 易誤認為換點後）
-        if spot == 'auto' and not lv:
-            return uikit.fail(SRC, uikit.EXIT_USAGE, '讀不到隊長等級，無法 auto 選點')
-        if spot not in ('here', 'auto') and not lv:
-            log('警告：讀不到隊長等級，不預判門檻，直接送出傳送')
-            lv_known = False
+        if spot == 'auto':
+            # 去練功：轉數不信 HUD（轉數位會讀錯）→ 明講 > 背包讀隊長 > trans_hint > 快取 > HUD（警告）；等級用 HUD 數字，讀不到用背包讀到的
+            level, src, blevel = spots.level_num(s.get('level')), 'arg', None
+            if trans is None:
+                trans, blevel, src = leader_trans(trans_hint)
+            if trans is None and lv:
+                trans, src = lv[0], 'hud'
+                log(f'警告：背包 / 快取都讀不到隊長轉數，改用 HUD 的「{lv[0]}轉」（轉數位可能讀錯）')
+            level = level or blevel
+            if trans is None or not level:
+                return uikit.fail(SRC, uikit.EXIT_USAGE, f'讀不到隊長{"轉數" if trans is None else "等級"}，無法依等級選點（auto）')
+            info.update(trans=trans, trans_src=src, level_num=level)
+            log(f'隊長 {trans}轉{level}級（轉數來源 {src}）')
+            name, err = choose_spot(spot, trans, level, cur)
         else:
-            lv_known = True
-        name, err = choose_spot(spot, trans if lv_known else 1, level, cur)
+            trans, level = lv if lv else (0, 0)
+            if spot != 'here' and not lv:
+                log('警告：讀不到隊長等級，不預判門檻，直接送出傳送')
+            name, err = choose_spot(spot, trans if lv else 1, level, cur)
         if err:
             return uikit.fail(SRC, uikit.EXIT_USAGE if 'auto' in err or '不到可練功點' in err else EXIT_TELEPORT, err)
         target = name or spots.spot_of_map(cur) or spot
@@ -507,6 +606,67 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
     return uikit.fail(SRC, EXIT_NO_EXP, f'{confirm_secs:.0f} 秒內只看到 {res["events"]} 次 EXP 橫幅（需 {EXP_NEED}）：遇敵開著但沒戰鬥 / 沒經驗？請 shot 看畫面')
 
 
+# ---- 去練功（使用者 2026-10-15）----
+def stop_follow(why: str) -> bool:
+    """有 follow 在跑就請它結束（它持 grind.lock，不停 grind.run 會回 8）；回 True = 現在沒有 follow 在跑"""
+    import follow
+    pid = follow.alive_other()
+    if not pid:
+        return True
+    log(f'follow（pid {pid}）在跑 → 先停（{why}）')
+    follow.stop_other()
+    return not follow.alive_other()
+
+
+def note_event(msg: str) -> None:
+    """寫 notes/quest-events.log 一行（「grind：…」）；失敗不丟例外"""
+    try:
+        import follow
+        follow.EVENT_LOG.parent.mkdir(exist_ok=True)
+        with open(follow.EVENT_LOG, 'a', encoding='utf-8') as f:
+            f.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} grind：{msg}\n')
+    except OSError:
+        pass
+
+
+def go(trans: int | None = None, trans_hint: int | None = None, confirm_secs: float = CONFIRM_SECS, fix: bool = True,
+       do_heal: bool = False, follow_ok: bool = True) -> int:
+    """「去練功」= 依當下隊長等級選點（spots.auto_spot：AUTO 表 + spots.learn 學到的門檻；轉數見 leader_trans）→ 傳送 → 5 人外掛 → 開遇敵 → EXP 確認。
+    選到最高一檔（地雷區，spots.is_top）→ 確認掛機就結束，不起 follow；未滿 → 確認掛機後背景常駐 `grind.py follow --no-heal --trans N`
+    （follow.ensure_running：已有同轉數的在跑就不重開），follow 換到地雷區並確認後自己結束。
+    開始前若有 follow 在跑先停（它持 grind.lock）。follow 起不來只記 errlog / 警告，不影響退出碼（掛機已確認）。follow_ok=False = 不起 follow"""
+    if not stop_follow('去練功：依當下等級重新選點，未滿最高點會再起新的'):
+        print(f'{SRC}：follow 停不掉（60 秒內沒結束），不動作', file=sys.stderr)
+        return uikit.EXIT_IN_BATTLE
+
+    def post(info: dict) -> int:
+        target, t = info.get('spot'), info.get('trans')
+        lvtxt = f'{t}轉{info.get("level_num")}級'
+        if spots.is_top(target):
+            info['follow'] = {'action': 'none', 'why': '最高練功點'}
+            log(f'{lvtxt} 在最高練功點 {target} 掛機中 → 不起 follow')
+            note_event(f'去練功：{lvtxt} → {target}（最高點，不起 follow）')
+            return 0
+        if not follow_ok:
+            info['follow'] = {'action': 'skip', 'why': '--no-follow'}
+            log(f'{lvtxt} 在 {target} 掛機中；--no-follow → 不起 follow（之後要自己換點）')
+            note_event(f'去練功：{lvtxt} → {target}（--no-follow）')
+            return 0
+        import follow
+        r = follow.ensure_running(t)
+        info['follow'] = r
+        if r['action'] == 'fail':
+            import errlog
+            errlog.add(f'去練功：{target} 掛機中，但背景 follow 起不來（{r.get("why")}）；不會跟著等級換點，請手動 grind.py follow --no-heal --trans {t}', source=SRC)
+            log(f'警告：follow 起不來（{r.get("why")}）')
+        else:
+            log(f'{lvtxt} 在 {target} 掛機中 → follow {"已在跑" if r["action"] == "running" else "已在背景啟動"}（pid {r.get("pid")}，--trans {t} --no-heal）')
+        note_event(f'去練功：{lvtxt} → {target}；follow {r["action"]}（pid {r.get("pid")}）')
+        return 0
+
+    return run('start', 'auto', confirm_secs, fix, do_heal, trans=trans, trans_hint=trans_hint, post=post)
+
+
 def main() -> int:
     import winenv
     winenv.enable_server()
@@ -517,8 +677,10 @@ def main() -> int:
     cp = argparse.ArgumentParser(add_help=False)
     cp.add_argument('--confirm-secs', type=float, default=CONFIRM_SECS)
     cp.add_argument('--no-fix', action='store_true', help='看到完整戰鬥時不自動重設 5 人（預設會重設一次）')
-    p = sub.add_parser('start', help='選點 → 傳送 → 設定 → 遇敵 → 確認', parents=[cp])
-    p.add_argument('--spot', required=True, help='練功點名（見 spots.py）| auto（依等級；1 轉以上沿用 0 轉表、未實測）| here（不傳送）')
+    p = sub.add_parser('start', help='選點 → 傳送 → 設定 → 遇敵 → 確認（不給 --spot = 去練功：依等級選點 + 未滿最高點背景起 follow）', parents=[cp])
+    p.add_argument('--spot', default='auto', help='不給 / auto = 去練功（依隊長等級選點；未滿地雷區背景起 follow）| 練功點名（見 spots.py，固定點、不起 follow）| here（不傳送）')
+    p.add_argument('--trans', type=int, default=None, help='auto 用的隊長轉數（預設：背包讀隊長 → 快取；HUD 轉數位會讀錯不用）')
+    p.add_argument('--no-follow', action='store_true', help='auto：未滿最高點也不起 follow')
     p.add_argument('--heal', action='store_true', help='先回村補血（點需在 heal.SPOTS）')
     sub.add_parser('ensure', help='不傳送：重查 5 人設定 + 遇敵 + 確認', parents=[cp])
     sub.add_parser('check', help='唯讀檢查')
@@ -530,6 +692,11 @@ def main() -> int:
     if a.cmd == 'start' and a.spot not in spots.SPOTS and a.spot not in ('auto', 'here'):
         print(f'不認得的練功點：{a.spot}（{" / ".join(spots.SPOTS)} / auto / here）')
         return uikit.EXIT_USAGE
+    if a.cmd == 'start' and a.spot == 'auto':
+        return go(a.trans, None, a.confirm_secs, not a.no_fix, a.heal, not a.no_follow)
+    if a.cmd == 'start' and not stop_follow(f'指定 --spot {a.spot} = 固定點，不跟等級換點'):
+        print(f'{SRC}：follow 停不掉（60 秒內沒結束），不動作', file=sys.stderr)
+        return uikit.EXIT_IN_BATTLE
     return run(a.cmd, getattr(a, 'spot', None), getattr(a, 'confirm_secs', CONFIRM_SECS), not getattr(a, 'no_fix', False), getattr(a, 'heal', False))
 
 

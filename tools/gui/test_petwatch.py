@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """petwatch.py 離線測試：不碰遊戲（gui / ocr / 外掛 / 寵物面板 / 遇敵都換成假的，不讀即時像素 / 截圖）。
 用法：uv run --no-project python tools/gui/test_petwatch.py"""
+import os
 import sys
+import types
 import tempfile
 from pathlib import Path
 
+os.environ.setdefault("PSA_LAYOUT", "2880x1659")       # 載入 walk（grind 會 import）時不問遊戲版面
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import testenv  # noqa: E402,F401  紀錄檔轉向暫存
@@ -279,5 +282,32 @@ check('--heal 才補血', petwatch.main(['--heal'], dry_args=True).no_heal is Fa
 check('--no-heal 相容（= 預設）', petwatch.main(['--no-heal'], dry_args=True).no_heal is True and petwatch.main(['--heal', '--no-heal'], dry_args=True).no_heal is True)
 check('--once 不補血（只讀）', petwatch.main(['--heal', '--once'], dry_args=True).no_heal is True)
 check('--max-tries 預設 2、--back-slot 仍收（相容）', petwatch.main(['--back-slot', '1'], dry_args=True).max_tries == 2)
+
+# 補血後回哪（2026-10-15 起 --spot 不寫死地雷區）：--spot > 開跑時所在點 > 現在所在點 > 依等級 auto > None
+import grind  # noqa: E402
+check('--spot 預設不給', petwatch.main([], dry_args=True).spot is None)
+_hs, _au, _st, _lt = petwatch.here_spot, grind.auto_spot_now, grind.heal.stat, grind.load_trans
+A = lambda **k: types.SimpleNamespace(**dict(dict(spot=None, home=None), **k))  # noqa: E731
+petwatch.here_spot = lambda: '五兄弟洞窟'
+grind.auto_spot_now = lambda: '波拉島'
+check('heal_spot：--spot 明講優先', petwatch.heal_spot(A(spot='地雷區2', home='波拉島')) == '地雷區2')
+check('heal_spot：開跑時所在點（home）', petwatch.heal_spot(A(home='柯奧4F龜洞')) == '柯奧4F龜洞')
+check('heal_spot：沒 home → 現在所在點', petwatch.heal_spot(A()) == '五兄弟洞窟')
+petwatch.here_spot = lambda: None
+check('heal_spot：不在練功點 → 依等級 auto', petwatch.heal_spot(A()) == '波拉島')
+grind.auto_spot_now = lambda: None
+check('heal_spot：都決定不了 → None（呼叫端不補血、記 errlog）', petwatch.heal_spot(A()) is None)
+grind.auto_spot_now = _au
+grind.heal.stat = lambda: {'level': '0轉125級'}
+grind.load_trans = lambda: 4
+check('grind.auto_spot_now：HUD 等級 + 快取轉數 → 地雷區', grind.auto_spot_now() == '地雷區')
+grind.heal.stat = lambda: {'level': '1轉50級'}
+grind.load_trans = lambda: None
+check('grind.auto_spot_now：沒快取 → HUD 轉數；50 級 → 五兄弟洞窟', grind.auto_spot_now() == '五兄弟洞窟')
+grind.heal.stat = lambda: {'level': '??'}
+check('grind.auto_spot_now：讀不到等級 → None', grind.auto_spot_now() is None)
+grind.heal.stat = lambda: {'pos': '500:10,10'}
+check('grind.here_spot：地圖 500 → 波拉島', grind.here_spot() == '波拉島')
+petwatch.here_spot, grind.heal.stat, grind.load_trans = _hs, _st, _lt
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

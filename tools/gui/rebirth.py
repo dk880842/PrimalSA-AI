@@ -29,9 +29,11 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
                 傳送後遊戲會自動巡路往守門人，若補血前已到守門人對話框 → 警告、這次不補血，enter 的 quest.py 接手對話）；
               未達條件 → 提示視窗點 ✕ 關掉、原地遇敵開回、人留在練功點（不先去補血）→ 80（info.gate.who = 誰不夠，讀得到才有）；
               讀不懂的視窗 → 9（疑似驗證，什麼都不點）；追蹤欄沒卡 → 警告 + 改用 bag.levels（任務沒接，accept 會接）；其他（沒傳送也沒訊息 / 對話框 / 換到別圖）→ 84。
+              點卡被傳到瑪麗娜絲村長選單「漆黑洞窟 / 再見」（任務其實還沒接，2026-10-15 四轉實跑 84）→ 在對話框接任務（翻頁 → 接受 → 驗進行中）
+              → 再點卡做門檻（accept 跳過）；接取失敗 → 97；接完被擋 → 80 但不開遇敵（人在村子，回去練功 = grind.py start）。
             --read-levels：舊行為，bag.levels 逐人讀 5 人轉數 / 等級當門檻（不點卡），之後 heal。
             （不再查四大洞窟證明：2026-10-13 find_items 讀字不穩兩次誤判 81；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理）。門檻實機未驗證（視窗內文 OCR 框是估計值）
-  accept    preflight 點卡已傳送（任務進行中）→ 跳過。否則接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（先看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
+  accept    preflight 點卡已傳送（任務進行中）→ 跳過。否則接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（畫面開著村長選單對話框 = 直接在對話框接、別的對話框 = 97 不點；再看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
   enter     quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
   boss10    龍王的守護（背包沒有就從公共倉庫取）→ quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認在 11F 以上（32011～32021，地圖為準）
   bow16     龍王的守護 → quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）。
@@ -39,7 +41,8 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
             （三轉實測：給弓時沒算到獎勵，巡路一路打完回 37）→ after_boss 確認滿 5 人（不滿走被打飛者重打）→ 記 boss20_done → heal / boss20 跳過
   swap      5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器（名稱防護；--keep-old-weapon 跳過）；
             武器格本來就是弓（already：上一轉的弓）→ 背包裡 16F 新給的那把是多的，bag.drop_spare_bow 丟掉（--allow-protected，武器格不動，二轉實測要丟）
-  heal      （boss20_done → 跳過）heal.py --no-return → ass.py 5 人戰寵一般動作 → 便捷傳送「漆黑20樓」→ team.form
+  heal      （boss20_done → 跳過）heal.py --no-return → ass.py 5 人戰寵一般動作（下拉依 OCR 文字找；剛轉生 Lv1 戰寵只有 攻擊 / 防禦、沒有忠犬 →
+            收下拉、警告、跳過該人，不失敗）→ 便捷傳送「漆黑20樓」→ team.form
   boss20    （boss20_done → 跳過）龍王的守護 → quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
             便捷傳送落在 32021:31,29（21 樓精靈王旁），BOSS 在上一層 32020:20,9。quest.py 退出碼不是 37 / 38 且人仍在 32021（追蹤沒走回去，如 3 / 19）→
             備援一次：preflight → 在北區（y<50，便捷傳送落點 31,29）先 walk 32021 傳送帶 31,47（同圖傳到 31,53，看座標 y>=50 判斷，逾時 84 backtrack=band；已在南區跳過）→ walk 32021 南出口 28,59（換圖 32020）→ team.check（散了 form）→ walk 32020 20,11 → quest.py --fight --npc auto → after_boss（37 / 38 同上）。
@@ -48,6 +51,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
             「寵物轉生」/ 讀不到 / 位置不在精靈王旁 → 88；--confirm-rebirth → 89；放行後確認 5 人轉數 = N
   cleanup   丟 5 人轉生獎勵寵（一轉烏力斯坦 / 二轉奇娜：petdrop 名稱 + Lv1；三轉起：rebirth 階段先拍寵物欄快照、這裡 diff 找「剛好 1 隻新出現的 Lv1」，
             名字 + Lv1 驗過才丟，任何不確定 → 98，不碰騎寵 / 戰寵）→ 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
+  之後      不自己練功；下一步 `rebirth_pets.py --trans N`（寵物重整，完成後自動去練功 = grind.go，不寫死練功點）。轉生確認後記 tools/.cache/trans.json
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79、90～96；rebirth 自己 80～89）：
   80 等級不足：點追蹤卡被「未達條件」視窗擋（已關視窗、原地遇敵開回、留在練功點；info.gate.who 看誰）；--read-levels / 沒卡時 bag.levels 不符（info.levels）或讀不到等級
@@ -246,8 +250,16 @@ class Tools:
         heal.heal_trip('波拉島', True)
 
     def ass_pet(self, role, action):
+        """戰寵一般動作 → (rc, 狀態, 訊息)。下拉依 OCR 文字找選項（set_pet_many）；找不到（剛轉生 Lv1 戰寵只有 攻擊 / 防禦）→
+        收下拉、狀態帶 'skipped'、rc 0（2026-10-15 四轉：舊版 set_pet 盲點第 3 列 → 87）"""
         import ass
-        return ass.set_pet(role, {'normal': action})
+        rc, sts, msg, _ = ass.set_pet_many({role: {'normal': action}}, skip_missing=True)
+        return rc, sts.get(role), msg
+
+    def save_trans(self, n):
+        """轉生確認後記下隊長轉數（grind 去練功讀不到背包時的備援）"""
+        import grind
+        grind.save_trans(n, src='rebirth')
 
     def teleport20(self):
         import heal
@@ -750,14 +762,23 @@ class Run:
         kind = g.get('kind')
         event(f'等級門檻（點追蹤卡）：{kind} {json.dumps(g, ensure_ascii=False)[:200]}')
         if kind in ('teleport', 'already'):
+            if g.get('accepted'):
+                event(f'門檻：點卡時任務還沒接（村長選單）→ 已接「{self.task}」再點卡，傳送成功')
             self.st['gate'] = 'teleport'
             return 0
+        if kind == 'accept_fail':
+            arc = g.get('rc')
+            if arc in stuckrecover.HALT_RC:
+                return self.fail(arc, f'門檻：在村長對話框接任務時{"看到驗證視窗" if arc == 9 else "斷線"}，停手')
+            return self.fail(EXIT_ACCEPT, f'點追蹤卡被傳到村長選單（任務沒接），接「{self.task}」失敗（questdetail rc {arc}）', accept_rc=arc)
         if kind == 'blocked':
             who = g.get('who')
             need = f'{g["trans"]}轉{g["level"]}級' if g.get('trans') is not None else f'{self.n - 1}轉 {level_min(self.n)} 級'
             msg = f'點「{self.task}」追蹤卡被擋：{who or "（讀不出是誰）"}未達到 {need}（{g.get("via")}：{g.get("text")}）'
             if not g.get('closed'):
                 return self.fail(EXIT_LEVEL, msg + '；視窗不是已知提示視窗、沒關（不亂點），原地遇敵維持關，請人工關視窗', who=who)
+            if g.get('accepted'):                            # 剛在村長那裡接了任務 → 人在瑪麗娜絲村，不是練功點：不開遇敵
+                return self.fail(EXIT_LEVEL, msg + '；任務剛接好、人在瑪麗娜絲村（不開原地遇敵）→ 回去練功：grind.py start（不帶 --spot）', who=who, accepted=True)
             try:
                 T.encounter_set(True)                        # 回到掛機：人還在練功點（沒先去補血）
                 enc = 'on'
@@ -867,6 +888,9 @@ class Run:
         if act and act != 'none':
             for r in ALL_ROLES:
                 rc, st, msg = T.ass_pet(r, act)
+                if rc == 0 and st and st.get('skipped'):
+                    self.warn(f'{r} 戰寵一般動作下拉沒有「{act}」（剛轉生 Lv1 戰寵只有 攻擊 / 防禦）→ 已收下拉、跳過，維持 {st.get("normal")}')
+                    continue
                 if rc == 0:
                     continue
                 if rc == 4 and (not st or st.get('normal') is None):
@@ -928,6 +952,7 @@ class Run:
             self.info['levels_after'] = {r: list(v) if v else None for r, v in lv.items()}
             if not rc and all(v and v[0] == self.n for v in lv.values()):
                 event(f'轉生確認：5 人 {self.info["levels_after"]}')
+                self.T.save_trans(self.n)
                 return True
             self.T.sleep(8)
         return False
@@ -964,7 +989,8 @@ class Run:
                  f'- 換弓：{self.info.get("swap")}']
         if self.warnings:
             lines.append('- 警告：' + '；'.join(self.warnings))
-        lines.append('- 待辦：重組隊、瑪斯貝卡改回騎乘、選練功點（1 轉門檻未測，`grind --spot auto` 不能用）、1.82 清單 / 四大洞窟 / 2031 紅暴要重做。')
+        lines.append(f'- 下一步：`rebirth_pets.py --trans {self.n}`（寵物重整，完成後自動去練功 = grind.py start 不帶 --spot：依等級選點、未滿地雷區背景起 follow）；'
+                     '之後 1.82 清單 / 四大洞窟 / 2031 紅暴要重做（postrebirth.py）。')
         try:
             with open(QUEST_LOG, 'a', encoding='utf-8') as f:
                 f.write('\n'.join(lines) + '\n')
@@ -981,7 +1007,7 @@ DRY_PLAN = {
     'boss10': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use）', 'quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認在 11F 以上（32011～32021，地圖為準）'],
     'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016', '已過 16F 看地圖：17～20F = 弓已拿到；21F = 20F 也打完 → after_boss（滿 5 人）→ boss20_done，heal / boss20 跳過'],
     'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
-    'heal': ['heal.heal_trip --no-return', 'ass.set_pet 5 人 normal={act}（rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
+    'heal': ['heal.heal_trip --no-return', 'ass.set_pet_many 逐人 normal={act}（下拉沒有該選項 = 收下拉、警告、跳過；rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
     'boss20': ['龍王的守護', 'quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近', '人仍在 32021 追蹤沒動 → 備援一次：walk 傳送帶 31,47（北區才走）→ 32021 28,59（出口）→ 32020 → team.check → walk 20,11 → quest.py --fight --npc auto（84 / 85）'],
     'rebirth': ['team.form', '沒有獎勵寵對照表的轉數（三轉起）：先拍 5 人寵物欄快照（98）', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
                 '點完成 + quest.py --no-track --allow-irreversible 收尾 → bag.levels 確認 5 人轉數 = N'],
@@ -1044,7 +1070,8 @@ def run(trans=None, from_stage: str = 'preflight', dry_run: bool = False, keep_o
             break
     LAST.clear()
     LAST.update(ok=rc == 0, rc=rc, trans=trans, stages=r.st['stages'], info=r.info, warnings=r.warnings)
-    event(f'結束 rc={rc}' + (f'；續跑：--from {s} --trans {trans}' if rc else ''))
+    event(f'結束 rc={rc}' + (f'；續跑：--from {s} --trans {trans}' if rc else
+                             (f'；下一步：rebirth_pets.py --trans {trans}（完成後自動去練功，不帶 --spot）' if s == 'cleanup' else '')))
     return rc
 
 

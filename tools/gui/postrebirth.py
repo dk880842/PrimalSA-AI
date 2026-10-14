@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """轉生後任務重做總控（2 轉 → 3 轉之間等）：盤點 → 成人儀式 → 彌生和日美子 → 紅暴 → 1.82 前段 → 清背包① → 1.82 後段 → 清背包② → 四大洞窟
-→ 恐龍博士 → 卡坦的願望 → 猜謎三兄弟 → 收尾（回地雷區掛機）。只用標準函式庫。順序是使用者 2026-10-13 定案（notes/plan-post2-quests.md「使用者決定」9～12）。
+→ 恐龍博士 → 卡坦的願望 → 猜謎三兄弟 → 收尾（去練功：依等級選點，未滿地雷區背景起 follow）。只用標準函式庫。順序是使用者 2026-10-13 定案（notes/plan-post2-quests.md「使用者決定」9～12）。
 **只有離線測試（test_postrebirth.py），整支未實機**；每段呼叫的 questrun / petquest / bag / grind 各自的實機狀態見各檔。
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/postrebirth.py plan                                  # 不碰遊戲：印完整順序與每段指令
-  uv run --no-project python tools/gui/postrebirth.py run [--from 段] [--to 段] [--confirm-drop] [--confirm-buy-bait] [--spot 地雷區] [--fresh] [--dry-run]
+  uv run --no-project python tools/gui/postrebirth.py run [--from 段] [--to 段] [--confirm-drop] [--confirm-buy-bait] [--spot 點名] [--fresh] [--dry-run]
     --confirm-drop      准做不可逆的丟 / 刪：紅暴的巴朵蘭恩（petdrop 1 級）+ 薩姆吉爾的首飾（bag.purge）、清背包（bag.purge 白名單）、
                         寵物任務的獎勵寵（布克布克 / 修寶 / 左迪洛斯）。沒給 → 紅暴不丟、清背包只 --dry-run 列出要刪的（空格不夠就 174 停）、寵物任務到丟寵段 168 停
     --confirm-buy-bait  傳給 petquest：誘餌不夠時准用外掛「+」買（每次 50,000 石幣，按前後驗石幣）
+    --spot 點名         收尾固定練功點（預設不給 = 去練功 grind.py start：依等級選點 + 未滿地雷區起 follow；2026-10-15 起不寫死地雷區）
     --from / --to       只跑某幾段（段名見 plan）；進度檔 tools/.cache/postrebirth.json 記完成的段（24 小時內），重跑 = 續跑；--fresh 從頭
   可 import：postrebirth.run(tools=…, …) → 退出碼；結果在 postrebirth.LAST
 
@@ -35,7 +36,7 @@
   katan      petquest.py run 2019 …                                                            失敗 175
   quiz       petquest.py run 3003 …（練金布伊前 petwatch --exp-fruit 吃 2倍智慧果）            失敗 175
   finish     questrun.py status --role all <全部任務>（全員完成的任務自動移出 questrun 待驗清單）→ not_done 不空 → questrun.py verify <落後任務> --role <落後者>
-             （進行中 → 交接 → bossretry --who 補人 → 再讀；待接取 / 補不上 108）→ pet.py list（5 人朵拉比斯出戰 + 騎寵騎乘）→ grind.py start --spot 地雷區
+             （進行中 → 交接 → bossretry --who 補人 → 再讀；待接取 / 補不上 108）→ pet.py list（5 人朵拉比斯出戰 + 騎寵騎乘）→ 去練功 grind.py start（不帶 --spot；--spot 給了才帶）
              （原地遇敵 + 5 人快戰確認）。失敗 176
   逐人驗證：questrun 段一律 --verify defer、petquest 帶 --verify-defer（2026-10-13 review 1013b §2.1）：沒風險事件的任務不在各段結束各驗一次（每次 115～154 秒），
              延到收尾那一次 status --role all；有風險事件（30 / 32 / 38 / 21 / 41 / bossretry / 重登 / BOSS 後 HP 0 / 交寵物）照舊當場驗，依賴任務接取前照舊先驗前置
@@ -142,7 +143,7 @@ def seg_cmds(seg: str, o: dict) -> list:
         'katan': [('petquest.py', ['run', 2019] + pq)],
         'quiz': [('petquest.py', ['run', 3003] + pq)],
         'finish': [('questrun.py', ['status', '--role', 'all'] + ALL_TASKS), ('pet.py', ['list', '--role', 'all', '--json']),
-                   ('grind.py', ['start', '--spot', o.get('spot', '地雷區')]),
+                   ('grind.py', ['start'] + (['--spot', o['spot']] if o.get('spot') else [])),
                    ('questrun.py', ['verify', '<落後的任務 ID>', '--role', '<落後者>'])],
     }[seg]
 
@@ -366,7 +367,7 @@ def print_plan(o: dict) -> None:
 
 
 def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, confirm_drop: bool = False, confirm_buy: bool = False,
-        spot: str = '地雷區', fresh: bool = False, dry_run: bool = False) -> int:
+        spot: str | None = None, fresh: bool = False, dry_run: bool = False) -> int:
     LAST.clear()
     for s in (from_seg, to_seg):
         if s and s not in SEGMENTS:
@@ -411,7 +412,7 @@ def main(argv=None) -> int:
     ap.add_argument('--to', dest='to_seg', default=None)
     ap.add_argument('--confirm-drop', action='store_true', help='准丟 / 刪（紅暴巴朵蘭恩 + 首飾、清背包白名單、寵物任務獎勵寵）')
     ap.add_argument('--confirm-buy-bait', action='store_true', help='傳給 petquest：誘餌不夠准用外掛「+」買')
-    ap.add_argument('--spot', default='地雷區')
+    ap.add_argument('--spot', default=None, help='收尾固定練功點（預設不給 = 去練功：依等級選點 + follow）')
     ap.add_argument('--fresh', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)

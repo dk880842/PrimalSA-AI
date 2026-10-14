@@ -35,7 +35,8 @@
                 多的先 store-many --pick last 存回公共 → pet.py take-many --depot public --plan 只放還缺的（抓寵者自己留的那隻不取；都齊了不取）→ list 驗每人每物種 1 隻
                 → 還有名字框是成長字串的任務寵（備援取出的）→ pet.py reset-name --role 那些人（交寵物「選擇」視窗依名字點卡；67 → 165、其他失敗只記事件）
                 take-many 中途失敗：訊息帶已取到的；重跑自動只補缺的（卡坦兩輪同樣套用）
-    train[N]    自動轉換戰寵 on（轉換級數使用者設 30）→ 第一種任務寵 5 人出戰 → pet_catch.py --verify-battle → grind.py start --spot 柯奧4F龜洞
+    train[N]    自動轉換戰寵 on（轉換級數使用者設 30）→ 第一種任務寵 5 人出戰 → pet_catch.py --verify-battle → grind.py start --spot 波拉島
+                （使用者 2026-10-15 指定：恐龍博士 / 卡坦練寵固定 80 級練功區「波拉島」，固定點、不起 follow；舊版柯奧4F龜洞）
                 → 每 POLL_S（30）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
                   levels 那格變空 / nh 不同 → 改讀完整 list；全部連兩輪 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25；逐隻累積：某隻連兩次 ≥ 門檻即鎖定、之後不清；不限升級幅度，誤讀 > 門檻+60 忽略；未鎖定者超過門檻+15 → 強制再讀完整 list，全 ≥ 門檻就結束）
                 → 關遇敵 → 自動轉換戰寵 off → pet.py rest-all（任務寵改等待；成功記進度檔 rested）
@@ -50,7 +51,7 @@
     step1       追蹤步號 = 1 才做：quest.py --task 猜謎三兄弟 --stop-after-rewards 1（10-12 / 10-13 點追蹤自動巡到 810 伊那多拿金豬，沒爬塔）
                 → pet.py list 驗 5 人都有金布伊；沒有 → 161（點任務追蹤重試 / 人工處理）
     prep        關遇敵 → pet.py list 記原戰寵（朵拉比斯）等級 → 取消鎖定戰寵 → 金布伊 5 人出戰 → pet_catch.py --lock 戰寵 --battle-pet 金布伊
-    train       grind.py start --spot 地雷區 → petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --exp-fruit（練前 depot_use 吃 2倍智慧果；到 77 自動換回朵拉比斯 + 重鎖）
+    train       去練功 grind.py start（不帶 --spot：依等級選點，未滿地雷區背景起 follow；petwatch 在跑時 follow 自動暫停）→ petwatch.py --pet 金布伊 --level 77 --back 朵拉比斯 --exp-fruit（練前 depot_use 吃 2倍智慧果；到 77 自動換回朵拉比斯 + 重鎖）
     turnin      關遇敵 → questrun.py run 3003 --after none（交金豬 → 會員證 → 藍暴）
     drop        （--confirm-drop）petdrop.py all 左迪洛斯 --confirm-name 左迪洛斯 --max-level 1
     restore     pet_catch.py --lock 戰寵 --battle-pet 朵拉比斯 → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗朵拉比斯出戰、等級 ≥ 原等級（練功中可能升級）
@@ -104,8 +105,8 @@ PET_MAX_LEVEL = 140
 RESTED_S = 30 * 60                 # train 段 rest-all 成功後這麼久內的 turnin 段帶 --rested（questrun 交件前不重做）
 TRAIN_MAX_S = 45 * 60              # 練寵最多等這麼久（S5 約 9 分、S6 約 5 分）
 PROGRESS_TRUST_S = 24 * 3600
-TRAIN_SPOT = '柯奧4F龜洞'
-QUIZ_SPOT = '地雷區'
+TRAIN_SPOT = '波拉島'           # 恐龍博士 / 卡坦練寵：使用者 2026-10-15 指定固定在 80 級練功區（spots「波拉島」）
+QUIZ_SPOT = None                # 猜謎三兄弟練金布伊：去練功（grind.py start 不帶 --spot，依等級選點 + follow）；不寫死地雷區
 LAST: dict = {}
 
 # 每任務的設定（物種 / 門檻 / 抓寵者取自 questdefs.pet_prep 與 psa-pet-quest SKILL.md 具體寵物表）
@@ -895,9 +896,10 @@ class Run:
 
     def train_quiz(self) -> int:
         q = self.q
-        rc, _ = self.sub('grind.py', ['start', '--spot', QUIZ_SPOT], 1800)
+        gargs = ['start'] + (['--spot', QUIZ_SPOT] if QUIZ_SPOT else [])
+        rc, _ = self.sub('grind.py', gargs, 1800)
         if rc:
-            return self.pass_or(rc, EXIT_TRAIN, f'grind start {QUIZ_SPOT} 失敗 rc={rc}', f'uv run --no-project python tools/gui/grind.py start --spot {QUIZ_SPOT}')
+            return self.pass_or(rc, EXIT_TRAIN, f'grind {" ".join(gargs)}（去練功）失敗 rc={rc}', f'uv run --no-project python tools/gui/grind.py {" ".join(gargs)}')
         args = ['--pet', q['pet'], '--level', q['level'], '--back', BATTLE_PET, '--exp-fruit']
         rc, _ = self.sub('petwatch.py', args, 4 * 3600)
         if rc:
@@ -1035,7 +1037,7 @@ def print_plan(qid: int, o: dict) -> None:
         print(f'  accept   questrun.py run {qid} --after none（115 / 155 / 0）')
         print(f'  step1    （步號 1）quest.py --task {q["track"]} --stop-after-rewards 1 → pet.py list 5 人有{q["pet"]}')
         print(f'  prep     關遇敵 → pet.py list 記{BATTLE_PET}等級 → pet_catch --unlock 戰寵 → set-state-many {q["pet"]} 出戰 → pet_catch --lock 戰寵 --battle-pet {q["pet"]}')
-        print(f'  train    grind.py start --spot {QUIZ_SPOT} → petwatch.py --pet {q["pet"]} --level {q["level"]} --back {BATTLE_PET} --exp-fruit')
+        print(f'  train    grind.py start{" --spot " + QUIZ_SPOT if QUIZ_SPOT else "（去練功，依等級選點 + follow）"} → petwatch.py --pet {q["pet"]} --level {q["level"]} --back {BATTLE_PET} --exp-fruit')
         print(f'  turnin   關遇敵 → questrun.py run {qid} --after none')
         print(f'  drop     petdrop.py all {q["drop"]} --confirm-name {q["drop"]} --max-level 1（要 --confirm-drop）')
         print(f'  restore  pet_catch --lock 戰寵 --battle-pet {BATTLE_PET} → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗')

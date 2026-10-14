@@ -99,8 +99,11 @@ check('1.82 前段 / 後段 / 洞窟的任務順序', qr[3][1:9] == tuple(map(st
       and qr[5][1:5] == ('2000', '2003', '2001', '2002') and '--max-min' in qr[5])
 pq = [a for s, a in f.calls if s == 'petquest.py']
 check('寵物任務 恐龍 → 卡坦 → 猜謎，帶 --confirm-drop', [a[1] for a in pq] == ['2016', '2019', '3003'] and all('--confirm-drop' in a for a in pq))
-check('收尾：status --role all 全部任務 → pet list → grind start 地雷區（最後一步）', f.calls[-1] == ('grind.py', ('start', '--spot', '地雷區'))
+check('收尾：status --role all 全部任務 → pet list → grind start 去練功（不帶 --spot，最後一步）', f.calls[-1] == ('grind.py', ('start',))
       and any(s == 'questrun.py' and a[0] == 'status' and '2031' in a for s, a in f.calls))
+f2 = Fake()
+go(f2, from_seg='finish', spot='波拉島')
+check('收尾 --spot 波拉島 → grind start --spot 波拉島（固定點）', f2.calls[-1] == ('grind.py', ('start', '--spot', '波拉島')), str(f2.calls[-1:]))
 check('空格都夠 → 清背包不刪（沒有 purge）', not [a for s, a in f.calls if s == 'bag.py' and a[0] == 'purge'])
 check('全部完成後進度清空', json.loads(pr.PROGRESS.read_text(encoding='utf-8'))['done'] == [])
 

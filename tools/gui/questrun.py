@@ -3,7 +3,7 @@
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/questrun.py plan [任務ID …]            # 不碰遊戲：印交接 / 每任務步驟 / 指令 / 預估 / 退出碼（沒給 ID = questdefs 全部）
-  uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--dragon [--dragon-all]] [--spot 地雷區]
+  uv run --no-project python tools/gui/questrun.py run 2999 2017 2015 [--dry-run] [--after grind|none] [--dragon [--dragon-all]] [--spot auto|點名]
         [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 0] [--hp-check-every 3] [--no-boss-retry]
         [--verify risk|each|off] [--no-verify-all] [--verify-skipped] [--no-battle-check] [--battle-check-always]
         [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
@@ -77,7 +77,8 @@
                  → 全部成功後 --drop-reward 巴朵蘭恩（petdrop 只丟 1 級）/ --drop-items 薩姆吉爾的首飾（bag.purge 只刪背包內、穿著的不動；只准 questdefs drop_items 列的名稱）
   丟獎勵寵（--drop-reward 名字,… 且 --confirm-drop 同一串，缺一不做；**不可逆、未實機**）全部任務成功後、恢復掛機前：
                  每個名字 petdrop.drop('all', 名字, max_level=1)（只丟名字完全相同、等級讀得到且 = 1 的；騎寵 / 第 1 格 / 出戰 / 騎乘一律擋）；失敗 151、不恢復掛機
-  交接回去（全部成功才做）--after grind（預設）= grind.py start --spot 地雷區（不重啟 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
+  交接回去（全部成功才做）--after grind（預設）= 去練功 grind.go（= grind.py start 不帶 --spot：依當下等級選點；未滿地雷區背景起 follow、到地雷區自己結束；
+                 2026-10-15 起不寫死地雷區）；--spot 點名 = 固定點（不起 follow）；none = 不動。**失敗退出一律不恢復掛機**（畫面狀態未知）
 
 quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；其他（時間到 / 提前結束 / 模糊）一律不開詳情直接下一片；5 找不到任務 = 完成；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
   （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
@@ -176,7 +177,7 @@ SLICE_S, MAX_SLICES, MAX_MIN, HP_MIN = 60, 60, 30, 50
 BOSS_RETRY_MAX = 3              # 每個任務 38 / 21 時最多呼叫幾次 bossretry（四大洞窟每個 2～5 場 BOSS）
 TEAM_HP_MIN = 0                 # 全隊任一人 HP < 這個 % → 補血；2026-10-14 使用者定預設 0 = 任務之間不讀血量（只看隊長 HUD HP，零成本）；>0 才開背包讀全隊（舊行為）
 WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計時這麼久（要與 quest.WALK_CAP_S 相同；子程序逾時 = slice + 這個 + 120）
-DEFAULT_SPOT = '地雷區'
+DEFAULT_SPOT = 'auto'           # 恢復掛機 = 去練功（grind.go：依等級選點、未滿地雷區背景起 follow）；不寫死地雷區（2026-10-15 使用者）
 MAIL_GLOW_READS, MAIL_GLOW_GAP = 4, 0.3                              # 信封發亮會閃：讀 4 次（約 1 秒）任一次亮就算有信
 FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出）
 BATTLE_WAIT_S, BATTLE_POLL_S = 240.0, 3.0                              # 交接 / form 失敗時畫面在戰鬥：最多等這麼久、每幾秒看一次（2026-10-14 09:17）
@@ -385,7 +386,12 @@ class Tools(rebirth.Tools):
         return walk.rewarp_if_on_exit() or walk.walk_onto_nearby_exit(2)
 
     def grind_start(self, spot):
+        """恢復掛機：spot = 'auto' / None → 去練功（grind.go）；指定點名 → 固定點 grind.run('start', 點)（先停 follow）"""
         import grind
+        if not spot or spot == 'auto':
+            return grind.go()
+        if not grind.stop_follow(f'questrun 恢復掛機指定 --spot {spot}'):
+            return uikit.EXIT_IN_BATTLE
         return grind.run('start', spot)
 
     def boss_retry(self, track, who=None, check=True):
@@ -679,7 +685,8 @@ def print_plan(defs, opts: dict) -> None:
     if opts.get('drop_reward'):
         print(f'[丟獎勵寵] 全部成功後：{"、".join(opts["drop_reward"])} 各 petdrop.drop all（名字完全相同、等級 ≤ {DROP_MAX_LEVEL}、非騎寵 / 第 1 格 / 出戰；失敗 151）')
     if opts['after'] == 'grind':
-        print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
+        print('[交接回去] 全部成功 → ' + ('去練功 grind.py start（依等級選點；未滿地雷區背景起 follow，到地雷區自己結束）' if opts['spot'] in (None, 'auto')
+                                         else f'grind.py start --spot {opts["spot"]}（固定點、不起 follow）') + '；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
     print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 / 道具 156 紅暴沒龍王（改跑 --solo 單人逃跑）157 完成後獎勵存倉失敗 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
@@ -2031,7 +2038,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     if not rc and ditems:
         rc = r.drop_items()
     if not rc and after == 'grind':
-        event(f'全部完成 → 恢復掛機：grind.py start --spot {spot}')
+        event('全部完成 → 恢復掛機：' + ('去練功 grind.py start（依等級選點 + follow）' if spot in (None, 'auto') else f'grind.py start --spot {spot}'))
         rc = T.grind_start(spot)
         if rc:
             r.fail(rc, f'恢復掛機失敗 grind rc={rc}')
@@ -2145,7 +2152,7 @@ def main() -> int:
         p.add_argument('--dragon', action='store_true', help='NO_DRAGON 以外的任務（questdefs dragon）每片前吃龍王的守護（2026-10-12 起預設不吃）')
         p.add_argument('--dragon-all', action='store_true', help='配 --dragon：每個任務都吃（不看 questdefs dragon）')
         p.add_argument('--no-dragon', action='store_true', help='相容舊指令：= 預設（不吃），no-op')
-        p.add_argument('--spot', default=DEFAULT_SPOT)
+        p.add_argument('--spot', default=DEFAULT_SPOT, help='恢復掛機的練功點：auto（預設）= 去練功依等級選點 + follow；點名 = 固定點')
         p.add_argument('--no-battle-check', action='store_true', help='交接 / bossretry 重打前不查外掛戰鬥設定（5 人自動戰鬥、DKBO 人物首次動作）')
         p.add_argument('--pet-turnin', action='store_true', help='交寵物步驟自動做（恐龍博士 pet_turnin 逐人交、卡坦交前 rest-all；未實機）；預設 manual 步停 115')
         p.add_argument('--drop-reward', default='', help='全部成功後丟這些獎勵寵（逗號分隔；只丟 1 級；要配 --confirm-drop 同一串）')

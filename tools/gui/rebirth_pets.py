@@ -14,7 +14,7 @@
 
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/rebirth_pets.py [--trans N] [--mount-species 布拉奇多斯] [--battle-pet 朵拉比斯] [--catcher DKBO2] [--count 5]
-        [--family 雷龍系] [--store-mount 瑪斯貝卡] [--from 階段] [--to 階段] [--dry-run] [--no-boxes] [--confirm-buy-catch] [--direct-catch] [--keep-lock]
+        [--family 雷龍系] [--store-mount 瑪斯貝卡] [--from 階段] [--to 階段] [--dry-run] [--no-boxes] [--confirm-buy-catch] [--direct-catch] [--keep-lock] [--no-grind]
     --trans N          剛轉到第 N 轉（開「N轉新手禮盒」；預設 1；下一個 N+1 轉新手禮盒存個人）
     --mount-species    要抓 / 設騎乘 / 鎖定的物種（預設 布拉奇多斯；也是 pet.py 的 MOUNTS 之一）
     --family           外掛捉寵設置的系別（預設依物種：布拉奇多斯 = 雷龍系；其他物種要明講）
@@ -28,6 +28,7 @@
                        （不取誘餌、不試抓、直接抓）。不給 = 舊行為（取誘餌）。**紅區（花石幣）：只有使用者明講才加**
     --direct-catch     catch：可抓捕數已買好 = count，不取誘餌、不試抓，直接抓（--confirm-buy-catch 隱含）
     --keep-lock        preflight 不先取消外掛鎖定（遊戲沒擋）
+    --no-grind         全部階段完成後不去練功（預設：cleanup 成功、--to 是 cleanup → grind.go 去練功，見下「之後」）
     --dry-run          只印計畫（階段 / 動作 / 退出碼），完全不碰遊戲
   可 import：rebirth_pets.run(trans=1, ..., tools=None) → 退出碼；結果 dict 在 rebirth_pets.LAST
 
@@ -47,6 +48,9 @@
   lock        5 人外掛：鎖定騎寵 = 騎乘寵（騎寵已還原名字 → ident ('name', 物種)；下拉找不到物種名才退回 catch 記的成長字串比對 growth / growth_partial，
               **待實機確認**：改名後下拉是否顯示物種名是推測；騎寵仍沒名字 → 照舊成長字串）、鎖定戰寵 = 戰寵（名字）→ 兩項都勾
   cleanup     catcher 背包多餘誘餌存回公共 → 確認當前 DKBO、遇敵關 → 讀最後寵物欄 → 寫 notes/quest-log.md 摘要
+  之後        （2026-10-15，--no-grind 關）去練功 = grind.go(trans_hint=--trans)：背包讀隊長轉數 → 依等級選點傳送 → 外掛 → 遇敵 → EXP 確認 →
+              未滿地雷區背景起 `grind.py follow --no-heal --trans N`（跟著等級換點，到地雷區自己結束）。rebirth → rebirth_pets → 練功連成一條。
+              失敗回 grind 的退出碼（50～59 / 8 / 9 / 10；info.grind_rc），寵物重整本身已完成（進度檔照記）
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79 / 80～89 rebirth / 90～96 bag；本檔 100～109）：
   100 preflight 失敗（當前角色切不回 DKBO、解散失敗、外掛解鎖失敗、讀寵物欄失敗）
@@ -337,7 +341,8 @@ def plan(o: dict) -> list:
         ('ride', [f'5 人 {sp} 設騎乘']),
         ('battle', [f'5 人從個人倉庫取 {bp}@1（Lv1）、設出戰；同名多隻讀不出等級 → 逐隻取出驗 Lv1、不對存回換下一隻']),
         ('lock', [f'外掛 5 人：鎖定騎寵 = {sp}（下拉比物種名，找不到退回成長字串）、鎖定戰寵 = {bp}、兩項都勾']),
-        ('cleanup', [f'{ct} 多餘誘餌存回公共', '當前 DKBO、遇敵關', '寫 quest-log']),
+        ('cleanup', [f'{ct} 多餘誘餌存回公共', '當前 DKBO、遇敵關', '寫 quest-log']
+                    + (['（--no-grind：不去練功）'] if o.get('no_grind') else [f'去練功：grind.go(trans_hint={o["trans"]})（依等級選點；未滿地雷區背景起 follow）'])),
     ]
 
 
@@ -400,6 +405,11 @@ class Tools:
 
     def sleep(self, s):
         uikit.sleep(s)
+
+    def grind_go(self, trans):
+        """去練功（grind.go：依等級選點、未滿地雷區背景起 follow；trans 只當提示，背包讀得到以背包為準）→ 退出碼"""
+        import grind
+        return grind.go(trans_hint=trans)
 
     def preflight(self):
         return uikit.preflight(SRC)
@@ -1351,7 +1361,7 @@ def write_quest_log(o: dict, prog: dict, final: dict) -> None:
 
 
 DEFAULTS = dict(trans=1, mount_species='布拉奇多斯', battle_pet='朵拉比斯', catcher='DKBO2', count=5, family=None, store_mount=None,
-                no_boxes=False, keep_lock=False, direct_catch=False, confirm_buy_catch=False)
+                no_boxes=False, keep_lock=False, direct_catch=False, confirm_buy_catch=False, no_grind=False)
 
 
 def run(trans=1, from_stage: str = 'preflight', to_stage: str = 'cleanup', dry_run: bool = False, tools=None, **kw) -> int:
@@ -1403,6 +1413,13 @@ def run(trans=1, from_stage: str = 'preflight', to_stage: str = 'cleanup', dry_r
         rc = getattr(R, st)()
         if rc:
             break
+    if not rc and to_stage == STAGES[-1] and not o.get('no_grind'):
+        # 全部階段完成 → 去練功（使用者 2026-10-15：rebirth → rebirth_pets → 練功連成一條；不寫死地雷區）
+        event(f'全部完成 → 去練功（grind.go，轉數提示 {o["trans"]}；依等級選點，未滿地雷區背景起 follow）')
+        grc = T.grind_go(o['trans'])
+        R.info['grind_rc'] = grc
+        event(f'去練功 rc={grc}' + ('' if not grc else '（50～59 見 grind.py；寵物重整已全部完成，只差練功）'))
+        rc = grc
     LAST.update(R.info, ok=rc == 0, rc=rc)
     LAST['done'] = list(R.prog.get('done', []))
     return rc
@@ -1427,10 +1444,12 @@ def main(argv=None) -> int:
     ap.add_argument('--no-boxes', action='store_true')
     ap.add_argument('--direct-catch', action='store_true', help='catch：可抓捕數已用外掛「+」買好 = count，不取誘餌、不試抓，直接抓')
     ap.add_argument('--confirm-buy-catch', action='store_true', help='catch：用外掛捉寵設置「+」花石幣買可抓捕數到 count（每個 50,000，每次前後驗石幣；使用者規定騎寵這樣抓）；隱含 --direct-catch')
+    ap.add_argument('--no-grind', action='store_true', help='全部階段完成後不去練功（預設會 grind.go：依等級選點 + 未滿地雷區起 follow）')
     ap.add_argument('--keep-lock', action='store_true', help='preflight 不先取消外掛鎖定騎寵 / 戰寵（使用者 2026-10-12：直接存，遊戲真的擋才解鎖）')
     a = ap.parse_args(argv)
     rc = run(a.trans, a.from_stage, a.to_stage, a.dry_run, None, mount_species=a.mount_species, battle_pet=a.battle_pet, catcher=a.catcher,
-             count=a.count, family=a.family, store_mount=a.store_mount, no_boxes=a.no_boxes, keep_lock=a.keep_lock, direct_catch=a.direct_catch, confirm_buy_catch=a.confirm_buy_catch)
+             count=a.count, family=a.family, store_mount=a.store_mount, no_boxes=a.no_boxes, keep_lock=a.keep_lock, direct_catch=a.direct_catch, confirm_buy_catch=a.confirm_buy_catch,
+             no_grind=a.no_grind)
     print(json.dumps(dict(LAST, rc=rc), ensure_ascii=False, default=str))
     return rc
 

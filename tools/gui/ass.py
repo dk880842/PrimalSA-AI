@@ -642,8 +642,10 @@ def _field_is(which: str, want: str) -> bool:
     return want in read_pet_text(which)
 
 
-def _visit_pet_normal(want: str, dry_run: bool):
-    """多人戰寵 一般動作的逐人動作。回 (退出碼, {'normal': 值}, 訊息, 改了哪些)"""
+def _visit_pet_normal(want: str, dry_run: bool, skip_missing: bool = False):
+    """多人戰寵 一般動作的逐人動作。回 (退出碼, {'normal': 值}, 訊息, 改了哪些)。
+    skip_missing：下拉裡找不到該選項（例：剛轉生 Lv1 戰寵只有「攻擊 / 防禦」，2026-10-15 四轉 rebirth heal 階段 87）→
+    點回下拉鈕收起清單、狀態帶 'skipped': want、回 0 繼續下一個人（不失敗、不亂點清單）"""
     def visit(role):
         if not pet_on_top():
             return EXIT_NOT_TOP, None, f'{role}：右半面板不在頂端（讀不到「戰寵動作」標題）；不點', []
@@ -656,6 +658,10 @@ def _visit_pet_normal(want: str, dry_run: bool):
         x, y = PET_DD['normal']
         gui('seq', f'click {x} {y}; wait 500', note=f'ass.py {role} 戰寵normal 開下拉')
         pos = find_option('normal', want)
+        if pos is None and skip_missing:
+            gui('seq', f'click {x} {y}; wait 500', note=f'ass.py {role} 戰寵normal 收下拉（沒有「{want}」）')
+            log(f'ass：{role} 戰寵一般動作下拉沒有「{want}」→ 收下拉、跳過（維持 {cur}）')
+            return EXIT_OK, {'normal': cur, 'skipped': want}, '', []
         if pos is None:
             return EXIT_NO_OPTION, {'normal': cur}, f'{role}：下拉裡找不到唯一的「{want}」選項（該寵物沒學這技能？OCR 讀不到？）；不亂點，下拉隨面板關閉', []
         if not panel_open():
@@ -694,11 +700,12 @@ def get_pet_many(roles, no_wait: bool = False) -> tuple:
     return _many({r: None for r in ordered_roles(roles)}, _visit_pet_get, no_wait)
 
 
-def set_pet_many(plan: dict, no_wait: bool = False, dry_run: bool = False) -> tuple:
+def set_pet_many(plan: dict, no_wait: bool = False, dry_run: bool = False, skip_missing: bool = False) -> tuple:
     """一次開面板逐人改「戰寵 一般動作」：plan = {角色: {'normal': 值}}；現值不同才改、改完讀回確認。
     只動這一項（首次動作 / 勾選 / 對象都不碰）。dry_run 只讀。回值同 set_many：(rc, {角色: {'normal': 值}}, 訊息, info)。
-    EXIT_NO_OPTION：該角色的下拉找不到這個選項 → 停在該角色（不亂點、不繼續往下）。"""
-    return _many(plan, lambda role: _visit_pet_normal(plan[role]['normal'], dry_run)(role), no_wait)
+    EXIT_NO_OPTION：該角色的下拉找不到這個選項 → 停在該角色（不亂點、不繼續往下）。
+    skip_missing=True：找不到選項的人收下拉、狀態帶 'skipped'、繼續下一個人（rebirth heal 階段用：剛轉生 Lv1 戰寵沒有忠犬）。"""
+    return _many(plan, lambda role: _visit_pet_normal(plan[role]['normal'], dry_run, skip_missing)(role), no_wait)
 
 
 # ---- 解任務前的戰鬥設定檢查（2026-10-12 四寶玉之謎：DKBO 人物首次動作「風的精靈Lv.5」勾選不見了 → 打火雞輸、2 人陣亡）----

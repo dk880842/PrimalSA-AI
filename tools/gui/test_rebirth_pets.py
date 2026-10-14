@@ -145,6 +145,10 @@ class Fake:
     def sleep(self, s):
         pass
 
+    def grind_go(self, trans):
+        self.c('grind_go', trans)
+        return self.f('grind_go')
+
     def preflight(self):
         self.c('preflight')
         return self.f('preflight')
@@ -403,6 +407,26 @@ def go(fake, **kw):
     return quiet(rp.run, 1, tools=fake, **kw)
 
 
+# ---------------- 去練功（2026-10-15）----------------
+f = Fake()
+rc, out = go(f, no_grind=True)
+check('--no-grind：完成後不去練功', rc == 0 and not any(c[0] == 'grind_go' for c in f.calls))
+f = Fake()
+rc, out = go(f, to_stage='lock')
+check('--to lock（沒跑到 cleanup）→ 不去練功', rc == 0 and not any(c[0] == 'grind_go' for c in f.calls))
+f = Fake()
+f.fail['grind_go'] = 55
+rc, out = go(f)
+check('去練功失敗 → 回 grind 的碼（55）、寵物重整仍記完成', rc == 55 and rp.LAST['done'] == rp.STAGES and rp.LAST.get('grind_rc') == 55, f'rc={rc}')
+f = Fake()
+rc, out = go(f, dry_run=True)
+check('--dry-run 計畫列出去練功（grind.go）', 'grind.go' in out and not f.calls)
+_run0, _kw = rp.run, {}
+rp.run = lambda *a, **k: _kw.update(k) or 0
+quiet(rp.main, ['--no-grind'])
+rp.run = _run0
+check('CLI --no-grind 帶入 run', _kw.get('no_grind') is True, str(_kw))
+
 # ---------------- dry-run / 參數 ----------------
 f = Fake()
 rc, out = go(f, dry_run=True)
@@ -417,6 +441,7 @@ f = Fake()
 rc, out = go(f)
 names_of = lambda r: [(p['name'] if not p.get('unnamed') else '?' + p['unnamed'], p['state']) for p in f.bar[r] if p]    # noqa: E731
 check('完整流程 rc 0、9 階段都完成', rc == 0 and rp.LAST['done'] == rp.STAGES, f'rc={rc} {out[-400:]}')
+check('全部完成 → 最後去練功 grind_go（轉數提示 = --trans 1），不帶固定點', f.calls[-1] == ('grind_go', 1) and rp.LAST.get('grind_rc') == 0, str(f.calls[-3:]))
 check('結果（名字為主）：5 人寵物欄 = 布拉奇多斯（已還原名字，騎乘）+ 朵拉比斯（出戰）', all(names_of(r) == [(BRA, '騎乘'), (DOR, '出戰')] for r in ROLES), str({r: names_of(r) for r in ROLES}))
 G5 = tuple(rp.load_progress()['data']['growths']['DKBO2'])
 check('進度檔記 5 隻還原名字前的成長字串（各不相同；鎖定下拉備援用）', len(set(G5)) == 5 and set(G5) == set(f.growths), str(G5))

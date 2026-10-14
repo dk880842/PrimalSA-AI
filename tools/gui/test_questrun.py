@@ -362,7 +362,7 @@ with contextlib.redirect_stdout(buf):
     rc_plan = questrun.run([2999, 2017], dry_run=True)
 txt = buf.getvalue()
 check('dry-run：rc 0、不碰 Tools（沒傳 tools 也不會建立遊戲動作）', rc_plan == 0 and '[任務 2999]' in txt and '[任務 2017]' in txt)
-check('dry-run：列出 walk 步驟 / 退出碼 / 交接回去', 'kind=walk' in txt and '10204:188,13' in txt and '110 preflight' in txt and 'grind.py start --spot 地雷區' in txt)
+check('dry-run：列出 walk 步驟 / 退出碼 / 交接回去', 'kind=walk' in txt and '10204:188,13' in txt and '110 preflight' in txt and '去練功 grind.py start' in txt)
 check('dry-run：2017 不含 walk', txt.split('[任務 2017]')[1].count('kind=walk') == 0)
 check('不認得的任務 ID → 1', quiet(questrun.run, [1234], dry_run=True) == uikit.EXIT_USAGE)
 check('--after 非法 → 1', quiet(questrun.run, [2017], after='follow', dry_run=True) == uikit.EXIT_USAGE)
@@ -372,7 +372,7 @@ check('--after 非法 → 1', quiet(questrun.run, [2017], after='follow', dry_ru
 f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
 rc = go(f, [2017])
 n = f.names()
-check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', '地雷區') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
+check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', 'auto') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
 check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
 check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh；片內 HP 檢查門檻 = --team-hp-min', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh')) in f.calls, str(f.calls))
 f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
@@ -393,7 +393,7 @@ check('quest-log 記詳情開啟次數 1', '詳情開啟 1 次' in questrun.QUES
 # 2) 已完成 → 跳過（不接、不跑、不吃龍王），仍恢復掛機
 f = Fake(status={D17: [questrun.DONE]})
 rc = go(f, [2017])
-check('已完成 → 跳過（只開一次詳情）', rc == 0 and f.names().count('accept') == 1 and 'status' not in f.names() and 'quest' not in f.names() and 'dragon' not in f.names() and ('grind_start', '地雷區') in f.calls)
+check('已完成 → 跳過（只開一次詳情）', rc == 0 and f.names().count('accept') == 1 and 'status' not in f.names() and 'quest' not in f.names() and 'dragon' not in f.names() and ('grind_start', 'auto') in f.calls)
 
 # 3) 進行中（續跑）→ 不 accept、先 team.form
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
@@ -651,14 +651,14 @@ f = Fake(status={D17: [questrun.DONE]}, team_rcs=[9])
 check('team.form 回 9（驗證視窗）→ 立即透傳、不重試', go(f, [2017]) == 9 and f.names().count('team_form') == 1)
 f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(32, []), (0, ['任務完成：x'])], team_rcs=[0, 42, 0])
 rc = go(f, [2017])
-check('接取後 / quest 回 32：原地 form 重試 + 再起一片，整個流程不退出（單次 run 完成）', rc == 0 and f.names().count('quest') == 2 and ('grind_start', '地雷區') in f.calls)
+check('接取後 / quest 回 32：原地 form 重試 + 再起一片，整個流程不退出（單次 run 完成）', rc == 0 and f.names().count('quest') == 2 and ('grind_start', 'auto') in f.calls)
 
 # 進度檔記「已完成」：重啟續跑直接跳過、不開詳情（2 小時內）；超過 / --no-trust-progress 就重讀
 f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, ['任務完成：x'])])
 go(f, [2017])
 f2 = Fake(status={D17: [questrun.DOING]})
 quiet(questrun.run, [2017], tools=f2, after='grind')              # 不 reset：沿用上一輪的進度檔
-check('進度檔已完成 → 重跑直接跳過：不 accept、不 team_form 組隊、不跑 quest、仍恢復掛機', f2.names().count('accept') == 0 and 'quest' not in f2.names() and ('grind_start', '地雷區') in f2.calls)
+check('進度檔已完成 → 重跑直接跳過：不 accept、不 team_form 組隊、不跑 quest、仍恢復掛機', f2.names().count('accept') == 0 and 'quest' not in f2.names() and ('grind_start', 'auto') in f2.calls)
 f3 = Fake(status={D17: [questrun.DONE]})
 quiet(questrun.run, [2017], tools=f3, after='grind', trust_progress=False)
 check('--no-trust-progress → 仍開詳情讀一次', f3.names().count('accept') == 1)
@@ -897,7 +897,7 @@ check('2999：步 1 自動巡路優先（quest 回 0、不 walk）', rc == 0 and
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[1, 1], quest=[(3, []), (0, [])], pos=(10204, 14, 7))
 rc = go(f, [2999])
 n = f.names()
-check('2999：步 1 quest 回 3 → 才 walk 再 quest；完成後恢復掛機', rc == 0 and n.count('quest') == 2 and n.index('quest') < n.index('walk_to') < len(n) - n[::-1].index('quest') - 1 and ('grind_start', '地雷區') in f.calls, str(n))
+check('2999：步 1 quest 回 3 → 才 walk 再 quest；完成後恢復掛機', rc == 0 and n.count('quest') == 2 and n.index('quest') < n.index('walk_to') < len(n) - n[::-1].index('quest') - 1 and ('grind_start', 'auto') in f.calls, str(n))
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[2], quest=[(0, [])])
 go(f, [2999])
 check('2999：步 2（default）不 walk', 'walk_to' not in f.names() and 'quest' in f.names())
@@ -1811,6 +1811,19 @@ check('leave_junction：在 3400 → 走出口 60,40 到 200 → 再離開回頭
 _posq[:] = [(1000, 5, 5)]
 check('leave_junction：不在交界兩張圖 → None、不走', quiet(walk.leave_junction, 3400, 200) is None and len(_walked) == 2)
 walk.wait_pos, walk.walk_to, walk._cells, walk.psa.T = _keep_w
+
+# 恢復掛機（2026-10-15）：預設 auto = 去練功 grind.go；指定點 = 先停 follow 再 grind.run start（真 Tools.grind_start，grind 全假）
+import grind  # noqa: E402
+_gk = (grind.go, grind.run, grind.stop_follow)
+gseen = []
+grind.go = lambda *a, **k: gseen.append(('go',)) or 0
+grind.run = lambda mode, spot=None, *a, **k: gseen.append(('run', mode, spot)) or 0
+grind.stop_follow = lambda why: gseen.append(('stop',)) or True
+check('預設 --spot = auto', questrun.DEFAULT_SPOT == 'auto')
+rc1, rc2, rc3 = questrun.Tools().grind_start('auto'), questrun.Tools().grind_start(None), questrun.Tools().grind_start('波拉島')
+check('grind_start：auto / None → grind.go；點名 → stop_follow + run start 點名', (rc1, rc2, rc3) == (0, 0, 0)
+      and gseen == [('go',), ('go',), ('stop',), ('run', 'start', '波拉島')], str(gseen))
+grind.go, grind.run, grind.stop_follow = _gk
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 

@@ -51,6 +51,14 @@
 - **舊寵物存倉**：不必先解外掛鎖定，遊戲沒擋。舊騎寵（轉生後變「等待」、名字讀不出）：先 `pet.py learn-species`，或 `rebirth_pets` 以縮圖比對認物種（`stores_for`：沒名字 + mountlike + 縮圖分數 ≥0.9 + 物種 = `--store-mount`，才放行；測試見 test_rebirth_pets.py）。
 - **誘餌「+」要錢**：外掛捉寵設置裡可抓捕數「+」每按一次 +1，扣 **50,000 石幣**（鑽石不動），5 次 = 250,000 石幣。用 `rebirth_pets.py --direct-catch` 直接抓 5 隻（雷龍系 / 布拉奇多斯 約 1 分 10 秒），DKBO2 留 1、存 4 公共、其他 4 人取；每次按「+」前要確定石幣夠。戰寵 Lv1 朵拉比斯從個人倉庫取（`--expect-level 1`；同名多隻時卡片等級讀不出，指定 `--index` 取後驗 Lv1）。
 - **收尾練功**：吃 2倍智慧果 → `team.form` → `grind.py start 柯奧龜洞` → `grind.py follow --trans 2 --no-heal`。
+  **2026-10-15 起自動**：`rebirth_pets.py` 全部階段完成後自己接「去練功」（`grind.go`：背包讀隊長轉數 → 依等級選點 → 未滿地雷區背景起 `follow --no-heal --trans N`，到地雷區自己結束；`--no-grind` 關）；
+  rebirth.py 結束只提示下一步 `rebirth_pets.py --trans N`，不再寫死練功點。
+- **四轉實跑（2026-10-15 00:31～00:49）寫回的兩個修正（離線測試，待實機）**：
+  ① preflight 點追蹤卡「漆黑洞窟(N轉)」時任務其實還沒接 → 被傳到瑪麗娜絲村長選單「漆黑洞窟 / 再見」（舊版 84）：`rebirth_steps.level_gate` 認得選單就在對話框接任務
+  （`questdetail._after_transfer`：左鈕翻頁 → 接受 → 重開詳情驗進行中）→ 再點卡做門檻（結果帶 accepted）；別的對話框照舊 84、接取失敗 97。`--from accept` 被同一個對話框擋住（舊版 97）：
+  `accept_task` 先看畫面上有沒有對話框，是村長選單就直接接，別的對話框不點、97。
+  ② heal 階段 5 人戰寵一般動作「忠犬」：剛轉生 Lv1 戰寵下拉只有「攻擊 / 防禦」（舊版 `ass.set_pet` 盲點第 3 列 → 讀回攻擊 → 87）→ 改 `ass.set_pet_many(skip_missing=True)`：
+  下拉依 OCR 文字找選項，找不到就點回下拉鈕收起、記警告、跳過該人（不失敗）。
 
 ## 2026-10-13 二轉後續：模組化與自動化（離線測試 test_rebirth.py / test_rebirth_steps.py / test_rebirth_pets.py；**實機未驗證**）
 可獨立呼叫的小模組（rebirth.py 只串階段）：

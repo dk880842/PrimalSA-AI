@@ -19,7 +19,8 @@ import spots  # noqa: E402
 
 ORIG_WBG = grind.wait_banner_gone
 TMP = Path(tempfile.mkdtemp())
-grind.LOCK, grind.OUT = TMP / 'grind.lock', TMP / 'grind.json'
+grind.LOCK, grind.OUT, grind.TRANS_FILE = TMP / 'grind.lock', TMP / 'grind.json', TMP / 'trans.json'
+grind.read_leader_bag = lambda: None           # 絕不開真背包（2026-10-15 漏 stub 曾在掛機中開了 3 次背包）
 fails = 0
 
 
@@ -97,6 +98,7 @@ class Game:
         self.transition = None       # uikit.transition_now 假回傳（None / 'loading' / 'black'）
         self.heal_fail = False
         self.pre = None                  # leader_team_read 的結果（None = 照舊 char.ensure + team.check 兩步）
+        self.bag_lv = None               # grind.read_leader_bag 假回傳（背包讀隊長 (轉, 級)；None = 讀不到）
 
     def clock(self):
         self.t += 0.3
@@ -107,6 +109,7 @@ def install(g, stat_missing=False):
     A, H, T, C, U = grind.ass, grind.heal, grind.team, grind.char, grind.uikit
     grind.sleep = lambda s: setattr(g, 't', g.t + s)
     grind.clock = g.clock
+    grind.read_leader_bag = lambda: g.log.append('bag_levels') or g.bag_lv
     U.preflight = lambda src: g.log.append('preflight') or 0
     U.fail = lambda src, rc, msg: g.log.append(f'fail:{rc}:{msg}') or rc
     C.ensure = lambda name: g.log.append('char.ensure') or g.char_rc
@@ -475,6 +478,136 @@ g = install(Game(cur_map=60050, hp=30))
 g.screens = good_screens()
 rc, j, _ = run('start', spot='地雷區2')
 check('血量 <40 自動補血', 'heal_trip:地雷區2' in g.log)
+
+# 16) 去練功 go()（2026-10-15）：依等級選點、最高點不起 follow、未滿起 follow（帶正確轉數）、先停舊 follow、轉數來源順序
+import follow  # noqa: E402
+spots.THRESH_FILE = TMP / 'thresh.json'                 # 學到的門檻不讀真檔
+FOL = {'alive': None, 'stops': 0, 'ensure': [], 'ensure_ret': {'action': 'started', 'pid': 4321}}
+follow.alive_other = lambda: FOL['alive']
+
+
+def _stop():
+    FOL['stops'] += 1
+    FOL['alive'] = None
+    return 0
+
+
+follow.stop_other = _stop
+follow.ensure_running = lambda t, **k: FOL['ensure'].append(t) or dict(FOL['ensure_ret'])
+
+
+def go(**k):
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+        rc = grind.go(**k)
+    return rc, json.loads(buf.getvalue().strip().splitlines()[-1]), buf.getvalue()
+
+
+def fol_reset(alive=None, ret=None):
+    FOL.update(alive=alive, stops=0, ensure=[], ensure_ret=ret or {'action': 'started', 'pid': 4321})
+
+
+fol_reset()
+g = install(Game(cur_map=60050, level='0轉130級'))
+g.bag_lv = (4, 130)
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功 130 級（背包讀 4 轉）在地雷區2 → 同檔不傳送、不起 follow', rc == 0 and j['spot'] == '地雷區2' and not FOL['ensure']
+      and j['follow']['action'] == 'none' and j['trans'] == 4 and j['trans_src'] == 'bag' and not any(e.startswith('teleport') for e in g.log), str(j))
+check('去練功：轉數讀在關遇敵之後（EXP 橫幅不擋背包讀字）', g.log.index('enc:False') < g.log.index('bag_levels'), str(g.log))
+check('去練功：背包讀到的轉數寫快取', json.loads(grind.TRANS_FILE.read_text(encoding='utf-8'))['trans'] == 4)
+
+fol_reset()
+g = install(Game(cur_map=500, level='0轉50級'))
+g.bag_lv = (4, 50)
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功 4轉50級（HUD 讀成 0 轉）→ 五兄弟洞窟、起 follow --trans 4', rc == 0 and 'teleport:五兄弟洞窟' in g.log and FOL['ensure'] == [4]
+      and j['follow']['action'] == 'started' and j['level_num'] == 50, str(j))
+
+fol_reset(alive=999)
+g = install(Game(cur_map=500, level='0轉50級'))
+g.bag_lv = (4, 50)
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功：開始前有 follow 在跑 → 先停、成功後再起（同一時間只有一支）', rc == 0 and FOL['stops'] == 1 and FOL['ensure'] == [4], str(FOL))
+
+fol_reset()
+g = install(Game(cur_map=500, level='0轉50級'))
+g.screens = good_screens()
+rc, j, _ = go(trans_hint=3)
+check('去練功：背包讀不到 → 用 trans_hint', rc == 0 and j['trans'] == 3 and j['trans_src'] == 'hint' and FOL['ensure'] == [3], str(j))
+
+fol_reset()
+grind.save_trans(2, 60, 'test')
+g = install(Game(cur_map=500, level='轉50,'))
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功：背包讀不到、沒 hint → 快取轉數；HUD 殘缺「轉50,」也取得到等級', rc == 0 and j['trans'] == 2 and j['trans_src'] == 'cache' and j['level_num'] == 50, str(j))
+grind.TRANS_FILE.unlink()
+
+fol_reset()
+g = install(Game(cur_map=500, level='1轉50級'))
+g.screens = good_screens()
+rc, j, out = go()
+check('去練功：背包 / 快取都沒有 → HUD 轉數 + 警告', rc == 0 and j['trans'] == 1 and j['trans_src'] == 'hud' and '轉數位可能讀錯' in out, str(j))
+
+fol_reset()
+g = install(Game(cur_map=500, level='轉,'))
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功：轉數 / 等級都讀不到 → 1、不傳送、不起 follow', rc == 1 and not FOL['ensure'] and not any(e.startswith('teleport') for e in g.log), str(g.log[-3:]))
+
+fol_reset()
+g = install(Game(cur_map=500, level='0轉50級'))
+g.screens = good_screens()
+rc, j, _ = go(trans=3)
+check('去練功：明講 trans → 不開背包', rc == 0 and j['trans'] == 3 and j['trans_src'] == 'arg' and 'bag_levels' not in g.log)
+
+fol_reset(ret={'action': 'fail', 'pid': None, 'why': 'x'})
+g = install(Game(cur_map=500, level='0轉50級'))
+g.bag_lv = (1, 50)
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功：follow 起不來 → 仍 0（掛機已確認），JSON 記 fail', rc == 0 and j['follow']['action'] == 'fail')
+
+fol_reset()
+g = install(Game(cur_map=500, level='0轉50級'))
+g.bag_lv = (1, 50)
+g.screens = good_screens()
+rc, j, _ = go(follow_ok=False)
+check('去練功 --no-follow → 不起 follow', rc == 0 and not FOL['ensure'] and j['follow']['action'] == 'skip')
+
+fol_reset()
+g = install(Game(cur_map=500, level='0轉50級'))
+g.bag_lv = (1, 50)
+g.screens = [idle()] * 80
+rc, j, _ = go()
+check('去練功：掛機沒確認（55）→ 不起 follow', rc == 55 and not FOL['ensure'], str(rc))
+
+fol_reset()
+g = install(Game(cur_map=500, level='0轉125級'))
+g.bag_lv = (4, 125)
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功 125 級從波拉島 → 傳地雷區、不起 follow', rc == 0 and 'teleport:地雷區' in g.log and not FOL['ensure'] and j['follow']['action'] == 'none', str(j))
+
+# CLI：start 不給 --spot = 去練功；指定點先停 follow
+_go, _run = grind.go, grind.run
+seen = []
+grind.go = lambda *a, **k: seen.append(('go', a)) or 0
+grind.run = lambda *a, **k: seen.append(('run', a)) or 0
+import winenv  # noqa: E402
+_es = winenv.enable_server
+winenv.enable_server = lambda: None
+for argv in (['grind.py', 'start'], ['grind.py', 'start', '--spot', 'auto', '--trans', '2', '--no-follow'], ['grind.py', 'start', '--spot', '波拉島']):
+    sys.argv = argv
+    fol_reset(alive=7)
+    grind.main()
+grind.go, grind.run = _go, _run
+winenv.enable_server = _es
+check('CLI：start（無 --spot）/ --spot auto → go；--trans / --no-follow 帶入', seen[0][0] == 'go' and seen[1] == ('go', (2, None, grind.CONFIRM_SECS, True, False, False)), str(seen))
+check('CLI：start --spot 波拉島 → 先停 follow 再 run（固定點）', seen[2][0] == 'run' and seen[2][1][1] == '波拉島' and FOL['stops'] == 1, str(seen))
 
 print(f'\n失敗 {fails} 項' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

@@ -55,6 +55,26 @@ def parse_level(text) -> tuple | None:
     return (int(m[1]), int(m[2])) if m else None
 
 
+def level_num(text) -> int | None:
+    """HUD 等級文字 → 等級整數；轉數不採用（HUD 會把 1 轉讀成 0 轉，轉數另外取：grind.leader_trans / follow --trans）。
+    容忍的格式：「1轉12級」「0轉26級」→ 取「N級」；「轉24,」「1轉24,」「24,」這類只讀到數字、沒有「級」的殘缺字串 → 取轉字之後 / 整串的數字。
+    讀不出、不在 1～200 之間 → None（follow.level_of 就是這個）"""
+    s = str(text or '')
+    m = re.search(r'(\d+)\s*級', s) or re.search(r'轉\s*(\d+)', s) or re.fullmatch(r'\s*(\d{1,3})\s*[,，.。]?\s*', s)
+    if not m:
+        return None
+    n = int(m[1])
+    return n if 1 <= n <= 200 else None
+
+
+TOP = '地雷區'                    # 最高一檔練功點（≥120）：「去練功」選到這檔就不起 follow；follow 換到這檔確認掛機後自動結束
+
+
+def is_top(name) -> bool:
+    """最高一檔（地雷區 / 地雷區2）"""
+    return name in SPOTS and SPOTS[name][3] >= SPOTS[TOP][3]
+
+
 # ---- 學習到的門檻（1 轉以上才用；{"轉數:點名": 實際要求的等級}）----
 def load_learned(path=None) -> dict:
     try:

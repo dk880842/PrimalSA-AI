@@ -7,6 +7,7 @@
   winenv.to_windows(path)         # 專案內（或任意）路徑 → Windows 路徑字串，給 powershell.exe 當參數
   winenv.ps_argv('gui.ps1', 'info')   # → ['powershell.exe', '-NoProfile', ..., '-File', <Windows 路徑>, 'info']
   winenv.run_ps('gui.ps1', 'shot')    # 執行並回傳 CompletedProcess（UTF-8、errors=replace、已去掉 \\r）
+  winenv.spawn_detached(argv, log)  # 背景常駐程序（脫離終端；WSL setsid / Windows DETACHED_PROCESS），回 pid（grind 去練功起 follow 用）
   winenv.enable_server()          # 長程序（quest / heal / petwatch / walk 主流程）明確呼叫；WSL 預設走常駐 serve.ps1、Windows 原生需 PSA_GUI_SERVER=1（=0 一律關）
 
 命令列自測：python tools/gui/winenv.py
@@ -111,6 +112,30 @@ def run_ps(script: str, *args: str, timeout: float | None = None) -> subprocess.
 #      serve.ps1 記憶體 / GDI 自保要退出時，最後一個回應帶 bye=true，client 收到就主動 close；
 #   ⑤ gui-server.pids 登記「擁有者 Python PID ↔ server Windows PID」：下次有程序起 server 時，擁有者已死的殘留 server 一併清掉（reap_orphans；登記含平台，只回收同平台）。
 # ---------------------------------------------------------------------------------------------
+def spawn_detached(argv: list, log_path=None, cwd=None, popen=None) -> int:
+    """背景常駐程序（例：grind.py follow）：跟呼叫端脫鉤，呼叫端 / 終端結束後照跑。回子程序 pid（失敗丟 OSError）。
+    POSIX（WSL）= start_new_session（等同 setsid，脫離終端與行程群組；不會被 SIGHUP / 群組 kill 帶走）；
+    Windows 原生 = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP，先試 CREATE_BREAKAWAY_FROM_JOB（工作物件不准脫離會 OSError → 不帶再試一次）。
+    stdout / stderr 附加寫到 log_path（沒給 = 丟棄）；stdin 一律 DEVNULL。popen 可換（測試）"""
+    popen = popen or subprocess.Popen
+    out = open(log_path, 'ab') if log_path else subprocess.DEVNULL
+    env = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')
+    kw = dict(stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, cwd=str(cwd or ROOT), env=env, close_fds=True)
+    try:
+        if os.name == 'nt':
+            base = 0x00000008 | 0x00000200                 # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+            try:
+                p = popen(argv, creationflags=base | 0x01000000, **kw)     # + CREATE_BREAKAWAY_FROM_JOB
+            except OSError:
+                p = popen(argv, creationflags=base, **kw)
+        else:
+            p = popen(argv, start_new_session=True, **kw)
+        return p.pid
+    finally:
+        if log_path:
+            out.close()                                     # 子程序有自己的一份 handle
+
+
 SERVER_SCRIPTS = {'gui', 'ocr', 'stat', 'findmark', 'titlematch', 'digitmatch'}
 # 各腳本 param 區塊裡「具名」參數（五支腳本都沒有 [switch]，所以「-名稱 值」成對拆進 named，其餘當位置參數）。
 # 腳本改 param 時要同步這裡（test_winenv_server.py 的「白名單與 ps1 param 區塊同步」會檢查；_selftest 只測路徑換算）。

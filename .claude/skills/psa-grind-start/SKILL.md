@@ -11,14 +11,23 @@ description: Use when the PrimalSA (精靈王石器) party must start or resume 
 
 ## 0. 先跑腳本（推薦；下面 1～6 是手動退路）
 ```bash
-uv run --no-project python tools/gui/grind.py start --spot 地雷區2     # 換點 / 第一次練功：選點 → 傳送 → 外掛 → 遇敵 → 確認
+uv run --no-project python tools/gui/grind.py start                    # 「去練功」：依當下等級選點 → 傳送 → 外掛 → 遇敵 → 確認；未滿地雷區背景起 follow
+uv run --no-project python tools/gui/grind.py start --spot 波拉島        # 固定點（使用者指定才用；不起 follow，有 follow 在跑先停）
 uv run --no-project python tools/gui/grind.py ensure                     # 不傳送：補血回來 / 任務後 / 斷線重登後，重查並補好（約 25 s）
 uv run --no-project python tools/gui/grind.py check                      # 唯讀：5 人快速 / 自動戰鬥 + 遇敵鈕（約 9 s）
 ```
-- `--spot`：點名（`tools/gui/spots.py`，資料唯一來源是 `ui/transfer.md`）、`auto`（依隊長等級；1 轉以上沿用 0 轉表並標「未實測」，被擋時由 follow 學習修正）、`here`（不傳送）。已在該點（或 auto 的同檔點，例 地雷區 / 地雷區2）不會傳送；0 轉等級不夠依表預判就擋（退出碼 51）。目前隊伍掛機點 = 庫塔伊洞窟地下二樓：`start --spot 地雷區2`。
+- **去練功（使用者 2026-10-15）= `grind.py start` 不給 --spot（= `--spot auto`；import：`grind.go()`）**：依當下隊長等級選點（`spots.auto_spot` = AUTO 表 + `spots.learn` 學到的門檻）。
+  轉數不信 HUD（轉數位會讀錯）：`--trans N` 明講 > 背包讀隊長等級字（bag.levels，成功寫 `tools/.cache/trans.json`）> 呼叫端提示 > 快取 > HUD（警告）。
+  選到最高一檔（**地雷區 ≥120**）→ 確認掛機就結束、**不起 follow**；未滿 120 → 確認掛機後背景常駐 `grind.py follow --no-heal --trans N`
+  （`follow.ensure_running` → `winenv.spawn_detached`：WSL setsid、Windows DETACHED_PROCESS；已有同轉數的在跑不重開、轉數不同先停再起；輸出 `tools/.cache/follow.log`），
+  follow 換到地雷區並確認掛機後自己結束（退出 0、quest-events.log 一行）。開始前有 follow 在跑會先停（它持 grind.lock）。`--no-follow` = 不起 follow。
+  JSON 帶 `trans / trans_src / level_num / follow.action`（none / skip / running / started / fail；fail 只記 errlog，退出碼仍 0）。
+  **任何腳本都不寫死 `--spot 地雷區`**（四轉後寫死導致在錯的點掛了 6 小時）：questrun --after grind、postrebirth 收尾、petquest 猜謎三兄弟、rebirth_pets 結束都改成去練功；
+  例外：恐龍博士 / 卡坦練寵固定 `--spot 波拉島`（使用者指定 80 級練功區）。
+- `--spot`：點名（`tools/gui/spots.py`，資料唯一來源是 `ui/transfer.md`）= 固定點、不起 follow；`here`（不傳送）。已在該點（或 auto 的同檔點，例 地雷區 / 地雷區2）不會傳送；0 轉等級不夠依表預判就擋（退出碼 51）。
 - `--heal`：先回村補血（點需在 heal.SPOTS，柯奧龜洞 / 阿布龜洞 / 五兄弟洞窟暫不支援）；血量 < 40% 也會自動補。`--no-fix`：看到完整戰鬥時不自動重設 5 人。
 - 成功 = 退出碼 0 且 30 秒內看到 ≥2 次 EXP 橫幅（只看到 1 次會自動再延長 30 秒，遇敵稀疏的點不再誤報 55；JSON from_map 換點前 / to_map 換點後地圖）。非 0：50 隊伍不全且組不起來 / 51 傳送失敗或等級不夠 / 52 外掛設定失敗 / 53 此地圖禁止快速戰鬥 / 54 遇敵開不起來 / 55 沒看到 EXP / 56 仍看到完整戰鬥 / 57 補血失敗 / 58 切不回隊長；8 別的工具在用畫面 / 9 疑似驗證視窗（**立刻停手通知使用者**）/ 10 netwatch halt。最後一行 JSON 看細節。
-- **依等級自動換點（常駐）**：`grind.py follow [--trans 1] [--every 15] [--buffer 0] [--until-level N] [--dry-run]`、`follow --stop`。換點表（實測真門檻）：1 柯奧龜洞 / 10 阿布龜洞 / 20 海主人隧道 / 45 五兄弟洞窟 / 60 柯奧4F龜洞 / 80 波拉島 / 120 地雷區（1 轉未實測）。讀 state.hud.level 的「N級」（轉數位會讀錯，改用 `--trans`；轉生後重啟並改 `--trans`）、連 2 次一致才採用；到門檻就 `grind.run('start')`；被擋 → errlog + 門檻修正存 `tools/.cache/spot-thresholds.json` + 留原點；血低回村補血；每 20 分鐘 `check` 並自動 ensure；有 battle.lock / 別的 grind 在動就暫停；watch 標 verify_suspect 時先現場讀畫面：主畫面算誤報；已知面板（寵物 / 背包 / 人物資訊…）= 暫停該輪；**畫面不認得 = 進入 unknown 暫停**（不點擊、不補血、不 ensure，只讀 state；第一次寫 errlog「畫面不認得，follow 暫停中，請人工確認」並附 watch 警報截圖路徑，之後不重複寫；不累計 BAD_MAX；畫面恢復成主畫面 / 已知面板就自動繼續並 log 一行），連續超過 `follow.UNKNOWN_STOP_MIN`（10 分鐘）才停（9）。狀態 `tools/.cache/follow.json`，事件寫 `notes/quest-events.log`。背景跑（WSL）：`nohup setsid uv run --no-project python tools/gui/grind.py follow --trans 1 > tools/.cache/follow.log 2>&1 &`。退出碼 59 = 連續讀不到等級。**follow 在跑時不要另外手動跑 grind start / heal**（會互相搶；要手動就先 `--stop`）。
+- **依等級自動換點（常駐）**：`grind.py follow [--trans 1] [--every 15] [--buffer 0] [--until-level N] [--dry-run]`、`follow --stop`。換點表（實測真門檻）：1 柯奧龜洞 / 10 阿布龜洞 / 20 海主人隧道 / 45 五兄弟洞窟 / 60 柯奧4F龜洞 / 80 波拉島 / 120 地雷區（1 轉未實測）。讀 state.hud.level 的「N級」（轉數位會讀錯，改用 `--trans`；轉生後重啟並改 `--trans`）、連 2 次一致才採用；到門檻就 `grind.run('start')`；被擋 → errlog + 門檻修正存 `tools/.cache/spot-thresholds.json` + 留原點；血低回村補血；每 20 分鐘 `check` 並自動 ensure；有 battle.lock / 別的 grind 在動就暫停；watch 標 verify_suspect 時先現場讀畫面：主畫面算誤報；已知面板（寵物 / 背包 / 人物資訊…）= 暫停該輪；**畫面不認得 = 進入 unknown 暫停**（不點擊、不補血、不 ensure，只讀 state；第一次寫 errlog「畫面不認得，follow 暫停中，請人工確認」並附 watch 警報截圖路徑，之後不重複寫；不累計 BAD_MAX；畫面恢復成主畫面 / 已知面板就自動繼續並 log 一行），連續超過 `follow.UNKNOWN_STOP_MIN`（10 分鐘）才停（9）。狀態 `tools/.cache/follow.json`，事件寫 `notes/quest-events.log`。平常由「去練功」自動起（見上）；手動背景跑（WSL）：`nohup setsid uv run --no-project python tools/gui/grind.py follow --no-heal --trans N > tools/.cache/follow.log 2>&1 &`。換到 / 已在地雷區（≥120）並確認掛機 → 自己結束（0）。退出碼 59 = 連續讀不到等級。**follow 在跑時不要另外手動跑 grind start / heal**（會互相搶；要手動就先 `--stop`）。
 - 只動快速戰鬥 / 自動戰鬥 / 主畫面遇敵鈕，先讀再改（已開不點）；不要和 `heal.py --watch`、`petwatch.py`、`quest.py` 同跑。
 - **吃 2倍智慧果 / 龍王的守護一律跑 `uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果`（龍王同理，換道具名）**：由它讀 buff 圖示決定吃不吃（已有就 skip、沒有才取出吃並驗圖示，沒驗到回 95）；**不要憑印象或 state.json / watch 的 buff 顯示判斷「已經有」而跳過**（2026-10-13 play agent 判斷 DKBO 有 buff 沒吃，實際已過期）。練寵掛機可加 `petwatch.py --exp-fruit` 讓它開練前自己跑。
 

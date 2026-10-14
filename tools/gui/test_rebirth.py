@@ -127,7 +127,10 @@ class FakeTools:
 
     def pet_empties(self): self.c('pet_empties'); return 0, self.pet_empty
     def heal(self): self.c('heal')
-    def ass_pet(self, role, act): self.c('ass_pet', role, act); return self.ass_rc
+    def ass_pet(self, role, act):
+        self.c('ass_pet', role, act)
+        return self.ass_rc(role) if callable(self.ass_rc) else self.ass_rc
+    def save_trans(self, n): self.c('save_trans', n)
     def teleport20(self): self.c('teleport20'); self.pos = (32021, 31, 29)
 
     def quest(self, args, timeout=0):
@@ -202,6 +205,7 @@ check('階段順序：quest < swap×5 < heal < ass×5 < teleport < quest < press
       and order.index('drop_pet') > order.index('press_dialog') and order.index('bag_store') > order.index('drop_pet'), str(order))
 check('swap 5 人、ass 5 人忠犬', order.count('swap_weapon') == 5 and [c for c in T.calls if c[0] == 'ass_pet'][0][2] == '忠犬' and order.count('ass_pet') == 5)
 check('龍王的守護存回公共（隊長）', ('bag_store', 'DKBO', '龍王的守護') in T.calls)
+check('轉生確認後記 trans 快取（grind 去練功備援）', ('save_trans', 1) in T.calls)
 check('進度檔記 10 階段 ok（含 accept）', all(v['status'] == 'ok' for v in rebirth.LAST['stages'].values()) and len(rebirth.LAST['stages']) == 10)
 check('event log / quest-log 有寫', '階段 cleanup 結束' in rebirth.EVENT_LOG.read_text(encoding='utf-8') and '漆黑洞窟(一轉)' in rebirth.QUEST_LOG.read_text(encoding='utf-8'))
 
@@ -407,6 +411,11 @@ fresh()
 T = FakeTools(quest=[(37, (32021, 29, 57))])
 rc = quiet(rebirth.run, trans=1, from_stage='heal', to_stage='heal', pet_action='none', tools=T)
 check('--pet-action none 不動外掛', 'ass_pet' not in T.names())
+fresh()
+T = FakeTools(quest=[(37, (32021, 29, 57))], ass_rc=lambda r: (0, {'normal': '攻擊', 'skipped': '忠犬'}, '') if r in ('DKBO', 'DKBO3') else (0, {'normal': '忠犬'}, ''))
+rc = quiet(rebirth.run, trans=4, from_stage='heal', to_stage='heal', tools=T)
+check('heal：剛轉生 Lv1 戰寵下拉沒有忠犬（skipped）→ 警告、跳過、不失敗，5 人都處理、照樣便捷傳送',
+      rc == 0 and T.names().count('ass_pet') == 5 and 'teleport20' in T.names() and sum('沒有「忠犬」' in w for w in rebirth.LAST['warnings']) == 2, str((rc, rebirth.LAST['warnings'])))
 
 # ================= FakeBag（bag.py 防護）=================
 class FakeBag:
@@ -954,6 +963,22 @@ check('門檻：讀不懂的視窗 → 9，不補血、不開遇敵、不 accept
 fresh()
 T = FakeTools(gate={'kind': 'timeout', 'pos': (300, 100, 100)})
 check('門檻：沒傳送也沒訊息 → 84', quiet(rebirth.run, trans=4, tools=T) == 84 and 'heal' not in T.names())
+fresh()
+T = FakeTools(quest=list(FULL_QUEST), gate={'kind': 'teleport', 'pos': (300, 96, 228), 'accepted': True})
+fresh()
+rc = quiet(rebirth.run, tools=T)
+check('門檻：點卡時任務沒接 → level_gate 自己接好再傳送（accepted）→ accept 跳過、全程完成', rc == 0 and 'accept' not in T.names(), str(rc))
+fresh()
+T = FakeTools(quest=list(FULL_QUEST), gate={'kind': 'accept_fail', 'rc': 127, 'pos': (2000, 54, 97)})
+rc = quiet(rebirth.run, tools=T)
+check('門檻：村長選單接取失敗 → 97、不補血、不跑 quest', rc == 97 and rebirth.LAST['info'].get('accept_rc') == 127 and not ({'heal', 'quest'} & set(T.names())), str(rc))
+fresh()
+T = FakeTools(quest=list(FULL_QUEST), gate={'kind': 'accept_fail', 'rc': 9})
+check('門檻：接任務時驗證視窗 → 9', quiet(rebirth.run, tools=T) == 9)
+fresh()
+T = FakeTools(quest=list(FULL_QUEST), gate={'kind': 'blocked', 'who': 'DKBO5', 'trans': 3, 'level': 131, 'closed': True, 'accepted': True, 'via': 'notice', 'text': 'x'})
+rc = quiet(rebirth.run, tools=T)
+check('門檻：接完任務再點卡被擋 → 80、人在村子不開原地遇敵', rc == 80 and ('enc_set', True) not in T.calls and rebirth.LAST['info'].get('accepted') is True, str(T.calls[-4:]))
 fresh()
 T = FakeTools(quest=list(FULL_QUEST), scr='dialog')
 rc = quiet(rebirth.run, tools=T)
