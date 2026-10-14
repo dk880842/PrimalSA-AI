@@ -229,6 +229,102 @@ j = last_json(out)
 check('depot-fix-names 改名確認後跳費用提示 → 67、寵物留在寵物欄（failed 列出）', rc == 67 and g.pets['DKBO'][2] and g.pets['DKBO'][2].get('unnamed') == '43/9/6/5'
       and len(j['failed']) == 1 and '留在寵物欄' in j['failed'][0]['why'], f'rc={rc} {j}')
 
+# ---------------- 批次領取（2026-10-14）：一次取 ≤ 寵物欄空格張、切回寵物分頁一次連續改名、再切倉庫一次連續存回
+fresh_tpl()
+cards5 = [U('43/9/6/5'), U('41/9/6/5', '貝魯卡'), '朵拉比斯', U('42/9/6/5', '加格'), U('44/9/6/5', '奇寶')]
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': cards5}))                 # 寵物欄 3 空格、4 張要修 → 2 批（3 + 1）
+g.compact = True
+g.resort = True
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'])
+j = last_json(out)
+pub = [c for c in g.depot['DKBO']['public'] if c]
+check('批次：4 張成長字串卡全修好、張數不變、寵物欄回到原樣', rc == 0 and len(j['fixed']) == 4 and len(pub) == 5 and all('unnamed' not in c for c in pub)
+      and [p and p['name'] for p in g.pets['DKBO']] == ['瑪斯貝卡', '迪基格斯', None, None, None], f'rc={rc} {j} {err[-300:]}')
+tabs = g.tab_clicks
+check('  分頁切換次數 = 批數級（不是每隻 2 次）：倉庫 ≤ 3、寵物 ≤ 3', tabs.count('depot') <= 3 and tabs.count('pet') <= 3, str(tabs))
+check('  每隻只點 1 次鉛筆 + 1 次確認', len(pencil(g)) == 4 and g.rename_clicks.count(pet.RENAME_OK_XY) == 4)
+check('  第一批 3 張在同一次倉庫分頁內連續取出、再連續存回 3 張（store_clicks 前 3 筆取出、接著 3 筆存入）',
+      [x[1] for x in g.store_clicks[:3]] == ['card'] * 3 and [x[1] for x in g.store_clicks[3:6]] == ['pet'] * 3, str(g.store_clicks))
+# 非遞補的倉庫（取走後留空格）：照樣能批次（取出由大到小、格號不受影響）
+fresh_tpl()
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': [U('43/9/6/5'), U('41/9/6/5', '貝魯卡')]}))
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'])
+check('批次（倉庫取走留空格、不遞補）：2 張都修好', rc == 0 and len(last_json(out)['fixed']) == 2 and all('unnamed' not in c for c in g.depot['DKBO']['public'] if c), f'rc={rc} {err[-300:]}')
+
+# 卡片字形：存回後核對 0 點擊
+fresh_tpl()
+real_glyph = pet.glyph_cards
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': [U('43/9/6/5')]}))
+g.compact = True
+pet.glyph_cards = fake_pet.glyph_stub(g)
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'])
+j = last_json(out)
+check('字形核對：存回後找卡不再點倉庫卡（卡片點擊只有取出前選 1 次）', rc == 0 and len(j['fixed']) == 1 and g.card_clicks == [0] and j['fixed'][0].get('to_index'),
+      f'rc={rc} card_clicks={g.card_clicks} {err[-200:]}')
+# 字形說是目標、但選卡讀名字框不是 → 退回逐張選卡找（字形讀錯只會慢、不會取錯）
+fresh_tpl()
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'personal': ['摩娜西普', '朵拉比斯', '巴朵蘭恩']}))
+pet.glyph_cards = fake_pet.glyph_stub(g, wrong={0: ('朵拉比斯', None)})
+rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯')
+check('字形讀錯（卡 1 其實是摩娜西普）→ 選卡核對不符 → 退回逐張找、取到真的朵拉比斯', rc == 0 and g.pets['DKBO'][2] and g.pets['DKBO'][2]['name'] == '朵拉比斯'
+      and [c and c['name'] for c in g.depot['DKBO']['personal'][:3]] == ['摩娜西普', None, '巴朵蘭恩'], f'rc={rc} {g.pets["DKBO"]} {err[-300:]}')
+# 字形對 → 取出不逐張找（卡片點擊只有取出前選那張）
+fresh_tpl()
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'personal': ['摩娜西普', '巴朵蘭恩', '朵拉比斯']}))
+pet.glyph_cards = fake_pet.glyph_stub(g)
+rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯')
+check('字形讀對 → 取出只點 1 次倉庫卡（不逐張找）', rc == 0 and g.card_clicks == [2] and g.pets['DKBO'][2]['name'] == '朵拉比斯', f'rc={rc} {g.card_clicks} {err[-200:]}')
+pet.glyph_cards = real_glyph
+
+# 改名後直接存：只點 1 次頭像（選角色），存回前不重選頭像
+fresh_tpl()
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': [U('43/9/6/5')]}))
+g.compact = True
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'])
+avatar_clicks = [c for c in g.clicks if c[0] == 83]
+check('改名後直接存：只點 1 次頭像（選角色），存回前不重選頭像 / 不重讀整個寵物欄', rc == 0 and len(avatar_clicks) == 1, str(avatar_clicks))
+
+# ---------------- reset-name：目標格已選中不先選別格再選回來
+fresh_tpl()
+g = new(pets=mk_pets(DKBO=[unn(0, '等待'), {'name': '朵拉比斯', 'state': '出戰', 'level': 1}, None, None, None]))
+rc, out, err = run(pet.reset_names, 'DKBO')
+check('reset-name：第 1 格（開頭已選中）直接改名，沒有點任何寵物格（不選第 2 格再選回）', rc == 0 and len(pencil(g)) == 1 and (pet.SLOT_X, pet.SLOT_Y[0]) not in g.clicks
+      and g.pets['DKBO'][0]['name'] == BRA, f'rc={rc} {[c for c in g.clicks if c[0] == pet.SLOT_X]}')
+g = new(pets=mk_pets(DKBO=[{'name': '朵拉比斯', 'state': '出戰', 'level': 1}, unn(0, '等待'), None, None, None]))
+rc, out, err = run(pet.reset_names, 'DKBO', slot_no=2)
+check('--slot 2：只選第 2 格（第 1 格不讀不點）', rc == 0 and len(pencil(g)) == 1 and [c for c in g.clicks if c[0] == pet.SLOT_X] == [(pet.SLOT_X, pet.SLOT_Y[1])],
+      f'rc={rc} {[c for c in g.clicks if c[0] == pet.SLOT_X]}')
+
+# ---------------- 合併入口 fix-names：寵物欄 reset-name + 倉庫 depot-fix-names，面板只開一次
+fresh_tpl()
+pets_f = mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, unn(1, '等待'), None, None, None])
+g = new(pets=pets_f, depot=mk_depot(DKBO={'public': [U('43/9/6/5'), '朵拉比斯'], 'personal': [U('47/9/8/1', BRA)]}))
+g.compact = True
+rc, out, err = run(pet.fix_names, 'DKBO', ['public', 'personal'])
+j = last_json(out)
+check('fix-names：寵物欄第 2 格還原 + 公共 1 張 + 個人 1 張，rc 0；面板只開 1 次', rc == 0 and g.pets['DKBO'][1]['name'] == BRA and len(j['ops']) == 1 and len(j['fixed']) == 2
+      and all('unnamed' not in c for c in g.depot['DKBO']['public'] + g.depot['DKBO']['personal'] if c) and g.clicks.count(uikit.PET.open_xy) == 1, f'rc={rc} {j} {err[-300:]}')
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, unn(1, '等待'), None, None, None]), depot=mk_depot(DKBO={'public': [U('43/9/6/5')]}))
+rc, out, err = run(pet.fix_names, 'DKBO', ['public'], dry_run=True)
+j = last_json(out)
+check('fix-names --dry-run：只列 1 隻寵物欄 + 1 張倉庫卡，零鉛筆 / 零存取', rc == 0 and len(j['ops']) == 1 and len(j['todo']) == 1 and pencil(g) == [] and g.store_clicks == [], f'rc={rc} {j}')
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, unn(1, '等待'), None, None, None]), depot=mk_depot(DKBO={'public': [U('43/9/6/5')]}))
+rc, out, err = run(pet.fix_names, 'DKBO', [])
+check('fix-names --depot none：只做寵物欄、不進倉庫', rc == 0 and g.pets['DKBO'][1]['name'] == BRA and g.depot_clicks == [], f'rc={rc}')
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, unn(1, '等待'), None, None, None]), depot=mk_depot(DKBO={'public': [U('43/9/6/5')]}))
+g.rename_after_popup = ['消耗 10 鑽石，確定嗎?']
+rc, out, err = run(pet.fix_names, 'DKBO', ['public'])
+check('fix-names：寵物欄改名跳費用 → 67 停手、不進倉庫', rc == 67 and g.depot_clicks == [], f'rc={rc}')
+# 批次改名失敗 → 停、msg 列出還留在寵物欄的格
+fresh_tpl()
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': [U('43/9/6/5'), U('41/9/6/5', '貝魯卡')]}))
+g.compact = True
+g.rename_after_popup = ['消耗 10 鑽石，確定嗎?']
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'])
+j = last_json(out)
+check('批次改名第一隻跳費用 → 67，msg 列出兩隻都還在寵物欄的格號、沒存回', rc == 67 and '第 3 格' in j.get('msg', '') and '第 4 格' in j.get('msg', '')
+      and all(x[1] == 'card' for x in g.store_clicks), f'rc={rc} {j.get("msg")}')
+
 # ---------------- 名字為主：讀到名字不跑縮圖；名字讀不出才用縮圖
 calls = []
 pet.IMG_ON = True

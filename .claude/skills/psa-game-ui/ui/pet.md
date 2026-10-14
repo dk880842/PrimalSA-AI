@@ -138,6 +138,14 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
   3. `pet.py depot-fix-names --depot public[,personal] [--role DKBO|all] [--limit N] [--dry-run]`：倉庫裡成長字串的卡（卡片白字字形 / 選卡讀名字框）→ `_take_in_depot`（以成長字串核對）取出 → 寵物分頁還原名字 →
      `_store_body` 存回**原倉庫**（公共回公共、個人回個人；騎寵物種是剛從倉庫取出、等待中、名字完全相同才放行）。公共倉庫用 `--role` 裡第一個寵物欄有空格的人；**寵物欄沒空格 → 跳過列在 `skipped`，不為騰位子存別的寵物**；
      取出前就被擋（零點擊）→ `failed` 繼續下一張；取出後 / 改名 / 存回失敗 → 停（寵物留在寵物欄，結果列出）。名字 / 成長字串都讀不出的卡只列出不動。
+  3b. **加速 + 合併入口（2026-10-14，離線測試；實機待量，目標一隻 8～10 s，舊約 27 s）**：
+     - `pet.py fix-names [--role all|..] [--depot public,personal|none] [--slot N] [--limit N] [--dry-run]` = 寵物欄 reset-name + 倉庫 depot-fix-names 一次跑（遇敵只關開一次、面板只開一次、同一份樣板）；`--depot none` 只做寵物欄；兩個舊子命令保留。
+     - **批次領取**：進倉庫前掃寵物欄空格數 N，同一次倉庫分頁內連續取出 ≤ N 張（卡片 index 大到小，倉庫遞補不影響前面的格號；每張取前照樣選卡核對名字框）→ 切回寵物分頁**一次**連續 `rename_selected`
+       （最後取出的格還選著先改）→ 切倉庫分頁**一次**連續存回（寵物格大到小，補位不影響前面）；卡片多於 N 張就下一批；N = 0 照舊跳過不騰位子。離線量測（假面板）：3 張一批約 8.5 次點擊 / 隻（含取出選卡 1 + 取出 1 + 選新格 1 + 改名 2～3 + 存入選格 1 + 存入 1），倉庫 / 寵物分頁各只切 1 次。
+     - **改名後直接存**：同角色同格剛改完 → 只 `read_slot` 該格名字框（_store_body `cur0`），不重選頭像、不 list 整個寵物欄；存入鈕前最後一關（read_ident / 縮圖簽名 / 按鈕底色 + 文字）照舊。
+     - **存 / 取後核對改用卡片字形**（`petglyph.read_cards`，整頁一次、0 點擊，比舊的「找倉庫卡」逐張點 9～10 s 快）：存回後 `find_card(glyph_first=True)`、take 的 `_find_target_card` 字形吻合就直接挑；
+       字形讀不出（橫幅遮擋 / 新名字沒樣板）、不吻合、或取前名字框核對不符（`glyph_retry`）→ 退回逐張選卡。`--no-glyph` 整個關。
+     - **reset-name 邊讀邊改**：`list_role(on_slot=)` 每格讀完仍選中就改名，不再「讀完全部再選回去」（舊：選第 2 格再選第 1 格）；`--slot N` 只選 / 讀那一格（`only`）。
   4. petquest 抓完一批（pet_catch register）後、存公共 / 分配前跑 `reset-name --role <抓寵者>`（67 → 165 停；其他失敗只記事件照常往下）。
 - **名字為主（`pet.NAME_FIRST`，`--img-first` 回下一段的縮圖為主）**：寵物格名字框 / 倉庫卡白字先用整名樣板（petmatch 名字樣板、petglyph 卡片名字整塊圖）讀、讀不到才 OCR；
   **讀到 Monster 表物種名就採用（`species_src: name`）、不跑縮圖**（list / depot-list / store / take 的取前取後核對都一樣，`img_conflict(named=True)` 直接略過）；

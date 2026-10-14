@@ -152,7 +152,10 @@ k, msg = pet._find_target_card(d, 'personal', {'name': '朵拉比斯', 'level': 
 check('take 找卡：卡片字 = 朵拉比斯 Lv130 的第 6 張先點、一次就中', k == 5 and clicked == [5], (k, clicked))
 clicked.clear()
 k, msg = pet._find_target_card(d, 'personal', {'growth': '46/9/8/2'}, {'learn': False}, info, {})
-check('take 找卡：成長字串卡第 8 張先點', k == 7 and clicked == [7], (k, clicked))
+check('take 找卡：卡片字形讀到成長字串吻合 → 直接挑第 8 張、不逐張點（取前核對在 _take_in_depot）', k == 7 and clicked == [] and info.get('glyph_pick'), (k, clicked))
+clicked.clear()
+k, msg = pet._find_target_card(d, 'personal', {'growth': '46/9/8/2'}, {'learn': False}, {'glyph_retry': True}, {})
+check('take 找卡：字形挑錯後的重找（glyph_retry）→ 照舊逐張，卡片字像目標的第 8 張先點', k == 7 and clicked == [7], (k, clicked))
 clicked.clear()
 cards[5]['name'] = '摩娜西普'                                 # 卡片字讀錯（假設）：照樣逐張選卡讀名字框，最後仍找得到
 k, msg = pet._find_target_card(d, 'personal', {'name': '朵拉比斯', 'level': 130}, {'learn': False}, info, {})

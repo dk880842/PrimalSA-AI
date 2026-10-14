@@ -106,6 +106,8 @@ class Game:
         self.dialog_pending = None
         self.depot_dead = False          # 點「倉庫」分頁沒反應
         self.store_clicks, self.depot_clicks = [], []
+        self.tab_clicks = []             # 依序記「寵物 / 倉庫」分頁點擊：'pet' / 'depot'
+        self.card_clicks = []            # 倉庫卡點擊（index 0 起算）
         self.hud, self.panel = hud, panel
         self.role = 'DKBO'
         self.sel = 0
@@ -316,12 +318,14 @@ class Game:
             return
         if xy == pet.DEPOT_TAB_XY:
             self.depot_clicks.append(xy)
+            self.tab_clicks.append('depot')
             if not self.depot_dead:
                 self.view = 'depot'
                 if self.on_depot:
                     self.on_depot(self)
             return
         if xy == pet.PET_TAB_XY:
+            self.tab_clicks.append('pet')
             self.view = 'pet'
             return
         if self.view == 'depot':
@@ -334,6 +338,7 @@ class Game:
                     if abs(x - pet.CARD_X[c]) < 50 and abs(y - pet.CARD_Y[r] - pet.CARD_CLICK_DY) < 50:
                         if self.depot[self.role][self.dtab][r * 5 + c] is not None:
                             self.sel_card, self.sel_kind = r * 5 + c, 'card'
+                            self.card_clicks.append(r * 5 + c)
                         return
             if xy == pet.DEPOT_BTN_XY:
                 self.store_clicks.append((self.role, self.sel_kind, self.sel, self.sel_card))
@@ -440,6 +445,24 @@ class Game:
                 return [f'0轉{str(lv)[0]}', f'0轉{lv}']
             return [f'0轉{lv}', f'轉{lv}']
         return []
+
+
+def glyph_stub(g, wrong=None):
+    """假的卡片字形讀取（pet.glyph_cards 取代）：依假倉庫現況回 {卡 index: {'name', 'growth', 'level'}}，不點擊、不選卡。
+    wrong = {卡 index: (name, growth)} 蓋掉某張（模擬字形讀錯）；用法：pet.glyph_cards = fake_pet.glyph_stub(g)"""
+    def fn(d):
+        if not d or not d.get('sig'):
+            return {}
+        out = {}
+        for k, c in enumerate(g.depot[g.role][g.dtab]):
+            if c is None:
+                continue
+            nm, gr = (c['name'], None) if not c.get('unnamed') else (None, c['unnamed'])
+            if wrong and k in wrong:
+                nm, gr = wrong[k]
+            out[k] = {'index': k + 1, 'name': nm, 'growth': gr, 'level': c.get('level')}
+        return out
+    return fn
 
 
 def mk_depot(**kw):
