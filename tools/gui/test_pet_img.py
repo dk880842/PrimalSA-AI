@@ -17,7 +17,8 @@ import pngread  # noqa: E402
 import uikit  # noqa: E402
 import pet  # noqa: E402
 
-CACHE = HERE.parents[1] / 'tools' / '.cache'
+import shotfix  # noqa: E402
+CACHE = shotfix.SHOTS          # 固定截圖 tools/gui/fixtures/petimg/（tools/.cache 的暫存截圖會被覆蓋，2026-10-14 s3.png）
 fails = 0
 
 
@@ -159,7 +160,7 @@ TURKEYS = ['火雞', '克克洛斯', '霍爾克', '奇寶']
 
 def task_candidates():
     """--candidates（ctx['img_only']）：卡坦 4 鯊 / 4 雞實機截圖（2026-10-13 卡坦分配時；每人寵物欄 4 隻各一種、任務已交成功）"""
-    shots = {'s3.png': (TURKEYS, {1: '火雞', 2: '霍爾克', 3: '奇寶', 4: '克克洛斯'}),
+    shots = {'s4.png': (TURKEYS, {1: '霍爾克', 2: '火雞', 3: '克克洛斯', 4: '奇寶'}),     # 原 s3.png 2026-10-14 被覆蓋、原圖已失，改用同批 s4
              's5.png': (TURKEYS, {1: '奇寶', 2: '火雞', 3: '克克洛斯', 4: '霍爾克'}),
              'z.png': (SHARKS, {1: '克邦凱斯', 2: '加克拉', 3: '邦恩吉', 4: '加格'})}
     real_ri = pet.resolve_ident

@@ -347,8 +347,8 @@ def growth_fields(t) -> list:
 def growth_compatible(line, whole: str) -> bool:
     """OCR 殘行 line 跟完整成長字串 whole 不矛盾（純函式）：
     (1) 去空白後是 whole 的子序列（掉字，#258 '34/8/8'）；或
-    (2) 以 / 切欄、靠右對齊（OCR 壞的多半是開頭那欄），含數字的欄必須逐欄完全相等，不含數字的欄（Windows OCR 把兩位數讀成一個漢字，
-        2026-10-14 實測 40/9/6/5 在 -Zooms 2 / 4 讀成「姍/9/6/5」「姍/6/5」）當萬用欄；萬用欄最多 1 個、至少 2 欄數字相等"""
+    (2) 以 / 切欄、對齊完整字串的某一段連續欄（開頭或結尾被切掉都行），含數字的欄必須逐欄完全相等，不含數字的欄（Windows OCR 把兩位數讀成一個漢字，
+        2026-10-14 實測 40/9/6/5 在寵物分頁讀成「姍/9/6/5」「姍/6/5」、倉庫分頁「姍/9/6」）當萬用欄；萬用欄最多 1 個、至少 2 欄數字相等"""
     t = re.sub(r'\s+', '', str(line))
     if not t:
         return False
@@ -358,15 +358,35 @@ def growth_compatible(line, whole: str) -> bool:
     fs, ws = growth_fields(t), whole.split('/')
     if len(fs) > len(ws) or any(not f for f in fs):
         return False
-    wild = same = 0
-    for f, w in zip(reversed(fs), reversed(ws)):
-        if not re.search(r'\d', f):
-            wild += 1
-        elif f == w or (f.isdigit() and str(int(f)) == w):
-            same += 1
+    for off in range(len(ws) - len(fs) + 1):                    # 殘行 = 完整字串中連續幾欄（頭 / 尾被切掉都可能，2026-10-14 倉庫分頁「姍/9/6」）
+        wild = same = 0
+        for f, w in zip(fs, ws[off:off + len(fs)]):
+            if not re.search(r'\d', f):
+                wild += 1
+            elif f == w or (f.isdigit() and str(int(f)) == w):
+                same += 1
+            else:
+                break
         else:
+            if wild <= 1 and same >= 2:
+                return True
+    return False
+
+
+def growth_consistent(lines, whole: str) -> bool:
+    """OCR 各行全部跟 whole 不矛盾（完整行必須等於它、殘行 growth_compatible），且至少 1 行有內容（純函式）。
+    名字框讀不出時拿「已知的成長字串」（寵物欄讀到的 / 登錄檔的）來核對現場這張是不是同一個字串用"""
+    ls = [str(t) for t in lines or [] if str(t).strip()]
+    if not ls or not GROWTH_RE.match(whole or ''):
+        return False
+    for t in ls:
+        m = GROWTH_RE.match(t)
+        if m:
+            if '/'.join(str(int(g)) for g in m.groups()) != whole:
+                return False
+        elif not growth_compatible(t, whole):
             return False
-    return wild <= 1 and same >= 2
+    return True
 
 
 def _growth_full(lines) -> Counter:

@@ -12,7 +12,8 @@ sys.path.insert(0, str(HERE))
 import petimg_match as M  # noqa: E402
 import pngread  # noqa: E402
 
-CACHE = HERE.parents[1] / 'tools' / '.cache'
+import shotfix  # noqa: E402
+CACHE = shotfix.SHOTS          # 固定截圖 tools/gui/fixtures/petimg/（tools/.cache 的暫存截圖會被覆蓋，2026-10-14 s3.png）
 fails = 0
 BG = (110, 72, 44)          # 寵物格底色（深棕）
 
@@ -134,7 +135,6 @@ def main() -> int:
     # ---- 任務候選相對比較 rank_among（inlier + 主色）：2026-10-13 卡坦分配實機截圖（每人 4 隻各一種、任務已交成功）----
     among = {
         's0.png': (turkeys, {('slot', 2): '火雞', ('slot', 3): '克克洛斯', ('slot', 4): '霍爾克', ('slot', 5): '奇寶'}),
-        's3.png': (turkeys, {('slot', 2): '火雞', ('slot', 3): '霍爾克', ('slot', 4): '奇寶', ('slot', 5): '克克洛斯'}),
         's4.png': (turkeys, {('slot', 2): '霍爾克', ('slot', 3): '火雞', ('slot', 4): '克克洛斯', ('slot', 5): '奇寶'}),
         's5.png': (turkeys, {('slot', 2): '奇寶', ('slot', 3): '火雞', ('slot', 4): '克克洛斯', ('slot', 5): '霍爾克'}),
         'dep2.png': (turkeys, {('slot', 2): '奇寶', ('card', 1): '火雞', ('card', 2): '霍爾克', ('card', 4): '克克洛斯',

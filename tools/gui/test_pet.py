@@ -1151,5 +1151,45 @@ try:
 finally:
     pet.img_ident, pet.species_reg = _svc
 
+# ---- 2026-10-14 續：倉庫分頁讀成 ['姍/9/6/5','姍/9/6/5','姍/9/6','40/9/6','40/9/6/5'] → store 75；身分確認共用 ----
+D = ['姍/9/6/5', '姍/9/6/5', '姍/9/6', '40/9/6', '40/9/6/5']
+check('parse_growth：倉庫分頁實機 5 行（尾欄被切掉的「姍/9/6」）→ 40/9/6/5', petmatch.parse_growth(D) == '40/9/6/5')
+check('growth_compatible：殘行對齊完整字串任一段連續欄', petmatch.growth_compatible('姍/9/6', '40/9/6/5') and petmatch.growth_compatible('9/6/5', '40/9/6/5')
+      and not petmatch.growth_compatible('姍/9/5', '40/9/6/5'))
+check('growth_consistent：全部行不矛盾才 True；有別的完整字串 / 空 → False', petmatch.growth_consistent(['姍/9/6/5', '姍/9/6'], '40/9/6/5')
+      and not petmatch.growth_consistent(['姍/9/6/5', '41/9/6/5'], '40/9/6/5') and not petmatch.growth_consistent([], '40/9/6/5')
+      and not petmatch.growth_consistent(['姍/8/6'], '40/9/6/5'))
+RG = {'growth': {'40/9/6/5': '魯尼帖斯', '51/9/8/1': '布拉奇多斯'}}
+check('candidate_species：登錄 + 縮圖一致才給；縮圖不同 / 沒登錄 / 騎寵 / OCR 矛盾 → None',
+      pet.candidate_species(['姍/9/6/5'], ['40/9/6/5'], '魯尼帖斯', RG) == '魯尼帖斯' and pet.candidate_species(['姍/9/6/5'], ['40/9/6/5'], None, RG) is None
+      and pet.candidate_species(['姍/9/6/5'], ['41/9/6/5'], '魯尼帖斯', RG) is None and pet.candidate_species(['51/9/8/1'], ['51/9/8/1'], '布拉奇多斯', RG) is None
+      and pet.candidate_species(['姍/8/6/5'], ['40/9/6/5'], '魯尼帖斯', RG) is None)
+_svi = (pet.img_ident, pet.species_reg)
+_img = {'v': '魯尼帖斯', 'n': 0}
+pet.species_reg = lambda ctx: RG
+pet.img_ident = lambda kind, k, ctx: (_img.__setitem__('n', _img['n'] + 1), {'img_species': _img['v']})[1]
+try:
+    SL = {'slot': 2, 'unnamed': '40/9/6/5', 'species': '魯尼帖斯'}
+    bad = {'name': None, 'growth': None, 'raw': ['姍/9/6/5', '姍/9/6/5', '姍/9/6']}
+    check('ident_confirms：讀得出成長字串 → 直接比（不讀縮圖）', pet.ident_confirms({'name': None, 'growth': '40/9/6/5'}, SL, 'slot', 1, {}) and _img['n'] == 0)
+    check('ident_confirms：讀不出 → 字串跟 OCR 不矛盾 + 登錄 + 縮圖一致 → True', pet.ident_confirms(bad, SL, 'slot', 1, {}))
+    _img['v'] = '貝魯卡'
+    check('ident_confirms：縮圖不同 → False', not pet.ident_confirms(bad, SL, 'slot', 1, {}))
+    _img['v'] = '魯尼帖斯'
+    check('ident_confirms：sl 字串沒登錄 / 現場候選字串不同 / sl 沒物種 / 讀到別的成長字串 → False',
+          not pet.ident_confirms(bad, dict(SL, unnamed='39/9/6/5'), 'slot', 1, {}) and not pet.ident_confirms(dict(bad, guess='41/9/6/5'), SL, 'slot', 1, {})
+          and not pet.ident_confirms(bad, dict(SL, species=None), 'slot', 1, {}) and not pet.ident_confirms({'name': None, 'growth': '41/9/6/5'}, SL, 'slot', 1, {}))
+    _img['n'] = 0
+    check('unreadable_species：候選都沒登錄 → 不讀縮圖', pet.unreadable_species({'name': None, 'growth': None, 'raw': ['姍/1/1/1'], 'guess': '9/1/1/1'}, 'card', 0, {}) is None and _img['n'] == 0)
+    check('unreadable_target：名字目標（靠 guess）/ 成長字串目標都可；字串目標跟 OCR 矛盾 → False；只給等級 → False',
+          pet.unreadable_target(dict(bad, guess='40/9/6/5'), 'card', 0, {'name': '魯尼帖斯'}, {})
+          and pet.unreadable_target(bad, 'card', 0, {'name': None, 'growth': '40/9/6/5'}, {})
+          and not pet.unreadable_target(dict(bad, guess='40/9/6/5'), 'card', 0, {'name': '貝魯卡'}, {}) and not pet.unreadable_target(bad, 'card', 0, {'name': '魯尼帖斯'}, {})
+          and not pet.unreadable_target({'name': None, 'growth': None, 'raw': ['姍/8/6']}, 'card', 0, {'growth': '40/9/6/5'}, {})
+          and not pet.unreadable_target(bad, 'card', 0, {'level': 1}, {}))
+    check('card_ident：讀不出 + 候選登錄 + 縮圖一致 → reg+img', pet.card_ident(0, dict(bad, guess='40/9/6/5'), {})['src'] == 'reg+img')
+finally:
+    pet.img_ident, pet.species_reg = _svi
+
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

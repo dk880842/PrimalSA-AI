@@ -598,15 +598,63 @@ def ident_matches(ident: dict, sl: dict) -> bool:
     return bool(sl.get('name')) and ident.get('name') == sl['name']
 
 
+# ---- 名字框讀不出時的身分確認（寵物分頁 / 倉庫分頁 / 倉庫卡共用，2026-10-14）----
+# 規則只有一條：候選成長字串（現場讀到的 guess，或呼叫端已知的字串）跟現場 OCR 每一行都不矛盾、已登錄成物種 X、
+# 現場縮圖（寵物格 / 倉庫卡，petimg_match）也認成 X、X 不是騎寵 → X。少任一條 → None（不猜）。只有縮圖照舊不算。
+def candidate_species(lines, cands, img_species, reg: dict) -> str | None:
+    """純函式：見上方規則。lines = 名字框 OCR 原文（None / 空 = 不比對 OCR，只給 read_slot 已確認過的 guess 用）"""
+    growth = reg.get('growth') or {}
+    hits = {growth.get(g) for g in cands or [] if g and growth.get(g) and (not lines or petmatch.growth_consistent(lines, g))}
+    if len(hits) != 1:
+        return None
+    x = hits.pop()
+    return x if x not in uikit.MOUNTS and img_species == x else None
+
+
 def guess_species(d: dict, reg: dict) -> str | None:
-    """純函式：名字框讀不出的格（read_slot 的 d，有 unreadable + guess）→ 物種或 None。
-    三重確認才採用：候選成長字串（growth_guess：只有一種完整字串、其餘行不矛盾）已登錄成 X、縮圖（img_species）也認成 X、X 不是騎寵"""
+    """純函式：名字框讀不出的格（read_slot 的 d，有 unreadable + guess）→ 物種或 None（candidate_species，縮圖 = d['img_species']）"""
     if not d.get('unreadable') or d.get('name') or d.get('unnamed') or not d.get('guess'):
         return None
-    sg = (reg.get('growth') or {}).get(d['guess'])
-    if not sg or sg in uikit.MOUNTS or d.get('img_species') != sg:
+    return candidate_species(d.get('ocr'), [d['guess']], d.get('img_species'), reg)
+
+
+def unreadable_species(idn: dict, kind: str, idx: int, ctx: dict, cands=()) -> str | None:
+    """現場名字框（resolve_ident 結果）讀不出（沒名字、沒成長字串）→ candidate_species(現場 OCR, [guess] + cands, 現場縮圖)。
+    kind / idx = 現場縮圖位置（'slot' 寵物格 0 起算 / 'card' 倉庫卡 0 起算）。有名字或成長字串 → None（照原本規則比）。
+    候選都沒登錄 → 不讀縮圖直接 None"""
+    if idn.get('name') or idn.get('growth') or not idn.get('raw'):
         return None
-    return sg
+    cs = [g for g in dict.fromkeys([idn.get('guess'), *cands]) if g]
+    reg = species_reg(ctx)
+    if not any((reg.get('growth') or {}).get(g) for g in cs):
+        return None
+    im = img_ident(kind, idx, ctx)
+    return candidate_species(idn['raw'], cs, im and im.get('img_species'), reg)
+
+
+def ident_confirms(ident: dict, sl: dict, kind: str, idx: int, ctx: dict) -> bool:
+    """現場名字框 ident 是不是 sl 這隻（store 存前 / 存後找卡共用）：ident_matches；或名字框讀不出時，
+    sl 的成長字串跟現場 OCR 不矛盾（現場的 guess 若有也要相同）+ 登錄成 sl 的物種 + 現場縮圖同物種（unreadable_species）"""
+    if ident_matches(ident, sl):
+        return True
+    g, sp = sl.get('unnamed'), sl.get('species')
+    if not (g and sp) or ident.get('guess') not in (None, g):
+        return False
+    return unreadable_species(dict(ident, guess=None), kind, idx, ctx, [g]) == sp
+
+
+def unreadable_target(idn: dict, kind: str, idx: int, t: dict, ctx: dict) -> bool:
+    """take 的身分確認（找卡 / 取前 / 取後共用）：名字框讀不出時 unreadable_species 認出的物種 == 目標名字；
+    目標有成長字串時候選只用它、且現場 OCR 要跟它不矛盾。目標沒名字也沒字串（只給等級）→ False（照原規則）"""
+    if not (t.get('name') or t.get('growth')):
+        return False
+    if t.get('growth'):
+        if idn.get('guess') not in (None, t['growth']):
+            return False
+        sp = unreadable_species(dict(idn, guess=None), kind, idx, ctx, [t['growth']])
+    else:
+        sp = unreadable_species(idn, kind, idx, ctx)
+    return bool(sp) and t.get('name') in (None, sp)
 
 
 def read_slot(i: int, ctx: dict) -> dict:
@@ -1536,7 +1584,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
         if rc:
             return rc
     ident = read_ident(ctx)
-    if not ident_matches(ident, sl):
+    if not ident_confirms(ident, sl, 'slot', i, ctx):
         return bad(EXIT_DEPOT, f'倉庫分頁中選取的是 {ident["name"] or ident["growth"]}（要 {want}），不點存入')
     now_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
     if now_cols is None or not thumb_same(pre_t, now_cols[:16]) or (i != 0 and not mount_same(pre_mount, now_cols[16:])):
@@ -1563,7 +1611,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     # 事後驗證（#84）：倉庫存入後會重新排序，不能認固定格位 → 寵物欄空格 +1 / 倉庫張數 +1（上面 wait_counts 已確認）
     # 再「現場逐張選卡讀名字」確認倉庫裡找得到這隻（先看新增的那格，再依序其他格）；沒名字的寵物比成長字串
     new_idx = next((k for k in range(20) if not d2['empty'][k] and d['empty'][k]), free_idx)
-    found = find_card(d2, depot, lambda idn: ident_matches(idn, sl), ctx, first=new_idx, info=info)
+    found = find_card(d2, depot, lambda idn, k: ident_confirms(idn, sl, 'card', k, ctx), ctx, first=new_idx, info=info)
     info['depot_index'] = None if found is None else found + 1
     if found is None:
         uikit.snap('pet-store-notfound')
@@ -1623,7 +1671,7 @@ def card_order(filled: list, first: int | None) -> list:
 
 
 def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, info: dict | None = None):
-    """倉庫（d = scan_depot 結果）逐張選卡讀名字框，pred(ident) 成立的第一格 index（0 起算）；找不到 / 面板消失 → None。
+    """倉庫（d = scan_depot 結果）逐張選卡讀名字框，pred(ident, 卡 index) 成立的第一格 index（0 起算）；找不到 / 面板消失 → None。
     選卡只是選取（無副作用）；每張卡先等選取框移過去才讀（讀到上一張的名字是舊資料）。info['cards'] 記讀到的每張（debug / take 用）"""
     seen = {}
     for k in card_order([not e for e in d['empty']], first):
@@ -1634,7 +1682,7 @@ def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, in
             continue
         idn = read_ident(ctx, 4, 1.0)
         seen[k + 1] = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
-        if pred(idn):
+        if pred(idn, k):
             if info is not None:
                 info['cards'] = seen
             return k
@@ -1767,9 +1815,12 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
         cache[k] = {'name': idn['name'], 'growth': idn['growth']}
         seen[k + 1] = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
         if not (target_ok(idn, t, reg) and (idn['name'] or idn['growth'])):
-            if not img_target('card', k, idn, t, ctx, info):          # 名字框認不出 → 縮圖比頭像（取出後還會再驗）
+            if unreadable_target(idn, 'card', k, t, ctx):              # 名字框讀不出：候選字串登錄 + 縮圖一致（共用規則）
+                seen[k + 1] = f'?≈{fmt_target(t)}(登錄+圖)'
+            elif img_target('card', k, idn, t, ctx, info):              # 名字框認不出 → 縮圖比頭像（取出後還會再驗）
+                seen[k + 1] = f'{seen[k + 1] or "?"}≈{t["name"]}(圖)'
+            else:
                 continue
-            seen[k + 1] = f'{seen[k + 1] or "?"}≈{t["name"]}(圖)'
         if t.get('level') is None:
             info['cards'] = seen
             return k, ''
@@ -1832,7 +1883,7 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
     cache[idx] = {'name': idn['name'], 'growth': idn['growth']}
     nm = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
     info['depot_name'] = nm
-    img_ok = not (nm and target_ok(idn, t, reg)) and img_target('card', idx, idn, t, ctx, info)
+    img_ok = not (nm and target_ok(idn, t, reg)) and (unreadable_target(idn, 'card', idx, t, ctx) or img_target('card', idx, idn, t, ctx, info))
     if img_ok:
         info['img_pre'] = True
     if not nm and not img_ok:
@@ -1875,6 +1926,8 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格，物種 {sp}），不是預期的 {want}！停手交人處理，不自動存回')
         if t.get('growth') and idn2['growth'] != t['growth']:
             return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），成長字串不是 {t["growth"]}！停手交人處理，不自動存回')
+    elif nm2 is None and unreadable_target(idn2, 'slot', new_slot - 1, t, ctx):   # 名字框讀不出：候選字串登錄 + 縮圖一致（共用規則）
+        info['species'] = t.get('name')
     elif (want and nm2 != want and not (nm2 is None and img_target('slot', new_slot - 1, idn2, t, ctx, info))) or t.get('growth'):
         return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {fmt_target(t)}！停手交人處理，不自動存回')
     el = t.get('level')
@@ -2063,6 +2116,8 @@ def card_ident(k: int, idn: dict, ctx: dict) -> dict:
         d['species'], d['src'] = d['name'], 'name'
     elif d['growth'] and reg.get(d['growth']):
         d['species'], d['src'] = reg[d['growth']], 'reg'
+    elif (us := unreadable_species(idn, 'card', k, ctx)):               # 讀不出：候選字串登錄 + 縮圖一致（共用規則）
+        d['species'], d['src'] = us, 'reg+img'
     else:
         im = img_ident('card', k, ctx)
         if im and im.get('img_species'):
