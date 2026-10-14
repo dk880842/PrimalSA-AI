@@ -21,7 +21,7 @@ HERE = Path(__file__).resolve().parent
 CACHE_DIR = HERE.parent / '.cache'
 FIX_DIR = HERE / 'fixtures' / 'petimg'
 PAD = 2
-NAMES = ['bn_0.png', 's0.png', 's4.png', 's5.png', 'z.png', 'dep.png', 'dep2.png', 'f0.png', 'm7.png', 'catch-m0/dep1.png']
+NAMES = ['bn_0.png', 's0.png', 's4.png', 's5.png', 'z.png', 'dep.png', 'dep2.png', 'f0.png', 'm7.png', 'catch-m0/dep1.png', 'k1.png']
 
 
 class _Shots:

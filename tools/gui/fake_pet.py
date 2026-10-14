@@ -439,6 +439,7 @@ def install(g):
     import heal
     import petwatch
     pet.IMG_ON = False
+    pet.GLYPH_ON = False                 # 假面板的名字框 / 卡片字不是遊戲字型（字形樣板測試在 test_petglyph.py 用實機點陣）
     uikit.gui = g.gui
     uikit.sleep = lambda s: None
     t = [0.0]

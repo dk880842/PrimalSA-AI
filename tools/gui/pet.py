@@ -24,7 +24,8 @@
   名字框讀不出（2026-10-14 40/9/6/5：Windows OCR 把「40」讀成「姍」）：先加讀 -Zooms 5,6；仍讀不出 → list 給 unreadable=True、guess=候選字串（只有一種完整字串、
     其餘行不矛盾），候選字串已登錄成 X 且縮圖也認成 X（且 X 不是騎寵）→ 當作沒名字的 X（species_src='img+reg-guess'，store / take 身分可用）；
     learn-species 對讀不出的格也可用（只收第 2～5 格、等待中、非騎寵，--confirm-growth 要跟現場 OCR 行不矛盾、縮圖不矛盾）
-  共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、--timing、
+  共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、
+    --no-glyph（不用字形樣板 petglyph：名字框成長字串 / 倉庫卡字與等級改回全部 OCR + 逐張選卡；2026-10-14）、--timing、
     --no-icache（不用身分跨程序快取：成長字串以名字框點陣完全相同為鍵、縮圖結果以整格像素 + 候選為鍵；只在 list / levels / set-state-many / rest-all 用，
     存倉 / 取出 / 丟寵 / learn-species 一律現場 OCR；tools/.cache/pet-tpl/ident-cache-<版面>.json，7 天過期，2026-10-13 review 1013b §1.1）、
     --candidates 物種,物種（任務候選：沒名字的寵物 / 倉庫卡只在這些之間比縮圖，inlier + 主色都同意才算；有把握且登錄檔不矛盾 → 當 species，2026-10-13 卡坦 4 鯊 / 4 雞）
@@ -124,6 +125,8 @@ CONFIRM = uikit.Panel('PETCONFIRM', None, CONFIRM_SIG, (946, 208))
 TAB_WAIT_S = 2.0
 
 BANNER_RETRIES, BANNER_WAIT_S = 2, 0.8
+SLOT_BANNER_POLLS, SLOT_BANNER_POLL_S = 5, 0.3      # read_slot：橫幅蓋住時每 0.3 s 重讀（最多 5 次）；2026-10-14 實測橫幅每 3～6 秒出現、蓋 1.2～1.6 秒（舊：0.8 s × 2）
+SLOT_CLICK_WAIT_MS = 100                            # 選寵物格只是選取（之後 wait_for 輪詢黃框 + stale_suspect 防殘影），點後少等一點
 OCR_NAME = [('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 120, '-Zooms', '2,3')]
 OCR_GROWTH_EXTRA = ('-Dark', 0, '-Zooms', '5,6')     # 名字框像成長字串但兩組都湊不齊時加讀一組：2026-10-14 實測 40/9/6/5 在 -Zooms 2 / 4 讀成「姍/9/6/5」「姍/6/5」，
                                                      # 只有 3 倍讀對（1 行不夠 parse_growth 採用）→ 5,6 倍也讀對 → 2 行同意
@@ -274,7 +277,7 @@ def select_slot(i: int, f: dict) -> int:
     if f['sel'][i] and sum(f['sel']) == 1:
         return 0
     for attempt in range(2):
-        if not click(SLOT_X, SLOT_Y[i], f'pet 選第 {i + 1} 格'):
+        if not uikit.safe_click(SLOT_X, SLOT_Y[i], uikit.PET, note=f'pet 選第 {i + 1} 格', wait_ms=SLOT_CLICK_WAIT_MS):
             return uikit_fail(EXIT_PANEL, '寵物面板特徵不在，沒點寵物格')
         g, ok = wait_for(lambda g, i=i: g['sel'] == [k == i for k in range(5)], SELECT_WAIT_S)
         if ok:
@@ -427,9 +430,31 @@ def icache_put(ctx: dict, sec: str, key, val) -> None:
 
 
 def growth_known(name_rows, ctx: dict) -> bool:
-    """這張名字框點陣已知是成長字串（本程序讀過 / 快取有）→ 不是被橫幅蓋住的名字（read_slot 不必等橫幅重讀）"""
+    """這張名字框點陣已知是成長字串（本程序讀過 / 快取有 / 字形樣板讀得出）→ 不是被橫幅蓋住的名字（read_slot 不必等橫幅重讀）"""
     k = rows_key(name_rows)
-    return k is not None and (k in ctx.get('gcache', {}) or k in ((icache(ctx) or {}).get('growth') or {}))
+    return k is not None and (k in ctx.get('gcache', {}) or k in ((icache(ctx) or {}).get('growth') or {})
+                              or glyph_growth(name_rows, ctx) is not None)
+
+
+GLYPH_ON = True                                # --no-glyph 關（字形樣板讀成長字串 / 卡片字，petglyph.py，2026-10-14）
+
+
+def glyph_growth(name_rows, ctx: dict) -> str | None:
+    """名字框點陣 → 字形樣板讀成長字串（petglyph.read_growth：每個字都認得、置中、格式 a/b/c/d 才算；約 1 ms，不 OCR）。
+    讀到就記進 ctx['gcache']（同一張點陣不重讀）。關閉 / 讀不出 → None（呼叫端照舊 OCR）"""
+    if not GLYPH_ON or ctx.get('no_glyph') or not name_rows:
+        return None
+    key = rows_key(name_rows)
+    gc = ctx.setdefault('gcache', {})
+    if key in gc:
+        return gc[key]
+    import petglyph
+    g = petglyph.read_growth(name_rows, 'cream')
+    if g:
+        gc[key] = g
+        ctx.setdefault('glyph_keys', set()).add(key)
+        ctx['glyph_hits'] = ctx.get('glyph_hits', 0) + 1
+    return g
 
 
 def resolve_name(name_rows, ctx: dict) -> tuple:
@@ -449,7 +474,10 @@ def resolve_ident(name_rows, ctx: dict) -> dict:
     gc = ctx.setdefault('gcache', {})
     key = rows_key(name_rows)
     if key is not None and key in gc:
-        return {'name': None, 'via': 'growth', 'raw': None, 'growth': gc[key]}
+        return {'name': None, 'via': 'growth', 'raw': None, 'growth': gc[key], 'glyph': key in ctx.get('glyph_keys', ())}
+    g = glyph_growth(name_rows, ctx)                            # 字形樣板（2026-10-14）：成長字串不用 OCR（OCR 會把 40 讀成「姍」、每格 2～3 組 0.3～1 s）
+    if g:
+        return {'name': None, 'via': 'growth', 'raw': None, 'growth': g, 'glyph': True}
     hit = ((icache(ctx) or {}).get('growth') or {}).get(key) if key else None
     if hit:                                                     # 跨程序快取：點陣完全相同 = 畫面文字完全相同
         gc[key] = hit[0]
@@ -465,6 +493,10 @@ def resolve_ident(name_rows, ctx: dict) -> dict:
             if g:
                 gc[key] = g
                 icache_put(ctx, 'growth', key, g)
+                if ctx['learn'] and GLYPH_ON and not ctx.get('no_glyph'):    # 字形樣板沒讀出來、OCR 讀到了 → 學字（已認得的字要都不矛盾，見 petglyph.learn_growth）
+                    import petglyph
+                    if petglyph.learn_growth(name_rows, g, 'cream'):
+                        log(f'字形樣板學到 {g} 的新字形')
                 return {'name': None, 'via': 'growth', 'raw': raw, 'growth': g}
             guess = petmatch.growth_guess(raw)                     # 仍讀不出：只留候選字串（read_slot 要「已登錄 + 縮圖同物種」才採用）
             if guess:
@@ -674,16 +706,16 @@ def read_slot(i: int, ctx: dict) -> dict:
     """目前選中的寵物（已確認是第 i 格）→ {'slot','name','via','ocr','state','level','lv_via','mountlike'}"""
     tpl = ctx['tpl']
     probes = [p for s in STATES for p in BTN_PROBES[s]]
-    for attempt in range(BANNER_RETRIES + 1):
+    for attempt in range(SLOT_BANNER_POLLS + 1):
         rows, extra = petmatch.grab([petmatch.BOX_NAME + ('name',), petmatch.BOX_LVL + ('lvl',)], extra=probes)
         if rows is None:
             break
         known = (tpl.get('name') and petmatch.match_whole('name', rows[0], tpl)[0] is None and not growth_known(rows[0], ctx)) \
             or (tpl.get('digit') and petmatch.read_level(rows[1], tpl) is None)
-        if not known or attempt == BANNER_RETRIES:
+        if not known or attempt == SLOT_BANNER_POLLS:
             break
-        uikit.sleep(BANNER_WAIT_S)              # 樣板都有卻對不上：多半是 EXP 橫幅 / 浮字蓋住（掛機中常見），等它消失再讀
-        uikit.mark('banner-retry')
+        uikit.sleep(SLOT_BANNER_POLL_S)         # 樣板都有卻對不上：多半是 EXP 橫幅 / 浮字蓋住（掛機中常見，每 3～6 秒蓋 1.2～1.6 秒），短間隔輪詢等它消失
+        uikit.mark(f'banner-retry {i + 1}')
     d = {'slot': i + 1, 'empty': False, 'name': None, 'via': None, 'state': None, 'level': None}
     ctx.pop('img_cache', None)                             # 縮圖結果只給「這一格」用（ident_species → 下面的補充顯示）
     if rows is None:
@@ -696,6 +728,8 @@ def read_slot(i: int, ctx: dict) -> dict:
     d['name'], d['via'], raw = ident['name'], ident['via'], ident['raw']
     if raw:
         d['ocr'] = raw
+    if ident.get('glyph'):
+        d['glyph'] = True                                # 成長字串由字形樣板讀出（沒 OCR）
     if ident['growth']:                                  # 沒名字的新寵物：成長字串 = 這隻的身分；物種由縮圖 / 登錄檔確認
         d['unnamed'] = ident['growth']
         d['raw_name'] = f'?({ident["growth"]})'
@@ -928,6 +962,7 @@ def list_roles(role_arg: str = 'all', as_json: bool = False, pause: bool = False
                     print(fmt_slot(sl))
         save_ctx(ctx)
     info['icache_hits'] = ctx.get('icache_hits', 0)
+    info['glyph_hits'] = ctx.get('glyph_hits', 0)
     return _out(0, info, t0)
 
 
@@ -1724,7 +1759,13 @@ def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, in
     """倉庫（d = scan_depot 結果）逐張選卡讀名字框，pred(ident, 卡 index) 成立的第一格 index（0 起算）；找不到 / 面板消失 → None。
     選卡只是選取（無副作用）；每張卡先等選取框移過去才讀（讀到上一張的名字是舊資料）。info['cards'] 記讀到的每張（debug / take 用）"""
     seen = {}
-    for k in card_order([not e for e in d['empty']], first):
+    order = card_order([not e for e in d['empty']], first)
+    gl = glyph_cards(d)
+    if gl:                                               # 卡片字已像目標的先看（不選卡讀；只決定順序，判定仍用選卡後的名字框）
+        import petglyph
+        pref = [k for k in order if k in gl and (gl[k]['name'] or gl[k]['growth']) and pred(petglyph.card_ident_text(gl[k]), k)]
+        order = pref + [k for k in order if k not in pref]
+    for k in order:
         if not click_card(k, f'pet 找倉庫卡 第 {k + 1} 格'):
             break
         g, ok = wait_for_card(k, depot)
@@ -1825,15 +1866,49 @@ def level_uncertain(lv: int | None, want: int | None) -> bool:
 def card_level_now(idx: int, extra: bool = False) -> int | None:
     """倉庫第 idx 格（0 起算）卡片下緣的等級（OCR；倉庫分頁中間沒有等級欄，只有卡片綠字；不用選卡）。讀不到 / 不一致 None。
     先讀 CARD_LVL_OPTS 第一組，已有 ≥ 2 行同值且沒有矛盾就停；extra = 再加讀 CARD_LVL_EXTRA（逐張確認用）"""
+    rows = None
+    if GLYPH_ON:                                         # 字形樣板（2026-10-14：12 張卡 195 次讀取 0 錯；OCR 會掉百位 123 → 23）
+        rows = glyph_card_rows(idx)
+        import petglyph
+        v = petglyph.read_card_level(rows) if rows else None
+        if v is not None:
+            return v
     cx, cy = card_xy(idx)
     dx, dy, w, h = CARD_LVL_BOX
     lines = []
+    v = None
     for opts in CARD_LVL_OPTS + (CARD_LVL_EXTRA if extra else []):
         lines += _petwatch().ocr((cx + dx, cy + dy, w, h), *opts)
         v = parse_card_level(lines)
         if v is not None and card_level_votes(lines).get(v, 0) >= 2 and not extra:
-            return v
-    return parse_card_level(lines)
+            break
+    else:
+        v = parse_card_level(lines)
+    if v is not None and rows and card_level_votes(lines).get(v, 0) >= 2:
+        import petglyph
+        if petglyph.learn_card_level(rows, v):          # OCR ≥ 2 行同意、字形樣板讀不出 → 學這幾個數字（已認得的字要不矛盾）
+            log(f'卡片等級字形學到 Lv{v}')
+    return v
+
+
+def glyph_card_rows(idx: int):
+    """倉庫第 idx 張卡（0 起算）下緣綠字框的二值點陣（petglyph.CARD_LVL）；讀不到 None"""
+    import petglyph
+    x, y, w, h = petglyph.card_box(idx, petglyph.CARD_LVL)
+    cols = uikit.px([(x + i, y + j) for j in range(h) for i in range(w)])
+    return petglyph.binarize(cols, w, h, 'green') if cols else None
+
+
+def glyph_cards(d: dict | None) -> dict:
+    """倉庫分頁（d = scan_depot 結果）：非空卡一次讀卡片上的白字名字 / 成長字串 + 綠字等級（petglyph.read_cards，不選卡、不受
+    「戰鬥結束選取跳回寵物欄」影響）→ {卡 index(0 起): {'name', 'growth', 'level', ...}}。關閉 / 讀不到 → {}。
+    **只拿來決定先看哪張 / 少點幾張**；存取前仍一律選卡讀名字框核對（取出鈕前驗證不變）"""
+    if not GLYPH_ON or not d or not d.get('sig'):
+        return {}
+    import petglyph
+    cs = petglyph.read_cards(d['empty'])
+    uikit.mark('glyph cards')
+    return {c['index'] - 1: c for c in cs or []}
 
 
 def take(role_arg: str, depot: str = 'personal', index: int | None = None, expect: str | None = None,
@@ -1909,7 +1984,13 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
     仍不確定 → 只有「這名字全倉庫就這一張」才選它（取出後再驗等級），否則 None（不取；2026-10-14 卡坦 restore 取到 Lv130 的教訓）"""
     reg = species_reg(ctx)
     filled = [k for k in range(20) if not d['empty'][k]]
+    gl = glyph_cards(d)                                  # 卡片字（不選卡）先猜哪張像目標：只決定順序，每張照樣選卡讀名字框
+    for k, c in gl.items():
+        if k not in cache and (c['name'] or c['growth']):
+            cache[k] = {'name': c['name'], 'growth': c['growth']}
     hit = [k for k in filled if k in cache and target_ok(cache[k], t, reg)]
+    if t.get('level') is not None:
+        hit.sort(key=lambda k: (gl.get(k) or {}).get('level') != t['level'])
     unk = [k for k in filled if k not in cache]
     rest = [k for k in filled if k not in hit and k not in unk]
     seen, cands, named = {}, [], []
@@ -2322,16 +2403,46 @@ def read_depot_cards(depot: str, ctx: dict) -> tuple:
     if rc:
         return rc, []
     out = []
+    gl = glyph_cards(d)                                  # 先讀卡片上的字（不選卡）：讀得出名字 / 成長字串的卡不用點（2026-10-14 掛機中選卡會被戰鬥結束刷新跳回）
     for k in [i for i in range(20) if not d['empty'][i]]:
+        c = gl.get(k)
+        if c and (c['name'] or c['growth']):
+            import petglyph
+            ci = card_ident(k, petglyph.card_ident_text(c), ctx)
+            ci.update(level=c['level'], via='card-glyph')
+            out.append(ci)
+            continue
         if not click_card(k, f'pet 讀倉庫卡 第 {k + 1} 格'):
             return uikit_fail(EXIT_PANEL, '面板特徵不在，沒點倉庫格'), out
         _, ok = wait_for_card(k, depot)
         if not ok:
             out.append({'index': k + 1, 'name': None, 'growth': None, 'guess': None, 'species': None, 'src': 'select-fail'})
             continue
-        out.append(card_ident(k, read_ident(ctx, 2, 0.6), ctx))
+        idn = read_ident(ctx, 2, 0.6)
+        ci = card_ident(k, idn, ctx)
+        if c is not None:
+            ci['level'] = c['level']
+            learn_card_text(c, idn, ctx)
+        out.append(ci)
     uikit.mark(f'depot-list {depot}')
     return 0, out
+
+
+def learn_card_text(c: dict, idn: dict, ctx: dict) -> None:
+    """卡片字讀不出、選卡後名字框讀到可信身分（名字樣板 / OCR 精確、或 OCR ≥ 2 行同意的成長字串）→ 學卡片字形 / 名字整塊圖。
+    要確認選取沒被戰鬥結束刷新跳走（選中框仍在這張）才學"""
+    if not ctx.get('learn') or not GLYPH_ON:
+        return
+    d = scan_depot()
+    if not (d and d['sel'][c['index'] - 1] and sum(d['sel']) == 1):
+        return
+    import petglyph
+    if idn.get('growth') and not c.get('growth'):
+        if petglyph.learn_growth(c['text_rows'], idn['growth'], 'white'):
+            log(f'卡片白字字形學到 {idn["growth"]}')
+    elif idn.get('name') and idn.get('via') in ('tpl', 'ocr') and not c.get('name'):
+        if petglyph.learn_card_name(c['text_rows'], idn['name']):
+            log(f'卡片名字整塊圖學到 {idn["name"]}')
 
 
 def count_cards(cards: list) -> dict:
@@ -2483,6 +2594,7 @@ def main() -> int:
     cp.add_argument('--no-learn', action='store_true', help='不學 / 不存名字與等級樣板')
     cp.add_argument('--timing', action='store_true', help='最後一行 JSON 多一個 t 欄位：各階段毫秒')
     cp.add_argument('--no-img', action='store_true', help='不用縮圖比知識庫頭像認物種（名字認不出時的備援，petimg_match）')
+    cp.add_argument('--no-glyph', action='store_true', help='不用字形樣板讀成長字串 / 倉庫卡字（petglyph；改回全部 OCR + 逐張選卡）')
     cp.add_argument('--candidates', default=None, metavar='名,名', help='任務候選物種：沒名字的寵物只在這些之間比縮圖（相對比較 + 主色；例 卡坦 4 鯊）')
     cp.add_argument('--no-icache', action='store_true', help='不用身分跨程序快取（成長字串 / 縮圖結果；只影響 list / levels / set-state-many / rest-all）')
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -2553,9 +2665,11 @@ def main() -> int:
         uikit.gui('pixel', '1,1')
         uikit.mark('server-start')
     learn = not a.no_learn
-    global IMG_ON, IMG_ONLY, ICACHE_ON
+    global IMG_ON, IMG_ONLY, ICACHE_ON, GLYPH_ON
     if a.no_img:
         IMG_ON = False
+    if a.no_glyph:
+        GLYPH_ON = False
     if a.no_icache:
         ICACHE_ON = False
     if a.candidates:

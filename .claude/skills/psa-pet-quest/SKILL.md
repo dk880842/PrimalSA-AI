@@ -12,6 +12,11 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 **多人一律用批次版**（2026-10-12）：`pet.py store-many / take-many [--plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"] / set-state-many`、`bag.py store|take all 名稱 [--skip-missing]`、`pet_catch.py --lock / --autoswap`：面板只開一次、倉庫分頁 / 子分頁只切一次、左欄頭像換人連續做完再關（不要一人一次開關）；新抓的寵物沒名字（名字框是成長字串）見下方「轉生後寵物重整」。
 
 
+## 讀寵物身分變快 / 變準（2026-10-14 petglyph）
+- 成長字串（沒名字的新寵物）改用字形樣板讀（不 OCR，不會再把 40 讀成「姍」）；倉庫 `depot-list` 一次讀全部卡片上的白字 / 綠字，**不再逐張選卡**（掛機中選卡會被戰鬥結束刷新跳回寵物欄第 1 格 → 讀到別隻）；`take` 找卡先點卡片字像目標的那張（等級同時對上的優先）。細節 / 實測見 `../psa-game-ui/ui/pet.md`「字形樣板讀字」。
+- 候選內縮圖決勝加第三關投票：卡坦倉庫卡 奇寶 / 克克洛斯（冠毛被字蓋住）不再 None。
+- 種子字形缺「3」（名字框、卡片白字）與綠字「4 5 6」：第一次遇到走 OCR、讀到就學，之後就快。**實機存取（store / take）時仍要 `--pause-encounter`**。
+
 ## 總控腳本 `petquest.py`（2026-10-13，**只有離線測試，整支未實機**）
 一行跑完一個寵物任務（接取 → 抓 / 分 / 練 → 交 → 丟獎勵寵 → 換回原戰寵），每段呼叫下面各節的既有腳本，失敗停在該段、印手動指令，進度檔 `tools/.cache/petquest.json` 續跑：
 ```

@@ -341,10 +341,11 @@ def rank_among(get, kind: str, cx: int, cy: int, names) -> dict:
     → {'species', 'imageId', 'best_species', 'score', 'second', 'second_species', 'hist', 'hist_second', 'ok', 'ranked'}"""
     cells = _cells(get, kind, cx, cy)
     ids = ids_for(names)
-    sc = {}
+    sc, pos_of = {}, {}
     for i in ids:
         pos = _best_pos(template(i, kind), cells, kind, cx, cy)
         sc[i] = (pos[0], color_score(cells, kind, i, pos))
+        pos_of[i] = pos
     ranked = sorted(((v[0], i) for i, v in sc.items()), reverse=True)
     top_s, top_i = ranked[0]
     top_k = species_key(species_name(top_i))
@@ -352,9 +353,15 @@ def rank_among(get, kind: str, cx: int, cy: int, names) -> dict:
     hr = sorted(((v[1], i) for i, v in sc.items()), reverse=True)
     h_top_i = hr[0][1]
     h_sec = next((h for h, i in hr[1:] if species_key(species_name(i)) != species_key(species_name(h_top_i))), 0.0)
-    ok = (top_s >= MIN_SCORE[kind] and top_s - sec_s >= REL_MARGIN
-          and species_key(species_name(h_top_i)) == top_k and sc[top_i][1] - h_sec >= HIST_MARGIN)
-    return {'species': species_name(top_i) if ok else None, 'imageId': top_i if ok else None,
+    agree = top_s >= MIN_SCORE[kind] and species_key(species_name(h_top_i)) == top_k
+    ok = agree and top_s - sec_s >= REL_MARGIN and sc[top_i][1] - h_sec >= HIST_MARGIN
+    tb = None
+    if agree and not ok and sec_i:
+        # 兩個特徵方向一致、只是分差不夠（倉庫卡 奇寶 / 克克洛斯：冠毛被成長字串蓋住，inlier 差 0.02、主色差 0.03）→
+        # 第三關：只看兩樣板明顯不同的點投票（_tiebreak，同 match 的第二關），贏家要是同一隻且票數 ≥ TIE_RATIO（2026-10-14 卡坦 21 張全判對、0 誤判）
+        tb = _tiebreak(cells, kind, (top_i, pos_of[top_i]), (sec_i, pos_of[sec_i]))
+        ok = tb['winner'] == top_i
+    return {'species': species_name(top_i) if ok else None, 'imageId': top_i if ok else None, 'tiebreak': tb,
             'best_species': species_name(top_i), 'score': round(top_s, 3), 'second': round(sec_s, 3),
             'second_species': species_name(sec_i) if sec_i else None,
             'hist': round(sc[top_i][1], 3), 'hist_second': round(h_sec, 3), 'hist_best': species_name(h_top_i), 'ok': ok,

@@ -151,6 +151,16 @@ def main() -> int:
         res = {(r['kind'], r['index']): r for r in M.scan_shot(p, cand, among=True)}
         miss = [(k, w, res[k]['species'] if k in res else '空格?') for k, w in want.items() if k not in res or res[k]['species'] != w]
         check(f'rank_among {fn} 全部認對（不在候選 → None）', not miss, str(miss))
+    # 2026-10-14 卡坦：倉庫卡 奇寶（紅冠，目視）/ 克克洛斯 inlier 差 0.02、主色差 0.03 → 舊版 None；第三關 _tiebreak 投票判對
+    p = CACHE / 'k1.png'
+    if p.exists():
+        res = {(r['kind'], r['index']): r for r in M.scan_shot(p, turkeys, among=True)}
+        r = res[('card', 2)]
+        check('rank_among k1.png 卡 2 奇寶（分差不夠 → 投票）', r['species'] == '奇寶' and r['tiebreak'] and r['tiebreak']['winner'], str(r))
+        check('rank_among k1.png 摩娜西普 / 巴朵蘭恩 / 左迪洛斯 卡不在候選 → None',
+              all(res[('card', i)]['species'] is None for i in (5, 6, 9)))
+    else:
+        print('SKIP 截圖不在 k1.png')
     # 合成：換色版只差顏色（同輪廓）→ 主色直方圖分得開
     a = M.ids_for(['加克拉'])[0]
     r = M.rank_among(fake_cell(a, 'slot', cx, cy, shift=(2, -1)), 'slot', cx, cy, sharks)

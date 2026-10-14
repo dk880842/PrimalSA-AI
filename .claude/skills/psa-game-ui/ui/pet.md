@@ -178,3 +178,28 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
 - **`pet.py levels [--role all] [--slots 2,3,4,5] [--json]`**：唯讀，每人選頭像 → 只點指定格 → 只讀等級（樣板 → OCR 共識，同 `level_from_rows`）+ 名字框點陣指紋 `nh`（不認名字 / 身分）。`list` 每格也多 `nh`。petquest 練寵輪詢：第一次 list、之後 levels，`nh` 對不上 / 格變空 → 那輪改讀 list。
 - 實機要確認：①同一隻寵物名字框點陣在不同時間是否真的完全相同（不同 → 只是快取沒中，照舊 OCR）；②levels 在快戰掛機中讀等級的穩定度、每人耗時。
 
+
+## 字形樣板讀字 `petglyph.py`（2026-10-14，掛機中實機唯讀量測）
+- **為什麼**：成長字串 OCR 會讀錯 / 讀不出（40→「姍」、殘字、DKBO5 49/10/8/1 實機讀成 `49/>`、`49/14` → unreadable），每格 2～3 組 OCR + 等橫幅；倉庫卡綠字等級 OCR 掉百位；
+  而且**倉庫分頁選卡在快戰掛機中不可靠：戰鬥結束時面板刷新，選取跳回寵物欄第 1 格**（實機：選卡 1.4～2 秒後 sel 全空、名字框變回 46/9/7/1、中間鈕變回「存入寵物」）→ 逐張選卡讀名字框會讀到別隻（舊 depot-list 25 張有 5 張 select-fail）。
+  **存取前驗證（按鈕底色 + 文字 + 選取）仍照舊，但掛機中 store / take 一定要 `--pause-encounter`**（選取會被刷新跳走，按鈕字會變）。
+- **作法**：字是固定字型、固定位置 → 半解析度（截圖座標）依字色二值化 → `digitmatch.segment` 切字 → 單字樣板（`digitmatch.Matcher`）。
+  - `cream` 名字框 430,160 200×45（成長字串 0～9 與 /）；`white` 倉庫卡上緣白字（卡心 (−52,−41) 104×25：成長字串單字樣板 / 名字整塊圖）；`green` 倉庫卡下緣綠字（卡心 (−52,+16) 104×28：「R轉N級」，「轉」「級」用高度 ≥ 18 分辨，只認數字）。
+  - 任何字認不出 / 兩候選太近 / **置中偏 > 3 px**（頭尾被蓋）/ **字距 > 5 px**（中間被蓋：49/10/8/1 掉 0 會變合法的 49/1/8/1）/ 格式不對 → None，退回 OCR（不猜）。離線「每個樣本拿掉任一個字」1259 種全部 None、0 讀錯。
+  - 樣板：種子 `tools/gui/fixtures/pet_glyph_tpl.json`（實機擷取 + 人工標籤，`petglyph.py build`）+ 執行中學到的 `tools/.cache/pet-tpl/glyph-2880x1659.json`（OCR ≥ 2 行同意、已認得的字都不矛盾、跟別的字不打架才學）。**種子缺字**：cream / white 沒有「3」、green 沒有「4 5 6」（這次實機沒有這些字的寵物）→ 遇到時第一次走 OCR、讀到就學。
+- **接線（pet.py）**：`resolve_ident` 名字樣板沒中 → 先字形讀成長字串（約 1 ms）再 OCR；`read_slot` 字形讀得出 = 不是橫幅（不等重讀），橫幅等待改每 0.3 s 輪詢（最多 5 次，舊 0.8 s × 2）；選寵物格點後只等 100 ms（之後輪詢黃框）。
+  `card_level_now` 先字形讀綠字等級再 OCR；`depot-list`（`read_depot_cards`）先一次 pixel 讀全部卡片字（**不選卡**），讀不出的卡才選卡讀名字框（讀到可信身分時順便學卡片字形）；
+  `take` 找卡（`_find_target_card`）/ `store` 存後找卡（`find_card`）用卡片字**只決定先點哪張**（像目標、等級相同的先看），判定照舊用選卡後的名字框。`--no-glyph` 全關（回舊行為）；`fake_pet.install` 關。
+- **實測（2026-10-14 15:00～15:20，地雷區快戰掛機中、5 人各 2 隻：布拉奇多斯〔成長字串〕+ 朵拉比斯）**：
+  | 項目 | 改前 | 改後 |
+  |---|---|---|
+  | `list --role all --no-icache` | 22.2～26.8 s（DKBO5 49/10/8/1 讀不出、DKBO3 48/10/7/2 有時讀不出） | 13.9～17.4 s，10 / 10 格全對，成長字串 5 / 5 字形讀出、0 次 OCR |
+  | 每格成長字串 | OCR 管線 1.3～1.5 s / 格（含橫幅重讀） | 字形 1 ms（擷取 0.2 s 不變） |
+  | `depot-list --depot public,personal --role DKBO,DKBO2`（25 張卡） | 41.3 s、20 對 5 讀不到（select-fail）、等級沒讀 | 12.7 s（讀卡 0.3～0.95 s / 頁、0 次點卡）、25 / 25 身分對、25 / 25 等級對 |
+  | 卡片白字 / 綠字（held-out 第 2 次擷取） | OCR `-Light 200` 58 / 65、`-Dark 0` 37 / 65 | 名字 160 / 165（5 張被浮字蓋住 → None）、成長字串 30 / 30、等級 195 / 195，0 讀錯 |
+  每人 2 隻約 2 s（選頭像 0.7 s + 每格選取 0.35～0.65 s + 讀 0.25 s），掛機中 EXP 橫幅每 3～6 秒蓋名字框 1.2～1.6 秒 → 多 0.5～1.6 s；5 隻的人推估 4～5 s（舊約 11 s）。
+- **擷取 / 重建**（唯讀，可在掛機中跑）：`uv run --no-project python tools/gui/petglyph.py capture --role all --depot public,personal [--ocr]` → `tools/.cache/petident/samples/cap-*.json`；
+  標籤寫 `tools/.cache/petident/labels.json`（`{"slot": {"DKBO:1": "46/9/7/1"}, "card": {"DKBO:personal:5": "#46/9/8/2@127"}}`）→ `petglyph.py eval labels caps…`（正確率 / 耗時）→ `build`（種子）→ `fixture`（測試樣本 `fixtures/petglyph_samples.json`）。
+  `petglyph.py read --depot`：面板開著時唯讀讀現在的名字框與全部卡片。測試 `test_petglyph.py`。
+- **縮圖候選內決勝（`petimg_match.rank_among`）加第三關**：inlier 第一名 ≥ 門檻且主色第一名同一隻、只是分差不夠時，前兩名做 `_tiebreak`（只看兩樣板明顯不同的點投票，贏家 ≥ 70%）。
+  2026-10-14 卡坦截圖：倉庫卡奇寶 / 克克洛斯（冠毛被成長字串蓋住）inlier 差 0.02、主色差 0.03 → 舊版 21 格 None → 現在 123 / 123 跟參考標籤一致（參考 = 全系比對結果，只有卡 2 紅冠是目視確認，非逐格人工標）；非候選 697 格 0 誤認（恐龍 / 鯊 / 雞三組）。測試 `test_petimg_match.py` 加 k1.png（固定檔）。恐龍 6 格、鯊 6 格全對（最小 inlier 分差 0.76 / 0.18）。
