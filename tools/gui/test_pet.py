@@ -1329,6 +1329,17 @@ check('img_target 撞號：目標在候選且縮圖認成目標才 True', pet.im
       and not pet.img_target('card', 0, {'growth': '49/10/6/3'}, {'name': '加格'}, ctx2))
 pet.img_ident = _sv
 
+# errlog #810：唯一字串（v2 前互蓋留下的錯單值）對上目標、但縮圖有把握是別種 → 跳過那張，取縮圖也對的那張
+_d3 = Path(tempfile.mkdtemp())
+petmatch.TPL_DIR = _d3
+petmatch.save_species({'thumb': {}, 'growth': {'49/10/6/3': '加克拉', '46/10/5/4': '加克拉'}})
+_pub = {'DKBO': {'public': [{'name': '加克拉', 'unnamed': '49/10/6/3', 'level': 1}, {'name': '加克拉', 'unnamed': '46/10/5/4', 'level': 1}]}}
+g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None]), depot=fake_pet.mk_depot(**_pub))
+pet.img_ident = lambda kind, idx, ctx: {'img_species': '邦恩吉' if (kind, idx) == ('card', 0) else '加克拉', 'img_score': 0.9}
+rc, out, err = run(pet.take, 'DKBO', 'public', None, None, False, True, '加克拉')
+pet.img_ident = _sv
+check('#810：字串登錄成加克拉但縮圖有把握是邦恩吉 → 跳過第 1 張、取第 2 張（46/10/5/4）', rc == 0 and g.pets['DKBO'][1].get('unnamed') == '46/10/5/4', f'rc={rc} {err[-300:]}')
+
 # ---- 2026-10-14 卡坦 register 漏登：選格後名字框還是上一格的字（殘影）→ list_role 重讀 ----
 check('stale_suspect：跟上一格點陣相同才懷疑；上一格空 / 沒 nh 不懷疑',
       pet.stale_suspect({'nh': 'a'}, {'nh': 'a'}) and not pet.stale_suspect({'nh': 'a'}, {'nh': 'b'})

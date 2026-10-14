@@ -1907,6 +1907,13 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
                 seen[k + 1] = f'{seen[k + 1] or "?"}≈{t["name"]}(圖)'
             else:
                 continue
+        elif t.get('name') and not idn['name'] and idn['growth']:
+            # 只靠成長字串對上（唯一登錄，可能是 v2 前互蓋留下的錯單值）：縮圖有把握是別種 → 不取（errlog #810：49/10/6/3 當加克拉取出、取後物種不符 76）
+            im = img_ident('card', k, ctx)
+            x = im and im.get('img_species')
+            if x and x != t['name']:
+                seen[k + 1] = f'{seen[k + 1]}≠圖{x}'
+                continue
         if t.get('level') is None:
             info['cards'] = seen
             return k, ''
