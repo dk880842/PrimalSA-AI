@@ -339,29 +339,77 @@ GROWTH_RE = re.compile(r'^\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d{1,3})\s*/\s*(\d
 THUMB_N, THUMB_TOL = 4, 24               # 縮圖每列 4 點（pet.THUMB_X）、每通道容差
 
 
-def parse_growth(lines) -> str | None:
-    """OCR 各行 → 成長字串 'a/b/c/d'：完整吻合的行至少 2 行相同且沒有別的完整字串 → 該字串；否則 None（實測 5 / 5 個角色有 ≥ 2 行相同，另有殘行如「49/8」）"""
+def growth_fields(t) -> list:
+    """'姍/9/6/5' → ['姍', '9', '6', '5']（去空白後以 / 切欄）"""
+    return re.sub(r'\s+', '', str(t)).split('/')
+
+
+def growth_compatible(line, whole: str) -> bool:
+    """OCR 殘行 line 跟完整成長字串 whole 不矛盾（純函式）：
+    (1) 去空白後是 whole 的子序列（掉字，#258 '34/8/8'）；或
+    (2) 以 / 切欄、靠右對齊（OCR 壞的多半是開頭那欄），含數字的欄必須逐欄完全相等，不含數字的欄（Windows OCR 把兩位數讀成一個漢字，
+        2026-10-14 實測 40/9/6/5 在 -Zooms 2 / 4 讀成「姍/9/6/5」「姍/6/5」）當萬用欄；萬用欄最多 1 個、至少 2 欄數字相等"""
+    t = re.sub(r'\s+', '', str(line))
+    if not t:
+        return False
+    it = iter(whole)
+    if all(ch in it for ch in t):
+        return True
+    fs, ws = growth_fields(t), whole.split('/')
+    if len(fs) > len(ws) or any(not f for f in fs):
+        return False
+    wild = same = 0
+    for f, w in zip(reversed(fs), reversed(ws)):
+        if not re.search(r'\d', f):
+            wild += 1
+        elif f == w or (f.isdigit() and str(int(f)) == w):
+            same += 1
+        else:
+            return False
+    return wild <= 1 and same >= 2
+
+
+def _growth_full(lines) -> Counter:
     full = Counter()
     for t in lines or []:
         m = GROWTH_RE.match(str(t))
         if m:
             full['/'.join(str(int(g)) for g in m.groups())] += 1
+    return full
+
+
+def parse_growth(lines) -> str | None:
+    """OCR 各行 → 成長字串 'a/b/c/d'：完整吻合的行至少 2 行相同且沒有別的完整字串 → 該字串；否則 None（實測 5 / 5 個角色有 ≥ 2 行相同，另有殘行如「49/8」）。
+    只有 1 行完整：其餘殘行至少 1 行、且全部跟它不矛盾（growth_compatible：掉字子序列，或某一欄被讀成漢字）才採用"""
+    full = _growth_full(lines)
     if not full:
         return None
     top = full.most_common()
-    if len(top) == 1 and top[0][1] == 1:                       # 只有 1 行完整：其餘殘行（掉字）至少 1 行且都是它的子序列才採用（2026-10-12 #258 倉庫分頁 '34/8/3/8' + 2 行 '34/8/8'）
+    if len(top) == 1 and top[0][1] == 1:                       # 只有 1 行完整（2026-10-12 #258 '34/8/3/8' + 2 行 '34/8/8'；2026-10-14 '40/9/6/5' + '姍/9/6/5' + '姍/6/5'）
         whole = top[0][0]
-        rest = [re.sub(r'\s+', '', str(t)) for t in lines if str(t).strip() and not GROWTH_RE.match(str(t))]
-
-        def subseq(a, b):
-            it = iter(b)
-            return all(ch in it for ch in a)
-        if len(rest) >= 1 and all(subseq(r, whole) for r in rest):
+        rest = [t for t in lines if str(t).strip() and not GROWTH_RE.match(str(t))]
+        if len(rest) >= 1 and all(growth_compatible(r, whole) for r in rest):
             return whole
         return None
     if top[0][1] < 2 or (len(top) > 1 and top[1][1] >= top[0][1]):
         return None
     return top[0][0]
+
+
+def growth_guess(lines) -> str | None:
+    """比 parse_growth 寬：只有一種完整字串（1 行也行）、其餘行都不矛盾 → 該字串；否則 None。
+    **只當候選**：名字框讀不出時，候選字串已登錄某物種、且縮圖認出同一物種，才當作該物種（pet.read_slot 三重確認），不單獨當身分"""
+    full = _growth_full(lines)
+    if len(full) != 1:
+        return None
+    whole = next(iter(full))
+    rest = [t for t in lines if str(t).strip() and not GROWTH_RE.match(str(t))]
+    return whole if all(growth_compatible(r, whole) for r in rest) else None
+
+
+def growth_like(lines) -> bool:
+    """OCR 行裡有沒有「像成長字串」的（含 / 且有數字）：名字框讀不出時要不要再加一組 OCR 設定重讀"""
+    return any('/' in str(t) and re.search(r'\d', str(t)) for t in lines or [])
 
 
 def inner_same(a, b, n: int = THUMB_N, tol: int = THUMB_TOL) -> bool:

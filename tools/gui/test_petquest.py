@@ -160,6 +160,16 @@ class Sim:
         assign = [a.split(':') for a in self.opt(args, '--assign').split(',')]
         k = int(self.opt(args, '--count'))
         stages = self.opt(args, '--stages')
+        if stages != 'bait' and getattr(self, 'partial', None):      # 模擬中途失敗：有人已抓了幾隻（第 1 格騎寵之後）、另一人設置失敗 → 14
+            for r, n in self.partial.items():
+                sp = next(x for rr, _, x in assign if rr == r)
+                self.bar[r] += [P(sp) for _ in range(n)]
+                self.bag_bait[r] = 0
+            for r, n in getattr(self, 'partial_personal', {}).items():
+                sp = next(x for rr, _, x in assign if rr == r)
+                self.personal[r] += [P(sp) for _ in range(n)]
+            self.partial = None
+            return self.out(14)
         if stages == 'bait':
             lines = []
             for r, _, _ in assign:
@@ -217,6 +227,11 @@ class Sim:
                 src.remove(hit)
                 self.bar[r].append(hit)
             return self.out(0)
+        if cmd == 'depot-list':                 # 唯讀：公共 + 指定角色個人倉庫各物種張數
+            self.depot_lists = getattr(self, 'depot_lists', 0) + 1
+            cnt = lambda ps: {n: sum(1 for p in ps if p['name'] == n) for n in {p['name'] for p in ps}}    # noqa: E731
+            roles = self.opt(args, '--role').split(',')
+            return self.out(0, js={'counts': {'public': cnt(self.public), 'personal': {r: cnt(self.personal[r]) for r in roles}}, 'rc': 0})
         if cmd == 'set-state-many':
             name, st = args[3], args[4]
             for r in ROLES:
@@ -467,6 +482,29 @@ rc = go(2016, s, confirm_drop=True)
 tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
 seq = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels')]
 check('levels 指紋對不上 → 那一輪改讀完整 list，之後回到只讀等級，仍練完', rc == 0 and seq[:3] == ['list', 'levels', 'list'] and seq[3] == 'levels', f'rc={rc} {seq[:6]}')
+
+# ---------------- 2026-10-14 抓寵中途失敗續跑：數實際數量（含倉庫），不重抓
+v = pq.recount_plan([('DKBO2', 'x', '魯尼帖斯'), ('DKBO3', 'y', '貝魯卡')],
+                    {'DKBO2': [P('布拉奇多斯', '騎乘'), P('魯尼帖斯'), P('魯尼帖斯'), P('魯尼帖斯')], 'DKBO3': [P('布拉奇多斯', '騎乘')]},
+                    {'魯尼帖斯': 1, '貝魯卡': 4}, {'DKBO3': {'貝魯卡': 1, '朵拉比斯': 1}}, 5)
+check('recount_plan：DKBO2 欄 3 + 公共 1 = 4 < 5 → 欄裡 3 隻全存公共；DKBO3 公共 4 + 個人 1（取回）= 5 → 欄留 1 不存不取',
+      v['DKBO2']['got'] == 4 and v['DKBO2']['store'] == 3 and v['DKBO2']['take_public'] == 0
+      and v['DKBO3']['got'] == 5 and v['DKBO3']['take_personal'] == 1 and v['DKBO3']['store'] == 0 and v['DKBO3']['take_public'] == 0, str(v))
+v = pq.recount_plan([('DKBO2', 'x', '魯尼帖斯')], {'DKBO2': [P('布拉奇多斯', '騎乘')]}, {'魯尼帖斯': 6}, {}, 5)
+check('recount_plan：公共已夠、欄裡 0 隻 → 從公共取 1 隻留著（抓寵者自己那隻）', v['DKBO2']['got'] == 6 and v['DKBO2']['take_public'] == 1 and v['DKBO2']['store'] == 0)
+s = grow(Sim(2016))
+s.partial = {'DKBO2': 3}                                       # 第 1 批：DKBO2 抓了 3 隻、DKBO3 設置失敗（14）
+s.partial_personal = {'DKBO3': 1}                              # DKBO3 有 1 隻溢到個人倉庫
+rc = go(2016, s, confirm_drop=True)
+check('抓寵中途失敗 → 164', rc == pq.EXIT_CATCH, f'rc={rc}')
+rc = go(2016, s, confirm_drop=True, reset=False)
+caught = [int(a[a.index('--count') + 1]) for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait']
+check('續跑：先 depot-list 數實際數量，DKBO2 只補 2 隻、DKBO3 補 4 隻（不重抓）且照樣完成', rc == 0 and getattr(s, 'depot_lists', 0) == 1
+      and caught[1:] == [4, 2] and all([p['name'] for p in s.bar[r]] == ['布拉奇多斯', '朵拉比斯'] for r in ROLES), f'rc={rc} {caught} {pq.LAST.get("info")}')
+check('續跑後 DKBO3 個人倉庫溢出的貝魯卡被取回分配（個人倉庫只剩朵拉比斯）', not any(p['name'] == '貝魯卡' for p in s.personal['DKBO3']), str(s.personal['DKBO3']))
+s = grow(Sim(2016))
+rc = go(2016, s, confirm_drop=True)
+check('全新開跑（寵物欄沒任務寵、沒開始標記）→ 不數倉庫', rc == 0 and getattr(s, 'depot_lists', 0) == 0)
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

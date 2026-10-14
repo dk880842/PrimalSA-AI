@@ -15,6 +15,10 @@
   uv run --no-project python tools/gui/pet.py set-state-many --role all 朵拉比斯 出戰 [--allow-mount]   # 多人同一隻寵物改狀態（面板只開一次）
   批次（2026-10-12）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 左欄頭像換角色連續做 → 關一次。目標字串 = 名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級
   uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
+  uv run --no-project python tools/gui/pet.py depot-list --depot public[,personal] [--role DKBO2,DKBO3] [--candidates 魯尼帖斯,貝魯卡]   # 唯讀：倉庫卡片 + 各物種張數（只選卡不存取）
+  名字框讀不出（2026-10-14 40/9/6/5：Windows OCR 把「40」讀成「姍」）：先加讀 -Zooms 5,6；仍讀不出 → list 給 unreadable=True、guess=候選字串（只有一種完整字串、
+    其餘行不矛盾），候選字串已登錄成 X 且縮圖也認成 X（且 X 不是騎寵）→ 當作沒名字的 X（species_src='img+reg-guess'，store / take 身分可用）；
+    learn-species 對讀不出的格也可用（只收第 2～5 格、等待中、非騎寵，--confirm-growth 要跟現場 OCR 行不矛盾、縮圖不矛盾）
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、--timing、
     --no-icache（不用身分跨程序快取：成長字串以名字框點陣完全相同為鍵、縮圖結果以整格像素 + 候選為鍵；只在 list / levels / set-state-many / rest-all 用，
     存倉 / 取出 / 丟寵 / learn-species 一律現場 OCR；tools/.cache/pet-tpl/ident-cache-<版面>.json，7 天過期，2026-10-13 review 1013b §1.1）、
@@ -116,6 +120,8 @@ TAB_WAIT_S = 2.0
 
 BANNER_RETRIES, BANNER_WAIT_S = 2, 0.8
 OCR_NAME = [('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 120, '-Zooms', '2,3')]
+OCR_GROWTH_EXTRA = ('-Dark', 0, '-Zooms', '5,6')     # 名字框像成長字串但兩組都湊不齊時加讀一組：2026-10-14 實測 40/9/6/5 在 -Zooms 2 / 4 讀成「姍/9/6/5」「姍/6/5」，
+                                                     # 只有 3 倍讀對（1 行不夠 parse_growth 採用）→ 5,6 倍也讀對 → 2 行同意
 OCR_LEVEL = [('-Dark', 0, '-Zooms', '2,3,4'), ('-Dark', 50, '-Zooms', '2,3,4'), ('-Dark', 70, '-Zooms', '2,3,4')]
 
 
@@ -448,10 +454,16 @@ def resolve_ident(name_rows, ctx: dict) -> dict:
         nm, raw, exact = ocr_pet_name()
         if not nm:
             g = petmatch.parse_growth(raw)
+            if not g and petmatch.growth_like(raw):               # 像成長字串但湊不齊（兩位數被讀成漢字）→ 加讀一組放大倍數（見 OCR_GROWTH_EXTRA）
+                raw = raw + [t for t in _petwatch().ocr(petmatch.BOX_NAME, *OCR_GROWTH_EXTRA) if uikit._pet_key(t)]
+                g = petmatch.parse_growth(raw)
             if g:
                 gc[key] = g
                 icache_put(ctx, 'growth', key, g)
                 return {'name': None, 'via': 'growth', 'raw': raw, 'growth': g}
+            guess = petmatch.growth_guess(raw)                     # 仍讀不出：只留候選字串（read_slot 要「已登錄 + 縮圖同物種」才採用）
+            if guess:
+                return {'name': None, 'via': None, 'raw': raw, 'growth': None, 'guess': guess}
         if nm and exact and ctx['learn']:
             again, _ = petmatch.grab([petmatch.BOX_NAME + ('name',)])
             if again and again[0] == name_rows and petmatch.learn_whole('name', nm, name_rows, tpl, log):    # 前後兩次截圖相同才學（避免畫面還沒換）
@@ -577,10 +589,24 @@ def slot_ident(sl: dict):
 
 
 def ident_matches(ident: dict, sl: dict) -> bool:
-    """現場讀到的名字框（resolve_ident 結果）是不是 sl 這隻：有名字比名字；沒名字比成長字串（同一隻固定）"""
+    """現場讀到的名字框（resolve_ident 結果）是不是 sl 這隻：有名字比名字；沒名字比成長字串（同一隻固定）。
+    sl 是「名字框讀不出、靠候選字串 + 登錄檔 + 縮圖」認的（sl['guess']）→ 現場也讀不出時比候選字串"""
     if sl.get('unnamed'):
-        return ident.get('growth') == sl['unnamed']
+        if ident.get('growth') == sl['unnamed']:
+            return True
+        return sl.get('guess') == sl['unnamed'] and not ident.get('growth') and ident.get('guess') == sl['unnamed']
     return bool(sl.get('name')) and ident.get('name') == sl['name']
+
+
+def guess_species(d: dict, reg: dict) -> str | None:
+    """純函式：名字框讀不出的格（read_slot 的 d，有 unreadable + guess）→ 物種或 None。
+    三重確認才採用：候選成長字串（growth_guess：只有一種完整字串、其餘行不矛盾）已登錄成 X、縮圖（img_species）也認成 X、X 不是騎寵"""
+    if not d.get('unreadable') or d.get('name') or d.get('unnamed') or not d.get('guess'):
+        return None
+    sg = (reg.get('growth') or {}).get(d['guess'])
+    if not sg or sg in uikit.MOUNTS or d.get('img_species') != sg:
+        return None
+    return sg
 
 
 def read_slot(i: int, ctx: dict) -> dict:
@@ -613,6 +639,10 @@ def read_slot(i: int, ctx: dict) -> dict:
         d['unnamed'] = ident['growth']
         d['raw_name'] = f'?({ident["growth"]})'
         d['species'] = ident_species(i, ident['growth'], ctx)
+    elif not d['name'] and petmatch.ink(name_rows) >= petmatch.MIN_INK['name']:     # 名字框有字但名字 / 成長字串都讀不出（2026-10-14 40/9/6/5）
+        d['unreadable'] = True
+        if ident.get('guess'):
+            d['guess'] = ident['guess']
     lv, via = level_from_rows(lvl_rows, ctx)
     if lv is not None:
         d['level'], d['lv_via'] = lv, via
@@ -629,6 +659,9 @@ def read_slot(i: int, ctx: dict) -> dict:
             d.update(im)
             if im['img_species']:
                 d['species_src'] = 'img'
+    gs = guess_species(d, species_reg(ctx))
+    if gs:                                                   # 名字框讀不出：候選字串已登錄 + 縮圖同物種 → 當作沒名字的該物種（store / take 身分可用）
+        d.update(unnamed=d['guess'], raw_name=f'?({d["guess"]})', species=gs, species_src='img+reg-guess')
     ocr_texts = ([d['name']] if d['name'] else []) + d.get('ocr', [])
     d['mountlike'] = any(uikit.is_mount_like(t) for t in ocr_texts) or d.get('species') in uikit.MOUNTS \
         or d.get('img_species') in uikit.MOUNTS                # img 認成騎寵只會更嚴（多擋），不會放行
@@ -1478,7 +1511,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     if rc:
         return rc
     cur = read_slot(i, ctx)
-    cur_sl = {**sl, **{k: cur.get(k) for k in ('name', 'state', 'mountlike', 'unnamed', 'raw_name', 'species')}}
+    cur_sl = {**sl, **{k: cur.get(k) for k in ('name', 'state', 'mountlike', 'unnamed', 'raw_name', 'species', 'guess', 'unreadable')}}
     reason = guard_store(cur_sl, allow_slot1, am)
     if reason or slot_ident(cur_sl) != want or (sl.get('unnamed') and cur_sl.get('unnamed') != sl['unnamed']):
         return bad(EXIT_FORBID if reason else EXIT_NAME, f'選中第 {sl["slot"]} 格後重讀：{reason or "名字是 " + str(cur.get("name") or cur.get("raw_name"))}，不存')
@@ -1571,6 +1604,8 @@ def img_target(kind: str, idx: int, idn: dict, t: dict, ctx: dict, info: dict | 
     if not t.get('name') or t.get('growth') or idn.get('name'):
         return False
     if idn.get('growth') and (species_reg(ctx).get('growth') or {}).get(idn['growth']):
+        return False
+    if idn.get('guess') and (species_reg(ctx).get('growth') or {}).get(idn['guess']) not in (None, t['name']):   # 讀不出但候選字串登錄成別的物種 → 不靠縮圖放行
         return False
     im = img_ident(kind, idx, ctx)
     if info is not None and im:
@@ -1919,8 +1954,8 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
                         if rc:
                             break
                         sl, why = find_slot(slots, nm, None, pick)
-                        unknown = [x for x in slots if x.get('unnamed') and not x.get('species')
-                                   and not (x.get('state') == '騎乘' and nm not in uikit.MOUNTS)]    # 騎乘中的沒名字寵物不可能是非騎寵目標（2026-10-12 實機 DKBO2 騎寵 ?(49/9/7/2) 擋住 --skip-missing）
+                        unknown = [x for x in slots if (x.get('unnamed') or x.get('unreadable')) and not x.get('species') and not x.get('name')
+                                   and not (x.get('state') == '騎乘' and nm not in uikit.MOUNTS)]   # 名字框讀不出的格也算不知道是什麼 → 不略過（2026-10-14 40/9/6/5）；騎乘中的不可能是非騎寵目標（2026-10-12 DKBO2 騎寵 ?(49/9/7/2)）
                         if sl is None and skip_missing and not predicted and not unknown:
                             op['skipped'] = why
                             print(f'pet：{r} 沒有 {nm}，略過')
@@ -2019,6 +2054,89 @@ def take_plan(ops: list, depot: str = 'personal', skip_missing: bool = False, pa
     return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
 
 
+def card_ident(k: int, idn: dict, ctx: dict) -> dict:
+    """倉庫第 k 張卡（0 起算，已選中、idn = 名字框身分）→ {'index', 'name', 'growth', 'guess', 'species', 'src'}（只供計數 / 顯示，不當取出依據）。
+    物種：名字 → 名字；成長字串（或讀不出時的候選字串）已登錄 → 登錄物種；都沒有 → 縮圖（img_ident card；--candidates 時只在候選內比）"""
+    reg = (species_reg(ctx).get('growth') or {})
+    d = {'index': k + 1, 'name': idn.get('name'), 'growth': idn.get('growth'), 'guess': idn.get('guess'), 'species': None, 'src': None}
+    if d['name']:
+        d['species'], d['src'] = d['name'], 'name'
+    elif d['growth'] and reg.get(d['growth']):
+        d['species'], d['src'] = reg[d['growth']], 'reg'
+    else:
+        im = img_ident('card', k, ctx)
+        if im and im.get('img_species'):
+            d['species'], d['src'] = im['img_species'], 'img'
+            if d['guess'] and reg.get(d['guess']) not in (None, im['img_species']):     # 候選字串登錄成別的物種 → 矛盾，不算
+                d['species'], d['src'] = None, 'conflict'
+    return d
+
+
+def read_depot_cards(depot: str, ctx: dict) -> tuple:
+    """倉庫分頁切到 depot（角色已選好）→ 逐張選卡讀身分（只選取，無副作用）→ (rc, [card_ident])"""
+    rc, d = _ensure_depot(depot)
+    if rc:
+        return rc, []
+    out = []
+    for k in [i for i in range(20) if not d['empty'][i]]:
+        if not click_card(k, f'pet 讀倉庫卡 第 {k + 1} 格'):
+            return uikit_fail(EXIT_PANEL, '面板特徵不在，沒點倉庫格'), out
+        _, ok = wait_for_card(k, depot)
+        if not ok:
+            out.append({'index': k + 1, 'name': None, 'growth': None, 'guess': None, 'species': None, 'src': 'select-fail'})
+            continue
+        out.append(card_ident(k, read_ident(ctx, 2, 0.6), ctx))
+    uikit.mark(f'depot-list {depot}')
+    return 0, out
+
+
+def count_cards(cards: list) -> dict:
+    """純函式：[card_ident] → {物種: 張數}（物種不明的記在 None）"""
+    out: dict = {}
+    for c in cards or []:
+        out[c.get('species')] = out.get(c.get('species'), 0) + 1
+    return out
+
+
+def depot_list(role_arg: str, depots: list, pause: bool = False, learn: bool = True) -> int:
+    """唯讀：倉庫卡片清單（公共一次；個人每個角色一次）。面板只開一次，逐張選卡讀名字框（沒名字的靠成長字串登錄檔 / 縮圖）。
+    petquest 抓寵續跑用來數「各抓寵者實際已抓幾隻（含已進倉庫的）」"""
+    t0 = time.time()
+    roles = roles_multi(role_arg)
+    info = {'cmd': 'depot-list', 'public': None, 'personal': {}, 'counts': {'public': None, 'personal': {}}}
+    if not roles or not depots or any(x not in ('personal', 'public') for x in depots):
+        print(f'pet：depot-list 參數不對（角色 {role_arg!r}、倉庫 {depots!r}）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    ctx = load_ctx(learn)
+    final = 0
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            if 'public' in depots:
+                rc = select_role(roles[0], ctx)
+                if not rc:
+                    rc, cards = read_depot_cards('public', ctx)
+                    info['public'], info['counts']['public'] = cards, count_cards(cards)
+                final = final or rc
+            if 'personal' in depots and not final:
+                for r in roles:
+                    rc = select_role(r, ctx)                       # 倉庫分頁開著也能點頭像（take_plan 同做法）
+                    if not rc:
+                        rc, cards = read_depot_cards('personal', ctx)
+                        info['personal'][r], info['counts']['personal'][r] = cards, count_cards(cards)
+                    if rc:
+                        final = rc
+                        break
+        finally:
+            save_ctx(ctx)
+            _back_to_pet_tab()
+    for k, v in [('public', info['counts']['public'])] + list(info['counts']['personal'].items()):
+        if v is not None:
+            print(f'pet：{k} 倉庫 {v}')
+    return _out(final, info, t0)
+
+
 def take_many(role_arg: str, pets_text: list, depot: str = 'personal', skip_missing: bool = False, pause: bool = False, learn: bool = True) -> int:
     """多角色 × 多寵物連續取出 = take_plan（每個角色取 pets_text 每一項；項目可帶 #成長字串 / @等級）"""
     roles = roles_multi(role_arg)
@@ -2028,6 +2146,29 @@ def take_many(role_arg: str, pets_text: list, depot: str = 'personal', skip_miss
         print(f'pet：take-many 參數不對（角色 {role_arg!r}、目標對不到：{bad}）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, {'cmd': 'take-many', 'depot': depot, 'ops': []}, time.time(), '參數不對')
     return take_plan([(r, t) for r in roles for t in tgts], depot, skip_missing, pause, learn)
+
+
+def unreadable_learn_reason(cur: dict, slot_no: int, sp: str, confirm: str) -> tuple | None:
+    """純函式：learn-species 對「名字框讀不出」的格的守門 → (退出碼, 拒絕原因) 或 None（可以登錄）；73 = 禁止動的格、72 = 身分對不上。
+    不碰第 1 格 / 騎寵（物種、縮圖、名字像騎寵）/ 騎乘 / 出戰（只收等待）；--confirm-growth 要跟現場 OCR 行不矛盾
+    （至少 1 行是它或它的殘行、沒有任何一行是別的完整字串）；縮圖認出的物種（有的話）要等於要登錄的物種"""
+    if slot_no == 1:
+        return EXIT_FORBID, '第 1 格（騎寵位置）不准登錄'
+    if cur.get('state') != '等待':
+        return EXIT_FORBID, f'狀態是 {cur.get("state")}（騎乘 / 出戰 / 讀不出都不准，只收等待）'
+    if sp in uikit.MOUNTS or cur.get('mountlike') or cur.get('img_species') in uikit.MOUNTS:
+        return EXIT_FORBID, f'是 / 像騎寵（{"/".join(uikit.MOUNTS)}）'
+    if not petmatch.GROWTH_RE.match(confirm or ''):
+        return EXIT_NAME, f'--confirm-growth {confirm!r} 不是 a/b/c/d'
+    lines = [str(t) for t in cur.get('ocr') or [] if str(t).strip()]
+    full = {'/'.join(str(int(g)) for g in m.groups()) for t in lines for m in [petmatch.GROWTH_RE.match(t)] if m}
+    if full - {confirm}:
+        return EXIT_NAME, f'名字框 OCR 讀到別的成長字串 {sorted(full - {confirm})}（{lines}）'
+    if not any(petmatch.growth_compatible(t, confirm) for t in lines):
+        return EXIT_NAME, f'名字框 OCR {lines} 沒有一行跟 {confirm} 吻合'
+    if cur.get('img_species') not in (None, sp):
+        return EXIT_NAME, f'縮圖認成 {cur.get("img_species")}，不是 {sp}'
+    return None
 
 
 def learn_species_cmd(role_arg: str, slot_no: int, species_text: str, confirm_growth: str, pause: bool = False) -> int:
@@ -2061,11 +2202,18 @@ def learn_species_cmd(role_arg: str, slot_no: int, species_text: str, confirm_gr
                 break
             uikit.sleep(0.6)
             cur = read_slot(slot_no - 1, ctx)
-        info['read'] = {k: cur.get(k) for k in ('name', 'unnamed', 'species', 'state')}
+        info['read'] = {k: cur.get(k) for k in ('name', 'unnamed', 'species', 'state', 'unreadable', 'guess', 'ocr', 'img_species')}
+        cg = confirm_growth.strip()
+        if cur.get('unreadable') and not cur.get('name') and (not cur.get('unnamed') or cur.get('guess') == cur.get('unnamed')):
+            bad = unreadable_learn_reason(cur, slot_no, sp, cg)       # 名字框讀不出的格（2026-10-14 40/9/6/5）：額外守門
+            if bad:
+                rc = uikit_fail(bad[0], f'第 {slot_no} 格名字框讀不出：{bad[1]}，不登錄')
+                return _out(rc, info, t0, bad[1])
+            cur = dict(cur, unnamed=cg, raw_name=f'?({cg})')
         if not cur.get('unnamed'):
             rc = uikit_fail(EXIT_NAME, f'第 {slot_no} 格不是「沒名字」的寵物（名字 {cur.get("name")}），不登錄')
             return _out(rc, info, t0, '不是沒名字的寵物')
-        if cur['unnamed'] != confirm_growth.strip():
+        if cur['unnamed'] != cg:
             rc = uikit_fail(EXIT_NAME, f'第 {slot_no} 格的成長字串是 {cur["unnamed"]}，與 --confirm-growth {confirm_growth} 不符，不登錄')
             return _out(rc, info, t0, '成長字串不符')
         cols = uikit.px(thumb_pts(slot_no - 1))
@@ -2138,6 +2286,9 @@ def main() -> int:
     p.add_argument('--plan', default=None, help='每人不同目標：DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126')
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
     p.add_argument('--skip-missing', action='store_true')
+    p = sub.add_parser('depot-list', help='唯讀：倉庫卡片清單 + 各物種張數（逐張選卡讀名字；公共一次、個人每人一次）', parents=[cp])
+    p.add_argument('--role', default='DKBO', help='個人倉庫要讀的角色（逗號分隔 / all）；只讀公共時用第一個角色選頭像')
+    p.add_argument('--depot', default='public', help='public / personal / public,personal')
     p = sub.add_parser('learn-species', help='登錄「某格沒名字的寵物是什麼物種」（縮圖 + 成長字串）', parents=[cp])
     p.add_argument('role')
     p.add_argument('slot', type=int)
@@ -2195,6 +2346,8 @@ def main() -> int:
         return take_many(a.role, csv(a.pets), a.depot, a.skip_missing, a.pause_encounter, learn)
     if a.cmd == 'set-state-many':
         return set_state_many(a.role, a.pet, a.state, a.allow_mount, a.pause_encounter, learn)
+    if a.cmd == 'depot-list':
+        return depot_list(a.role, [x.strip() for x in a.depot.split(',') if x.strip()], a.pause_encounter, learn)
     if a.cmd == 'learn-species':
         return learn_species_cmd(a.role, a.slot, a.species, a.confirm_growth, a.pause_encounter)
     split = lambda t: None if t is None else [x.strip() for x in t.split(',') if x.strip()]    # noqa: E731

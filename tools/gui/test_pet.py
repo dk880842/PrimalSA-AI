@@ -1083,5 +1083,73 @@ check('levels --slots 2：只讀第 2 格（空格照列）', rc == 0 and [x['sl
 rc, out, err = run(pet.list_levels, 'DKBO3', [7])
 check('levels --slots 超出 1～5 → 用法錯誤', rc == uikit.EXIT_USAGE)
 
+# ---- 2026-10-14 恐龍博士：40/9/6/5 名字框讀不出（Windows OCR 把「40」讀成「姍」）----
+L = ['姍/9/6/5', '40/9/6/5', '姍/6/5']                       # 實機 -Dark 0 -Zooms 2,3,4 讀到的三行（2 / 3 / 4 倍各一行）
+check('parse_growth：1 行完整 + 開頭欄被讀成漢字的殘行 → 採用（2026-10-14）', petmatch.parse_growth(L) == '40/9/6/5')
+check('growth_compatible：漢字萬用欄最多 1 個、數字欄要逐欄相等、至少 2 欄數字',
+      petmatch.growth_compatible('姍/9/6/5', '40/9/6/5') and petmatch.growth_compatible('姍/6/5', '40/9/6/5')
+      and not petmatch.growth_compatible('姍/8/6/5', '40/9/6/5') and not petmatch.growth_compatible('姍/姍/6/5', '40/9/6/5')
+      and not petmatch.growth_compatible('姍/5', '40/9/6/5') and petmatch.growth_compatible('40/9/5', '40/9/6/5'))
+check('parse_growth：殘行數字矛盾 / 兩個萬用欄 → None（不猜）', petmatch.parse_growth(['40/9/6/5', '姍/8/6/5']) is None and petmatch.parse_growth(['40/9/6/5', '姍/姍/6/5']) is None)
+check('growth_guess：只有一種完整字串（1 行也行）、其餘不矛盾 → 候選；兩種完整字串 / 矛盾 → None',
+      petmatch.growth_guess(['40/9/6/5']) == '40/9/6/5' and petmatch.growth_guess(['40/9/6/5', '41/9/6/5']) is None
+      and petmatch.growth_guess(['40/9/6/5', '姍/8/6/5']) is None and petmatch.growth_guess(['姍/9/6/5']) is None)
+check('growth_like', petmatch.growth_like(['姍/9/6/5']) and not petmatch.growth_like(['朵拉比斯']) and not petmatch.growth_like([]))
+_sv2 = (pet._petwatch, petmatch.match_whole, petmatch.ink)
+petmatch.match_whole = lambda *a, **k: (None, 0.0, None)
+petmatch.ink = lambda rows: 999
+try:
+    _pw1 = _PW([['姍/9/6/5', '40/9/6/5'], [], ['40/9/6/5']])                       # 同一個實例（ocr_pet_name 與加讀共用一串回應）
+    pet._petwatch = lambda: _pw1
+    r = pet.resolve_ident(['1' * 5], pet.load_ctx(False))
+    check('resolve_ident：兩組湊不齊但像成長字串 → 加讀 -Zooms 5,6，2 行同意 → growth', r['growth'] == '40/9/6/5' and r['raw'][-1] == '40/9/6/5', str(r))
+    _pw1 = _PW([['姍/9/6/5'], [], ['姍/9/6/5']])                       # 同一個實例（ocr_pet_name 與加讀共用一串回應）
+    pet._petwatch = lambda: _pw1
+    r = pet.resolve_ident(['1' * 6], pet.load_ctx(False))
+    check('resolve_ident：加讀後仍湊不齊、也沒完整行 → growth / guess 都 None', r['growth'] is None and not r.get('guess'), str(r))
+    _pw1 = _PW([['姍/9/6/5', '40/9/6/5', '41/9/6/5'], [], []])                       # 同一個實例（ocr_pet_name 與加讀共用一串回應）
+    pet._petwatch = lambda: _pw1
+    r = pet.resolve_ident(['1' * 7], pet.load_ctx(False))
+    check('resolve_ident：兩種完整字串 → 不給候選', r['growth'] is None and not r.get('guess'))
+    _pw1 = _PW([['40/9/6/5'], [], []])                       # 同一個實例（ocr_pet_name 與加讀共用一串回應）
+    pet._petwatch = lambda: _pw1
+    r = pet.resolve_ident(['1' * 8], pet.load_ctx(False))
+    check('resolve_ident：只有 1 行完整、沒殘行 → growth None、guess = 候選', r['growth'] is None and r.get('guess') == '40/9/6/5', str(r))
+finally:
+    pet._petwatch, petmatch.match_whole, petmatch.ink = _sv2
+U = {'slot': 2, 'name': None, 'unreadable': True, 'guess': '40/9/6/5', 'img_species': '魯尼帖斯', 'state': '等待'}
+R = {'growth': {'40/9/6/5': '魯尼帖斯'}}
+check('guess_species：候選字串已登錄 + 縮圖同物種 → 物種；缺一或矛盾 / 騎寵 → None',
+      pet.guess_species(U, R) == '魯尼帖斯' and pet.guess_species(dict(U, img_species=None), R) is None
+      and pet.guess_species(dict(U, img_species='貝魯卡'), R) is None and pet.guess_species(U, {'growth': {}}) is None
+      and pet.guess_species(dict(U, img_species='布拉奇多斯'), {'growth': {'40/9/6/5': '布拉奇多斯'}}) is None
+      and pet.guess_species(dict(U, unreadable=False), R) is None)
+sl = dict(U, unnamed='40/9/6/5', species='魯尼帖斯')
+check('ident_matches：靠候選認的格，現場也讀不出時比候選字串；讀出成長字串照比；候選不同 → 不符',
+      pet.ident_matches({'growth': None, 'guess': '40/9/6/5'}, sl) and pet.ident_matches({'growth': '40/9/6/5'}, sl)
+      and not pet.ident_matches({'growth': None, 'guess': '41/9/6/5'}, sl) and not pet.ident_matches({'growth': None, 'guess': '40/9/6/5'}, {'unnamed': '40/9/6/5'}))
+check('slot_ident / guard_store：三重確認後當沒名字的魯尼帖斯（第 2 格、等待）可存；只有縮圖 → 照舊拒絕',
+      pet.slot_ident(sl) == '魯尼帖斯' and pet.guard_store(sl, False) is None and pet.guard_store(U, False) is not None)
+C = dict(U, ocr=L)
+check('unreadable_learn_reason：第 2 格等待、OCR 不矛盾、縮圖同物種 → 可登錄', pet.unreadable_learn_reason(C, 2, '魯尼帖斯', '40/9/6/5') is None)
+check('unreadable_learn_reason：第 1 格 / 騎乘 / 出戰 / 騎寵物種 / 縮圖像騎寵 → 73',
+      all(pet.unreadable_learn_reason(c, n, sp, '40/9/6/5')[0] == pet.EXIT_FORBID for c, n, sp in
+          ((C, 1, '魯尼帖斯'), (dict(C, state='騎乘'), 2, '魯尼帖斯'), (dict(C, state='出戰'), 2, '魯尼帖斯'), (C, 2, '布拉奇多斯'),
+           (dict(C, img_species='布拉奇多斯'), 2, '魯尼帖斯'), (dict(C, mountlike=True), 2, '魯尼帖斯'))))
+check('unreadable_learn_reason：--confirm-growth 跟 OCR 矛盾 / OCR 有別的完整字串 / 縮圖別種 / 格式錯 → 72',
+      all(pet.unreadable_learn_reason(c, 2, '魯尼帖斯', g)[0] == pet.EXIT_NAME for c, g in
+          ((C, '41/9/6/5'), (dict(C, ocr=['40/9/6/5', '41/9/6/5']), '40/9/6/5'), (dict(C, img_species='貝魯卡'), '40/9/6/5'), (C, '40/9/6'))))
+check('count_cards', pet.count_cards([{'species': 'a'}, {'species': 'a'}, {'species': None}]) == {'a': 2, None: 1})
+_svc = (pet.img_ident, pet.species_reg)
+pet.species_reg = lambda ctx: {'growth': {'40/9/6/5': '魯尼帖斯', '43/9/6/6': '貝魯卡'}}
+pet.img_ident = lambda kind, k, ctx: {'img_species': '魯尼帖斯'}
+try:
+    check('card_ident：名字 → 名字；成長字串登錄 → 登錄；都沒有 → 縮圖；候選字串登錄成別種 → 矛盾不算',
+          pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] == '朵拉比斯' and pet.card_ident(0, {'name': None, 'growth': '43/9/6/6'}, {})['species'] == '貝魯卡'
+          and pet.card_ident(0, {'name': None, 'growth': None}, {})['src'] == 'img'
+          and pet.card_ident(0, {'name': None, 'growth': None, 'guess': '43/9/6/6'}, {})['species'] is None)
+finally:
+    pet.img_ident, pet.species_reg = _svc
+
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

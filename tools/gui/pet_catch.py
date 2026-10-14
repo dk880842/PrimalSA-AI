@@ -17,10 +17,16 @@
     --poll 秒                  wait 輪詢間隔（預設：第一次依隻數 k×20+20 秒〔40～120〕、之後每 60 秒，review 1013b §2.4；給值 = 每次都等這麼久。每次要開外掛面板，開前會先等戰鬥結束）
     --reuse-setup              沿用上一批的捉寵設置（petquest 同一輪第 2 批起）：系別 / 物種欄位 OCR 讀不到字就不重選下拉（讀到別的字才重選），可抓捕數 / 勾選照做，讀回驗證照舊
     --dry-run                  只印計畫
+  register 的排除（2026-10-14 恐龍博士：第 1 格騎寵布拉奇多斯 51/9/8/1 被登錄成魯尼帖斯）：第 1 格、騎乘中、騎寵（名字 / 物種 / 縮圖）、
+    抓寵前就在寵物欄的寵物一律不登錄。「抓寵前」= 抓寵前寵物欄快照 tools/.cache/pet-tpl/catch-pre.json（setup 階段前寫：petquest 用它抓前讀好的
+    pet.py list 直接存〔save_pre〕，沒有 / 超過 PRE_MAX_S 才自己讀一次）；比對用名字框點陣指紋 nh（同一隻固定），再退回成長字串，依張數扣（同字串多隻也對）。
+    快照沒有該角色 → 只排除第 1 格 / 騎寵並印警告。非空、不是騎寵、名字和成長字串都讀不出的新寵物 → 不登錄並報錯（退出碼 16，其餘照登錄），不沉默略過。
+  setup / wait 失敗（設置選不到、逾時…；驗證視窗 9 / 斷線 10 除外）→ 收尾把這批抓寵者的「自動抓寵」勾掉（catch_off；已設好的人不會繼續抓）。
+  uv run --no-project python tools/gui/pet_catch.py --catch-off [--roles DKBO2,DKBO3]     # 改做：外掛捉寵設置「自動抓寵」取消勾選（讀回）
   uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）
   uv run --no-project python tools/gui/pet_catch.py --autoswap on|off [--roles ...]                 # 自動轉換戰寵
   批次（2026-10-12）：背包（取誘餌）/ 外掛（捉寵設置、輪詢、自動轉換、鎖定）面板都只開一次，逐人切頭像做完再關。
-退出碼：0 全部抓完；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；14 捉寵設置系別 / 物種選不到或讀回對不上（EXIT_CATCH_PICK，已重試、已收下拉、沒勾自動抓寵）；
+退出碼：0 全部抓完；16 register：有新寵物名字框讀不出（EXIT_CATCH_UNREAD，那隻沒登錄，其他照登錄）；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；14 捉寵設置系別 / 物種選不到或讀回對不上（EXIT_CATCH_PICK，已重試、已收下拉、沒勾自動抓寵）；
   15 register：抓寵者欄裡有寵物縮圖有把握認成別的物種（EXIT_CATCH_SPECIES，那隻沒登錄，其他照登錄）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
 安全：不點「+」（花石幣）、不碰丟棄區；沿用 rebirth_pets.Tools 的讀字驗證（讀不到 / 對不上就停，不盲點）。
 抓完後新寵物沒名字（成長字串），分配前要 `pet.py learn-species`，見 psa-pet-quest SKILL.md。
@@ -48,7 +54,11 @@ def parse_assign(s: str) -> list:
 
 
 EXIT_CATCH_SPECIES = 15
+EXIT_CATCH_UNREAD = 16
 SRC_FILE = 'catch-src.json'                # 抓寵來源檔（petmatch.TPL_DIR 底下）
+PRE_FILE = 'catch-pre.json'                # 抓寵前寵物欄快照（register 排除舊寵物用）
+PRE_MAX_S = 30 * 60                        # 快照超過這麼久就不信（自己重讀）
+PASS_RC = (9, 10)                          # uikit.EXIT_UNKNOWN_SCREEN / EXIT_HALT：驗證視窗 / 斷線 → 不做任何收尾點擊
 
 
 def src_path():
@@ -74,16 +84,84 @@ def save_src(d: dict) -> None:
     tmp.replace(p)
 
 
-def plan_register(assign: list, pets: dict, reg_growth: dict) -> tuple:
-    """純函式：抓寵者寵物欄 → (登錄 {成長字串: (物種, 抓寵者)}, 矛盾 [(角色, 格, 成長字串, 縮圖物種, 應是)])。
+def pre_path():
+    import petmatch
+    return petmatch.TPL_DIR / PRE_FILE
+
+
+def save_pre(pets: dict, now: float | None = None) -> None:
+    """抓寵前寵物欄快照（{角色: pet.py list 的格}）→ catch-pre.json（只留比對要的欄位）"""
+    import json
+    keep = ('slot', 'empty', 'name', 'unnamed', 'nh', 'state')
+    d = {'ts': time.time() if now is None else now,
+         'roles': {r: [{k: s.get(k) for k in keep if k in s} for s in slots or []] for r, slots in (pets or {}).items()}}
+    p = pre_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix('.tmp')
+    tmp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
+    tmp.replace(p)
+
+
+def load_pre(max_age: float = PRE_MAX_S, now: float | None = None) -> dict:
+    """→ {角色: 格}；沒有 / 壞檔 / 超過 max_age → {}"""
+    import json
+    try:
+        d = json.loads(pre_path().read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return {}
+    now = time.time() if now is None else now
+    if not isinstance(d, dict) or now - (d.get('ts') or 0) > max_age:
+        return {}
+    return d.get('roles') or {}
+
+
+def _is_mountish(s: dict) -> bool:
+    import uikit as U
+    return bool(s.get('mountlike') or s.get('state') == '騎乘' or s.get('species') in U.MOUNTS or s.get('img_species') in U.MOUNTS
+                or s.get('name') in U.MOUNTS)
+
+
+def new_slots(pre: list, cur: list) -> list:
+    """純函式：抓寵前快照 pre、現在 cur（pet.py list 的格）→ cur 裡「抓寵前不在」的非空格。
+    先比名字框點陣指紋 nh、再比成長字串 / 名字，依張數扣（3 隻同字串的魯尼帖斯抓前有 1 隻 → 新的 2 隻）"""
+    from collections import Counter
+    nh = Counter(s['nh'] for s in pre or [] if not s.get('empty') and s.get('nh'))
+    ids = Counter(s.get('unnamed') or s.get('name') for s in pre or [] if not s.get('empty') and not s.get('nh') and (s.get('unnamed') or s.get('name')))
+    out = []
+    for s in cur or []:
+        if s.get('empty'):
+            continue
+        k, i = s.get('nh'), s.get('unnamed') or s.get('name')
+        if k and nh[k] > 0:
+            nh[k] -= 1
+        elif i and ids[i] > 0:
+            ids[i] -= 1
+        else:
+            out.append(s)
+    return out
+
+
+def plan_register(assign: list, pets: dict, reg_growth: dict, pre: dict | None = None) -> tuple:
+    """純函式：抓寵者寵物欄 → (登錄 {成長字串: (物種, 抓寵者)}, 矛盾 [(角色, 格, 成長字串, 縮圖物種, 應是)], 讀不出 [(角色, 格, OCR 行)])。
     只看「沒名字、成長字串還沒登錄成別的物種」的格（已登錄成別種 = 以前分來的，不是這次抓的）；
-    縮圖（rank_among 結果放在 img_species / species）有把握且 ≠ 指定物種 → 矛盾（不登錄）；沒把握 / 相同 → 依來源登錄"""
+    一律不看：第 1 格、騎乘中 / 騎寵、抓寵前快照 pre[角色] 裡就有的（pre 沒有該角色 → 只靠前兩條）；
+    縮圖（rank_among 結果放在 img_species / species）有把握且 ≠ 指定物種 → 矛盾（不登錄）；沒把握 / 相同 → 依來源登錄；
+    非空、沒名字、成長字串讀不出 → 讀不出清單（不登錄、呼叫端要報錯）"""
     want = {r: sp for r, _, sp in assign}
-    todo, bad = {}, []
+    todo, bad, unread = {}, [], []
     for role, sp in want.items():
-        for s in pets.get(role) or []:
+        slots = pets.get(role) or []
+        fresh = new_slots(pre[role], slots) if pre and role in pre else [s for s in slots if not s.get('empty')]
+        for s in fresh:
+            if s.get('slot') == 1 or _is_mountish(s) or s.get('name'):
+                continue
             g = s.get('unnamed')
-            if s.get('empty') or not g:
+            if s.get('guess') and g == s.get('guess') and s.get('unreadable'):     # 讀不出、靠候選字串認的：已登錄成這種 = 沒事要做；否則不拿來登錄（不確定的字串不進登錄檔）
+                if reg_growth.get(g) == sp:
+                    continue
+                g = None
+            if not g:
+                unread.append((role, s.get('slot'), s.get('ocr')))
                 continue
             known = reg_growth.get(g)
             if known and known != sp:
@@ -97,7 +175,7 @@ def plan_register(assign: list, pets: dict, reg_growth: dict) -> tuple:
                 todo[g] = (None, todo[g][1])
                 continue
             todo[g] = (sp, role)
-    return {g: v for g, v in todo.items() if v[0]}, bad
+    return {g: v for g, v in todo.items() if v[0]}, bad, unread
 
 
 def register_catches(assign: list, tools=None) -> int:
@@ -110,7 +188,11 @@ def register_catches(assign: list, tools=None) -> int:
         print(f'pet_catch：register 讀寵物欄失敗 rc {rc}')
         return rc
     reg = petmatch.load_species()
-    todo, bad = plan_register(assign, pets, reg.get('growth') or {})
+    pre = load_pre()
+    miss = [r for r, _, _ in assign if r not in pre]
+    if miss:
+        print(f'pet_catch：register 沒有 {miss} 的抓寵前快照（{PRE_FILE}）→ 只排除第 1 格 / 騎寵，抓寵前就在的寵物可能被誤登錄，請人看結果')
+    todo, bad, unread = plan_register(assign, pets, reg.get('growth') or {}, pre)
     dropped = register_growths({g: sp for g, (sp, _) in todo.items()})
     src = load_src()
     now = time.strftime('%Y-%m-%d %H:%M:%S')
@@ -126,10 +208,43 @@ def register_catches(assign: list, tools=None) -> int:
         print(f'pet_catch：register {role} 抓的 {sp}：登錄 {len(gs)} 隻 {gs}')
     if dropped:
         print(f'pet_catch：register 有 {dropped} 個成長字串撞到別的物種，已從登錄檔刪掉（這些只能靠縮圖）')
+    for role, slot, ocr in unread:
+        print(f'pet_catch：register {role} 第 {slot} 格名字框讀不出成長字串（OCR {ocr}）→ 不登錄；用 pet.py list 看，必要時 learn-species --confirm-growth')
+    if unread:
+        try:
+            import errlog
+            errlog.add(f'pet_catch register：新寵物名字框讀不出成長字串 {[(r, s) for r, s, _ in unread]}（OCR {[o for _, _, o in unread]}）', source='pet_catch')
+        except Exception:                                              # noqa: BLE001
+            pass
     if bad:
         for role, slot, g, seen, sp in bad:
             print(f'pet_catch：register {role} 第 {slot} 格 {g}：縮圖認成 {seen}，但他抓的是 {sp} → 不登錄（請人看）')
         return EXIT_CATCH_SPECIES
+    return EXIT_CATCH_UNREAD if unread else 0
+
+
+def catch_off(roles: list, tools=None) -> int:
+    """外掛捉寵設置「自動抓寵」取消勾選（抓寵中途失敗的收尾；已是未勾就不點，_toggle 讀回）。外掛面板只開一次逐人。→ 0 / 退出碼"""
+    T = tools or rp.Tools()
+
+    def fn(role):
+        rc = T._toggle(rp.CATCH_XY['auto'], False, f'{role} 取消自動抓寵')
+        return rc, None if rc else False
+    rc, _, bad = T.ass_each(list(roles), 'catch', fn)
+    print(f'pet_catch：自動抓寵{"已取消" if not rc else f"取消失敗（{bad} rc {rc}）"}：{list(roles)}')
+    return rc
+
+
+def ensure_pre(roles: list, T) -> int:
+    """setup 前確保有抓寵前快照（PRE_MAX_S 內、含全部抓寵者）；沒有就讀一次寵物欄存起來。→ 0 / 讀取失敗退出碼"""
+    pre = load_pre()
+    if all(r in pre for r in roles):
+        return 0
+    rc, pets = T.pets_list(list(roles))
+    if rc:
+        print(f'pet_catch：抓寵前讀寵物欄失敗 rc {rc}')
+        return rc
+    save_pre(pets)
     return 0
 
 
@@ -161,10 +276,16 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register
                 return rc
         if tools is None and uikit.is_open(bag.BAGANY):         # 2026-10-12 實機：拆分 / 存入後背包面板仍開著，外掛打不開
             uikit.close_panel(bag.BAGANY, known_open=True)
+    roles = [r for r, _, _ in assign]
     if 'setup' in stages:
+        rc = ensure_pre(roles, T)
+        if rc:
+            return rc
         rc, bad = (T.catch_setup_many(assign, count, reuse=True) if reuse_setup else T.catch_setup_many(assign, count))   # 外掛面板只開一次：逐人捉寵設置 + 勾自動存倉庫 / 自動抓寵
         if rc:
             print(f'pet_catch：{bad} 捉寵設置 / 勾選失敗 rc {rc}')
+            if rc not in PASS_RC:                                  # 前面的人可能已勾好自動抓寵、會繼續抓（2026-10-14 DKBO3 物種選不到、DKBO2 照抓）→ 全部勾掉
+                catch_off(roles, T)
             return rc
         for role, fam, sp in assign:
             print(f'pet_catch：{role} 開始抓 {count} 隻 {sp}')
@@ -177,13 +298,16 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register
             waits += 1
             rc, st = T.catch_poll_many(sorted(pending))          # 一次開面板讀所有還沒抓完的人
             if rc:
+                if rc not in PASS_RC:
+                    catch_off(sorted(pending), T)
                 return rc
             for role, (left, auto) in st.items():
                 print(f'pet_catch：{role} 可抓捕數 {left} 自動抓寵 {auto}')
                 if auto is False and left in (0, None):                # 可抓捕數 OCR 常讀不到（None）；遊戲抓完會自己取消「自動抓寵」勾選 = 抓完（2026-10-12 實機）
                     pending.discard(role)
             if pending and uikit.clock() >= end:
-                print(f'pet_catch：逾時，未抓完 {sorted(pending)}')
+                print(f'pet_catch：逾時，未抓完 {sorted(pending)} → 取消自動抓寵')
+                catch_off(sorted(pending), T)
                 return rp.EXIT_CATCH
     if 'register' in stages:
         return register_catches(assign, T)
@@ -283,6 +407,7 @@ def main(argv=None) -> int:
     ap.add_argument('--verify-battle', action='store_true', help='改做：逐人讀回出戰寵（開遇敵練寵前；沒有出戰寵退出碼 105）')
     ap.add_argument('--lock', default=None, metavar='騎寵,戰寵', help='改做：外掛鎖定重勾（騎寵 / 戰寵 / 兩者；下拉讀字選、讀回）')
     ap.add_argument('--unlock', default=None, metavar='騎寵,戰寵', help='改做：外掛取消鎖定（換練功寵前）')
+    ap.add_argument('--catch-off', action='store_true', help='改做：外掛捉寵設置「自動抓寵」取消勾選（--roles，預設 DKBO2,DKBO3,DKBO4,DKBO5）')
     ap.add_argument('--battle-pet', default='朵拉比斯')
     ap.add_argument('--mount-species', default='布拉奇多斯')
     ap.add_argument('--roles', default='DKBO,DKBO2,DKBO3,DKBO4,DKBO5')
@@ -293,6 +418,11 @@ def main(argv=None) -> int:
     ap.add_argument('--poll', type=float, default=None, help='wait 階段輪詢間隔秒（預設：第一次 k×20+20、之後 60；每次要開外掛面板）')
     ap.add_argument('--reuse-setup', action='store_true', help='沿用上一批的捉寵設置（欄位讀不到字不重選下拉；讀回驗證照舊）')
     a = ap.parse_args(argv)
+    if a.catch_off:
+        import winenv
+        winenv.enable_server()
+        roles = a.roles.split(',') if a.roles != ap.get_default('roles') else ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+        return catch_off(roles)
     if a.verify_battle:
         import winenv
         winenv.enable_server()

@@ -9,7 +9,9 @@ import testenv  # noqa: E402,F401
 import pet_catch  # noqa: E402
 import rebirth_pets as rp  # noqa: E402
 import petmatch  # noqa: E402
+import tempfile  # noqa: E402
 
+petmatch.TPL_DIR = Path(tempfile.mkdtemp())            # 抓寵前快照 / 來源檔都寫暫存（不碰 tools/.cache）
 fails = 0
 
 
@@ -62,6 +64,19 @@ class FakeT:
                     return rc, r
         return 0, None
 
+    def pets_list(self, roles, img_only=None):          # ensure_pre（抓寵前快照）
+        self.listed = getattr(self, 'listed', 0) + 1
+        return 0, {r: [] for r in roles}
+
+    def ass_each(self, roles, tab, fn):                  # catch_off 收尾
+        for r in roles:
+            fn(r)
+        return 0, {}, None
+
+    def _toggle(self, xy, want, note):
+        self.calls.append(('off' if want is False else 'on', note.split()[0]))
+        return 0
+
     def sleep(self, s):
         pass
 
@@ -73,7 +88,12 @@ f = FakeT()
 rc = pet_catch.run(A, stages=('setup',), tools=f)
 check('setup：外掛面板開 1 次、逐人 setup + start', rc == 0 and f.calls == [('ass_open', ('DKBO2', 'DKBO3')), ('setup', 'DKBO2'), ('start', 'DKBO2'), ('setup', 'DKBO3'), ('start', 'DKBO3')])
 f = FakeT(fail_at=('setup', 'DKBO2'))
-check('setup 失敗 → 該 rc、不繼續下一人', pet_catch.run(A, stages=('setup',), tools=f) == 7 and f.calls[1:] == [('setup', 'DKBO2')])
+check('setup 失敗 → 該 rc、不繼續下一人；收尾全部抓寵者取消自動抓寵', pet_catch.run(A, stages=('setup',), tools=f) == 7
+      and f.calls[1:] == [('setup', 'DKBO2'), ('off', 'DKBO2'), ('off', 'DKBO3')], str(f.calls))
+f = FakeT(fail_at=('setup', 'DKBO3'))
+f.fail_rc = 9
+f._r = lambda tag, role: (f.calls.append((tag, role)), 9 if (tag, role) == ('setup', 'DKBO3') else 0)[1]
+check('setup 遇驗證視窗（9）→ 透傳、不做收尾點擊', pet_catch.run(A, stages=('setup',), tools=f) == 9 and not any(c[0] == 'off' for c in f.calls), str(f.calls))
 f = FakeT(fail_at=('bait', 'DKBO2'))
 check('bait 失敗 → rc、不繼續', pet_catch.run(A, stages=('bait',), tools=f) == 7 and f.calls == [('bait_many', ('DKBO2', 'DKBO3')), ('bait', 'DKBO2')])
 f = FakeT()
@@ -304,14 +324,39 @@ pets = {'DKBO2': [mount, u(2, '35/7/3/8'), u(3, '36/7/3/8', img_species='克邦�
         'DKBO3': [mount, u(2, '33/7/3/8'), u(3, '32/7/3/8', img_species='邦恩吉')],            # 縮圖有把握認成別的 → 矛盾
         'DKBO4': [mount, u(2, '30/8/3/8', species='加格', species_src='img')],
         'DKBO5': [mount, u(2, '35/7/3/8'), u(3, '31/8/2/8')]}                                   # 35/7/3/8 跟 DKBO2 撞號
-todo, bad = pet_catch.plan_register(SH, pets, {'49/9/8/2': '布拉奇多斯'})
+todo, bad, unread = pet_catch.plan_register(SH, pets, {'49/9/8/2': '布拉奇多斯'})
 check('plan_register：依抓寵者登錄（騎寵已登錄別種略過）',
       todo == {'36/7/3/8': ('克邦凱斯', 'DKBO2'), '34/7/4/8': ('克邦凱斯', 'DKBO2'), '33/7/3/8': ('加克拉', 'DKBO3'),
                '30/8/3/8': ('加格', 'DKBO4'), '31/8/2/8': ('邦恩吉', 'DKBO5')}, str(todo))
 check('plan_register：縮圖有把握是別種 → 矛盾不登錄；兩人同字串不同種 → 都不登錄',
       ('DKBO3', 3, '32/7/3/8', '邦恩吉', '加克拉') in bad and any(b[0] == 'DKBO5' and b[2] == '35/7/3/8' for b in bad) and '35/7/3/8' not in todo, str(bad))
-todo, bad = pet_catch.plan_register(SH[:1], {'DKBO2': [u(2, '1/2/3/4')]}, {'1/2/3/4': '加格'})
+todo, bad, unread = pet_catch.plan_register(SH[:1], {'DKBO2': [u(2, '1/2/3/4')]}, {'1/2/3/4': '加格'})
 check('plan_register：字串已登錄成別種（以前分來的）→ 不是這次抓的，略過', todo == {} and bad == [])
+
+
+# ---- 2026-10-14 恐龍博士：第 1 格騎寵 51/9/8/1 被登錄成魯尼帖斯；40/9/6/5 讀不出被沉默略過 ----
+DINO = [('DKBO2', '呼拔拔系', '魯尼帖斯')]
+mount1 = {'slot': 1, 'empty': False, 'name': None, 'unnamed': '51/9/8/1', 'state': '騎乘', 'img_species': '魯尼帖斯', 'species_src': 'img', 'nh': 'M'}
+unr = lambda n, **k: dict({'slot': n, 'empty': False, 'name': None, 'unreadable': True, 'state': '等待', 'ocr': ['姍/9/6/5'], 'nh': 'X'}, **k)    # noqa: E731
+todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [mount1, unr(2), unr(3), u(4, '43/9/6/5', nh='Y')]}, {})
+check('plan_register：第 1 格騎乘中的騎寵（縮圖被候選誤認成任務寵）絕不登錄', '51/9/8/1' not in todo and todo == {'43/9/6/5': ('魯尼帖斯', 'DKBO2')}, str(todo))
+check('plan_register：名字框讀不出的新寵物 → 讀不出清單（不沉默）', [x[:2] for x in unread] == [('DKBO2', 2), ('DKBO2', 3)] and unread[0][2] == ['姍/9/6/5'], str(unread))
+m2 = dict(mount1, slot=2, state='等待', unnamed='51/9/8/2', img_species=None, species='布拉奇多斯', species_src='reg')
+todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [m2]}, {})
+check('plan_register：非第 1 格但物種是騎寵 → 不登錄', todo == {} and unread == [], str(todo))
+pre = {'DKBO2': [{'slot': 1, 'empty': False, 'nh': 'M', 'unnamed': '51/9/8/1'}, {'slot': 2, 'empty': False, 'nh': 'Z', 'unnamed': '43/9/6/5'}]}
+cur = [mount1, u(2, '43/9/6/5', nh='Z'), u(3, '43/9/6/5', nh='Z'), u(4, '41/9/6/5', nh='W')]
+check('new_slots：nh 依張數扣（抓前 1 隻同字串 → 現在 2 隻只算 1 隻新）', [x['slot'] for x in pet_catch.new_slots(pre['DKBO2'], cur)] == [3, 4])
+todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': cur}, {}, pre)
+check('plan_register + 抓寵前快照：抓前就在的不算這次抓的（同字串第 2 隻照登錄）', todo == {'43/9/6/5': ('魯尼帖斯', 'DKBO2'), '41/9/6/5': ('魯尼帖斯', 'DKBO2')}, str(todo))
+todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [dict(unr(2), guess='40/9/6/5', unnamed='40/9/6/5', species='魯尼帖斯')]}, {'40/9/6/5': '魯尼帖斯'})
+check('plan_register：讀不出但候選字串已登錄成同種（三重確認認得）→ 沒事做、不報讀不出', todo == {} and unread == [] and bad == [])
+todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [dict(unr(2), guess='40/9/6/5', unnamed='40/9/6/5')]}, {})
+check('plan_register：候選字串沒登錄 → 不拿不確定的字串登錄，報讀不出', todo == {} and len(unread) == 1)
+pet_catch.save_pre({'DKBO2': cur}, now=1000.0)
+check('save_pre / load_pre：只留比對欄位、過期不信', pet_catch.load_pre(now=1000.0 + 10)['DKBO2'][1] == {'slot': 2, 'empty': False, 'name': None, 'unnamed': '43/9/6/5', 'nh': 'Z', 'state': '等待'}
+      and pet_catch.load_pre(now=1000.0 + pet_catch.PRE_MAX_S + 1) == {})
+pet_catch.pre_path().unlink()
 
 
 class FR:
@@ -327,6 +372,7 @@ reg = {'thumb': {}, 'growth': {'49/9/8/2': '布拉奇多斯'}}
 petmatch.load_species = lambda: reg
 petmatch.TPL_DIR = Path(tempfile.mkdtemp())
 fr = FR(pets)
+pet_catch.save_pre({r: [] for r, _, _ in SH})                      # 抓寵前 4 人寵物欄都是空的（只有騎寵 → 這裡省略）
 rc = pet_catch.register_catches(SH, fr)
 check('register_catches：有矛盾 → 15，其餘照登錄（登錄檔 + 來源檔）', rc == pet_catch.EXIT_CATCH_SPECIES and reg['growth'].get('33/7/3/8') == '加克拉'
       and reg['growth'].get('31/8/2/8') == '邦恩吉' and '32/7/3/8' not in reg['growth'] and pet_catch.load_src()['33/7/3/8']['catcher'] == 'DKBO3', str(reg['growth']))
@@ -336,5 +382,19 @@ check('register_catches：沒有矛盾 → 0', pet_catch.register_catches(SH[:1]
 f3 = FT3({}, polls=[{'DKBO2': (0, False)}])
 f3.pets_list = lambda roles, img_only=None: (0, {'DKBO2': [u(2, '41/7/3/8')]})
 check('run 預設階段含 register（wait 完接著登錄）', pet_catch.run(A[:1], stages=('wait', 'register'), tools=f3) == 0 and reg['growth']['41/7/3/8'] == '克邦凱斯')
+fr = FR({'DKBO2': [mount1, unr(2), u(3, '42/9/6/5', nh='K')]})
+pet_catch.save_pre({'DKBO2': [mount1]})
+rc = pet_catch.register_catches(DINO, fr)
+check('register_catches：有讀不出的新寵物 → 16，其餘照登錄；騎寵沒被登錄', rc == pet_catch.EXIT_CATCH_UNREAD and reg['growth'].get('42/9/6/5') == '魯尼帖斯'
+      and '51/9/8/1' not in reg['growth'], str(rc))
+f4 = FakeT()
+check('catch_off：外掛逐人取消自動抓寵', pet_catch.catch_off(['DKBO2', 'DKBO3'], f4) == 0 and f4.calls == [('off', 'DKBO2'), ('off', 'DKBO3')])
+f5 = FakeT()
+pet_catch.pre_path().unlink()
+pet_catch.run(A, stages=('setup',), tools=f5)
+check('setup 前沒有抓寵前快照 → 讀一次寵物欄存起來', getattr(f5, 'listed', 0) == 1 and set(pet_catch.load_pre()) == {'DKBO2', 'DKBO3'})
+f5 = FakeT()
+pet_catch.run(A, stages=('setup',), tools=f5)
+check('setup 前已有新鮮快照（petquest 存的）→ 不重讀', getattr(f5, 'listed', 0) == 0)
 print('\n失敗 %d' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)
