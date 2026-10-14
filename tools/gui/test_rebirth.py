@@ -93,6 +93,8 @@ class FakeTools:
         self.relogin_rcs = kw.get('relogin_rcs', [])
         self.snap_rc = kw.get('snap_rc', 0)
         self.diff_rc = kw.get('diff_rc', 0)
+        self.gate = kw.get('gate', {'kind': 'teleport', 'pos': (300, 121, 170)})
+        self.scr = kw.get('scr', 'idle')
 
     def c(self, *a):
         self.calls.append(a)
@@ -166,6 +168,14 @@ class FakeTools:
     def drop_new_lv1(self, n, before): self.c('drop_new_lv1', n, before); return self.diff_rc, {'why': 'x'}
     def encounter_on(self): return False
     def encounter_off(self): self.c('enc_off')
+    def encounter_set(self, on): self.c('enc_set', on)
+    def screen_state(self): return self.scr
+
+    def level_gate(self, n):
+        self.c('level_gate', n)
+        if self.gate.get('kind') in ('teleport', 'already') and self.gate.get('pos'):
+            self.pos = self.gate['pos']
+        return dict(self.gate)
     def snap(self, tag): self.c('snap', tag)
 
 
@@ -216,9 +226,9 @@ check('當前不是 DKBO → 83', quiet(rebirth.run, tools=FakeTools(cur='DKBO3'
 fresh()
 check('team.form 失敗（team.check 也不滿）→ 83', quiet(rebirth.run, tools=FakeTools(team_form_rc=41, team_checks=[41])) == 83)
 fresh()
-check('等級不足（130）→ 80', quiet(rebirth.run, trans=1, tools=FakeTools(levels={**{r: (0, 133) for r in rebirth.ALL_ROLES}, 'DKBO4': (0, 130)})) == 80)
+check('--read-levels 等級不足（130）→ 80', quiet(rebirth.run, trans=1, read_levels=True, tools=FakeTools(levels={**{r: (0, 133) for r in rebirth.ALL_ROLES}, 'DKBO4': (0, 130)})) == 80)
 fresh()
-check('轉數不符 → 80', quiet(rebirth.run, trans=1, tools=FakeTools(levels={r: (1, 140) for r in rebirth.ALL_ROLES})) == 80)
+check('--read-levels 轉數不符 → 80', quiet(rebirth.run, trans=1, read_levels=True, tools=FakeTools(levels={r: (1, 140) for r in rebirth.ALL_ROLES})) == 80)
 fresh()
 T = FakeTools(items={'DKBO2': {'水的戒指': None}}, quest=[(37, (32011, 1, 1))])
 check('缺證明不再擋 preflight（不回 81、不查證明）', quiet(rebirth.run, tools=T) != 81 and 'missing' not in rebirth.LAST.get('info', {}))
@@ -909,10 +919,50 @@ import stuckrecover  # noqa: E402
 import rebirth_steps  # noqa: E402
 
 fresh()
+T = FakeTools(quest=list(FULL_QUEST), gate={'kind': 'nocard', 'pos': (300, 100, 100)})
+rc = quiet(rebirth.run, tools=T)
+nm = T.names()
+check('追蹤欄沒卡：accept 階段在 preflight 之後、第一個 quest（enter）之前，帶轉數', ('accept', 1) in T.calls and nm.index('accept') > nm.index('heal') and nm.index('accept') < nm.index('quest'), str(nm[:12]))
+check('追蹤欄沒卡 → 退回 bag.levels 讀 5 人等級 + 警告', ('levels', tuple(rebirth.ALL_ROLES)) in T.calls and any('沒有' in w for w in rebirth.LAST['warnings']))
+
+# ---- 2026-10-14：點追蹤卡 = 等級檢查 ----
+fresh()
 T = FakeTools(quest=list(FULL_QUEST))
 rc = quiet(rebirth.run, tools=T)
 nm = T.names()
-check('accept 階段在 preflight 之後、第一個 quest（enter）之前，帶轉數', ('accept', 1) in T.calls and nm.index('accept') > nm.index('heal') and nm.index('accept') < nm.index('quest'), str(nm[:12]))
+check('門檻：有傳送 → 繼續跑完 rc 0', rc == 0, str(rebirth.LAST.get('info')))
+check('門檻：順序 關遇敵 → current → form → 空位 → 點卡 → 補血', nm.index('enc_off') < nm.index('current') < nm.index('team_form') < nm.index('pet_empties') < nm.index('level_gate') < nm.index('heal'), str(nm[:14]))
+check('門檻：有傳送 → 不讀 5 人等級、accept 跳過', ('levels', tuple(rebirth.ALL_ROLES)) not in T.calls[:nm.index('quest')] and 'accept' not in nm, str(nm[:14]))
+fresh()
+T = FakeTools(quest=list(FULL_QUEST), gate={'kind': 'already', 'pos': (32001, 5, 5)})
+check('門檻：本來就在漆黑 → 視為達標、accept 跳過', quiet(rebirth.run, tools=T) == 0 and 'accept' not in T.names())
+fresh()
+T = FakeTools(gate={'kind': 'blocked', 'who': 'DKBO4', 'trans': 3, 'level': 131, 'via': 'notice', 'closed': True, 'text': 'DKBO4未達到3轉131級禁止傳送'})
+rc = quiet(rebirth.run, trans=4, tools=T)
+nm = T.names()
+check('門檻：未達條件視窗 → 80', rc == 80, str(rc))
+check('門檻：80 → 原地遇敵開回、沒補血、沒接任務 / 沒跑 quest', ('enc_set', True) in T.calls and 'heal' not in nm and 'accept' not in nm and 'quest' not in nm, str(nm))
+check('門檻：80 → info 記誰不夠', rebirth.LAST['info'].get('who') == 'DKBO4' and rebirth.LAST['info']['gate']['kind'] == 'blocked')
+fresh()
+T = FakeTools(gate={'kind': 'blocked', 'who': None, 'trans': None, 'level': None, 'via': 'window', 'closed': False, 'text': '條件不足,無法傳送'})
+rc = quiet(rebirth.run, trans=4, tools=T)
+check('門檻：被擋但視窗不是已知提示窗（沒關）→ 80、遇敵不開（視窗擋著）、不補血', rc == 80 and 'enc_set' not in T.names() and 'heal' not in T.names())
+fresh()
+T = FakeTools(gate={'kind': 'unknown', 'text': '請選擇正確的圖片'})
+rc = quiet(rebirth.run, trans=4, tools=T)
+check('門檻：讀不懂的視窗 → 9，不補血、不開遇敵、不 accept', rc == 9 and not ({'heal', 'enc_set', 'accept', 'quest'} & set(T.names())), str(T.names()))
+fresh()
+T = FakeTools(gate={'kind': 'timeout', 'pos': (300, 100, 100)})
+check('門檻：沒傳送也沒訊息 → 84', quiet(rebirth.run, trans=4, tools=T) == 84 and 'heal' not in T.names())
+fresh()
+T = FakeTools(quest=list(FULL_QUEST), scr='dialog')
+rc = quiet(rebirth.run, tools=T)
+check('門檻：傳送後已到守門人對話框 → preflight 不補血（第一次 heal 在 swap 之後）、警告、照跑',
+      rc == 0 and T.names().index('heal') > T.names().index('swap_weapon') and any('不補血' in w for w in rebirth.LAST['warnings']), str(T.names()[:16]))
+fresh()
+T = FakeTools(quest=list(FULL_QUEST))
+check('--read-levels：不點卡、讀 5 人等級、accept 照跑', quiet(rebirth.run, read_levels=True, tools=T) == 0 and 'level_gate' not in T.names() and 'accept' in T.names()
+      and ('levels', tuple(rebirth.ALL_ROLES)) in T.calls)
 fresh()
 T = FakeTools(accept_rc=126)
 rc = quiet(rebirth.run, trans=2, from_stage='accept', to_stage='accept', tools=T)

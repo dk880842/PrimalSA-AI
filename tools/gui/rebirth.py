@@ -18,12 +18,20 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
     --confirm-rebirth 精靈王轉生頁確認是「角色轉生」後停下（退出碼 89，對話框維持開著）等人；預設不停直接轉（使用者 2026-10-11：不用停）
     --pet-action 值  換弓後把 5 人戰寵「一般動作」設成這個（預設忠犬；none = 不動）
     --no-dragon      不用龍王的守護
+    --read-levels    preflight 改用 bag.levels 逐人讀等級當門檻（舊行為；預設是點追蹤卡看有沒有傳送）
   可 import：rebirth.run(trans=None, from_stage='preflight', dry_run=False, ..., tools=None) → 退出碼；結果 dict 在 rebirth.LAST
 
 階段（每階段開始 / 結束都寫 notes/quest-events.log、tools/.cache/rebirth.json；失敗另寫 errlog）：
-  preflight 前置檢查：先關原地遇敵（heal.set_encounter(False)，已關不點；練功中 EXP 橫幅會擋讀字）、當前角色 = DKBO、team.form 滿 5 人（form 非 0 → 先 team.check，滿 5 就算）、5 人轉數 / 等級（不再查四大洞窟證明：2026-10-13 find_items 讀字不穩兩次誤判 81；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理）、
-            背包 / 寵物欄空位 ≥ 2、heal 補滿
-  accept    接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（先看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
+  preflight 前置檢查（2026-10-14 起順序）：先關原地遇敵（heal.set_encounter(False)，已關不點；練功中 EXP 橫幅會擋讀字）→ 當前角色 = DKBO → team.form 滿 5 人（form 非 0 → 先 team.check，滿 5 就算）
+            → 背包 / 寵物欄空位 ≥ 2（唯讀、不移動）→ **點追蹤卡 = 等級檢查**（rebirth_steps.level_gate；使用者 2026-10-14：任務已接時點「漆黑洞窟(N轉) / 進入漆黑」卡，
+            有傳送 = 5 人都達標，有人不夠會跳「{0}未達到{1}轉{2}級禁止傳送」/「條件不足,無法傳送」/「等級不足」視窗）：
+              傳送到吉魯島 300 / 漆黑（或本來就在）→ 達標，記 gate=teleport（accept 跳過）→ heal 補滿（補血排在門檻之後：被擋時人要留在練功點；
+                傳送後遊戲會自動巡路往守門人，若補血前已到守門人對話框 → 警告、這次不補血，enter 的 quest.py 接手對話）；
+              未達條件 → 提示視窗點 ✕ 關掉、原地遇敵開回、人留在練功點（不先去補血）→ 80（info.gate.who = 誰不夠，讀得到才有）；
+              讀不懂的視窗 → 9（疑似驗證，什麼都不點）；追蹤欄沒卡 → 警告 + 改用 bag.levels（任務沒接，accept 會接）；其他（沒傳送也沒訊息 / 對話框 / 換到別圖）→ 84。
+            --read-levels：舊行為，bag.levels 逐人讀 5 人轉數 / 等級當門檻（不點卡），之後 heal。
+            （不再查四大洞窟證明：2026-10-13 find_items 讀字不穩兩次誤判 81；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理）。門檻實機未驗證（視窗內文 OCR 框是估計值）
+  accept    preflight 點卡已傳送（任務進行中）→ 跳過。否則接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（先看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
   enter     quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
   boss10    龍王的守護（背包沒有就從公共倉庫取）→ quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認在 11F 以上（32011～32021，地圖為準）
   bow16     龍王的守護 → quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）。
@@ -42,7 +50,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
             名字 + Lv1 驗過才丟，任何不確定 → 98，不碰騎寵 / 戰寵）→ 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79、90～96；rebirth 自己 80～89）：
-  80 等級 / 轉數不符（info.levels 看誰）或讀不到等級
+  80 等級不足：點追蹤卡被「未達條件」視窗擋（已關視窗、原地遇敵開回、留在練功點；info.gate.who 看誰）；--read-levels / 沒卡時 bag.levels 不符（info.levels）或讀不到等級
   81 保留不用（原「缺四件證明」，2026-10-13 起 preflight 不再檢查）
   82 背包 / 寵物欄空位不足
   83 隊伍 / 當前角色（不是 DKBO、team.form 失敗、補隊失敗）
@@ -336,6 +344,16 @@ class Tools:
     def encounter_off(self):
         import heal
         heal.set_encounter(False)
+
+    def encounter_set(self, on):
+        import heal
+        heal.set_encounter(on)
+
+    def level_gate(self, n):
+        return rebirth_steps.level_gate(n)
+
+    def screen_state(self):
+        return uikit.screen().get('state')
 
     def snap(self, tag):
         return uikit.snap(tag)
@@ -665,6 +683,7 @@ class Run:
     # ---- 階段 ----
     def s_preflight(self) -> int:
         T = self.T
+        self.st.pop('gate', None)                               # 上次的門檻結果不沿用（accept 靠它判斷要不要跳過）
         rc = T.preflight()
         if rc:
             return rc
@@ -679,13 +698,10 @@ class Run:
         rc = self.form()
         if rc:
             return self.fail(EXIT_TEAM, f'team.form 沒成功 rc={rc}（要滿 5 人）')
-        rc, lv = T.levels(ALL_ROLES)
-        if rc:
-            return self.fail(EXIT_LEVEL, f'讀等級失敗 bag rc={rc}', bag_rc=rc)
-        self.info['levels'] = {r: list(v) if v else None for r, v in lv.items()}
-        bad = {r: v for r, v in lv.items() if not v or v[0] != self.n - 1 or v[1] < level_min(self.n)}
-        if bad:
-            return self.fail(EXIT_LEVEL, f'要「{self.n - 1}轉 ≥{level_min(self.n)} 級」才能做 {self.task}；不符 / 讀不到：{bad}', bad=bad)
+        if self.o.get('read_levels'):                          # 舊行為（--read-levels）：bag.levels 逐人讀等級當門檻
+            rc = self.check_levels()
+            if rc:
+                return rc
         space = {}
         for r in ALL_ROLES:
             rc, it = T.find_items(r, [])        # 只讀空格數；不查四大洞窟證明（2026-10-13：讀字不穩誤判 81）
@@ -701,14 +717,65 @@ class Run:
         pshort = {r: v for r, v in pe.items() if v < 2}
         if short or pshort:
             return self.fail(EXIT_SPACE, f'空位不足（要各 ≥2）：背包 {short}、寵物欄 {pshort}', bag_short=short, pet_short=pshort)
+        if not self.o.get('read_levels'):
+            rc = self.gate()
+            if rc:
+                return rc
+        if self.st.get('gate') == 'teleport' and T.screen_state() == 'dialog':
+            self.warn('preflight：傳送後已到守門人對話框（巡路比補血快）→ 這次不補血，直接 enter（quest.py 處理對話）')
+            return 0
         try:
             T.heal()
         except RuntimeError as e:
             return self.fail(EXIT_SETUP, f'補血失敗：{e}')
         return 0
 
+    def check_levels(self) -> int:
+        """--read-levels 舊門檻：bag.levels 讀 5 人轉數 / 等級（80）"""
+        rc, lv = self.T.levels(ALL_ROLES)
+        if rc:
+            return self.fail(EXIT_LEVEL, f'讀等級失敗 bag rc={rc}', bag_rc=rc)
+        self.info['levels'] = {r: list(v) if v else None for r, v in lv.items()}
+        bad = {r: v for r, v in lv.items() if not v or v[0] != self.n - 1 or v[1] < level_min(self.n)}
+        if bad:
+            return self.fail(EXIT_LEVEL, f'要「{self.n - 1}轉 ≥{level_min(self.n)} 級」才能做 {self.task}；不符 / 讀不到：{bad}', bad=bad)
+        return 0
+
+    def gate(self) -> int:
+        """點追蹤卡 = 等級檢查（rebirth_steps.level_gate）。有傳送 → 記 st['gate']='teleport'（accept 跳過，接著補血）；
+        未達條件 → 視窗已關、原地遇敵開回、人留在練功點（沒補血）→ 80；不認得的視窗 → 9；沒卡 → 退回 bag.levels 讀等級（任務多半沒接，accept 會接）"""
+        T = self.T
+        g = T.level_gate(self.n)
+        self.info['gate'] = g
+        kind = g.get('kind')
+        event(f'等級門檻（點追蹤卡）：{kind} {json.dumps(g, ensure_ascii=False)[:200]}')
+        if kind in ('teleport', 'already'):
+            self.st['gate'] = 'teleport'
+            return 0
+        if kind == 'blocked':
+            who = g.get('who')
+            need = f'{g["trans"]}轉{g["level"]}級' if g.get('trans') is not None else f'{self.n - 1}轉 {level_min(self.n)} 級'
+            msg = f'點「{self.task}」追蹤卡被擋：{who or "（讀不出是誰）"}未達到 {need}（{g.get("via")}：{g.get("text")}）'
+            if not g.get('closed'):
+                return self.fail(EXIT_LEVEL, msg + '；視窗不是已知提示視窗、沒關（不亂點），原地遇敵維持關，請人工關視窗', who=who)
+            try:
+                T.encounter_set(True)                        # 回到掛機：人還在練功點（沒先去補血）
+                enc = 'on'
+            except RuntimeError as e:
+                enc = f'fail：{e}'
+            return self.fail(EXIT_LEVEL, msg + f'；已關視窗，原地遇敵開回（{enc}），留在練功點繼續練', who=who, encounter=enc)
+        if kind == 'unknown':
+            return self.fail(uikit.EXIT_UNKNOWN_SCREEN, f'點追蹤卡後跳出讀不懂的視窗（{g.get("text")!r}），疑似驗證視窗 → 停手（鐵則 5），沒點任何東西')
+        if kind == 'nocard':
+            self.warn(f'追蹤欄沒有「{self.task}」卡（任務沒接？）→ 改用 bag.levels 讀等級，accept 階段會接任務')
+            return self.check_levels()
+        return self.fail(EXIT_QUEST, f'點「{self.task}」追蹤卡後沒傳送也沒看到未達條件（{kind}，位置 {g.get("pos")}）；不亂點，請看畫面', pos=g.get('pos'))
+
     def s_accept(self) -> int:
         """接「漆黑洞窟(N轉)」（rebirth_steps.accept_task：任務詳情精確標題 → 傳送村長 → 選單頁翻頁 → 接受 → 驗進行中；已進行中跳過）"""
+        if self.st.get('gate') == 'teleport':
+            event(f'accept：preflight 點追蹤卡已傳送（任務進行中）→ 跳過接任務')
+            return 0
         rc = self.T.accept(self.n)
         if rc in stuckrecover.HALT_RC:
             return self.fail(rc, f'接任務：{"看到驗證視窗" if rc == 9 else "斷線"}，停手')
@@ -906,8 +973,10 @@ class Run:
 
 
 DRY_PLAN = {
-    'preflight': ['heal.set_encounter(False)：關原地遇敵（已關不點；87）', 'char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人（非 0 → team.check 滿 5 就算，否則再 form 一次）', 'bag.levels：5 人 (N-1)轉 ≥{lv} 級（80）', '背包 / 寵物欄空位各 ≥2（82）', 'heal.heal_trip --no-return（87）'],
-    'accept': ['questdetail.accept {t}（任務詳情列表 / 中間標題精確樣板比對 → 傳送瑪麗娜絲村長 → 對話選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗證進行中；已進行中略過）（97）'],
+    'preflight': ['heal.set_encounter(False)：關原地遇敵（已關不點；87）', 'char.current = DKBO（面板左欄「當前登錄」）', 'team.form 滿 5 人（非 0 → team.check 滿 5 就算，否則再 form 一次）', '背包 / 寵物欄空位各 ≥2（82）',
+                  '點追蹤卡「{t}」= 等級檢查（rebirth_steps.level_gate）：傳送到吉魯島 / 漆黑 = 5 人達標；跳「未達到 / 禁止傳送 / 條件不足 / 等級不足」→ 關視窗、原地遇敵開回、留在練功點 → 80；讀不懂的視窗 → 9；沒卡 → bag.levels（--read-levels 一律用 bag.levels：(N-1)轉 ≥{lv} 級）',
+                  '傳送後 heal.heal_trip --no-return（已到守門人對話框 → 警告、不補血直接 enter）（87）'],
+    'accept': ['preflight 點卡已傳送 → 跳過', 'questdetail.accept {t}（任務詳情列表 / 中間標題精確樣板比對 → 傳送瑪麗娜絲村長 → 對話選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗證進行中；已進行中略過）（97）'],
     'enter': ['quest.py --task {t} --stop-after-dialog --max-seconds 240（最多 3 輪）→ 地圖 32001'],
     'boss10': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use）', 'quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認在 11F 以上（32011～32021，地圖為準）'],
     'bow16': ['龍王的守護（距上次 >9 分鐘才吃）', 'quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016', '已過 16F 看地圖：17～20F = 弓已拿到；21F = 20F 也打完 → after_boss（滿 5 人）→ boss20_done，heal / boss20 跳過'],
@@ -932,12 +1001,12 @@ def print_plan(n: int, from_stage: str, opts: dict) -> None:
 
 
 def run(trans=None, from_stage: str = 'preflight', dry_run: bool = False, keep_old_weapon: bool = False, confirm_rebirth: bool = False,
-        pet_action: str = '忠犬', use_dragon: bool = True, tools=None, to_stage: str = 'cleanup') -> int:
+        pet_action: str = '忠犬', use_dragon: bool = True, tools=None, to_stage: str = 'cleanup', read_levels: bool = False) -> int:
     LAST.clear()
     if from_stage not in STAGES or to_stage not in STAGES or STAGES.index(to_stage) < STAGES.index(from_stage):
         print(f'rebirth：--from / --to 要是 {STAGES} 之一，且 to 不早於 from', file=sys.stderr)
         return uikit.EXIT_USAGE
-    opts = {'keep_old': keep_old_weapon, 'confirm_rebirth': confirm_rebirth, 'pet_action': pet_action, 'dragon': use_dragon}
+    opts = {'keep_old': keep_old_weapon, 'confirm_rebirth': confirm_rebirth, 'pet_action': pet_action, 'dragon': use_dragon, 'read_levels': read_levels}
     T = tools or Tools()
     if dry_run:
         print_plan(trans or 1, from_stage, opts)
@@ -993,8 +1062,9 @@ def main() -> int:
     ap.add_argument('--confirm-rebirth', action='store_true')
     ap.add_argument('--pet-action', default='忠犬', choices=['忠犬', '攻擊', '防禦', 'none'])
     ap.add_argument('--no-dragon', action='store_true')
+    ap.add_argument('--read-levels', action='store_true', help='preflight 用 bag.levels 逐人讀等級當門檻（舊行為；預設改點追蹤卡看有沒有傳送）')
     a = ap.parse_args()
-    rc = run(a.trans, a.from_stage, a.dry_run, a.keep_old_weapon, a.confirm_rebirth, a.pet_action, not a.no_dragon, to_stage=a.to_stage)
+    rc = run(a.trans, a.from_stage, a.dry_run, a.keep_old_weapon, a.confirm_rebirth, a.pet_action, not a.no_dragon, to_stage=a.to_stage, read_levels=a.read_levels)
     if not a.dry_run:
         print(json.dumps(LAST, ensure_ascii=False, default=str))
     return rc

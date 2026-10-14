@@ -2,7 +2,7 @@
 
 > 2026-10-11 寫成。流程取自 2004 一轉實跑（notes/quest-log.md 2004 段、notes/plan-qihei.md）。**bag.py / petdrop.py 是新寫的，實機完全沒驗證**；其餘串接既有已驗證工具。
 
-一行指令：`uv run --no-project python tools/gui/rebirth.py [--trans N] [--from 階段] [--to 階段] [--dry-run] [--keep-old-weapon] [--confirm-rebirth] [--pet-action 忠犬|攻擊|防禦|none] [--no-dragon]`
+一行指令：`uv run --no-project python tools/gui/rebirth.py [--trans N] [--from 階段] [--to 階段] [--dry-run] [--keep-old-weapon] [--confirm-rebirth] [--pet-action 忠犬|攻擊|防禦|none] [--no-dragon] [--read-levels]`
 - 任務組 = 2004 + N - 1（一轉 2004、二轉 2005、三轉 2006、四轉 2007、五轉 2008；NPC / 步驟 / 四件證明都相同，只有第 6 步交的守護獸不同：大地 / 水 / 火 / 風，五轉要四隻）。
 - 等級門檻：N=1～4 為 131、N=5 為 140；每轉前置要 (N-1) 轉。`--trans` 預設 = DKBO 目前轉數 + 1。
 - 先 `--dry-run` 看計畫（完全不碰遊戲）。可 import：`rebirth.run(...)`，結果 dict 在 `rebirth.LAST`。
@@ -11,8 +11,8 @@
 ## 階段（STAGES）
 | 階段 | 做什麼 | 失敗碼 |
 |---|---|---|
-| preflight | 先關原地遇敵（`heal.set_encounter(False)`，已關不點；練功中 EXP 橫幅擋讀字）→ 當前角色 = DKBO（面板左欄頭像紅字「當前登錄」，不看頭頂名牌）、`team.form` 滿 5 人（`Run.form`：非 0 / 非 9 → 等 3 秒 `team.check`，滿 5 就算，不滿再 form 一次）、5 人轉數 / 等級（不查四大洞窟證明）、背包 / 寵物欄空位 ≥2、`heal --no-return` | 83 / 80 / 82 / 87 |
-| accept | `rebirth_steps.accept_task`（先看任務追蹤欄：有標題精確相符的「漆黑洞窟(N轉)」卡片（titlematch 樣板，不用 OCR）→ `quest.track_task` 點卡巡路到村長 → 選單翻頁 → 接受 → 驗進行中；沒卡 / 不確定 / 點卡 20 秒沒對話框才退回 `questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)`）：任務詳情列表 / 中間標題樣板精確比對（(三轉) / (五轉) 分得開，對不上不傳送）→ 傳送村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗進行中；已進行中略過、已完成不接 | 97 |
+| preflight | 先關原地遇敵（`heal.set_encounter(False)`，已關不點；練功中 EXP 橫幅擋讀字）→ 當前角色 = DKBO（面板左欄頭像紅字「當前登錄」，不看頭頂名牌）、`team.form` 滿 5 人（`Run.form`：非 0 / 非 9 → 等 3 秒 `team.check`，滿 5 就算，不滿再 form 一次）、背包 / 寵物欄空位 ≥2 → **點追蹤卡 = 等級檢查**（2026-10-14 使用者說法，`rebirth_steps.level_gate`，未實機）：傳送到吉魯島 300 / 漆黑 = 5 人達標（accept 跳過）→ `heal --no-return`（補血排在門檻後；補血前已到守門人對話框 → 警告、不補直接 enter）；跳「未達到 / 禁止傳送 / 條件不足 / 等級不足」提示窗 → 點 ✕ 關、原地遇敵開回、留在練功點 → 80（`info.gate.who` 誰不夠）；讀不懂的視窗 → 9；追蹤欄沒卡 → `bag.levels`。`--read-levels` = 舊行為（`bag.levels` 讀 5 人轉數 / 等級，不點卡）。單獨跑：`rebirth_steps.py gate --trans N`（先自己關遇敵 / 組隊） | 83 / 82 / 80 / 9 / 84 / 87 |
+| accept | preflight 點卡已傳送（任務進行中）→ 跳過；否則 `rebirth_steps.accept_task`（先看任務追蹤欄：有標題精確相符的「漆黑洞窟(N轉)」卡片（titlematch 樣板，不用 OCR）→ `quest.track_task` 點卡巡路到村長 → 選單翻頁 → 接受 → 驗進行中；沒卡 / 不確定 / 點卡 20 秒沒對話框才退回 `questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)`）：任務詳情列表 / 中間標題樣板精確比對（(三轉) / (五轉) 分得開，對不上不傳送）→ 傳送村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗進行中；已進行中略過、已完成不接 | 97 |
 | enter | `quest.py --stop-after-dialog` 最多 3 輪：吉魯島守門人 → 守門人２ → 漆黑 1F（32001） | 84 |
 | boss10 | 龍王的守護 → `quest.py` 預設模式到 10F BOSS，退出碼 37（滿員）/ 38（不滿）→ 確認在 11F 以上（32011～32021，`past_boss10`，地圖為準；37 的「戰鬥 N」計數不可靠） | 85 / 84 |
 | bow16 | 龍王 → `--stop-after-rewards 1`：16F 守門人收 4 件證明、每人得精靈王之弓（32016）。進度看地圖（`bow16_progress`）：17～20F = 弓已拿到 → 0；21F = 20F 帖拉所伊朵也打完 → `after_boss` 確認滿 5 人 → 記 `boss20_done`（進度檔）→ heal / boss20 跳過 | 84 / 85 |
@@ -23,7 +23,7 @@
 | cleanup | 丟 5 人轉生獎勵寵（一轉烏力斯坦 / 二轉奇娜，petdrop 名稱 + Lv1；三轉起 rebirth 階段先拍寵物欄快照、這裡 diff 找剛好 1 隻新 Lv1，不確定 98） → 龍王存回公共倉庫 → 確認原地遇敵關 → `char.ensure DKBO` → 寫 quest-log 摘要 | 86 |
 
 ## 退出碼
-80 等級 / 轉數不符或讀不到 · 81 保留不用（原缺四件證明，2026-10-13 起 preflight 不再檢查；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理） · 82 背包 / 寵物欄空位不足 · 83 隊伍 / 當前角色 · 84 quest.py 階段沒完成（非預期碼 / 地圖不對 / 逾時）· 85 BOSS 輸 / 重打失敗 / 補不滿 · 86 背包 / 寵物操作失敗 · 87 補血 / 外掛 / 傳送失敗 · 88 精靈王對話不是角色轉生（或轉生後轉數沒變）· 97 接任務失敗 · 98 轉生獎勵寵無法確認（三轉起 diff 不確定，一律不丟）· 89 `--confirm-rebirth` 停下等人。
+80 等級不足（點追蹤卡被未達條件視窗擋：已關窗、遇敵開回、留練功點；`--read-levels` / 沒卡時 bag.levels 不符或讀不到） · 81 保留不用（原缺四件證明，2026-10-13 起 preflight 不再檢查；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理） · 82 背包 / 寵物欄空位不足 · 83 隊伍 / 當前角色 · 84 quest.py 階段沒完成（非預期碼 / 地圖不對 / 逾時）· 85 BOSS 輸 / 重打失敗 / 補不滿 · 86 背包 / 寵物操作失敗 · 87 補血 / 外掛 / 傳送失敗 · 88 精靈王對話不是角色轉生（或轉生後轉數沒變）· 97 接任務失敗 · 98 轉生獎勵寵無法確認（三轉起 diff 不確定，一律不丟）· 89 `--confirm-rebirth` 停下等人。
 共用：1 參數錯、2 版面、8 戰鬥鎖、9 疑似驗證視窗（quest 回 2 也轉成 9，鐵則 5 停手通知）、10 斷線（netwatch halt）。底層碼：quest 20～39、team 40～47、char 60～65、pet 70～79、bag 90～96（見各檔開頭）。
 
 ## 規則與設計

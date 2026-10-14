@@ -220,5 +220,70 @@ check('快照存讀 json', rs.load_snapshot(tmp) == BEFORE and rs.load_snapshot(
 check('reward_name 對照表', rs.reward_name(1) == '烏力斯坦' and rs.reward_name(2) == '奇娜' and rs.reward_name(3) is None)
 check('rebirth 的 URISTAN 常數 = 對照表一轉', __import__('rebirth').URISTAN == '烏力斯坦')
 
+# ---- 等級門檻：點追蹤卡（level_gate / judge_gate_text）----
+J = rs.judge_gate_text
+j = J('DKB04 未達到 3轉 131級禁止傳送')
+check('judge_gate：讀出誰 / 轉數 / 等級（DKB04 → 真名 DKBO4）', j and j['who'] == 'DKBO4' and j['trans'] == 3 and j['level'] == 131, str(j))
+check('judge_gate：條件不足,無法傳送 → 被擋（誰讀不到）', J('條件不足,無法傳送') and J('條件不足,無法傳送')['who'] is None)
+check('judge_gate：等級不足 → 被擋', J('等級不足') is not None)
+check('judge_gate：不相干 / 空字 → None', J('請選擇正確的圖片') is None and J('') is None and J(None) is None)
+check('past_gate：吉魯島 / 漆黑 1F～21F', rs.past_gate((300, 1, 1)) and rs.past_gate((32001, 1, 1)) and rs.past_gate((32021, 1, 1)) and not rs.past_gate((1000, 1, 1)) and not rs.past_gate(None))
+
+
+class GateT:
+    def __init__(self, pos=(1200, 50, 50), card=True, after=None, notice_at=None, notice_text='', state='walking', unknown_text='', chat='', dismiss_ok=True):
+        self.t = 0.0
+        self.p, self.card, self.after = pos, card, after or []
+        self.notice_at, self.ntext, self.st, self.utext, self.chat, self.dok = notice_at, notice_text, state, unknown_text, chat, dismiss_ok
+        self.calls = []
+
+    def clock(self): return self.t
+    def sleep(self, s): self.t += s
+    def pos(self):
+        if self.after and self.t >= self.after[0][0]:
+            self.p = self.after.pop(0)[1]
+        return self.p
+    def click_card(self, title): self.calls.append(('card', title)); return self.card
+    def notice(self): return self.notice_at is not None and self.t >= self.notice_at
+    def notice_text(self): return self.ntext
+    def dismiss(self): self.calls.append('dismiss'); return self.dok
+    def state(self): return self.st
+    def transition(self): return None
+    def center_text(self): self.calls.append('center'); return self.utext
+    def chat_text(self): self.calls.append('chat'); return self.chat
+
+
+T = GateT(after=[(3, (300, 121, 170))])
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：點卡（標題 漆黑洞窟(四轉)）→ 換到吉魯島 = teleport', g['kind'] == 'teleport' and ('card', '漆黑洞窟(四轉)') in T.calls, str(g))
+T = GateT(pos=(32005, 1, 1))
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：已在漆黑 → already、不點卡', g['kind'] == 'already' and not T.calls)
+T = GateT(notice_at=2, notice_text='DKBO5未達到3轉131級禁止傳送')
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：提示視窗含未達到 → blocked、點 ✕ 關、記誰', g['kind'] == 'blocked' and g['who'] == 'DKBO5' and g['closed'] and 'dismiss' in T.calls, str(g))
+T = GateT(notice_at=2, notice_text='請回答下列問題')
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：提示視窗讀不懂 → unknown、不點 ✕', g['kind'] == 'unknown' and 'dismiss' not in T.calls)
+T = GateT(state='unknown', unknown_text='看圖選出正確答案')
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：不認得的畫面讀不懂 → unknown（呼叫端 9）', g['kind'] == 'unknown' and 'center' in T.calls)
+T = GateT(state='unknown', unknown_text='條件不足,無法傳送')
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：不認得的視窗但有條件不足 → blocked、closed=False（不亂點）', g['kind'] == 'blocked' and g['closed'] is False and 'dismiss' not in T.calls)
+T = GateT(card=False)
+check('level_gate：追蹤欄沒卡 → nocard', quiet(rs.level_gate, 4, T)['kind'] == 'nocard')
+T = GateT(card=None)
+check('level_gate：掃描途中畫面變了 → screen', quiet(rs.level_gate, 4, T)['kind'] == 'screen')
+T = GateT(state='dialog')
+check('level_gate：直接出現對話框（沒傳送）→ dialog', quiet(rs.level_gate, 4, T)['kind'] == 'dialog')
+T = GateT(after=[(2, (2006, 21, 8))])
+check('level_gate：換到別張地圖 → moved', quiet(rs.level_gate, 4, T)['kind'] == 'moved')
+T = GateT(state='idle', chat='系統：DKBO3未達到3轉131級禁止傳送')
+g = quiet(rs.level_gate, 4, T)
+check('level_gate：逾時、聊天區有未達到 → blocked via chat', g['kind'] == 'blocked' and g['via'] == 'chat' and g['who'] == 'DKBO3', str(g))
+T = GateT(state='idle')
+check('level_gate：逾時、什麼都沒有 → timeout', quiet(rs.level_gate, 4, T)['kind'] == 'timeout')
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

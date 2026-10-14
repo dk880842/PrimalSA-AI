@@ -3,9 +3,10 @@
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/rebirth_steps.py accept --trans 3            # 接「漆黑洞窟(三轉)」（任務詳情 → 傳送到瑪麗娜絲村長 → 選單頁翻頁 → 接受 → 驗證進行中）
+  uv run --no-project python tools/gui/rebirth_steps.py gate --trans 4                # 點追蹤卡當等級檢查（有傳送 = 5 人達標；跳未達條件視窗 → 關掉，印 JSON 結果）
   uv run --no-project python tools/gui/rebirth_steps.py snapshot                    # 唯讀：讀 5 人寵物欄存成轉生前快照（tools/.cache/rebirth_pets_before.json）
   uv run --no-project python tools/gui/rebirth_steps.py drop-reward --trans 3 [--dry-run]   # 轉生後丟 5 人的獎勵寵（見下）
-  可 import：accept_task(n, T=None)、reward_name(n)、find_new_lv1(before, after)、drop_rewards(n, before, T=None, dry_run=False)
+  可 import：accept_task(n, T=None)、level_gate(n, T=None)、judge_gate_text(text)、reward_name(n)、find_new_lv1(before, after)、drop_rewards(n, before, T=None, dry_run=False)
 
 接任務（accept_task）：先看任務追蹤欄——有標題精確等於「漆黑洞窟(N轉)」的卡片（titlematch 圖樣板；沒樣板 / 不確定不用 OCR）→ quest.track_task 點卡片巡路到村長 →
   questdetail._after_transfer（選單頁翻頁 → 接受 → 驗進行中）；沒有卡、或點卡後 20 秒沒對話框才 fallback：questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)。任務詳情列表 / 中間標題用樣板精確比對（(三轉) / (五轉) 只差一字也分得開，
@@ -19,6 +20,7 @@
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -109,6 +111,148 @@ class _AcceptTools:
     def accept_state(self):
         import questdetail
         return questdetail.LAST.get('state')
+
+
+# ---- 等級門檻：點追蹤卡 = 等級檢查（2026-10-14 使用者說法）----
+# 任務已接時追蹤欄「漆黑洞窟(N轉) / 進入漆黑」卡片一點就自動傳送到吉魯島（300）→ 守門人 → 漆黑 1F；
+# 隊伍裡有人未達門檻 → 遊戲跳視窗擋住（知識庫字串 text 71266「{0}未達到{1}轉{2}級禁止傳送」、2004「條件不足,無法傳送」、「等級不足」），不傳送。
+# 所以「有傳送 = 全隊達標」，比 bag.levels 逐人開面板讀等級快又準。
+GATE_MAPS = (300,) + tuple(range(32001, 32022))        # 吉魯島 / 漆黑 1F～21F：在這裡 = 已過傳送門檻
+GATE_WORDS = ('未達到', '禁止傳送', '條件不足', '等級不足')
+GATE_RE = re.compile(r'([A-Za-z0-9]+)?\s*未\s*達\s*到?\s*(\d+)\s*轉\s*(\d+)\s*級')
+GATE_WAIT_S = 20.0               # 點卡後等傳送 / 視窗的上限（實測整段到 1F 約 15 秒，2026-10-12 notes 2004 段）
+GATE_UNKNOWN_N = 3               # 不認得的畫面（非轉場）連續這麼多次才讀字判斷
+# 截圖座標（1440×830）。提示視窗：✕ 946,208、確定 714,557（questdetail.NOTICE_*），內文在兩者之間（未實機量測，估計值）
+NOTICE_TEXT_BOX = (480, 235, 465, 300)
+CENTER_TEXT_BOX = (300, 150, 840, 500)    # 不認得的視窗：讀畫面中央一大塊
+
+
+def past_gate(pos) -> bool:
+    """純函式：目前位置已在吉魯島 / 漆黑洞窟（已過傳送門檻）"""
+    return bool(pos) and pos[0] in GATE_MAPS
+
+
+def judge_gate_text(text: str):
+    """純函式：視窗 / 聊天文字 → 未達條件 {'who', 'trans', 'level', 'text'}（who 讀不到 = None）；不含任何關鍵字 → None"""
+    t = re.sub(r'\s+', '', text or '')
+    if not any(w in t for w in GATE_WORDS):
+        return None
+    m = GATE_RE.search(t)
+    who = trans = lv = None
+    if m:
+        trans, lv = int(m[2]), int(m[3])
+        if m[1]:
+            try:
+                import charname
+                who = charname.canon(m[1]).replace('DKB0', 'DKBO')       # 顯示用真名（字母 O）
+            except Exception:
+                who = m[1]
+    return {'who': who, 'trans': trans, 'level': lv, 'text': t[:80]}
+
+
+def level_gate(n: int, T=None, wait_s: float = GATE_WAIT_S) -> dict:
+    """點追蹤卡「漆黑洞窟(N轉)」當等級檢查（呼叫前：原地遇敵已關、DKBO 當前、5 人隊伍）。回 dict，kind：
+    already  點之前就在吉魯島 / 漆黑（已過門檻，沒點）
+    teleport 點卡後地圖變成吉魯島 / 漆黑 → 全隊達標（遊戲接著自動巡路往守門人）
+    blocked  跳「未達條件」視窗（提示視窗 → 已點 ✕ 關掉，closed=True；別種視窗讀到關鍵字 → closed=False 沒點）或聊天區有同樣訊息；who = 誰不夠
+    nocard   追蹤欄掃完沒有這張卡（標題對不上絕不點；任務多半沒接）
+    unknown  跳出視窗但讀不出「未達到 / 禁止傳送 / 條件不足 / 等級不足」→ 可能是驗證視窗，什麼都沒點（呼叫端回 9）
+    dialog   點卡後直接出現 NPC 對話框（沒傳送，例：任務其實沒接 → 村長）→ 沒按
+    moved    換到別張地圖（不是吉魯島 / 漆黑）
+    screen   掃追蹤欄途中畫面不再是主畫面（戰鬥等），沒點
+    timeout  wait_s 秒內沒傳送、沒視窗、聊天區也沒有未達訊息"""
+    title = task_name(n)
+    T = T or _GateTools()
+    pos0 = T.pos()
+    if past_gate(pos0):
+        return {'kind': 'already', 'pos': pos0}
+    hit = T.click_card(title)
+    if hit is None:
+        return {'kind': 'screen', 'pos': pos0}
+    if not hit:
+        return {'kind': 'nocard', 'pos': pos0}
+    t_end = T.clock() + wait_s
+    unk = 0
+    pos = pos0
+    while T.clock() < t_end:
+        T.sleep(1.0)
+        if T.notice():                                              # 米色「提示」視窗（questdetail 同一個特徵）
+            text = T.notice_text()
+            j = judge_gate_text(text)
+            if not j:
+                return {'kind': 'unknown', 'text': (text or '')[:80], 'pos': pos}
+            closed = T.dismiss()
+            return dict(j, kind='blocked', via='notice', closed=closed, pos=pos)
+        p = T.pos()
+        if p:
+            pos = p
+            if past_gate(p):
+                return {'kind': 'teleport', 'pos': p}
+            if pos0 and p[0] != pos0[0]:
+                return {'kind': 'moved', 'pos': p}
+        st = T.state()
+        if st == 'dialog':
+            return {'kind': 'dialog', 'pos': pos}
+        if st in ('unknown', 'error') and not T.transition():
+            unk += 1
+            if unk >= GATE_UNKNOWN_N:
+                text = T.center_text()
+                j = judge_gate_text(text)
+                if not j:
+                    return {'kind': 'unknown', 'text': (text or '')[:80], 'pos': pos}
+                return dict(j, kind='blocked', via='window', closed=False, pos=pos)
+        else:
+            unk = 0
+    j = judge_gate_text(T.chat_text())                              # 沒視窗：系統訊息可能只出在聊天區（follow.py 練級點傳送被擋就是這樣）
+    if j:
+        return dict(j, kind='blocked', via='chat', closed=True, pos=pos)
+    return {'kind': 'timeout', 'pos': pos}
+
+
+class _GateTools:
+    def clock(self):
+        import time
+        return time.monotonic()
+
+    def sleep(self, s):
+        uikit.sleep(s)
+
+    def pos(self):
+        import quest
+        return quest.read_pos()
+
+    def click_card(self, title):
+        """quest.track_task：標題相符才點（樣板 / OCR 都對不上 → False，不點）"""
+        import quest
+        if uikit.preflight(SRC):
+            return None
+        return quest.track_task(title)
+
+    def notice(self):
+        import questdetail
+        return questdetail.notice_open()
+
+    def notice_text(self):
+        return ''.join(uikit.ocr(NOTICE_TEXT_BOX, '-Zooms', '2,3'))
+
+    def dismiss(self):
+        import questdetail
+        uikit.snap('rebirth-gate-blocked')
+        return questdetail.dismiss_notice()
+
+    def state(self):
+        return uikit.screen().get('state')
+
+    def transition(self):
+        return uikit.transition_now()
+
+    def center_text(self):
+        uikit.snap('rebirth-gate-unknown')
+        return ''.join(uikit.ocr(CENTER_TEXT_BOX, '-Zooms', '2,3'))
+
+    def chat_text(self):
+        import follow
+        return ''.join(uikit.ocr(follow.CHAT_BOX, '-Zooms', '2,3', '-Dark', 0))
 
 
 # ---- 轉生獎勵寵 ----
@@ -244,6 +388,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('accept'); p.add_argument('--trans', type=int, required=True)
+    p = sub.add_parser('gate'); p.add_argument('--trans', type=int, required=True)
     sub.add_parser('snapshot')
     p = sub.add_parser('drop-reward'); p.add_argument('--trans', type=int, required=True); p.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)
@@ -252,6 +397,10 @@ def main(argv=None) -> int:
         return uikit.EXIT_USAGE
     if a.cmd == 'accept':
         rc = accept_task(a.trans)
+    elif a.cmd == 'gate':                                        # 0 = 已過門檻（傳送 / 已在吉魯島漆黑）、9 = 不認得的視窗、1 = 其他（看 JSON kind）
+        g = level_gate(a.trans)
+        LAST.update(gate=g)
+        rc = 0 if g['kind'] in ('teleport', 'already') else uikit.EXIT_UNKNOWN_SCREEN if g['kind'] == 'unknown' else 1
     elif a.cmd == 'snapshot':
         rc = take_snapshot()
     else:
