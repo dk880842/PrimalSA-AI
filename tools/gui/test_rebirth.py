@@ -638,7 +638,7 @@ check('names_hidden 純函式', bag.names_hidden([True, False], {0: ''}) and not
 import json as _json
 _fx = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'bag_slots_px.json').read_text(encoding='utf-8'))
 for _name, _img in _fx['images'].items():
-    _k = len(bag.SLOT_PROBE)
+    _k = len(_img.get('probe') or [None] * 25)          # 每張圖存當時的取點；沒有 = 舊 25 點（來源截圖已不在，make_fixtures 保留）
     _cols = [tuple(int(h[j:j + 2], 16) for j in (0, 2, 4)) for h in _img['px']]
     _occ = ''.join('X' if bag.slot_occupied(_cols[i * _k:(i + 1) * _k]) else '.' for i in range(15))
     check(f'slot_occupied 實機樣本 {_name}', _occ == _img['expect'], _occ)
@@ -736,8 +736,8 @@ class FakeDelBag(FakeBag):
                     hit = i
             if hit is not None and self.mode == 'del':
                 out.append((243, 69, 84) if hit in self.marks else (255, 255, 255))
-            elif hit is not None:
-                out.append((255, 255, 255))
+            elif hit is not None and self.slots[hit] is not None:
+                out.append((255, 255, 255))               # 名稱白字只在有道具的格（空格沒有字；2026-10-14 SLOT_PROBE 改 169 點後會取到這一區）
             else:
                 out += super().px([(x, y)])
         return out

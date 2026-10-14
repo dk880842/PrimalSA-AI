@@ -4,7 +4,8 @@
 需要 tools/.cache/item-images（tools/extract/item_images.py 抽圖）；沒有就整個略過（回 0）。
 畫面 = fixtures/itemimg_cells.png 的格子裁片拼回原座標（其他位置當空格棕），uikit.shot_getter 換成它；面板 / 選角色 / OCR / 彈窗全換假的。
 驗：find_items 縮圖命中不 OCR、沒命中只 OCR 沒認出的格、icon 模式不 OCR、ocr 模式不截圖；list（read_bag_items）縮圖名 + 同圖多名標 ambiguous；
-find_item 只開縮圖命中那格的彈窗；橫幅蓋住 → 重拍、仍蓋住 → 那格走 OCR；名稱帶 [地] 的道具（大地的羈絆）也查得到圖。"""
+find_item 只開縮圖命中那格的彈窗；橫幅蓋住 → 重拍、仍蓋住 → 那格走 OCR；名稱帶 [地] 的道具（大地的羈絆）也查得到圖；
+倉庫格被橫幅蓋住（名字關著的實樣）→ 重拍、不認成 2倍智慧果；open_depot 子分頁被橫幅蓋住 → 等它消失再點、點擊被吃掉 → 重點（不需要抽圖）。"""
 import sys
 from pathlib import Path
 
@@ -74,7 +75,82 @@ def install(get, texts=None, popups=None):
     return st
 
 
+# 子分頁列三點（SUB_TABS）實機像素（2026-10-14 itemident/*-noname.png 與 ui-log/*-bag-depot-sub.png）
+TAB_SAMPLES = [
+    ([(251, 219, 135), (171, 127, 84), (173, 126, 82)], 'personal'),       # depot-personal-DKBO
+    ([(171, 127, 84), (251, 219, 135), (251, 219, 135)], 'public'),        # depot-public-DKBO
+    ([(251, 219, 135), (177, 141, 106), (178, 141, 106)], 'personal'),     # 185001：公共只剩 hover 淡色（點擊被橫幅吃掉後）
+    ([(251, 219, 135), (131, 106, 79), (100, 79, 59)], None),             # 185027：公共被橫幅蓋住
+    ([(251, 219, 135), (139, 102, 67), (255, 255, 255)], None),           # 094414
+    ([(171, 127, 84), (187, 151, 87), (3, 46, 0)], None),                 # depot-public-DKBO2：已切公共但被橫幅蓋住
+    ([(251, 219, 135), (128, 95, 63), (97, 70, 45)], None),               # depot-personal-DKBO3
+]
+
+
+def test_open_depot():
+    for cols, want in TAB_SAMPLES:
+        check(f'tab_state 實機像素 → {want}', bag.tab_state(cols) == want, cols)
+    keep = (bag.goto_page, bag._sub_on, bag._tab_state, bag._click, uikit.clock, uikit.sleep, bag.log)
+    t = {'now': 0.0}
+    uikit.clock = lambda: t['now']
+    uikit.sleep = lambda s: t.__setitem__('now', t['now'] + s)
+    bag.goto_page = lambda page: 0
+    bag.log = lambda msg: None
+
+    def run(covered, swallow, start='personal'):
+        st = {'tab': start, 'covered': covered, 'swallow': swallow, 'clicks': [], 'clicked_covered': 0}
+
+        def tab():
+            if st['covered'] > 0:
+                st['covered'] -= 1
+                return None
+            return st['tab']
+
+        def click(x, y, panel, note, **kw):
+            st['clicks'].append((x, y))
+            if st['covered'] > 0:
+                st['clicked_covered'] += 1
+            if st['swallow'] > 0:
+                st['swallow'] -= 1
+            else:
+                st['tab'] = 'public' if (x, y) == bag.SUB_XY['public'] else 'personal'
+            return True
+        bag._tab_state = tab
+        bag._sub_on = lambda sub: st['covered'] <= 0 and st['tab'] == sub
+        bag._click = click
+        return bag.open_depot('public'), st
+    rc, st = run(covered=0, swallow=0, start='public')
+    check('open_depot：已在公共 → 0、不點', rc == 0 and not st['clicks'], st['clicks'])
+    rc, st = run(covered=5, swallow=0)
+    check('open_depot：分頁被橫幅蓋住 → 等它消失才點（1 次）', rc == 0 and len(st['clicks']) == 1 and st['clicked_covered'] == 0, st)
+    rc, st = run(covered=0, swallow=1)
+    check('open_depot：點擊被橫幅吃掉 → 重點一次成功', rc == 0 and len(st['clicks']) == 2, st['clicks'])
+    rc, st = run(covered=0, swallow=99)
+    check(f'open_depot：一直切不過去 → 點 {bag.SUB_RETRIES + 1} 次後回 90', rc == 90 and len(st['clicks']) == bag.SUB_RETRIES + 1, (rc, st['clicks']))
+    rc, st = run(covered=10 ** 6, swallow=0)
+    check('open_depot：一直被蓋住 → 等 SUB_CLEAR_WAIT_S 後照點（舊行為）、點完被蓋住讀不到 → 90', rc == 90 and st['clicks'], (rc, len(st['clicks'])))
+    (bag.goto_page, bag._sub_on, bag._tab_state, bag._click, uikit.clock, uikit.sleep, bag.log) = keep
+
+
+def test_depot_banner():
+    """名字關著的實樣（fixtures/itemimg_noname.*）：DKBO4 個人倉庫第 4、5 格是空格被橫幅蓋住 → 重拍；一直蓋住 → 不認成 2倍智慧果、occ 為 None"""
+    tiles = [c for c in TI.load_fixtures(TI.NONAME_PNG, TI.NONAME_JSON) if c['src'] == 'depot-personal-DKBO4-noname.png' and c['kind'] == 'depot']
+
+    def get(x, y):
+        for c in tiles:
+            v = c['get'](x, y)
+            if v is not None:
+                return v
+        return (223, 187, 147) if (x - 237) % 95 in (47, 48) else EMPTY      # 格外：縫 = 米色、其他 = 空格棕（夠用的近似）
+    st = install(get)
+    r = bag.icon_read('depot', ['2倍智慧果'], pool=[])
+    check('倉庫格被橫幅蓋住 → 重拍 ICON_OCC_RETRIES 次', st['shots'] == bag.ICON_OCC_RETRIES + 1, st['shots'])
+    check('倉庫格被橫幅蓋住 → 不命中 2倍智慧果（舊版 0.585 誤認）、occ 第 4、5 格 None、列 unresolved',
+          r['hits']['2倍智慧果'] == [] and r['occ'][3] is None and r['occ'][4] is None and {3, 4} <= set(r['unresolved']), (r['hits'], r['occ'][:6], r['unresolved']))
+
+
 def main() -> int:
+    test_open_depot()
     try:
         IM.index()
     except FileNotFoundError:
@@ -150,6 +226,7 @@ def main() -> int:
     st['seq'] = [gb, get]                                  # 第 2 張橫幅消失（換成 b5 同位置的畫面）
     r = bag._names_in_bag(['大地的羈絆'])
     check('橫幅第 2 張消失 → 縮圖認出、零 OCR', st['shots'] == 2 and r['found']['大地的羈絆'] == 0 and not st['ocr'], (st['shots'], r))
+    test_depot_banner()
 
     print('全部通過' if not fails else f'{fails} 項失敗')
     return 1 if fails else 0

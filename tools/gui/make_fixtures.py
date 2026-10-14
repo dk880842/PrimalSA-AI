@@ -234,22 +234,33 @@ BAG_SLOTS_SRC = {
     'bag-names-off.png': 'XXXX...........',                      # 「顯示道具名」關：只有圖示（2026-10-12 04:07 DKBO 實機）
     'ui-log/173724-bag-noitem.png': 'XXXXXXXXX......',          # 名稱開：儀之兜…空想的衣服 9 件
     'ui-log/232817-bag-depot-btn.png': '...............',       # 倉庫頁：右半背包全空
+    'itemident/bag-DKBO-noname.png': 'XXXXX.XX.......',         # 名字關：格號 6 = 風的鎖（空心細線，舊 25 點探針漏判；2026-10-14）
 }
+LEGACY_PROBE = [(dx, dy) for dx in (-24, -12, 0, 12, 24) for dy in (-20, -10, 0, 10, 20)]   # 2026-10-14 前的 25 點探針
 
 
 def make_bag_slots_fixture() -> list:
+    """每張圖存 probe（取點清單）＋像素：bag.SLOT_PROBE 改了就重抽；來源截圖已經不在的舊樣本照舊保留（沒有 probe 欄 = LEGACY_PROBE）"""
     import bag
     pts = [(x + dx, y + dy) for i in range(bag.n_slots()) for x, y in [bag.slot_xy(i)] for dx, dy in bag.SLOT_PROBE]
+    try:
+        old = json.loads((OUT / 'bag_slots_px.json').read_text(encoding='utf-8')).get('images', {})
+    except (OSError, ValueError):
+        old = {}
     imgs, miss = {}, []
     for rel, want in BAG_SLOTS_SRC.items():
         p = CACHE / rel
         if not p.exists():
             miss.append(rel)
+            if rel in old:
+                imgs[rel] = old[rel]
             continue
         px = grab(p, pts)
-        imgs[rel] = {'expect': want, 'px': ['%02x%02x%02x' % tuple(px[f'{x},{y}']) for x, y in pts]}
+        imgs[rel] = {'expect': want, 'probe': [list(t) for t in bag.SLOT_PROBE],
+                     'px': ['%02x%02x%02x' % tuple(px[f'{x},{y}']) for x, y in pts]}
     if imgs:
-        write('bag_slots_px.json', {'note': '背包 15 格 × bag.SLOT_PROBE 像素（順序 = 格 0..14、每格 SLOT_PROBE 順序）；expect = 人工標記 X 有道具 / . 空（2026-10-12）', 'images': imgs})
+        write('bag_slots_px.json', {'note': '背包 15 格 × probe 像素（順序 = 格 0..14、每格 probe 順序；沒有 probe 欄 = 舊 25 點 LEGACY_PROBE）；'
+                                    'expect = 人工標記 X 有道具 / . 空（2026-10-12，10-14 加名字關著的風的鎖樣本、改 169 點）', 'images': imgs})
     return miss
 
 

@@ -1,0 +1,206 @@
+{
+"note": "「顯示道具名」關著的實樣（2026-10-14 itemident/*-noname.png）：每格以格心為準裁 [-50,50]、8 欄拼圖；state = true 有道具 / false 空 / null 被 EXP 橫幅蓋住（test_itemimg_match.py --make-fixtures 產生）",
+"tile": 101,
+"cols": 8,
+"pad0": -50,
+"cells": [
+{
+"src": "depot-personal-DKBO4-noname.png",
+"kind": "depot",
+"slot": 3,
+"cx": 520,
+"cy": 290,
+"state": null,
+"name": null
+},
+{
+"src": "depot-personal-DKBO4-noname.png",
+"kind": "depot",
+"slot": 4,
+"cx": 614,
+"cy": 290,
+"state": null,
+"name": null
+},
+{
+"src": "depot-personal-DKBO4-noname.png",
+"kind": "depot",
+"slot": 2,
+"cx": 425,
+"cy": 290,
+"state": true,
+"name": null
+},
+{
+"src": "depot-personal-DKBO4-noname.png",
+"kind": "depot",
+"slot": 1,
+"cx": 331,
+"cy": 290,
+"state": true,
+"name": "英雄的祝福"
+},
+{
+"src": "depot-personal-DKBO4-noname.png",
+"kind": "depot",
+"slot": 5,
+"cx": 237,
+"cy": 385,
+"state": false,
+"name": null
+},
+{
+"src": "depot-personal-DKBO4-noname.png",
+"kind": "depot",
+"slot": 8,
+"cx": 520,
+"cy": 385,
+"state": false,
+"name": null
+},
+{
+"src": "depot-public-DKBO2-noname.png",
+"kind": "depot",
+"slot": 3,
+"cx": 520,
+"cy": 290,
+"state": null,
+"name": null
+},
+{
+"src": "depot-public-DKBO2-noname.png",
+"kind": "depot",
+"slot": 4,
+"cx": 614,
+"cy": 290,
+"state": null,
+"name": null
+},
+{
+"src": "depot-public-DKBO2-noname.png",
+"kind": "depot",
+"slot": 2,
+"cx": 425,
+"cy": 290,
+"state": true,
+"name": "龍王的守護"
+},
+{
+"src": "depot-public-DKBO2-noname.png",
+"kind": "depot",
+"slot": 0,
+"cx": 237,
+"cy": 290,
+"state": true,
+"name": "2倍智慧果"
+},
+{
+"src": "depot-public-DKBO2-noname.png",
+"kind": "depot",
+"slot": 10,
+"cx": 237,
+"cy": 480,
+"state": true,
+"name": "人龍隨機蛋"
+},
+{
+"src": "depot-personal-DKBO3-noname.png",
+"kind": "depot",
+"slot": 3,
+"cx": 520,
+"cy": 290,
+"state": null,
+"name": null
+},
+{
+"src": "depot-personal-DKBO3-noname.png",
+"kind": "depot",
+"slot": 4,
+"cx": 614,
+"cy": 290,
+"state": null,
+"name": null
+},
+{
+"src": "depot-public-DKBO-noname.png",
+"kind": "depot",
+"slot": 3,
+"cx": 520,
+"cy": 290,
+"state": true,
+"name": "安撫之素"
+},
+{
+"src": "depot-public-DKBO-noname.png",
+"kind": "depot",
+"slot": 4,
+"cx": 614,
+"cy": 290,
+"state": false,
+"name": null
+},
+{
+"src": "depot-public-DKBO-noname.png",
+"kind": "depot",
+"slot": 1,
+"cx": 331,
+"cy": 290,
+"state": true,
+"name": "離線水晶"
+},
+{
+"src": "bag-DKBO-noname.png",
+"kind": "bag",
+"slot": 6,
+"cx": 860,
+"cy": 352,
+"state": true,
+"name": "風的鎖"
+},
+{
+"src": "bag-DKBO-noname.png",
+"kind": "bag",
+"slot": 5,
+"cx": 752,
+"cy": 352,
+"state": false,
+"name": null
+},
+{
+"src": "bag-DKBO-noname.png",
+"kind": "bag",
+"slot": 1,
+"cx": 860,
+"cy": 245,
+"state": null,
+"name": null
+},
+{
+"src": "bag-DKBO-noname.png",
+"kind": "bag",
+"slot": 7,
+"cx": 966,
+"cy": 352,
+"state": true,
+"name": "水的戒指"
+},
+{
+"src": "bag-DKBO2-noname.png",
+"kind": "bag",
+"slot": 5,
+"cx": 752,
+"cy": 352,
+"state": true,
+"name": "風的鎖"
+},
+{
+"src": "bag-DKBO2-noname.png",
+"kind": "bag",
+"slot": 9,
+"cx": 1180,
+"cy": 352,
+"state": false,
+"name": null
+}
+]
+}

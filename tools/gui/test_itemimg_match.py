@@ -2,12 +2,15 @@
 """itemimg_match / imgmatch 離線測試（不碰遊戲）。用法：
   uv run --no-project python tools/gui/test_itemimg_match.py                  # 跑測試
   uv run --no-project python tools/gui/test_itemimg_match.py --make-fixtures  # 從 tools/.cache 截圖重做 fixtures（維護用）
+  uv run --no-project python tools/gui/test_itemimg_match.py --make-noname-fixtures  # 只重做名字關著的實樣 fixtures
 需要 tools/.cache/item-images/（tools/extract/item_images.py 匯出，不進 git）；沒匯出就整個略過（回 0）。
 回歸樣本不依賴 tools/.cache 的截圖：每格裁成 85×85 小圖拼在 fixtures/itemimg_cells.png，格資料在 fixtures/itemimg_cells.json。
 
 樣本（2026-10-14，notes/plan-item-icon-match.md §2.4）：
   計畫 39 格（b5 / bag2 / b6 / d_pers450 / dep0 / d_pub450，名字從截圖讀得到）+ bag-names-off 4 格（名字關著，推定）
   + dep0 右側背包 3 格（千年龜的殼）+ 空格 6 格 + bag0 浮動「獲得 EXP」橫幅 5 格（格 0～2 被蓋住）。
+「顯示道具名」關著的實樣（2026-10-14，tools/.cache/itemident/*-noname.png）另存 fixtures/itemimg_noname.png / .json（NONAME，裁 ±50 含格間米色縫）：
+  倉庫空格 / 有道具的格被 EXP 橫幅蓋住（要判 covered、不比對）、旁邊沒被蓋的格（不能誤判）、空心細線的風的鎖（舊 25 點探針漏判）。
 """
 import random
 import struct
@@ -45,6 +48,21 @@ TRUTH = {
 EXTRA = {'dep0.png': ('bag', {4: '23907', 5: '23907', 6: '23907'})}          # 倉庫畫面右側的背包格
 BANNER = {'bag0.png': ('bag', {0: '?', 1: '22026', 2: '22011', 3: '22016', 4: '22124'})}
 NAMES_OFF = 'bag-names-off.png'
+# 名字關著的實樣：{檔名: [(kind, 格, 期望狀態 True 有 / False 空 / None 被蓋住, 期望名稱 或 None)]}
+NONAME_DIR = 'itemident'
+NONAME = {
+    'depot-personal-DKBO4-noname.png': [('depot', 3, None, None), ('depot', 4, None, None), ('depot', 2, True, None),
+                                        ('depot', 1, True, '英雄的祝福'), ('depot', 5, False, None), ('depot', 8, False, None)],
+    'depot-public-DKBO2-noname.png': [('depot', 3, None, None), ('depot', 4, None, None), ('depot', 2, True, '龍王的守護'),
+                                      ('depot', 0, True, '2倍智慧果'), ('depot', 10, True, '人龍隨機蛋')],
+    'depot-personal-DKBO3-noname.png': [('depot', 3, None, None), ('depot', 4, None, None)],
+    'depot-public-DKBO-noname.png': [('depot', 3, True, '安撫之素'), ('depot', 4, False, None), ('depot', 1, True, '離線水晶')],
+    'bag-DKBO-noname.png': [('bag', 6, True, '風的鎖'), ('bag', 5, False, None), ('bag', 1, None, None), ('bag', 7, True, '水的戒指')],
+    'bag-DKBO2-noname.png': [('bag', 5, True, '風的鎖'), ('bag', 9, False, None)],
+}
+NONAME_PNG = HERE / 'fixtures' / 'itemimg_noname.png'
+NONAME_JSON = HERE / 'fixtures' / 'itemimg_noname.json'
+NPAD0, NPAD1 = -50, 50        # 含倉庫格左右的米色縫（−47 / +50）
 # 計畫離線實驗的閉集（同系首飾 / 戒指 / 手環換色版、石頭類）
 POOL_IDS = ['22084', '22124', '22016', '22026', '22011', '22013', '22050', '22082', '24053', '24054', '22356', '24169', '23907',
             '24049', '50055', '50220', '24154', '24236', '24314', '24055', '24052', '22014', '22015', '22051', '22052', '22083',
@@ -102,10 +120,43 @@ def make_fixtures() -> int:
     return 0
 
 
-def load_fixtures():
+def make_noname_fixtures() -> int:
     import json
-    meta = json.loads(FIX_JSON.read_text(encoding='utf-8'))
-    w, h, bpp, rows = imgmatch.decode(FIX_PNG)
+    cells, tiles = [], []
+    t = NPAD1 - NPAD0 + 1
+    for f, lst in NONAME.items():
+        src = CACHE / NONAME_DIR / f
+        if not src.exists():
+            print('缺截圖', src)
+            return 1
+        w, h, bpp, rows = imgmatch.decode(src)
+        for kind, slot, state, name in lst:
+            cx, cy = M._xy(kind, slot)
+            tile = [bytes(rows[cy + dy][(cx + NPAD0) * bpp:(cx + NPAD1 + 1) * bpp]) for dy in range(NPAD0, NPAD1 + 1)]
+            if bpp == 4:
+                tile = [bytes(b for i, b in enumerate(r) if i % 4 != 3) for r in tile]
+            tiles.append(tile)
+            cells.append({'src': f, 'kind': kind, 'slot': slot, 'cx': cx, 'cy': cy, 'state': state, 'name': name})
+    n_rows = (len(tiles) + COLS - 1) // COLS
+    W, H = COLS * t, n_rows * t
+    canvas = [bytearray(W * 3) for _ in range(H)]
+    for k, tile in enumerate(tiles):
+        ox, oy = (k % COLS) * t, (k // COLS) * t
+        for y, r in enumerate(tile):
+            canvas[oy + y][ox * 3:(ox + t) * 3] = r
+    NONAME_PNG.write_bytes(_png(W, H, canvas))
+    NONAME_JSON.write_text(json.dumps({'note': '「顯示道具名」關著的實樣（2026-10-14 itemident/*-noname.png）：每格以格心為準裁 [%d,%d]、%d 欄拼圖；'
+                                       'state = true 有道具 / false 空 / null 被 EXP 橫幅蓋住（test_itemimg_match.py --make-fixtures 產生）'
+                                       % (NPAD0, NPAD1, COLS), 'tile': t, 'cols': COLS, 'pad0': NPAD0, 'cells': cells},
+                                      ensure_ascii=False, indent=0), encoding='utf-8')
+    print(f'{len(cells)} 格 → {NONAME_PNG}（{NONAME_PNG.stat().st_size // 1024} KB）')
+    return 0
+
+
+def load_fixtures(png=FIX_PNG, js=FIX_JSON):
+    import json
+    meta = json.loads(js.read_text(encoding='utf-8'))
+    w, h, bpp, rows = imgmatch.decode(png)
     out = []
     for k, c in enumerate(meta['cells']):
         tx, ty = (k % meta['cols']) * meta['tile'], (k // meta['cols']) * meta['tile']
@@ -268,9 +319,44 @@ def test_names_band():
           [(c[i]['best'], c[i]['score']) for i in (1, 2)])
 
 
+def test_noname(pool):
+    """2026-10-14 名字關著的實樣：倉庫格遮擋偵測（正負例）、被蓋住的格不判 occupancy / 不比對、風的鎖不漏判"""
+    fx = load_fixtures(NONAME_PNG, NONAME_JSON)
+    bad_state, bad_name, fake = [], [], []
+    for c in fx:
+        st = M.cell_state(c['get'], c['kind'], c['slot'])
+        if st is not c['state']:
+            bad_state.append((c['src'][:-12], c['kind'], c['slot'], c['state'], st, M.occlusion(c['get'], c['kind'], c['slot'])))
+        r = M.identify(c['get'], c['kind'], c['slot'], pool)
+        if c['state'] is None and (r['ok'] or not r['occluded'] or r['ranked']):
+            fake.append((c['src'][:-12], c['slot'], r['names'][:2], r['score']))
+        if c['name'] and not (r['ok'] and any(M.norm(c['name']) == M.norm(n) for n in r['names'])):
+            bad_name.append((c['src'][:-12], c['kind'], c['slot'], c['name'], r['names'][:2], r['score']))
+    cov = [c for c in fx if c['state'] is None]
+    check(f'名字關著實樣：{len(fx)} 格 occupancy 三態（有 / 空 / 被蓋住）全對（被蓋住 {len(cov)} 格、沒被蓋的鄰格不誤判）', not bad_state, bad_state)
+    check('被蓋住的格不比對（ok=False、occluded、不排名；舊版倉庫空格被認成 2倍智慧果 0.585）', not fake, fake)
+    check('名字關著實樣：認得出的格名稱全對（含空心細線的風的鎖 2 格）', not bad_name, bad_name)
+    by = {}
+    for c in fx:
+        by.setdefault((c['src'], c['kind']), []).append(c)
+    ok = True
+    for (src, kind), cs in by.items():
+        g = lambda x, y, cs=cs: next((v for v in (c['get'](x, y) for c in cs) if v is not None), None)
+        r = M.match_slots(g, kind, ['2倍智慧果'], pool=pool, slots=[c['slot'] for c in cs])
+        hit = r['hits']['2倍智慧果']
+        exp = [c['slot'] for c in cs if c['name'] == '2倍智慧果']
+        covered = [c['slot'] for c in cs if c['state'] is None]
+        if hit != exp or any(not r['cells'][i]['occluded'] for i in covered):
+            ok = False
+            print('   ', src, '命中', hit, '期望', exp)
+    check('match_slots：被蓋住的格放進 cells 標 occluded（呼叫端重拍），不算命中', ok)
+
+
 def main() -> int:
     if '--make-fixtures' in sys.argv:
-        return make_fixtures()
+        return make_fixtures() or make_noname_fixtures()
+    if '--make-noname-fixtures' in sys.argv:
+        return make_noname_fixtures()
     if not (M.IMG_DIR / 'index.tsv').exists():
         print('SKIP 沒有 tools/.cache/item-images（先跑 uv run --no-project --with UnityPy python tools/extract/item_images.py）')
         return 0
@@ -281,6 +367,10 @@ def main() -> int:
     test_absent(fx)
     test_empty_and_banner(fx)
     test_names_band()
+    import bag
+    test_noname([n for n in dict.fromkeys(bag.item_pool() + ['風的鎖', '水的戒指', '英雄的祝福', '2倍智慧果', '龍王的守護', '人龍隨機蛋',
+                                                               '安撫之素', '離線水晶'])
+                 if n in M._BYNAME or M.norm(n) in M._BYNORM])
     print('全部通過' if not fails else f'{fails} 項失敗')
     return 1 if fails else 0
 

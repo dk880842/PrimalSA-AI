@@ -66,6 +66,14 @@ TAB_BAG, TAB_DEPOT = (1318, 265), (1318, 467)
 SUB_XY = {'personal': (307, 200), 'public': (547, 200)}
 SUB_PROBE = {'personal': (230, 200), 'public': (480, 200)}        # 選中 = 亮黃 (251,219,135)；沒選 = (171,127,84)
 SUB_ON = (251, 219, 135)
+# 子分頁列三點（個人 230 / 公共 480、640，都避開字）→ tab_state。沒選 = (171,127,84)；沒選但游標停在上面 = hover 淡色 (177,141,106)。
+# 浮動「獲得 EXP」橫幅（約 x 470～1000）會蓋住公共分頁、而且會吃掉點擊（2026-10-14 errlog 877/878：DKBO4 / DKBO5 open_depot 回 90，
+# ui-log 6 張 bag-depot-sub 失敗截圖 5 張是橫幅蓋住分頁或點完後只剩 hover 淡色）→ 讀不出狀態 = 被蓋住，等它飄走再點
+SUB_OFF = ((171, 127, 84), (177, 141, 106))
+SUB_TABS = [(230, 200), (480, 200), (640, 200)]
+SUB_TOL = 24
+SUB_CLEAR_WAIT_S = 4.0     # 分頁被橫幅蓋住時最多等多久
+SUB_RETRIES = 2            # 點了沒切過去（點擊被橫幅吃掉）→ 等橫幅消失再點，最多再點幾次（切分頁可重複點，無副作用）
 SLOT_X, SLOT_Y = [752, 860, 966, 1072, 1180], [245, 352, 460]     # 背包格 5×3 可見（ui/bag.md 寫 5×4；第 4 列 / 捲動未量）
 DEPOT_X, DEPOT_Y = [237, 331, 425, 520, 614], [290, 385, 480, 575]
 WEAPON_SLOT = (233, 372)                                            # 裝備格左欄第 3 個（弓箭圖示）
@@ -214,7 +222,35 @@ def _avatar_sel(role: str) -> bool:
 
 def _sub_on(sub: str) -> bool:
     cols = uikit.px([SUB_PROBE[sub]])
-    return bool(cols) and all(abs(a - b) <= 24 for a, b in zip(cols[0], SUB_ON))
+    return bool(cols) and all(abs(a - b) <= SUB_TOL for a, b in zip(cols[0], SUB_ON))
+
+
+def tab_state(cols) -> str | None:
+    """純函式：SUB_TABS 三點顏色 → 'personal' / 'public' / None（讀不懂 = 被浮字橫幅 / 其他東西蓋住）"""
+    if not cols or len(cols) != len(SUB_TABS):
+        return None
+    near = lambda c, t: all(abs(a - b) <= SUB_TOL for a, b in zip(c, t))
+    on = [near(c, SUB_ON) for c in cols]
+    off = [any(near(c, t) for t in SUB_OFF) for c in cols]
+    if on[0] and off[1] and off[2]:
+        return 'personal'
+    if off[0] and on[1] and on[2]:
+        return 'public'
+    return None
+
+
+def _tab_state() -> str | None:
+    return tab_state(uikit.px(SUB_TABS))
+
+
+def _wait_tab_clear(secs: float = SUB_CLEAR_WAIT_S) -> str | None:
+    """輪詢到子分頁列讀得懂（沒被橫幅蓋住）→ 目前分頁；secs 內一直被蓋住 → None"""
+    end = uikit.clock() + secs
+    while True:
+        st = _tab_state()
+        if st is not None or uikit.clock() >= end:
+            return st
+        uikit.sleep(POLL_S)
 
 
 BUFF_SLOTS = [(76 + 46 * k, 150, 44, 45) for k in range(3)]      # 左上 buff 列（頭像下方）：每格約 46 px 寬，最多 3 格並排
@@ -567,7 +603,11 @@ def n_slots(depot: bool = False) -> int:
 NAMES_BTN = (968, 561)
 SLOT_EMPTY = (104, 74, 49)
 SLOT_EMPTY_TOL = 14
-SLOT_PROBE = [(dx, dy) for dx in (-24, -12, 0, 12, 24) for dy in (-20, -10, 0, 10, 20)]   # 格中心周圍 25 點（避開右下數量字）
+# 格心周圍 13×13 = 169 點（dx −30～30 每 5、dy −24～24 每 4；背包格 / 倉庫格空格內部都是平的棕色）。
+# 2026-10-14：舊的 5×5 = 25 點（每 12 / 10 px）漏掉空心細線的「風的鎖」（DKBO 背包格號 6 = 860,352，25 點全落在空心處，3 張截圖都漏）；
+# 離線 171 張背包頁 + 88 張倉庫頁截圖（4325 格）：空格 0 點（無一誤判）、有道具最少 25 點（耐久力回複藥；風的鎖 35 點）；dy 不超過 ±24 是避開
+# 取出動畫時上一格飄下來的圖示（p4/after_take_depot.png 第 12 格，dy ≤ −26）
+SLOT_PROBE = [(dx, dy) for dx in range(-30, 31, 5) for dy in range(-24, 25, 4)]
 SLOT_OCC_MIN = 2
 
 
@@ -1574,11 +1614,15 @@ def open_depot(sub: str) -> int:
         return rc
     if _sub_on(sub):
         return 0
-    if not _click(SUB_XY[sub][0], SUB_XY[sub][1], DEPOT, f'bag 倉庫切到{sub}'):
-        return _fail(EXIT_PANEL, '倉庫特徵不在，沒點子分頁', 'bag-depot-sub')
-    if not _wait(lambda: _sub_on(sub), 2.0):
-        return _fail(EXIT_PANEL, f'點了 {sub} 子分頁但底色沒變', 'bag-depot-sub')
-    return 0
+    for attempt in range(SUB_RETRIES + 1):
+        if _wait_tab_clear() == sub:                    # 分頁被浮動 EXP 橫幅蓋住 → 等它飄走（橫幅會吃掉點擊）；等不到照點，點完再驗
+            return 0
+        if not _click(SUB_XY[sub][0], SUB_XY[sub][1], DEPOT, f'bag 倉庫切到{sub}' + (f'（第 {attempt + 1} 次）' if attempt else '')):
+            return _fail(EXIT_PANEL, '倉庫特徵不在，沒點子分頁', 'bag-depot-sub')
+        if _wait(lambda: _sub_on(sub) or _tab_state() == sub, 2.0):
+            return 0
+        log(f'點了 {sub} 子分頁沒切過去（可能被浮字橫幅吃掉點擊），等橫幅消失再點')
+    return _fail(EXIT_PANEL, f'點了 {sub} 子分頁 {SUB_RETRIES + 1} 次底色都沒變', 'bag-depot-sub')
 
 
 def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consumable', hint: int | None = None) -> int:

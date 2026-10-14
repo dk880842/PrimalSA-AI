@@ -9,14 +9,17 @@
   背包格 bag.SLOT_X / SLOT_Y（5×3）：圖示中心 = 格心 (+2, +2)；倉庫格 bag.DEPOT_X / DEPOT_Y（5×4）：(+1, +1)。
   兩邊倍率都是 0.90（80×80 Sprite → 72×72）；Sprite 是固定畫布、中心固定，所以位移只搜 ±2。
   「顯示道具名」開著時名字白字疊在圖示上半部、右下有數量白字 → 遮掉畫面上「三通道最小值 > 200」或「總和 < 90（深色描邊）」的點。
-  空格：沿用 bag.slot_occupied（格心周圍 25 點偏離空格棕）；倉庫格離線實測同一個棕色、同一套判法（空格 0 點、有道具 ≥ 8 點）。
+  空格：沿用 bag.slot_occupied（格心周圍 169 點 bag.SLOT_PROBE 偏離空格棕）；倉庫格同一個棕色、同一套判法
+  （2026-10-14 離線 171 張背包頁 + 88 張倉庫頁：空格 0 點、有道具 ≥ 25 點）。被橫幅蓋住的格 occupancy 回 None（不判）。
 
 判定（identify）：
   - 樣板去掉「顏色接近空格棕」的點（那些點對任何格都吻合，會讓棕色系圖示到處拿高分）。
   - 候選 pool = 道具名清單 → imageId 集合（一個名字可能有多個 imageId；不屬於任何道具的 Sprite 一律排除）。
     pool=None 為開集（全部道具圖，先粗篩），結果標 guess=True：開集分差很小，不能當名稱用。
   - 最佳分數 ≥ MIN_SCORE 且與第二名（不同 imageId）差 ≥ MARGIN → ok；前兩名都過門檻但太近 → imgmatch.tiebreak 投票。
-  - 遮擋偵測（背包格）：格子左右內緣變暗的棕色點 ≥ OCCLUDED_MIN → occluded=True、ok=False（浮動「獲得 EXP」橫幅 / 半透明遮罩）。
+  - 遮擋偵測（浮動「獲得 EXP」橫幅 / 半透明遮罩）→ occluded=True、ok=False、不比對（呼叫端重拍，bag.icon_read）：
+      背包格：格子左右內緣變暗的棕色點 ≥ OCCLUDED_MIN；
+      倉庫格（2026-10-14）：格子之間的米色縫被壓暗（imgmatch.dimmed_beige）的列 ≥ DEPOT_OCC_MIN（見 depot_covered_rows）。
   - match_slots 會把每個要找的圖的 lookalikes（換色版 / 相似圖）加進候選，避免「要找的不在格裡、換色版冒充」；
     直接呼叫 identify 只給 1 個候選時沒有這層保護。
   - 不過門檻 → imageId=None（不猜）。**不過門檻 ≠ 沒有這個道具**（EXP 橫幅 / 閃光會蓋住格子），呼叫端要重拍或走 OCR / 彈窗備援。
@@ -34,7 +37,7 @@
   match_slots(img, kind, want_names, pool=None, slots=None, expand=True) → {'hits': {名稱: [格號…]（分數高到低）},
                                           'cells': {格號: identify 結果}, 'missing': [沒圖的名稱], 'pool': 實際候選}
   lookalikes(imageId) → 相似圖 imageId；名稱可寫「#24054」直接指定 imageId
-  occupancy(img, kind) → [bool]；cells_of(kind) → [(格號 0 起, cx, cy)]；ids_for_name(name)；names_for_id(iid)
+  occupancy(img, kind) → [True / False / None（被橫幅蓋住，不判）]；occluded(img, kind, slot)；cells_of(kind) → [(格號 0 起, cx, cy)]；ids_for_name(name)；names_for_id(iid)
   img 可以是 get(x,y)、{(x,y): rgb}、pngread.decode 結果或 PNG 路徑；格號與 bag.py 相同（0 起）。
 """
 import argparse
@@ -57,7 +60,7 @@ COARSE_DIR = ROOT / 'tools' / '.cache'
 SCALE = 0.90
 KINDS = {
     'bag': {'xs': bag.SLOT_X, 'ys': bag.SLOT_Y, 'center': (2, 2), 'search': (2, 2), 'ring': (-41, -39, 41, 43)},
-    # 倉庫格比背包格窄，左右邊緣直接是格框（深棕），遮擋偵測的邊緣取樣不適用 → ring=None（不偵測；沒有倉庫被橫幅蓋住的樣本）
+    # 倉庫格比背包格窄，左右邊緣直接是格框（深棕），內緣取樣不適用 → 改看格子之間的米色縫（depot_covered_rows）
     'depot': {'xs': bag.DEPOT_X, 'ys': bag.DEPOT_Y, 'center': (1, 1), 'search': (2, 2), 'ring': None},
 }
 CLIP = (-40, -40, 42, 42)     # 一格要讀的範圍（相對格心）：72 px 圖示 + 中心偏移 + 搜尋 ±2
@@ -70,6 +73,15 @@ COARSE_STRIDE = 7   # 粗篩樣板每 N 點取 1
 # 被橫幅蓋住會變暗棕。離線：正常格暗棕 ≤ 6 點（96 點中），bag0 橫幅蓋住的 3 格 29～58 點、b3 / b4 半透明遮罩 62～96 點
 RING_BROWN = (101, 72, 46)
 OCCLUDED_MIN = 15
+# 倉庫格遮擋（2026-10-14 實機：名字關著時 DKBO2 公共第 5 格、DKBO4 個人第 4、5 格是空格被橫幅蓋住，舊版當成有道具、還認成 2倍智慧果 0.585）：
+# 欄與欄之間有 2～4 px 的米色縫（約 (223,187,147)），被橫幅壓暗成灰棕 (125,105,82)。橫幅是一條從 x≈470 往右的橫帶，
+# 所以「左邊的縫暗」= 整格被蓋；「只有右邊的縫暗」要再看格內右緣 dx=+33（空格棕平坦區，被蓋住變暗棕 (57,40,27)）才算，
+# 否則是橫幅左端剛好停在縫上（DKBO4 公共第 3 格旁的情形）。第 0 欄左邊的縫有箭頭把手 → 不取（橫幅不會只蓋第 0 欄）。
+# 離線 88 張倉庫頁截圖：被蓋住的格 5～12 列（dy −36～36 每 4 一列）、其他格全部 0 列
+DEPOT_GAP_X = [None, 285, 379, 474, 569, 664]
+DEPOT_IN_DX = 33
+DEPOT_OCC_ROWS = range(-36, 37, 4)
+DEPOT_OCC_MIN = 2
 DROP_BG_LIKE = True
 LOOK_K = 8          # match_slots 擴充候選：每個要找的圖加幾個最像的圖
 LOOK_MIN = 0.45     # 相似圖粗分門檻
@@ -281,7 +293,7 @@ def band_region(img, cx: int, cy: int, cells: dict) -> dict:
 
 
 def occupied(img, kind: str, slot) -> bool:
-    """有沒有道具（bag.slot_occupied：格心周圍 25 點偏離空格棕；倉庫格同一套）"""
+    """有沒有道具（bag.slot_occupied：格心周圍 bag.SLOT_PROBE 169 點偏離空格棕；倉庫格同一套）。不看遮擋，要排除被蓋住的格用 cell_state"""
     get = imgmatch.as_getter(img)
     cx, cy = _xy(kind, slot)
     return bag.slot_occupied([get(cx + dx, cy + dy) for dx, dy in bag.SLOT_PROBE])
@@ -292,8 +304,36 @@ def _dark_brown(c) -> bool:
     return 35 <= r <= 82 and 22 <= g <= 60 and 10 <= b <= 42 and r > g > b
 
 
+def depot_covered_rows(img, slot: int) -> list:
+    """倉庫格被橫幅蓋住的列（相對格心 dy，DEPOT_OCC_ROWS 取樣）：左縫壓暗，或右縫壓暗且格內右緣變暗棕"""
+    get = imgmatch.as_getter(img)
+    col = slot % 5
+    cx, cy = _xy('depot', slot)
+    lx, rx = DEPOT_GAP_X[col], DEPOT_GAP_X[col + 1]
+    out = []
+    for dy in DEPOT_OCC_ROWS:
+        y = cy + dy
+        left = lx is not None and _dimmed(get(lx, y))
+        right = _dimmed(get(rx, y)) and _dark(get(cx + DEPOT_IN_DX, y))
+        if left or right:
+            out.append(dy)
+    return out
+
+
+def _dimmed(c) -> bool:
+    """米色縫被壓暗：imgmatch.dimmed_beige 再加 b ≥ 0.58 r（米色 / 壓暗米色 b/r ≈ 0.66；空格棕 (104,74,49) b/r 0.47 不算，
+    測試拼圖把格外當空格棕時也不會誤判）"""
+    return c is not None and imgmatch.dimmed_beige(c) and c[2] >= 0.58 * c[0]
+
+
+def _dark(c) -> bool:
+    return c is not None and _dark_brown(c[:3])
+
+
 def occlusion(img, kind: str, slot) -> int:
-    """格子左右內緣「變暗的棕色」點數（≥ OCCLUDED_MIN = 被橫幅 / 遮罩蓋住）；kind 沒有 ring 設定回 0"""
+    """遮擋量：背包格 = 左右內緣「變暗的棕色」點數；倉庫格 = 被蓋住的列數（depot_covered_rows）。≥ occ_min(kind) = 被橫幅 / 遮罩蓋住"""
+    if kind == 'depot':
+        return len(depot_covered_rows(img, slot if not isinstance(slot, tuple) else _slot_of(kind, slot)))
     ring = KINDS[kind]['ring']
     if not ring:
         return 0
@@ -301,9 +341,30 @@ def occlusion(img, kind: str, slot) -> int:
     return imgmatch.occlusion(img, cx, cy, [(dx, dy) for dx in ring for dy in range(-30, 37, 3)], _dark_brown)
 
 
-def occupancy(img, kind: str) -> list:
+def _slot_of(kind: str, xy: tuple) -> int:
+    return next(i for i, cx, cy in cells_of(kind) if (cx, cy) == tuple(xy))
+
+
+def occ_min(kind: str) -> int:
+    return DEPOT_OCC_MIN if kind == 'depot' else OCCLUDED_MIN
+
+
+def occluded(img, kind: str, slot) -> bool:
+    return occlusion(img, kind, slot) >= occ_min(kind)
+
+
+def cell_state(img, kind: str, slot):
+    """True = 有道具、False = 空格、None = 被橫幅蓋住（不判，呼叫端重拍）"""
     get = imgmatch.as_getter(img)
-    return [occupied(get, kind, i) for i, _, _ in cells_of(kind)]
+    if occluded(get, kind, slot):
+        return None
+    return occupied(get, kind, slot)
+
+
+def occupancy(img, kind: str) -> list:
+    """每格 cell_state：[True / False / None（被蓋住）]"""
+    get = imgmatch.as_getter(img)
+    return [cell_state(get, kind, i) for i, _, _ in cells_of(kind)]
 
 
 # ---- 比對 ----
@@ -333,13 +394,13 @@ def identify(img, kind: str, slot, pool=None, cells=None) -> dict:
     else:
         (ids, miss), coarse = ids_for(pool), None
     res = {'slot': slot, 'kind': kind, 'by': 'icon', 'guess': pool is None, 'missing': miss,
-           'occluded': occ >= OCCLUDED_MIN, 'dark': occ}
-    if not ids:
+           'occluded': occ >= occ_min(kind), 'dark': occ}
+    if not ids or res['occluded']:                      # 被橫幅蓋住 → 不比對（2026-10-14：倉庫空格被蓋住曾認成 2倍智慧果 0.585）
         return dict(res, imageId=None, best=None, score=0.0, second=0.0, second_id=None, ok=False, name=None,
-                    names=[], ambiguous=False, tie=None)
+                    names=[], ambiguous=False, tie=None, ranked=[])
     ranked = _rank(cells, kind, cx, cy, ids, coarse)
-    c = imgmatch.classify(cells, ranked, template, MIN_SCORE, MARGIN, gate=not res['occluded'])   # 被遮擋 → 不判定也不投票
-    if second_pass and not c['ok'] and not res['occluded']:
+    c = imgmatch.classify(cells, ranked, template, MIN_SCORE, MARGIN)
+    if second_pass and not c['ok']:
         bc = band_region(img, cx, cy, cells)                # 第二輪：名字字列整列丟掉再比（只救第一輪判不出的格）
         if bc is not cells:
             ranked2 = _rank(bc, kind, cx, cy, ids, coarse)
@@ -372,7 +433,7 @@ def match_slots(img, kind: str, want_names, pool=None, slots=None, expand: bool 
     slots = [i for i, _, _ in cells_of(kind)] if slots is None else list(slots)
     cells = {}
     for i in slots:
-        if occupied(get, kind, i):
+        if cell_state(get, kind, i) is not False:       # 被橫幅蓋住的格（不管有沒有道具）也放進 cells，標 occluded → 呼叫端重拍
             cells[i] = identify(get, kind, i, pool)
     hits = {}
     for n in want_names:
@@ -388,7 +449,7 @@ def scan(img, kind: str, pool=None) -> list:
     get = imgmatch.as_getter(img)
     out = []
     for i, _, _ in cells_of(kind):
-        if not occupied(get, kind, i):
+        if cell_state(get, kind, i) is False:
             continue
         t = time.time()
         r = identify(get, kind, i, pool)
