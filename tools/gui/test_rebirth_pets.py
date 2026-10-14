@@ -87,6 +87,22 @@ check('role_ident：騎寵 = 沒名字 → growth；戰寵 = name；找不到 / 
 check('catch 不碰紅區：程式碼沒有點「+」1295,315 / 丟棄區座標', all('1295' not in str(v) for v in rp.CATCH_XY.values()))
 
 
+# 名字為主（2026-10-14）：新寵物（有沒有名字都算）、進度檔成長字串、鎖定下拉找不到物種名才退回成長字串（待實機確認）
+_b = [S(1, name='布拉奇多斯', state='騎乘'), E(2), E(3)]
+_a = [S(1, name='布拉奇多斯', state='騎乘'), S(2, name='布拉奇多斯'), S(3, unnamed='1/2/3/4')]
+check('new_pets：前一次空格、這次有（有名字 / 成長字串都算）', [x['slot'] for x in rp.new_pets(_b, _a)] == [2, 3] and [x['slot'] for x in rp.new_unnamed(_b, _a)] == [3])
+check('known_growths：攤平去重', rp.known_growths({'data': {'growths': {'DKBO2': ['1/2/3/4', '5/6/7/8', '1/2/3/4']}}}) == ['1/2/3/4', '5/6/7/8'] and rp.known_growths({}) == [])
+_rows = [('朵拉比斯', 1000, 400), ('49/9/8/2', 1000, 442)]
+check('pick_row 名字找不到 → 退回備援成長字串（剛好一列）', rp.pick_row(_rows, ('name', '布拉奇多斯', (), ('49/9/8/2', '48/9/7/1')))[0] == ('49/9/8/2', 1000, 442))
+check('pick_row 名字找得到 → 用名字（不看成長字串）', rp.pick_row([('布拉奇多斯', 1000, 400), ('49/9/8/2', 1000, 442)], ('name', '布拉奇多斯', (), ('49/9/8/2',)))[0][2] == 400)
+check('pick_row 名字找不到、成長字串兩列都吻合 → 不選', rp.pick_row([('49/9/8/2', 1, 400), ('48/9/7/1', 1, 442)], ('name', '布拉奇多斯', (), ('49/9/8/2', '48/9/7/1')))[0] is None)
+check('pick_row 沒有備援 → 跟以前一樣只比名字', rp.pick_row(_rows, ('name', '布拉奇多斯'))[0] is None)
+check('role_ident：騎寵有名字 + 備援字串 → (name, 物種, (), 字串)；沒備援 → (name, 物種)',
+      rp.role_ident(_a, '布拉奇多斯', '朵拉比斯', '騎寵', ('9/9/9/9',)) is None
+      and rp.role_ident(_a[:2], '布拉奇多斯', '朵拉比斯', '騎寵', ('9/9/9/9',)) is None
+      and rp.role_ident([S(1, name='布拉奇多斯', state='騎乘')], '布拉奇多斯', '朵拉比斯', '騎寵', ('9/9/9/9',)) == ('name', '布拉奇多斯', (), ('9/9/9/9',))
+      and rp.role_ident([S(1, name='布拉奇多斯', state='騎乘')], '布拉奇多斯', '朵拉比斯', '騎寵') == ('name', '布拉奇多斯'))
+
 # ---------------- 假 Tools ----------------
 class Fake:
     def __init__(self, store_mount_ok=True):
@@ -303,6 +319,23 @@ class Fake:
         self.stone -= 50000
         return 0, before, self.count
 
+    def reset_names(self, roles):
+        """還原名字（pet.reset_soft 的假版）：沒名字的寵物 → 物種名。rename_rc = 67 / 9 → 原樣回；rename_soft = 66 → 不改、rc 0 + soft_rc"""
+        self.c('reset_names', tuple(roles))
+        rr = getattr(self, 'rename_rc', 0)
+        if rr:
+            return rr, {}
+        soft = getattr(self, 'rename_soft', 0)
+        if soft:
+            return 0, {'soft_rc': soft, 'renamed': {}, 'msg': '看不到鉛筆鈕'}
+        out = {}
+        for r in roles:
+            for p in self.bar[r]:
+                if p and p.get('unnamed'):
+                    out.setdefault(r, []).append(p.pop('unnamed'))
+                    p['name'] = p.get('species') or p.get('name')
+        return 0, {'renamed': out}
+
     def learn_species(self, r, slot, species, growth):
         self.c('learn_species', r, slot, species, growth)
         if self.f('learn_species'):
@@ -384,17 +417,22 @@ f = Fake()
 rc, out = go(f)
 names_of = lambda r: [(p['name'] if not p.get('unnamed') else '?' + p['unnamed'], p['state']) for p in f.bar[r] if p]    # noqa: E731
 check('完整流程 rc 0、9 階段都完成', rc == 0 and rp.LAST['done'] == rp.STAGES, f'rc={rc} {out[-400:]}')
-check('結果：5 人寵物欄 = 布拉奇多斯（沒名字，騎乘）+ 朵拉比斯（出戰）', all(len(names_of(r)) == 2 and names_of(r)[0][1] == '騎乘' and names_of(r)[0][0].startswith('?') and names_of(r)[1] == (DOR, '出戰') for r in ROLES), str({r: names_of(r) for r in ROLES}))
-check('5 人成長字串各不相同（5 隻）', len({names_of(r)[0][0] for r in ROLES}) == 5)
-check('外掛：5 人鎖定騎寵（成長字串）與戰寵（名字）最後都勾、ident 正確', all(f.locks[r] == {'騎寵': True, '戰寵': True} and f.lock_ident[(r, '騎寵')] == ('growth', names_of(r)[0][0][1:]) and f.lock_ident[(r, '戰寵')] == ('name', DOR) for r in ROLES))
+check('結果（名字為主）：5 人寵物欄 = 布拉奇多斯（已還原名字，騎乘）+ 朵拉比斯（出戰）', all(names_of(r) == [(BRA, '騎乘'), (DOR, '出戰')] for r in ROLES), str({r: names_of(r) for r in ROLES}))
+G5 = tuple(rp.load_progress()['data']['growths']['DKBO2'])
+check('進度檔記 5 隻還原名字前的成長字串（各不相同；鎖定下拉備援用）', len(set(G5)) == 5 and set(G5) == set(f.growths), str(G5))
+check('外掛：5 人鎖定騎寵（物種名，找不到退回成長字串）與戰寵（名字）最後都勾、ident 正確',
+      all(f.locks[r] == {'騎寵': True, '戰寵': True} and f.lock_ident[(r, '騎寵')] == ('name', BRA, (), G5) and f.lock_ident[(r, '戰寵')] == ('name', DOR) for r in ROLES),
+      str(f.lock_ident.get(('DKBO', '騎寵'))))
 ci = lambda name: [i for i, c in enumerate(f.calls) if c[0] == name]    # noqa: E731
 check('順序：preflight < 禮盒 < store < 抓寵 < distribute < ride < battle < lock < cleanup',
       ci('disband')[0] < ci('box_open')[0] < ci('store_many')[0] < ci('catch_setup')[0] < [i for i, c in enumerate(f.calls) if c[0] == 'store_many' and c[3] == 'public'][0]
       < [i for i, c in enumerate(f.calls) if c[0] == 'set_state' and c[3] == '騎乘'][0] < [i for i, c in enumerate(f.calls) if c[0] == 'take_many' and c[3] == 'personal'][0]
       < [i for i, c in enumerate(f.calls) if c[0] == 'lock_set' and c[3]][0] < ci('bait_return')[-1])
 check('preflight：外掛解鎖先於存倉（5 人 × 2 項）、解散隊伍', len([c for c in f.calls if c[0] == 'lock_set' and c[3] is False]) == 10 and ci('disband'))
-check('抓寵：先試 1（誘餌留 1、可抓捕數 1）、學物種、再 4', [c[1:] for c in f.calls if c[0] == 'catch_setup'] == [('DKBO2', '雷龍系', BRA, 1), ('DKBO2', '雷龍系', BRA, 4)]
-      and [c[2] for c in f.calls if c[0] == 'bait_take'] == [1, 4] and len([c for c in f.calls if c[0] == 'learn_species']) == 1)
+check('抓寵：先試 1（誘餌留 1、可抓捕數 1）、還原名字、再 4、再還原名字；名字對 → 不學物種（learn-species 只當備援）',
+      [c[1:] for c in f.calls if c[0] == 'catch_setup'] == [('DKBO2', '雷龍系', BRA, 1), ('DKBO2', '雷龍系', BRA, 4)]
+      and [c[2] for c in f.calls if c[0] == 'bait_take'] == [1, 4] and [c[1] for c in f.calls if c[0] == 'reset_names'] == [('DKBO2',), ('DKBO2',)]
+      and not ci('learn_species') and ci('catch_wait')[0] < ci('reset_names')[0] < ci('catch_setup')[1])
 check('舊騎寵：--store-mount 瑪斯貝卡 → 先設等待（allow-mount）再存，存倉名單帶旗標', ('set_state', 'DKBO', '瑪斯貝卡', '等待', True) in f.calls and any(c[0] == 'store_many' and c[3] == 'personal' and '瑪斯貝卡' in c[2] and c[4] == ('瑪斯貝卡',) for c in f.calls))
 check('分配：catcher 存 4 隻進公共（取最後格 pick=last、旗標只放行布拉奇多斯）、其他 4 人各取 1',
       ('store_many', ('DKBO2',), (BRA,) * 4, 'public', (BRA,), 'last') in f.calls and ('take_many', ('DKBO', 'DKBO3', 'DKBO4', 'DKBO5'), (BRA,), 'public') in f.calls)
@@ -444,8 +482,37 @@ f.catch_extra = 1
 rc, out = go(f)
 check('試抓 1 隻卻多出 2 隻沒名字 → 103、沒登錄物種', rc == 103 and not ci('learn_species'), f'rc={rc}')
 f = Fake()
+f.rename_soft = 66
 f.fail['learn_species'] = 72
-check('登錄物種失敗 → 103、沒繼續抓 4 隻', go(f)[0] == 103 and len(ci('catch_setup')) == 1)
+check('還原名字失敗（備援）+ 登錄物種失敗 → 103、沒繼續抓 4 隻', go(f)[0] == 103 and len(ci('catch_setup')) == 1)
+f = Fake()
+f.rename_soft = 66
+rc, out = go(f)
+check('還原名字一般失敗（66）→ 記事件、走 learn-species 備援（試抓那隻學 1 次）、照常跑完；騎寵仍是成長字串、鎖定用成長字串',
+      rc == 0 and len(ci('learn_species')) == 1 and all(names_of(r)[0][0].startswith('?') for r in ROLES)
+      and all(f.lock_ident[(r, '騎寵')][0] == 'growth' for r in ROLES) and '還原名字沒全部成功' in rp.EVENT_LOG.read_text(encoding='utf-8'), f'rc={rc}')
+f = Fake()
+f.rename_rc = 67
+rc, out = go(f)
+check('還原名字讀到費用字樣（67）→ 103 停手、沒繼續抓 4 隻、沒分配', rc == 103 and len(ci('catch_setup')) == 1 and rp.LAST.get('pet_rc') == 67
+      and '鐵則 3' in rp.LAST.get('msg', '') and not any(c[0] == 'store_many' and c[3] == 'public' for c in f.calls), f'rc={rc} {rp.LAST.get("msg")}')
+f = Fake()
+f.rename_rc = 9
+check('還原名字遇驗證視窗（9）→ 透傳 9', go(f)[0] == 9)
+f = Fake()
+orig_cw = f.catch_wait
+
+
+def _cw_wrong(r, timeout=0, _o=orig_cw, _f=f):
+    rc_, left = _o(r, timeout)
+    for q in _f.bar[r]:
+        if q and q.get('unnamed'):
+            q['species'] = '迪基格斯'                                  # 還原後名字是別的物種
+    return rc_, left
+
+
+f.catch_wait = _cw_wrong
+check('試抓新寵物還原後名字是別的物種 → 103、不學物種', go(f)[0] == 103 and not ci('learn_species') and len(ci('catch_setup')) == 1)
 f = Fake()
 f.fail['take_many'] = 72
 check('分配取不到 → 104（或戰寵取不到 106）；先到的是 distribute', go(f)[0] == 104)

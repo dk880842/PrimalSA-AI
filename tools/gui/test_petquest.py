@@ -187,6 +187,13 @@ class Sim:
                 return self.out(103, '寵物欄放不下（模擬：會進個人倉庫）')
             self.bar[r] += [P(sp) for _ in range(k)]
             self.bag_bait[r] = self.plus[r] = 0
+        if 'rename' in stages.split(','):        # rename 階段（pet_catch → pet.reset_soft）：rename_rc 模擬費用字樣 67 / 驗證視窗 9 / 一般失敗（印 RENAME_FAIL_TAG）
+            self.rename_calls = getattr(self, 'rename_calls', 0) + 1
+            rr = getattr(self, 'rename_rc', 0)
+            if rr in (pq.PET_FEE, 9, 10):
+                return self.out(rr)
+            if rr:
+                return self.out(0, f'pet_catch：{pq.RENAME_FAIL_TAG}（pet rc {rr}）')
         return self.out(0)
 
     def pet(self, args):
@@ -614,30 +621,56 @@ s.calls.clear()
 rc2 = go(2019, s, from_stage='distribute1', to_stage='distribute1', reset=False)
 check('卡坦 distribute1：第一次取齊、重跑不重複取', rc == 0 and rc2 == 0 and not any(a[0] == 'take-many' for a in names(s, 'pet.py')), f'{rc} {rc2}')
 
-# ---------------- 還原名字（2026-10-14）：抓完一批 register 後、存公共前 reset-name 抓寵者
+# ---------------- 還原名字 + 名字驗證（2026-10-14 名字為主）：pet_catch setup,wait,rename,register（同一個子程序），之後才存公共
 s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
 seq = [(c[0], c[1][0] if c[0] == 'pet.py' else c[1][c[1].index('--stages') + 1] if '--stages' in c[1] else '') for c in s.calls
        if c[0] in ('pet.py', 'pet_catch.py')]
-rn = [a for a in names(s, 'pet.py') if a[0] == 'reset-name']
-i_reg = [i for i, x in enumerate(seq) if x == ('pet_catch.py', 'setup,wait,register')]
-i_rn = [i for i, x in enumerate(seq) if x == ('pet.py', 'reset-name')]
+i_cr = [i for i, x in enumerate(seq) if x == ('pet_catch.py', 'setup,wait,rename,register')]
 i_st = [i for i, x in enumerate(seq) if x[0] == 'pet.py' and x[1] == 'store-many']
-check('每批 register 後都 reset-name 抓寵者（DKBO2,DKBO3），且在該批 store-many 之前', rc == 0 and len(rn) == 2 and rn[0] == ('reset-name', '--role', 'DKBO2,DKBO3')
-      and all(r < n for r, n in zip(i_reg, i_rn)) and any(n < st for n in i_rn for st in i_st), f'rc={rc} {rn} {seq}')
+st_pub = [a for a in names(s, 'pet.py') if a[0] == 'store-many' and a[a.index('--depot') + 1] == 'public']
+check('每批 pet_catch 都是 setup,wait,rename,register（還原名字在名字驗證之前），且在該批 store-many 之前；沒有另外的 reset-name 子程序',
+      rc == 0 and len(i_cr) == 2 and s.rename_calls == 2 and any(i_cr[0] < st < i_cr[1] for st in i_st) and not any(a[0] == 'reset-name' for a in names(s, 'pet.py'))
+      and st_pub and not any('--no-rename' in a for a in st_pub), f'rc={rc} {seq}')
 s = grow(Sim(2016))
-s.reset_rc = 66
+s.rename_rc = 66
 rc = go(2016, s, confirm_drop=True)
-check('reset-name 一般失敗（66）→ 只記事件、照常跑完', rc == 0, f'rc={rc}')
+st_pub = [a for a in names(s, 'pet.py') if a[0] == 'store-many' and a[a.index('--depot') + 1] == 'public']
+check('還原名字一般失敗（66，pet_catch 走成長字串登錄備援）→ 記事件、這批存公共加 --no-rename、照常跑完', rc == 0 and st_pub and all('--no-rename' in a for a in st_pub)
+      and '還原名字沒全部成功' in pq.EVENT_LOG.read_text(encoding='utf-8'), f'rc={rc} {st_pub}')
 s = grow(Sim(2016))
-s.reset_rc = pq.PET_FEE
+s.rename_rc = pq.PET_FEE
 rc = go(2016, s, confirm_drop=True)
-check('reset-name 讀到費用字樣（67）→ 165 停手、沒存公共', rc == pq.EXIT_DIST and not any(a[0] == 'store-many' and '--depot' in a and a[a.index('--depot') + 1] == 'public'
+check('還原名字讀到費用字樣（pet_catch 67）→ 165 停手、沒存公共', rc == pq.EXIT_DIST and not any(a[0] == 'store-many' and '--depot' in a and a[a.index('--depot') + 1] == 'public'
       for a in names(s, 'pet.py')) and '鐵則 3' in pq.LAST['info'].get('msg', ''), f'rc={rc} {pq.LAST.get("info")}')
 s = grow(Sim(2016))
-s.reset_rc = 9
+s.rename_rc = 9
 rc = go(2016, s, confirm_drop=True)
-check('reset-name 驗證視窗（9）→ 透傳 9', rc == 9, f'rc={rc}')
+check('還原名字驗證視窗（9）→ 透傳 9', rc == 9, f'rc={rc}')
+check('rename_failed：讀 pet_catch 輸出的 RENAME_FAIL_TAG', pq.rename_failed(['x', f'pet_catch：{pq.RENAME_FAIL_TAG}（pet rc 66）']) and not pq.rename_failed(['pet_catch：還原名字完成']))
+import pet_catch  # noqa: E402
+check('RENAME_FAIL_TAG 跟 pet_catch 同一串', pq.RENAME_FAIL_TAG == pet_catch.RENAME_FAIL_TAG)
+U = lambda sp, g: {'name': None, 'unnamed': g, 'species': sp, 'state': '等待', 'level': 1}    # noqa: E731
+check('unnamed_roles：只列有「名字框是成長字串的任務寵」的角色', pq.unnamed_roles({'DKBO': [P('魯尼帖斯')], 'DKBO3': [P('布拉奇多斯'), U('貝魯卡', '1/2/3/4')],
+                                                                         'DKBO4': [U('布拉奇多斯', '5/6/7/8')]}, ['魯尼帖斯', '貝魯卡']) == ['DKBO3'])
+s = Sim(2016)
+for r in ROLES:
+    s.bar[r] = s.bar[r][:1] + [P('魯尼帖斯'), P('貝魯卡')]
+s.bar['DKBO4'][2] = U('貝魯卡', '30/7/3/8')                    # 備援取出的成長字串寵物（名字還原失敗那隻）
+rc = go(2016, s, from_stage='distribute', to_stage='distribute')
+rn = [a for a in names(s, 'pet.py') if a[0] == 'reset-name']
+check('distribute 後還有成長字串任務寵 → reset-name 那個角色（交寵物要靠名字點卡）', rc == 0 and rn == [('reset-name', '--role', 'DKBO4')], f'rc={rc} {rn}')
+s = Sim(2016)
+for r in ROLES:
+    s.bar[r] = s.bar[r][:1] + [P('魯尼帖斯'), P('貝魯卡')]
+s.bar['DKBO4'][2] = U('貝魯卡', '30/7/3/8')
+s.reset_rc = pq.PET_FEE
+check('distribute 後 reset-name 讀到費用字樣 → 165', go(2016, s, from_stage='distribute', to_stage='distribute') == pq.EXIT_DIST)
+s = Sim(2016)
+for r in ROLES:
+    s.bar[r] = s.bar[r][:1] + [P('魯尼帖斯'), P('貝魯卡')]
+rc = go(2016, s, from_stage='distribute', to_stage='distribute')
+check('distribute 後都有名字 → 不跑 reset-name', rc == 0 and not any(a[0] == 'reset-name' for a in names(s, 'pet.py')))
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

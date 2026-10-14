@@ -36,19 +36,23 @@
   boxes       （bag 95 = 動作後驗證失敗：使用 / 每項存倉各自動重試 1 次，二轉 DKBO4 重跑才過的處理）5 人各：背包找「N轉新手禮盒」→ 使用 → 內容（寵物誘餌 / 離線水晶8H / 2倍智慧果 / 安撫之素）存公共；「N+1轉新手禮盒」禁止存公共 → 存個人（--no-boxes 跳過）
   store       5 人寵物欄所有寵物存個人倉庫（pet.py store-many；騎寵只在 --store-mount 時、先設等待）
   catch       catcher 從公共取誘餌（拆分只留 1）→ 外掛捉寵設置（系別 → 物種 → 可抓捕數 = 1）→ 勾自動存倉庫 / 自動抓寵 → 等抓完 →
-              確認多 1 隻沒名字的新寵物 → pet.py learn-species（登錄縮圖 / 成長字串）→ 再留 N-1 個誘餌重複 → 確認共 N 隻、物種都確認
-  distribute  catcher 把 N-1 隻（取最後格）存公共 → 其他 4 人各從公共取 1 隻（pet.py take-many，現場逐張找、沒名字的靠成長字串登錄檔）
-  ride        5 人把騎乘物種設騎乘（pet.py set-state --allow-mount）
+              → pet.reset_soft(catcher) 還原名字（成長字串 → 物種名）→ 確認多 1 隻新寵物、名字 = 物種 → 再留 N-1 個誘餌重複 → 還原名字 → 確認共 N 隻
+              名字為主（2026-10-14 晚，離線測試；reset-name 本身實機驗過 8 隻布拉奇多斯）：learn-species（登錄縮圖 / 成長字串）只在還原失敗、
+              名字框仍是成長字串時才做（備援）；還原讀到費用字樣（pet 67）→ 103 停手（鐵則 3）；9 / 10 透傳；其他還原失敗 → 記事件、走備援。
+              還原前的成長字串記進度檔 data.growths（鎖定下拉備援）。--confirm-buy-catch / --direct-catch 一樣：抓完還原 → 名字驗 → 名字讀不出才縮圖 + learn-species
+  distribute  catcher 把 N-1 隻（取最後格）存公共 → 其他 4 人各從公共取 1 隻（pet.py take-many，以名字找卡；名字讀不出的卡才靠成長字串登錄檔）
+  ride        5 人把騎乘物種設騎乘（pet.py set-state --allow-mount，以名字找）
   battle      5 人從個人倉庫取戰寵 Lv1（pet.py take-many 目標「名字@1」）→ 設出戰；倉庫同名多隻、卡片等級讀不出（72）→ 對沒拿到的人逐隻取出（--index + 取後驗 Lv1），
               不是 Lv1 就存回個人倉庫換下一隻（Tools.pet_take_lv1_scan；二轉 DKBO2 手動 --index 的自動化）
-  lock        5 人外掛：鎖定騎寵 = 騎乘寵（下拉顯示成長字串 → 逐項 OCR 比對再點）、鎖定戰寵 = 戰寵（名字）→ 兩項都勾
+  lock        5 人外掛：鎖定騎寵 = 騎乘寵（騎寵已還原名字 → ident ('name', 物種)；下拉找不到物種名才退回 catch 記的成長字串比對 growth / growth_partial，
+              **待實機確認**：改名後下拉是否顯示物種名是推測；騎寵仍沒名字 → 照舊成長字串）、鎖定戰寵 = 戰寵（名字）→ 兩項都勾
   cleanup     catcher 背包多餘誘餌存回公共 → 確認當前 DKBO、遇敵關 → 讀最後寵物欄 → 寫 notes/quest-log.md 摘要
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79 / 80～89 rebirth / 90～96 bag；本檔 100～109）：
   100 preflight 失敗（當前角色切不回 DKBO、解散失敗、外掛解鎖失敗、讀寵物欄失敗）
   101 boxes 失敗（背包 / 倉庫操作，info.bag_rc）
   102 store 失敗（pet.py 退出碼在 info.pet_rc；舊騎寵沒給 --store-mount 又佔位 → 也是 102）
-  103 catch 失敗（取誘餌 / 外掛設定 / 抓寵逾時 / 新寵物數量不對 / 物種登錄失敗 / 欄位不夠）
+  103 catch 失敗（取誘餌 / 外掛設定 / 抓寵逾時 / 新寵物數量不對 / 名字不是該物種 / 物種登錄失敗 / 欄位不夠 / 還原名字讀到費用字樣 pet 67）
   104 distribute 失敗
   105 ride 失敗
   106 battle 失敗（倉庫沒有戰寵、取出 / 出戰失敗）
@@ -157,10 +161,25 @@ def growth_partial(text, val: str) -> bool:
 
 
 def pick_row(lines: list, ident: tuple) -> tuple:
-    """下拉選項 [(文字, x, y)] 與身分 ('name', 名) / ('growth', 'a/b/c/d'[, 同角色其他沒名字寵物的成長字串]) → (命中的 (文字, x, y) | None, 說明)。
+    """下拉選項 [(文字, x, y)] 與身分 ('name', 名[, (), 備援成長字串…]) / ('growth', 'a/b/c/d'[, 同角色其他沒名字寵物的成長字串]) → (命中的 (文字, x, y) | None, 說明)。
     必須「剛好一列」吻合：名字用 uikit.snap_pet 對到同一個正式名；成長字串整行完全相同。0 列或 ≥ 2 列 → None（不猜）。
-    成長字串沒有整行相同的列時才用漏段萬用（growth_partial）：吻合的列也可能是同角色別隻（ident 第 3 項）→ 有歧義就停，不選"""
+    成長字串沒有整行相同的列時才用漏段萬用（growth_partial）：吻合的列也可能是同角色別隻（ident 第 3 項）→ 有歧義就停，不選。
+    名字找不到且有第 4 項（備援成長字串：還原名字前的字串，lock_items 給）→ 退回逐個成長字串比對，剛好一列吻合才選
+    （**待實機確認**：寵物還原名字後外掛下拉是否顯示物種名是推測；若下拉仍顯示成長字串就走這條）"""
     kind, val = ident[0], ident[1]
+    if kind == 'name' and len(ident) > 3 and ident[3]:
+        hit, why = pick_row(lines, ('name', val))
+        if hit:
+            return hit, ''
+        gs = tuple(ident[3])
+        hits = []
+        for g in gs:
+            h, _ = pick_row(lines, ('growth', g, tuple(o for o in gs if o != g)))
+            if h and not any(abs(h[2] - x[2]) <= 15 for x in hits):
+                hits.append(h)
+        if len(hits) == 1:
+            return hits[0], ''
+        return None, f'{why}；退回成長字串 {list(gs)} 比對吻合 {len(hits)} 列（要剛好 1 列）'
     others = tuple(ident[2]) if len(ident) > 2 else ()
     hits = []
     for t, x, y in lines:
@@ -220,9 +239,10 @@ def family_below_action(lines: list, plain: str, backed: int, list_top: int) -> 
     return 'stop', None
 
 
-def role_ident(slots: list, species: str, battle_pet: str, which: str) -> tuple | None:
+def role_ident(slots: list, species: str, battle_pet: str, which: str, growths=()) -> tuple | None:
     """鎖定下拉要選誰：騎寵 = 該角色寵物欄中物種 = species 的那隻（沒名字 → ('growth', 成長字串)；有名字 → ('name', 名)）；戰寵 = ('name', battle_pet)。
-    找不到 / 有多隻 → None"""
+    growths = 這次抓的騎寵還原名字前的成長字串（catch 階段記在進度檔）：騎寵有名字時 ident = ('name', 名, (), growths) → 下拉沒有物種名才退回成長字串比對
+    （名字為主 2026-10-14；**待實機確認**下拉顯示什麼）。找不到 / 有多隻 → None"""
     if which == '戰寵':
         n = sum(1 for s in slots if not s.get('empty') and s.get('name') == battle_pet)
         return ('name', battle_pet) if n == 1 else None             # 同名 2 隻（朵拉比斯 Lv126 / Lv1）下拉分不出來 → 不鎖、交人
@@ -233,17 +253,18 @@ def role_ident(slots: list, species: str, battle_pet: str, which: str) -> tuple 
         return None
     s = hits[0]
     if not s.get('unnamed'):
-        return ('name', s['name'])
+        return ('name', s['name'], (), tuple(growths)) if growths else ('name', s['name'])
     others = tuple(x['unnamed'] for x in slots if not x.get('empty') and x.get('unnamed') and x is not s)
     return ('growth', s['unnamed'], others) if others else ('growth', s['unnamed'])   # 第 3 項：同角色其他沒名字寵物（pick_row 漏段萬用時排除歧義）
 
 
-def lock_items(pets: dict, roles: list, species: str, battle_pet: str, which=('騎寵', '戰寵')) -> tuple:
-    """鎖定清單（純函式）：pets = {角色: 寵物欄} → ([(角色, 項目, True, ident)], 錯誤訊息或 '')；任一人找不到唯一一隻 → ([], 訊息)"""
+def lock_items(pets: dict, roles: list, species: str, battle_pet: str, which=('騎寵', '戰寵'), growths=()) -> tuple:
+    """鎖定清單（純函式）：pets = {角色: 寵物欄} → ([(角色, 項目, True, ident)], 錯誤訊息或 '')；任一人找不到唯一一隻 → ([], 訊息)。
+    growths = 騎寵還原名字前的成長字串（known_growths；鎖定騎寵下拉找不到物種名時的備援）"""
     items = []
     for r in roles:
         for w in which:
-            ident = role_ident(pets.get(r) or [], species, battle_pet, w)
+            ident = role_ident(pets.get(r) or [], species, battle_pet, w, growths if w == '騎寵' else ())
             if ident is None:
                 return [], f'{r} 的{w}在寵物欄裡找不到唯一一隻（讀到 {[s.get("name") or s.get("raw_name") for s in (pets.get(r) or []) if not s.get("empty")]}）'
             items.append((r, w, True, ident))
@@ -278,6 +299,18 @@ def stores_for(slots: list, store_mount: str | None, keep: list | None = None) -
     return names, mount, left
 
 
+def new_pets(before: list, after: list) -> list:
+    """抓寵前後寵物欄 → 新增的寵物（前一次是空格、這次有；有沒有名字都算，名字為主 2026-10-14：還原名字後新寵物有物種名）"""
+    was_empty = {s['slot'] for s in before if s.get('empty')}
+    return [s for s in after if not s.get('empty') and s['slot'] in was_empty]
+
+
+def known_growths(prog: dict | None = None) -> list:
+    """進度檔 catch 階段記的騎寵成長字串（還原名字前；{角色: [字串]} 攤平去重）→ 鎖定騎寵下拉的備援比對用"""
+    d = ((load_progress() if prog is None else prog) or {}).get('data') or {}
+    return list(dict.fromkeys(g for v in (d.get('growths') or {}).values() for g in v or [] if g))
+
+
 def new_unnamed(before: list, after: list) -> list:
     """抓寵前後寵物欄 → 新增的沒名字寵物（slot dict 清單）：前一次是空格、這次有、且沒名字"""
     was_empty = {s['slot'] for s in before if s.get('empty')}
@@ -299,11 +332,11 @@ def plan(o: dict) -> list:
         ('preflight', ['確認當前 = DKBO', '解散隊伍', '外掛：5 人鎖定騎寵 / 戰寵先取消', '讀 5 人寵物欄']),
         ('boxes', [f'5 人開 {box}（內容存公共，{nxt} 存個人；bag 95 驗證失敗各步自動重試 1 次）'] if not o['no_boxes'] else ['（--no-boxes 跳過）']),
         ('store', ['5 人寵物欄全存個人倉庫'] + ([f'舊騎寵 {o["store_mount"]} 先設等待再存（--store-mount）'] if o['store_mount'] else ['舊騎寵不碰（沒給 --store-mount）'])),
-        ('catch', ([f'{ct} 外掛捉寵設置「+」花石幣買可抓捕數到 {n}（--confirm-buy-catch，每個 50,000，前後驗石幣 / 鑽石）', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 {n}、自動存倉庫 + 自動抓寵（直接抓，不試抓）', f'等抓完 → 縮圖 + 成長字串登錄物種 {sp}', f'確認 {ct} 共 {n} 隻 {sp}'] if o.get('confirm_buy_catch') else [f'{ct} 公共倉庫取誘餌、拆到只剩 1', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 1、自動存倉庫 + 自動抓寵', f'等抓完 → 學物種 {sp}', f'再留 {n - 1} 個誘餌重複', f'確認 {ct} 共 {n} 隻 {sp}'])),
+        ('catch', ([f'{ct} 外掛捉寵設置「+」花石幣買可抓捕數到 {n}（--confirm-buy-catch，每個 50,000，前後驗石幣 / 鑽石）', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 {n}、自動存倉庫 + 自動抓寵（直接抓，不試抓）', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才縮圖 + 成長字串登錄）', f'確認 {ct} 共 {n} 隻 {sp}'] if o.get('confirm_buy_catch') else [f'{ct} 公共倉庫取誘餌、拆到只剩 1', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 1、自動存倉庫 + 自動抓寵', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才學物種）', f'再留 {n - 1} 個誘餌重複 → reset-name', f'確認 {ct} 共 {n} 隻 {sp}'])),
         ('distribute', [f'{ct} 存 {n - 1} 隻 {sp} 進公共（取最後格）', f'其他 {n - 1} 人各從公共取 1 隻']),
         ('ride', [f'5 人 {sp} 設騎乘']),
         ('battle', [f'5 人從個人倉庫取 {bp}@1（Lv1）、設出戰；同名多隻讀不出等級 → 逐隻取出驗 Lv1、不對存回換下一隻']),
-        ('lock', [f'外掛 5 人：鎖定騎寵 = {sp}（成長字串逐項讀字）、鎖定戰寵 = {bp}、兩項都勾']),
+        ('lock', [f'外掛 5 人：鎖定騎寵 = {sp}（下拉比物種名，找不到退回成長字串）、鎖定戰寵 = {bp}、兩項都勾']),
         ('cleanup', [f'{ct} 多餘誘餌存回公共', '當前 DKBO、遇敵關', '寫 quest-log']),
     ]
 
@@ -477,6 +510,11 @@ class Tools:
     def learn_species(self, role, slot, species, growth):
         import pet
         return pet.learn_species_cmd(role, slot, species, growth, True)
+
+    def reset_names(self, roles):
+        """名字框是成長字串的寵物 → 還原物種名（pet.reset_soft：67 / 9 / 10 原樣回、其他失敗 rc 0 + info['soft_rc']）→ (rc, info)"""
+        import pet
+        return pet.reset_soft(','.join(roles))
 
     # ---- 背包（bag.py + 拆分）----
     def box_open(self, role, trans):
@@ -1076,20 +1114,25 @@ class Run:
             rc = self._catch_round(ct, fam, sp, 1)
             if rc:
                 return rc
+            rc = self._rename(ct)                                          # 名字為主：成長字串還原成物種名
+            if rc:
+                return rc
             rc, pets = T.pets_list([ct])
             if rc:
                 return self.stop(EXIT_CATCH, f'試抓後讀寵物欄失敗（pet rc {rc}）')
-            fresh = new_unnamed(before, pets[ct])
+            fresh = new_pets(before, pets[ct])
             if len(fresh) != 1:
-                return self.stop(EXIT_CATCH, f'試抓 1 隻後寵物欄多了 {len(fresh)} 隻沒名字的寵物（要剛好 1）', new=[s.get('raw_name') for s in fresh])
+                return self.stop(EXIT_CATCH, f'試抓 1 隻後寵物欄多了 {len(fresh)} 隻寵物（要剛好 1）', new=[s.get('name') or s.get('raw_name') for s in fresh])
             s0 = fresh[0]
-            if not s0.get('species'):                                      # 三重確認：外掛選的物種 + 剛好多 1 隻沒名字 + 誘餌 1 → 1；才登錄
-                rc = T.learn_species(ct, s0['slot'], sp, s0['unnamed'])
-                if rc:
-                    return self.stop(EXIT_CATCH, f'登錄物種失敗（pet rc {rc}）', pet_rc=rc)
+            rc = self._check_new(ct, s0, sp, img_gate=False)                # 三重確認（備援）：外掛選的物種 + 剛好多 1 隻 + 誘餌 1 → 1；名字讀不出才登錄
+            if rc:
+                return rc
             need -= 1
         if need > 0:
             rc = self._catch_round(ct, fam, sp, need)
+            if rc:
+                return rc
+            rc = self._rename(ct)
             if rc:
                 return rc
         rc, pets = T.pets_list([ct])
@@ -1098,8 +1141,46 @@ class Run:
         got = [s for s in pets[ct] if not s.get('empty') and (s.get('species') == sp or s.get('name') == sp)]
         if len(got) != n:
             return self.stop(EXIT_CATCH, f'{ct} 寵物欄物種確認的 {sp} 有 {len(got)} 隻，要 {n}（其他沒名字的：{[s.get("raw_name") for s in pets[ct] if s.get("unnamed") and not s.get("species")]}）')
-        self.done('catch', caught=len(got), growths={ct: [s.get('unnamed') for s in got]})
+        self.done('catch', caught=len(got), growths={ct: self._growths(ct, got)})
         return 0
+
+    def _rename(self, ct):
+        """抓完還原名字（pet.reset_soft）：67 費用字樣 → 103 停手（鐵則 3）；9 / 10 透傳；其他失敗 → 記事件、照常（名字讀不出的那隻走 learn-species 備援）。
+        還原成功的成長字串記在 self.info['renamed']（鎖定騎寵下拉備援比對用）"""
+        rc, info = self.T.reset_names([ct])
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.stop(EXIT_CATCH, f'{ct} 還原名字讀到費用字樣（pet rc {rc}）→ 已按取消、停手（鐵則 3：改名不該花錢，請人看 tools/.cache/ui-log/*pet-rename* 截圖）', pet_rc=rc)
+        gs = (info.get('renamed') or {}).get(ct) or []
+        self.info.setdefault('renamed', {}).setdefault(ct, []).extend(gs)
+        if info.get('soft_rc'):
+            event(f'{ct} 還原名字沒全部成功（pet rc {info["soft_rc"]}：{info.get("msg", "")}）→ 名字讀不出的新寵物走 learn-species 備援')
+        elif gs:
+            event(f'{ct} 還原名字 {len(gs)} 隻：{gs}')
+        return 0
+
+    def _check_new(self, ct, s0, sp, img_gate=True):
+        """新寵物 s0 的身分（名字為主）：名字 = sp → 過；名字是別的 → 103；名字框是成長字串（還原失敗）→ 備援：已登錄 species = sp 就過，
+        否則 learn-species 登錄（img_gate：縮圖要認得是 sp 且分數 ≥ 0.9 才登錄；試抓那隻靠「剛好多 1 隻」三重確認不看縮圖）"""
+        if s0.get('name'):
+            if s0['name'] == sp:
+                return 0
+            return self.stop(EXIT_CATCH, f'新寵物第 {s0["slot"]} 格名字是「{s0["name"]}」，不是抓的 {sp}', slot=s0['slot'])
+        if s0.get('species') == sp:
+            return 0
+        if not s0.get('unnamed'):
+            return self.stop(EXIT_CATCH, f'新寵物第 {s0["slot"]} 格名字讀不出（{s0.get("raw_name")}），也不是成長字串 → 不登錄', slot=s0['slot'])
+        if img_gate and (s0.get('img_species') != sp or (s0.get('img_score') or 0) < 0.9):
+            return self.stop(EXIT_CATCH, f'新寵物第 {s0["slot"]} 格縮圖認不出是 {sp}（{s0.get("img_species")} {s0.get("img_score")}）→ 不登錄', slot=s0['slot'])
+        rc = self.T.learn_species(ct, s0['slot'], sp, s0['unnamed'])
+        if rc:
+            return self.stop(EXIT_CATCH, f'登錄物種失敗（pet rc {rc}）', pet_rc=rc)
+        return 0
+
+    def _growths(self, ct, got):
+        """進度檔要記的騎寵成長字串：這次還原名字前的 + 仍沒名字的（鎖定下拉備援）"""
+        return list(dict.fromkeys((self.info.get('renamed') or {}).get(ct, []) + [s.get('unnamed') for s in got if s.get('unnamed')]))
 
     def _buy_catch(self, ct, n):
         """catchbuy.buy_to：外掛捉寵設置「+」按到可抓捕數 = n（續跑安全：已夠就不按）。每按一次前後讀石幣：剛好少 50,000、鑽石不變，否則停（鐵則 3）"""
@@ -1128,27 +1209,30 @@ class Run:
         rc, left = T.catch_wait(ct)
         if rc:
             return self.stop(EXIT_CATCH, f'等抓寵失敗（rc {rc}，剩 {left}）')
+        rc = self._rename(ct)                                              # 名字為主：成長字串還原成物種名
+        if rc:
+            return rc
         rc, pets = T.pets_list([ct])
         if rc:
             return self.stop(EXIT_CATCH, f'抓完讀寵物欄失敗（pet rc {rc}）')
-        fresh = new_unnamed(before, pets[ct])
+        fresh = new_pets(before, pets[ct])
         if len(fresh) != n:
-            return self.stop(EXIT_CATCH, f'抓完寵物欄多了 {len(fresh)} 隻沒名字的寵物（要 {n}）', new=[s.get('raw_name') for s in fresh])
+            return self.stop(EXIT_CATCH, f'抓完寵物欄多了 {len(fresh)} 隻寵物（要 {n}）', new=[s.get('name') or s.get('raw_name') for s in fresh])
+        learned = False
         for s0 in fresh:
-            if s0.get('species'):
-                continue
-            if s0.get('img_species') != sp or (s0.get('img_score') or 0) < 0.9:
-                return self.stop(EXIT_CATCH, f'新寵物第 {s0["slot"]} 格縮圖認不出是 {sp}（{s0.get("img_species")} {s0.get("img_score")}）→ 不登錄', slot=s0['slot'])
-            rc = T.learn_species(ct, s0['slot'], sp, s0['unnamed'])
+            if not s0.get('name') and s0.get('species') != sp:
+                learned = True
+            rc = self._check_new(ct, s0, sp)
             if rc:
-                return self.stop(EXIT_CATCH, f'登錄物種失敗（pet rc {rc}）', pet_rc=rc)
-        rc, pets = T.pets_list([ct])
-        if rc:
-            return self.stop(EXIT_CATCH, f'登錄後讀寵物欄失敗（pet rc {rc}）')
+                return rc
+        if learned:                                                        # 備援登錄過 → 重讀確認
+            rc, pets = T.pets_list([ct])
+            if rc:
+                return self.stop(EXIT_CATCH, f'登錄後讀寵物欄失敗（pet rc {rc}）')
         got = [s for s in pets[ct] if not s.get('empty') and (s.get('species') == sp or s.get('name') == sp)]
         if len(got) != n:
             return self.stop(EXIT_CATCH, f'{ct} 寵物欄物種確認的 {sp} 有 {len(got)} 隻，要 {n}')
-        self.done('catch', caught=len(got), growths={ct: [s.get('unnamed') for s in got]})
+        self.done('catch', caught=len(got), growths={ct: self._growths(ct, got)})
         return 0
 
     def _catch_round(self, ct, fam, sp, k):
@@ -1218,7 +1302,7 @@ class Run:
         rc, pets = T.pets_list(ALL_ROLES)
         if rc:
             return self.stop(EXIT_LOCK, f'讀寵物欄失敗（pet rc {rc}）', pet_rc=rc)
-        items, why = lock_items(pets, ALL_ROLES, o['mount_species'], o['battle_pet'])
+        items, why = lock_items(pets, ALL_ROLES, o['mount_species'], o['battle_pet'], growths=known_growths(self.prog))   # 騎寵有名字 → 下拉比物種名，找不到才退回成長字串（待實機確認）
         if why:
             return self.stop(EXIT_LOCK, why)
         rc, bad = T.lock_set_many(items)                       # 外掛面板只開一次（2026-10-12 批次化）

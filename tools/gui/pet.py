@@ -36,7 +36,8 @@
     （不再讀標題 / 費用字樣 / 輸入框、不重讀名字、不登錄物種）。單按確認不花錢，花錢一定要第二個提示窗：按確認後正常零成本等視窗關；出現 CONFIRM 提示窗 / 視窗沒關 →
     讀字、按取消 822,520 / 提示的取消，有費用字樣 67 停手（鐵則 3），其他 66；絕不點提示窗的確定。
     時機：store / store-many 存倉前名字框是成長字串 → 先還原再存（失敗不存；--no-rename 關）；depot-fix-names 修倉庫卡（寵物欄沒空格 → 跳過列在 skipped）；
-    petquest 抓完一批 register 後、存公共 / 分配前跑 reset-name。
+    流程腳本共用 reset_soft（67 / 9 / 10 原樣回停手、其他失敗 rc 0 + soft_rc 走備援）：pet_catch rename 階段（setup,wait → rename → register 名字驗證）、
+    rebirth_pets catch（每批抓完還原、learn-species 只在還原失敗時）；petquest distribute 後還有成長字串任務寵 → reset-name 那些人。
   名字框讀不出（2026-10-14 40/9/6/5：Windows OCR 把「40」讀成「姍」）：先加讀 -Zooms 5,6；仍讀不出 → list 給 unreadable=True、guess=候選字串（只有一種完整字串、
     其餘行不矛盾），候選字串已登錄成 X 且縮圖也認成 X（且 X 不是騎寵）→ 當作沒名字的 X（species_src='img+reg-guess'，store / take 身分可用）；
     learn-species 對讀不出的格也可用（只收第 2～5 格、等待中、非騎寵，--confirm-growth 要跟現場 OCR 行不矛盾、縮圖不矛盾）
@@ -3094,6 +3095,33 @@ def reset_names(role_arg: str = 'all', slot_no: int | None = None, dry_run: bool
             save_ctx(ctx)
     msg = next((o.get('rename_msg') or o.get('rename_cancelled') or '' for o in info['ops'] if o.get('rc')), '')
     return _out(final, info, t0, msg)
+
+
+RENAME_HARD = (EXIT_FEE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)     # reset_soft 原樣回傳（呼叫端停手）
+
+
+def reset_soft(role_arg: str, pause: bool = True, learn: bool = True) -> tuple:
+    """流程腳本共用的還原名字（pet_catch rename 階段、rebirth_pets catch；2026-10-14 名字為主）：跑 reset_names，退出碼分兩類 →
+    (rc, info)。rc = 費用字樣 67 / 驗證視窗 9 / 斷線 10 → 原樣回傳（呼叫端停手，鐵則 3 / 5）；其他失敗（66 鉛筆 / 視窗、70 面板、78 戰鬥…）→ rc 0、
+    info['soft_rc'] = 原退出碼（呼叫端記事件、名字讀不出的那隻走成長字串登錄 / learn-species 備援，不卡住）。
+    info = reset_names 的結果（ops：每格 role / slot / growth / rc）；info['renamed'] = {角色: [還原成功的成長字串]}（鎖定下拉退回成長字串比對用）。
+    pause 預設 True：剛抓完寵可能還在最後一場戰鬥 → Session 關遇敵（本來就關）並等戰鬥結束再開面板"""
+    rc = reset_names(role_arg, None, False, pause, learn)
+    info = dict(LAST)
+    info['renamed'] = renamed_growths(info)
+    if rc in RENAME_HARD or rc == 0:
+        return rc, info
+    info['soft_rc'] = rc
+    return 0, info
+
+
+def renamed_growths(info: dict) -> dict:
+    """純函式：reset_names 的結果 → {角色: [這次還原成功的成長字串]}"""
+    out: dict = {}
+    for o in (info or {}).get('ops') or []:
+        if o.get('rc') == 0 and o.get('growth'):
+            out.setdefault(o['role'], []).append(o['growth'])
+    return out
 
 
 def _fix_jobs(roles: list, depots, ctx: dict, info: dict, dry_run: bool, limit: int | None) -> int:

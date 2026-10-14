@@ -146,7 +146,10 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
      - **存 / 取後核對改用卡片字形**（`petglyph.read_cards`，整頁一次、0 點擊，比舊的「找倉庫卡」逐張點 9～10 s 快）：存回後 `find_card(glyph_first=True)`、take 的 `_find_target_card` 字形吻合就直接挑；
        字形讀不出（橫幅遮擋 / 新名字沒樣板）、不吻合、或取前名字框核對不符（`glyph_retry`）→ 退回逐張選卡。`--no-glyph` 整個關。
      - **reset-name 邊讀邊改**：`list_role(on_slot=)` 每格讀完仍選中就改名，不再「讀完全部再選回去」（舊：選第 2 格再選第 1 格）；`--slot N` 只選 / 讀那一格（`only`）。
-  4. petquest 抓完一批（pet_catch register）後、存公共 / 分配前跑 `reset-name --role <抓寵者>`（67 → 165 停；其他失敗只記事件照常往下）。
+  4. 流程腳本共用 `pet.reset_soft(角色)`（2026-10-14 晚，離線測試）：67 / 9 / 10 原樣回（停手）；其他失敗 rc 0 + `soft_rc`（呼叫端記事件、名字讀不出的那隻走成長字串登錄備援）；
+     `info['renamed']` = {角色: [還原成功的成長字串]}。用在 pet_catch `--stages setup,wait,rename,register`（rename → register 名字驗證；petquest 67 → 165、
+     soft 失敗那批 store-many 加 `--no-rename`）、rebirth_pets catch（每批抓完；67 → 103；learn-species 只在還原失敗時）；petquest distribute 後仍有成長字串任務寵 → `reset-name --role` 那些人。
+     rebirth_pets lock：騎寵有名字 → 外掛下拉比物種名，找不到才退回 catch 記的成長字串（**改名後下拉顯示什麼待實機確認**）。
 - **名字為主（`pet.NAME_FIRST`，`--img-first` 回下一段的縮圖為主）**：寵物格名字框 / 倉庫卡白字先用整名樣板（petmatch 名字樣板、petglyph 卡片名字整塊圖）讀、讀不到才 OCR；
   **讀到 Monster 表物種名就採用（`species_src: name`）、不跑縮圖**（list / depot-list / store / take 的取前取後核對都一樣，`img_conflict(named=True)` 直接略過）；
   縮圖只在名字讀不出（成長字串、浮字橫幅蓋住、沒樣板又 OCR 不準的新名字）時補，衝突仍走 `ident_conflict`。`species.json` 成長字串登錄檔 / `learn-species` 退為備援（不刪）。

@@ -384,7 +384,7 @@ fr = FR({'DKBO2': [u(2, '40/7/3/8')]})
 check('register_catches：沒有矛盾 → 0', pet_catch.register_catches(SH[:1], fr) == 0 and reg['growth']['40/7/3/8'] == '克邦凱斯')
 f3 = FT3({}, polls=[{'DKBO2': (0, False)}])
 f3.pets_list = lambda roles, img_only=None: (0, {'DKBO2': [u(2, '41/7/3/8')]})
-check('run 預設階段含 register（wait 完接著登錄）', pet_catch.run(A[:1], stages=('wait', 'register'), tools=f3) == 0 and reg['growth']['41/7/3/8'] == '克邦凱斯')
+check('run 預設階段含 register（wait 完接著登錄）', pet_catch.run(A[:1], count=1, stages=('wait', 'register'), tools=f3) == 0 and reg['growth']['41/7/3/8'] == '克邦凱斯')
 fr = FR({'DKBO2': [mount1, unr(2), u(3, '42/9/6/5', nh='K')]})
 pet_catch.save_pre({'DKBO2': [mount1]})
 rc = pet_catch.register_catches(DINO, fr)
@@ -414,13 +414,75 @@ reg.clear()
 reg.update({'thumb': {}, 'growth': {'48/10/5/3': '邦恩吉', '50/10/6/3': '克邦凱斯'}})
 pet_catch.save_pre(pre4)
 fr = FR(cur4)
-rc = pet_catch.register_catches(SH, fr, expect=2)
+rc = pet_catch.register_catches(SH, fr)
 check('register_catches：撞號兩種都記著（推導的唯一對照拿掉）、沒漏 → 0',
       rc == 0 and petmatch.growth_species(reg, '48/10/5/3') == ['邦恩吉', '加格'] and petmatch.growth_species(reg, '50/10/6/3') == ['克邦凱斯', '邦恩吉']
       and '48/10/5/3' not in reg['growth'] and reg['growth'].get('47/11/5/3') == '加格'
       and reg['growth_src']['47/11/5/3'][0]['catcher'] == 'DKBO4', f'{rc} {reg}')
 fr = FR({'DKBO2': [m1, u(2, '45/10/5/2', nh='p'), u(3, '50/9/6/3', nh='q'), u(4, '50/9/6/3', nh='r')]})
 check('register_catches：有漏登（dup）→ 17，不能回 0', pet_catch.register_catches(SH[:1], fr) == pet_catch.EXIT_CATCH_MISSED)
+
+# ---- 2026-10-14 名字為主：rename 階段（reset-name 抓寵者）→ register 改名字驗證，名字讀不出的才登錄成長字串 ----
+pre5 = {r: [{'slot': 1, 'empty': False, 'nh': 'M', 'unnamed': '51/9/8/1'}] for r, _, _ in SH}
+nm = lambda n, name, **k: dict({'slot': n, 'empty': False, 'name': name, 'state': '等待', 'nh': f'n{n}'}, **k)    # noqa: E731
+pets5 = {'DKBO2': [m1, nm(2, '克邦凱斯'), nm(3, '克邦凱斯')], 'DKBO3': [m1, nm(2, '加克拉'), u(3, '33/7/3/9', nh='g')],
+         'DKBO4': [m1, nm(2, '加格'), nm(3, '邦恩吉')], 'DKBO5': [m1, nm(2, '邦恩吉')]}
+named, wrong, rest, fresh = pet_catch.plan_verify(SH, pets5, pre5)
+check('plan_verify：名字 = 指定物種 → 通過；名字是別的物種 → wrong；沒名字 → rest（備援）；fresh = 新寵物數',
+      named == {'DKBO2': 2, 'DKBO3': 1, 'DKBO4': 1, 'DKBO5': 1} and wrong == [('DKBO4', 3, '邦恩吉', '加格')]
+      and [x['slot'] for x in rest['DKBO3']] == [3] and fresh == {'DKBO2': 2, 'DKBO3': 2, 'DKBO4': 2, 'DKBO5': 1}, str((named, wrong, rest, fresh)))
+named, wrong, rest, fresh = pet_catch.plan_verify(SH[:1], {'DKBO2': [m1, nm(2, '朵拉比斯'), nm(3, '克邦凱斯')]}, {'DKBO2': [m1, nm(2, '朵拉比斯')]})
+check('plan_verify：抓前就在的有名字寵物（快照 nh 相同）不算新寵物', named == {'DKBO2': 1} and wrong == [] and fresh == {'DKBO2': 1}, str((named, wrong, fresh)))
+named, wrong, rest, fresh = pet_catch.plan_verify(SH[:1], {'DKBO2': [m1, nm(2, '朵拉比斯'), nm(3, '克邦凱斯')]}, {})
+check('plan_verify：沒快照 → 別的名字不算錯、不核對數量', wrong == [] and fresh == {'DKBO2': None} and named == {'DKBO2': 1})
+reg.clear()
+reg.update({'thumb': {}, 'growth': {}})
+pet_catch.save_pre(pre5)
+fr = FR({r: v for r, v in pets5.items() if r != 'DKBO4'})
+rc = pet_catch.register_catches([x for x in SH if x[0] != 'DKBO4'], fr, expect=None)
+check('register_catches 名字為主：全對 + 名字讀不出的 1 隻走成長字串登錄 → 0；有名字的不進登錄檔',
+      rc == 0 and reg['growth'] == {'33/7/3/9': '加克拉'} and pet_catch.load_src()['33/7/3/9']['catcher'] == 'DKBO3', f'{rc} {reg}')
+check('register_catches 名字為主：名字是別的物種 → 15', pet_catch.register_catches(SH[2:3], FR(pets5)) == pet_catch.EXIT_CATCH_SPECIES)
+check('register_catches 名字為主：數量 = expect → 0；少一隻 → 17',
+      pet_catch.register_catches(SH[:1], FR(pets5), expect=2) == 0 and pet_catch.register_catches(SH[:1], FR(pets5), expect=3) == pet_catch.EXIT_CATCH_MISSED)
+
+
+class FRN(FR):
+    """rename 階段：reset_names 回 (rc, info)；呼叫後 renamed=True，pets_list 給還原後的名字"""
+    def __init__(self, before, after, rc=0, soft=None):
+        super().__init__(before)
+        self.after, self.rc, self.soft, self.reset_calls = after, rc, soft, []
+
+    def reset_names(self, roles):
+        self.reset_calls.append(list(roles))
+        if not self.rc:
+            self.pets = self.after
+        info = {'renamed': {r: ['x'] for r in roles}}
+        if self.soft:
+            info['soft_rc'] = self.soft
+        return self.rc, info
+
+
+before = {'DKBO2': [m1, u(2, '45/10/5/2', nh='p'), u(3, '46/10/5/2', nh='q')]}
+after = {'DKBO2': [m1, nm(2, '克邦凱斯', nh='p2'), nm(3, '克邦凱斯', nh='q2')]}
+pet_catch.save_pre({'DKBO2': [m1]})
+reg.clear()
+reg.update({'thumb': {}, 'growth': {}})
+fr = FRN(before, after)
+rc = pet_catch.run(SH[:1], count=2, stages=('rename', 'register'), tools=fr)
+check('run rename → register：先 reset-name 抓寵者、再用名字驗證（不登錄成長字串）', rc == 0 and fr.reset_calls == [['DKBO2']] and reg['growth'] == {}, f'{rc} {reg}')
+fr = FRN(before, after, rc=67)
+check('rename 讀到費用字樣（67）→ 回 67、不做 register', pet_catch.run(SH[:1], count=2, stages=('rename', 'register'), tools=fr) == 67 and fr.args is None)
+fr = FRN(before, after, rc=9)
+check('rename 驗證視窗（9）→ 透傳', pet_catch.run(SH[:1], count=2, stages=('rename', 'register'), tools=fr) == 9)
+fr = FRN(before, before, soft=66)
+import io, contextlib  # noqa: E401,E402
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    rc = pet_catch.run(SH[:1], count=2, stages=('rename', 'register'), tools=fr)
+check('rename 一般失敗（soft 66）→ 印 RENAME_FAIL_TAG、照常 register：名字讀不出的走成長字串登錄備援 → 0',
+      rc == 0 and pet_catch.RENAME_FAIL_TAG in buf.getvalue() and reg['growth'] == {'45/10/5/2': '克邦凱斯', '46/10/5/2': '克邦凱斯'}, f'{rc} {reg}')
+check('run 預設階段含 rename（wait 與 register 之間）', pet_catch.run.__defaults__[1] == ('bait', 'setup', 'wait', 'rename', 'register'))
 f4 = FakeT()
 check('catch_off：外掛逐人取消自動抓寵', pet_catch.catch_off(['DKBO2', 'DKBO3'], f4) == 0 and f4.calls == [('off', 'DKBO2'), ('off', 'DKBO3')])
 f5 = FakeT()

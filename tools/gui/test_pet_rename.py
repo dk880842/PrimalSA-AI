@@ -133,6 +133,23 @@ g.rename_keep = True
 rc, out, err = run(pet.reset_names, 'DKBO')
 check('確認後視窗不關 → 66、按取消', rc == 66 and pet.RENAME_CANCEL_XY in g.rename_clicks and not g.rename, f'rc={rc}')
 
+# ---------------- reset_soft（pet_catch rename 階段 / rebirth_pets catch 共用；2026-10-14 名字為主）
+g = new(pets=five())
+rc, out, err = run(pet.reset_soft, 'DKBO2,DKBO3', pause=False)
+check('reset_soft 成功：rc 0、renamed = 每人還原的成長字串、沒有 soft_rc', rc[0] == 0 and rc[1]['renamed'] == {'DKBO2': [GS[1]], 'DKBO3': [GS[2]]}
+      and 'soft_rc' not in rc[1], str(rc))
+g = new(pets=five())
+g.rename_dead = True
+rc, out, err = run(pet.reset_soft, 'DKBO', pause=False)
+check('reset_soft 一般失敗（66）→ rc 0 + soft_rc 66（呼叫端走備援）', rc[0] == 0 and rc[1].get('soft_rc') == 66 and rc[1]['renamed'] == {}, str(rc))
+g = new(pets=five())
+g.rename_after_popup = ['改名需要消耗 50,000 石幣，確定嗎?']
+rc, out, err = run(pet.reset_soft, 'DKBO', pause=False)
+check('reset_soft 費用字樣（67）→ 原樣回 67（停手）', rc[0] == 67 and 'soft_rc' not in rc[1], str(rc))
+check('renamed_growths：只收 rc 0 的', pet.renamed_growths({'ops': [{'role': 'A', 'growth': '1/2/3/4', 'rc': 0}, {'role': 'A', 'growth': '5/6/7/8', 'rc': 66},
+                                                                 {'role': 'B', 'growth': '9/9/9/9'}]}) == {'A': ['1/2/3/4']})
+
+
 # ---------------- 時機一：store 前還原名字
 fresh_tpl()
 pets3 = mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, {'name': '朵拉比斯', 'state': '出戰', 'level': 1},
