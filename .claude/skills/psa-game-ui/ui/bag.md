@@ -145,11 +145,19 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 547 200; wait 600
   2. 龍王圖示樣板取自被選取框圍住的格子，未選取的格只吻合約 0.56 → 嚴格（≥0.85）全不中。修法：`icon_match_slots` 嚴格無中時放寬到 `ICON_RATIO_LOOSE = 0.45`（依命中率排序），後面仍有彈窗標題 + 按鈕列核對，名稱不符就 ESC 不按。**樣板尚未改**：要實機截圖才能擷取，下次實機用 `make_item_icons.py` 補「未選取」樣板（在格子沒被選取框圍住時擷取），讓嚴格比對本身就能命中。
   - `depot_use.run`：倉庫沒有但背包有 → 直接用背包那份（note）；取出動作後驗證失敗（背包找不到）也一定 `depot_store` 試著存回（背包沒有只回 92，無害）。
 
-## 道具格縮圖比對 `itemimg_match.py`（2026-10-14 離線；**尚未接線**，bag.py 仍走上面的 item_icons.json + 格名 OCR）
-- 計畫：`notes/plan-item-icon-match.md`（做了階段 1 抽圖、階段 2 比對核心；階段 3 起接到 bag.py 唯讀路徑，要另外實機驗證）。
+## 道具格縮圖比對 `itemimg_match.py`（2026-10-14；已接進 bag.py 唯讀路徑 + find_item 排序，實機唯讀驗證）
+- 計畫：`notes/plan-item-icon-match.md`（階段 1 抽圖、2 比對核心、3 唯讀接線、4 find_item 排序已做；動作類接線、關名字政策未做）。比對核心 `imgmatch.py` 與寵物縮圖共用。
+- **bag.py 接線**（`ITEM_MATCH`，環境變數 `PSA_ITEM_MATCH=auto|icon|ocr`，預設 auto；ocr = 舊行為）：
+  - `icon_read(kind, want, pool)`：一次 `uikit.shot_getter`（約 0.2～0.4 s）→ 空格 + 每個有道具的格比道具圖（want + 相似圖 + 工作集 `item_pool()` = PROTECT + AUTO_PURGE + PURGE_FORBID + 常用道具）。被浮字橫幅蓋住 → 等 1.5 秒重拍、最多 2 次。
+  - `find` / `find_items` / `team_read`（`_names_in_bag`）：縮圖命中 → 格號（`_by: icon`、同圖多名列 `_ambiguous`）；沒命中的名稱，auto 只對「沒認出 / 被蓋住」的格名稱 OCR（名稱沒有道具圖 / 索引查不到 → 其他格都 OCR）；icon 模式不 OCR。
+  - `list`（`read_bag_items`）：縮圖認得的格給名稱（同圖還有別的道具 → 名稱後加「(同圖)」，只是推定），認不出的格 OCR，輸出多 `by` / `icons`。
+  - `find_item`（use / store / take / drop / swap 用）：縮圖只比 want + 相似圖；圖只屬於 want → 直接回格號（動作前照舊開彈窗核對名稱）；同圖多名 → 讀那格名字（名字沒顯示才開彈窗）；auto 沒命中 → 照舊路徑（圖示樣板 / 格名 OCR / 逐格彈窗）。**purge 不走縮圖**（勾選目標照舊名稱 OCR + 提示窗清單核對）。
+  - 名字疊圖的第二輪（2026-10-14 實機）：兩行名字（巴巴洛的許可證、大地的羈絆[地]）蓋住圖示上半時，只丟白字點的話反鋸齒殘邊讓別的圖（火山岩碎片）拿高分 → 第一輪判不出的格再「有白字的整列 ±2 列」丟掉比一次，門檻較嚴（0.62 / 分差 0.12；不在工作集的貝殼曾被認成橡樹果 0.58）。
+- **實機唯讀（2026-10-14 17:0x，奇努伊村、名字開著，5 人背包 7～11 格）**：`bag.py list all` 舊（全 OCR）14.0 s → 新 auto 12.0～14.3 s（icon 模式 11.1 s）；47 格裡 38 格縮圖認出、名稱全部與舊版 OCR 一致、0 認錯，其餘 9 格（大地的羈絆 4 格、不可思議的貝殼 5 格〔不在工作集〕）走 OCR。`find DKBO3 耐久力回複藥 千年龜的殼 龍王的守護` 5.8 → 5.7 s（兩個縮圖命中、0 次全格 OCR）。`find_item` 三個道具 0.73～1.06 s → 0.42～0.60 s。速度差不大的原因：常駐 server 下格名 OCR 只要約 0.1～0.2 s / 格，主要成本是開面板與切頭像；縮圖的好處是名字被關 / OCR 讀錯時仍認得。
+- 離線測試：`test_itemimg_match.py`（+ `fixtures/itemimg_live_names.png` 名字疊圖第二輪）、`test_bag_icon.py`（假截圖 / 假 OCR / 假彈窗：縮圖命中零 OCR、只 OCR 沒認出的格、icon / ocr 模式、find_item 只開命中格、橫幅重拍後 OCR）。
 - 圖示來源：`uv run --no-project --with UnityPy python tools/extract/item_images.py`（約 15 秒）→ `tools/.cache/item-images/<imageId>.png` + `index.tsv`（imageId ↔ 道具名）+ `missing.tsv`（沒圖的道具）。Sprite 3,225 張；Item imageId 2,299 種中有圖 2,246、缺 53（81 個道具）；不屬於道具的 979 張比對時排除。`--find 龍王的守護` 只查索引。
 - 版面：背包格心 (+2,+2)、倉庫格心 (+1,+1)，倍率都是 0.90，位移搜 ±2；名字 / 數量白字與深色描邊不比；空格沿用 `bag.slot_occupied`（倉庫格同一個棕色，離線實測可用）。
-- 判定：樣板去掉接近空格棕的點；分數 ≥ 0.50 且贏第二名 ≥ 0.06 才認；`match_slots` 自動把要找的圖的換色版 / 相似圖加進候選；背包格左右內緣變暗（EXP 橫幅 / 半透明遮罩）→ `occluded`、不認（**不認 ≠ 沒有**，要重拍或走 OCR / 彈窗）。倉庫格沒有遮擋偵測（格太窄，沒有樣本）。
+- 判定（`imgmatch.classify`）：樣板去掉接近空格棕的點；分數 ≥ 0.50 且贏第二名 ≥ 0.06 才認；`match_slots` 自動把要找的圖的換色版 / 相似圖加進候選；背包格左右內緣變暗（EXP 橫幅 / 半透明遮罩）→ `occluded`、不認（**不認 ≠ 沒有**，要重拍或走 OCR / 彈窗）。倉庫格沒有遮擋偵測（格太窄，沒有樣本）。
 - 只認得到 imageId：同圖多名（龍王的守護 = 合成石 7 / 壞石 / 不明的石頭；2倍智慧果（綁定）與 10 種橡樹果類同圖）→ `ambiguous`，有動作前仍要開彈窗核對名稱。
 - 離線結果（`test_itemimg_match.py`，fixtures 是 57 格裁片，不依賴 tools/.cache 截圖）：計畫 39 格 + 名字關掉 4 格 + 倉庫畫面背包 3 格閉集 46/46，最小分差 0.205；要找的不在格裡 424 組 0 誤判；空格 6/6；bag0 橫幅蓋住的 3 格回 None、0 錯判。速度：閉集 30 候選約 17 ms/格；`match_slots` 1 名稱掃整個背包約 0.1 秒（冷啟動含解碼 0.27 秒）；開集（全部道具圖）約 0.5 秒/格且只當猜測。
 - CLI：`uv run --no-project python tools/gui/itemimg_match.py shot <截圖.png> --kind bag|depot|both [--names 名稱,…]`、`... ids 名稱`。

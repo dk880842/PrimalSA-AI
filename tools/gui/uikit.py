@@ -9,6 +9,7 @@
 """
 import difflib
 import json
+import os
 import re
 import sys
 import time
@@ -633,6 +634,27 @@ def snap(tag: str) -> str | None:
         return str(p.relative_to(ROOT))
     except Exception:
         return None
+
+
+TMP_SHOT_DIR = ROOT / 'tools' / '.cache' / 'tmp'
+
+
+def shot_getter(tag: str = 'img'):
+    """縮圖比對用：一次背景截圖（唯讀，常駐 server 約 0.2 s；PrintWindow 縮成 1/2 = 縮圖比對離線校正用的同一種圖）→ get(x, y) → (r,g,b)。
+    存到 tools/.cache/tmp/<tag>.png（每次覆蓋）；截不到 / 解碼失敗 → None（呼叫端退回 px 逐點讀）。pet.py / bag.py 共用"""
+    if 'psatest-' in os.environ.get('PSA_LOG_DIR', ''):
+        return None                                    # 離線測試（testenv）絕不截真遊戲畫面；要縮圖的測試自己替換 shot_getter
+    try:
+        import pngread
+        TMP_SHOT_DIR.mkdir(parents=True, exist_ok=True)
+        p = TMP_SHOT_DIR / f'{re.sub(r"[^0-9A-Za-z_-]", "_", tag)}.png'
+        p.unlink(missing_ok=True)                      # 截圖失敗時不能讀到上一張舊圖
+        gui('shot', winenv.to_windows(p))
+        w, h, bpp, rows = pngread.decode(p.read_bytes())
+    except Exception:
+        return None
+    mark(f'shot {tag}')
+    return lambda x, y: tuple(rows[y][x * bpp:x * bpp + 3]) if 0 <= x < w and 0 <= y < h else None
 
 
 def fail(src: str, rc: int, msg: str) -> int:

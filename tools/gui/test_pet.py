@@ -1143,7 +1143,7 @@ pet.IMG_ON = True
 _M.index = lambda: {'x': ['朵拉比斯']}
 _M.cells_of = lambda kind: [(i, 250, 200 + i) for i in range(5)]
 _M.read_cell = lambda kind, cx, cy: dict(_cells['v'])
-pet.img_match = lambda cells, kind, cx, cy, ctx: (_n.__setitem__('match', _n['match'] + 1), {'img_species': '克邦凱斯', 'img_score': 0.9})[1]
+pet.img_match = lambda cells, kind, cx, cy, ctx, text=(): (_n.__setitem__('match', _n['match'] + 1), {'img_species': '克邦凱斯', 'img_score': 0.9, 'img_occluded': False})[1]
 try:
     c1 = pet.load_ctx(True, ['克邦凱斯', '加克拉'], use_icache=True)
     a1 = pet.img_ident('slot', 1, c1)
@@ -1233,12 +1233,18 @@ check('unreadable_learn_reason：--confirm-growth 跟 OCR 矛盾 / OCR 有別的
 check('count_cards', pet.count_cards([{'species': 'a'}, {'species': 'a'}, {'species': None}]) == {'a': 2, None: 1})
 _svc = (pet.img_ident, pet.species_reg)
 pet.species_reg = lambda ctx: {'growth': {'40/9/6/5': '魯尼帖斯', '43/9/6/6': '貝魯卡'}}
-pet.img_ident = lambda kind, k, ctx: {'img_species': '魯尼帖斯'}
+_IMG = {'v': '魯尼帖斯'}
+pet.img_ident = lambda kind, k, ctx, text=(): {'img_species': _IMG['v'], 'img_occluded': False}
 try:
-    check('card_ident：名字 → 名字；成長字串登錄 → 登錄；都沒有 → 縮圖；候選字串登錄成別種 → 矛盾不算',
-          pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] == '朵拉比斯' and pet.card_ident(0, {'name': None, 'growth': '43/9/6/6'}, {})['species'] == '貝魯卡'
-          and pet.card_ident(0, {'name': None, 'growth': None}, {})['src'] == 'img'
-          and pet.card_ident(0, {'name': None, 'growth': None, 'guess': '43/9/6/6'}, {})['species'] is None)
+    check('card_ident（縮圖為主）：沒文字 → 縮圖；名字 / 登錄與縮圖一致 → img+name / img+reg；候選字串登錄成別種 → 衝突',
+          pet.card_ident(0, {'name': None, 'growth': None}, {})['src'] == 'img'
+          and pet.card_ident(0, {'name': None, 'growth': '40/9/6/5'}, {})['src'] == 'img+reg'
+          and pet.card_ident(0, {'name': None, 'growth': None, 'guess': '43/9/6/6'}, {})['src'] == 'conflict')
+    check('card_ident：名字 / 登錄物種與縮圖不同 → 衝突（species None）',
+          pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] is None and pet.card_ident(0, {'name': None, 'growth': '43/9/6/6'}, {})['src'] == 'conflict')
+    _IMG['v'] = None
+    check('card_ident：縮圖沒把握 → 舊規則（名字 → 名字；成長字串登錄 → 登錄）',
+          pet.card_ident(0, {'name': '朵拉比斯'}, {})['species'] == '朵拉比斯' and pet.card_ident(0, {'name': None, 'growth': '43/9/6/6'}, {})['species'] == '貝魯卡')
 finally:
     pet.img_ident, pet.species_reg = _svc
 
@@ -1258,7 +1264,7 @@ check('candidate_species：登錄 + 縮圖一致才給；縮圖不同 / 沒登�
 _svi = (pet.img_ident, pet.species_reg)
 _img = {'v': '魯尼帖斯', 'n': 0}
 pet.species_reg = lambda ctx: RG
-pet.img_ident = lambda kind, k, ctx: (_img.__setitem__('n', _img['n'] + 1), {'img_species': _img['v']})[1]
+pet.img_ident = lambda kind, k, ctx, text=(): (_img.__setitem__('n', _img['n'] + 1), {'img_species': _img['v']})[1]
 try:
     SL = {'slot': 2, 'unnamed': '40/9/6/5', 'species': '魯尼帖斯'}
     bad = {'name': None, 'growth': None, 'raw': ['姍/9/6/5', '姍/9/6/5', '姍/9/6']}
@@ -1311,7 +1317,7 @@ finally:
     pet._petwatch, petmatch.match_whole, petmatch.ink = _sv3
 _svi = (pet.img_ident, pet.species_reg)
 pet.species_reg = lambda ctx: {'growth': {'43/9/6/5': '魯尼帖斯'}}
-pet.img_ident = lambda kind, k, ctx: {'img_species': '魯尼帖斯'}
+pet.img_ident = lambda kind, k, ctx, text=(): {'img_species': '魯尼帖斯'}
 try:
     after = {'name': None, 'growth': None, 'raw': ['43/9/6', '姍/9/6/5']}       # 取後讀不完整
     check('take 取後：目標只給物種名 → 用取前卡片的成長字串當候選（登錄 + 縮圖一致才過）',
@@ -1360,11 +1366,11 @@ def _fake_img(kind, idx, ctx, sp=None):
 
 
 ctx2 = {'reg': r3, 'img_only': ['克邦凱斯', '加克拉', '加格', '邦恩吉']}
-pet.img_ident = lambda kind, idx, ctx: _fake_img(kind, idx, ctx, None)
+pet.img_ident = lambda kind, idx, ctx, text=(): _fake_img(kind, idx, ctx, None)
 check('ident_species 撞號（49/10/6/3 克邦凱斯 / 邦恩吉）縮圖沒把握 → None（不准存取）', pet.ident_species(1, '49/10/6/3', ctx2) is None and _seen_only[-1] == ['克邦凱斯', '邦恩吉'])
-pet.img_ident = lambda kind, idx, ctx: _fake_img(kind, idx, ctx, '邦恩吉')
+pet.img_ident = lambda kind, idx, ctx, text=(): _fake_img(kind, idx, ctx, '邦恩吉')
 check('ident_species 撞號：只在撞號的物種之間比縮圖、有把握 → 該物種', pet.ident_species(1, '49/10/6/3', ctx2) == '邦恩吉')
-pet.img_ident = lambda kind, idx, ctx: _fake_img(kind, idx, ctx, '邦恩吉')
+pet.img_ident = lambda kind, idx, ctx, text=(): _fake_img(kind, idx, ctx, '邦恩吉')
 check('ident_species 唯一字串：縮圖相同 → 採用；縮圖有把握但不在字串候選 → None',
       pet.ident_species(1, '47/11/5/3', dict(ctx2)) is None and pet.ident_species(1, '9/9/9/9', dict(ctx2)) == '邦恩吉')
 check('img_target 撞號：目標在候選且縮圖認成目標才 True', pet.img_target('card', 0, {'growth': '49/10/6/3'}, {'name': '邦恩吉'}, ctx2)
@@ -1378,7 +1384,7 @@ petmatch.TPL_DIR = _d3
 petmatch.save_species({'thumb': {}, 'growth': {'49/10/6/3': '加克拉', '46/10/5/4': '加克拉'}})
 _pub = {'DKBO': {'public': [{'name': '加克拉', 'unnamed': '49/10/6/3', 'level': 1}, {'name': '加克拉', 'unnamed': '46/10/5/4', 'level': 1}]}}
 g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None]), depot=fake_pet.mk_depot(**_pub))
-pet.img_ident = lambda kind, idx, ctx: {'img_species': '邦恩吉' if (kind, idx) == ('card', 0) else '加克拉', 'img_score': 0.9}
+pet.img_ident = lambda kind, idx, ctx, text=(): {'img_species': '邦恩吉' if (kind, idx) == ('card', 0) else '加克拉', 'img_score': 0.9}
 rc, out, err = run(pet.take, 'DKBO', 'public', None, None, False, True, '加克拉')
 pet.img_ident = _sv
 check('#810：字串登錄成加克拉但縮圖有把握是邦恩吉 → 跳過第 1 張、取第 2 張（46/10/5/4）', rc == 0 and g.pets['DKBO'][1].get('unnamed') == '46/10/5/4', f'rc={rc} {err[-300:]}')

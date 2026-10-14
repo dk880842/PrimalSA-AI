@@ -24,6 +24,8 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
 最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
 背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
 AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的兩項）。
+道具縮圖（2026-10-14，itemimg_match）：find / find_items / team_read / list / item_slots / find_item 先一次截圖比 GameClient 道具圖挑格，
+沒認出 / 被浮字蓋住的格才名稱 OCR；動作類（use / store / take / drop / purge）照舊開彈窗 / 提示窗核對名稱。PSA_ITEM_MATCH=auto（預設）| icon | ocr（舊行為）。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；bag 自己 90～96）：
   90 背包面板打不開 / 分頁不對 / 中途消失（沒點面板內座標）
@@ -43,6 +45,7 @@ AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md
 import argparse
 import difflib
 import json
+import os
 import re
 import sys
 import time
@@ -476,10 +479,10 @@ def team_read(roles=None, names=(), level: bool = True) -> tuple:
             if level:
                 d['level'] = read_level(r)
             if names:
-                occ, texts = read_bag_names()
-                vals = [dedup_text(t) for t in texts.values() if t.strip()]
-                d['have'] = {n: any(name_match(t, n) for t in vals) for n in names}
-                d['free'] = occ.count(False) if occ else None
+                r = _names_in_bag(names)
+                d['have'] = {n: r['found'][n] is not None for n in names}
+                d['free'] = r['free'] if r['occ'] is not None else None
+                d['by'] = r['by']
             out[r] = d
     return 0, out
 
@@ -645,18 +648,183 @@ def icon_match_slots(want: str, depot: bool = False) -> list | None:
                   key=lambda i: -hit.get(i, 0))
 
 
+# ---- 道具格縮圖比對（itemimg_match，2026-10-14 計畫 notes/plan-item-icon-match.md 階段 3 唯讀 + 階段 4 find_item 排序）----
+# 一次背包截圖（uikit.shot_getter，約 0.2 s）→ 空格（像素）+ 每個有道具的格比 GameClient 道具圖（工作集 = 呼叫端名稱 + item_pool() + 相似圖）。
+# 只能認到 imageId：同圖多名（龍王的守護 = 合成石 7…）標 ambiguous；**動作類（use / store / take / drop / purge）照舊開彈窗 / 提示窗核對名稱**，
+# 縮圖只決定「先開哪一格」。被浮字橫幅蓋住（itemimg_match 遮擋偵測）→ 等 ICON_OCC_WAIT_S 重拍，最多 ICON_OCC_RETRIES 次，仍蓋住 → 那幾格走 OCR（auto）。
+# 縮圖沒中 ≠ 沒有：auto 模式對「沒認出 / 被蓋住」的格（與沒有道具圖的名稱）照舊 OCR / 開彈窗再確認才說沒有。
+# ITEM_MATCH（環境變數 PSA_ITEM_MATCH 覆寫）：auto = 縮圖先、不夠再 OCR（預設）；icon = 只用縮圖（不 OCR 名稱，認不出的格列 unread）；ocr = 舊行為。
+ITEM_MATCH = (os.environ.get('PSA_ITEM_MATCH') or 'auto').strip().lower()
+ITEM_POOL_EXTRA = ['龍王的守護', '2倍智慧果', '千年龜的殼', '寵物誘餌', '耐久力回複藥', '人龍隨機蛋', '薩姆吉爾的首飾',
+                   '龍的魅力之笛', '英雄的祝福', '離線水晶', '安撫之素', '2轉新手禮盒']
+
+
+def item_pool() -> list:
+    """縮圖工作集（常在背包的道具）= PROTECT + AUTO_PURGE + PURGE_FORBID + ITEM_POOL_EXTRA（去重）"""
+    return list(dict.fromkeys(PROTECT + AUTO_PURGE + PURGE_FORBID + ITEM_POOL_EXTRA))
+ICON_OCC_RETRIES, ICON_OCC_WAIT_S = 2, 1.5
+_IM = {'mod': None, 'warned': False}
+
+
+def _imgmod():
+    """itemimg_match 模組（ITEM_MATCH=ocr / 沒抽道具圖 tools/.cache/item-images → None，呼叫端走 OCR）"""
+    if ITEM_MATCH == 'ocr':
+        return None
+    if _IM['mod'] is None:
+        try:
+            import itemimg_match
+            itemimg_match.index()
+            _IM['mod'] = itemimg_match
+        except (OSError, ImportError) as e:
+            if not _IM['warned']:
+                log(f'道具縮圖比對停用（{e}）→ 走名稱 OCR')
+                _IM['warned'] = True
+            return None
+    return _IM['mod']
+
+
+def _known(IM, names) -> list:
+    """名稱清單去掉道具圖索引查無此名的（ids_for_name 會丟 KeyError）；保序去重"""
+    out = []
+    for n in dict.fromkeys(n for n in names if n):
+        try:
+            IM.ids_for_name(n)
+            out.append(n)
+        except KeyError:
+            pass
+    return out
+
+
+def icon_read(kind: str = 'bag', want=(), pool=None, expand: bool = True) -> dict | None:
+    """唯讀：一次截圖比對目前頁的道具格（kind = 'bag' 背包 15 格 / 'depot' 倉庫 20 格）。
+    want = 要找的名稱（一定在候選、會加相似圖）；pool = 其他可能同時在的道具（預設 item_pool()）。
+    → {'occ': [bool], 'cells': {格: identify 結果}, 'hits': {名稱: [格…]（分數高到低）}, 'unresolved': [有道具但沒認出 / 被蓋住的格],
+       'missing': [沒有道具圖的名稱], 'shots': 截圖次數, 'ms'}；不能用縮圖（ocr 模式 / 沒抽圖 / 截不到）→ None"""
+    IM = _imgmod()
+    if IM is None:
+        return None
+    t0 = time.time()
+    want = _known(IM, want)
+    pool = _known(IM, item_pool() if pool is None else pool)
+    r = get = None
+    shots = 0
+    for attempt in range(ICON_OCC_RETRIES + 1):
+        get = uikit.shot_getter('bagimg')
+        shots += 1
+        if get is None:
+            return None
+        r = IM.match_slots(get, kind, want, pool=pool, expand=expand)
+        if not any(c['occluded'] for c in r['cells'].values()) or attempt == ICON_OCC_RETRIES:
+            break
+        uikit.mark('icon-occluded')
+        uikit.sleep(ICON_OCC_WAIT_S)                   # 浮動 EXP 橫幅蓋住格子：等它消失重拍
+    occ = IM.occupancy(get, kind)
+    cells = r['cells']
+    out = {'occ': occ, 'cells': cells, 'hits': r['hits'], 'missing': r['missing'], 'known': want,
+           'unresolved': sorted(i for i, c in cells.items() if not c['ok']), 'shots': shots, 'ms': int((time.time() - t0) * 1000)}
+    uikit.mark(f'icon {kind}')
+    return out
+
+
+def icon_label(c: dict) -> str:
+    """identify 結果 → 顯示名：工作集裡唯一對應的名稱（同圖還有別的道具名 → 後面加「(同圖)」，只是推定）；沒有 → 前 3 個同圖名用 / 連起來"""
+    if c.get('name'):
+        return c['name'] + ('(同圖)' if c.get('ambiguous') else '')
+    ns = c.get('names') or []
+    return '/'.join(ns[:3]) + ('…' if len(ns) > 3 else '')
+
+
+def _names_in_bag(names) -> dict:
+    """背包頁（角色已選好）：names 各在哪格 → {'found': {名稱: 格 | None}, 'by': {名稱: 'icon'|'ocr'}, 'free', 'unread', 'ambiguous', 'occ', 'icon_ms'}。
+    auto：縮圖先（一次截圖）；沒命中的名稱，若還有「沒認出 / 被蓋住」的格或名稱沒有道具圖 → 只對那些格名稱 OCR（名稱被關才點開「顯示道具名」）。
+    icon：不 OCR。ocr / 不能用縮圖：舊法（每格名稱 OCR）"""
+    names = list(names)
+    ir = icon_read('bag', names) if ITEM_MATCH != 'ocr' else None
+    found, by, amb = {}, {}, []
+    if ir is None:                                     # 舊法
+        occ, texts = read_bag_names_ocr()
+        idx = sorted(texts)
+        for nm in names:
+            hit = next((i for i in idx if texts[i] and name_match(texts[i], nm)), None)
+            found[nm] = hit
+            if hit is not None:
+                by[nm] = 'ocr'
+        free = occ.count(False) if occ is not None else sum(1 for i in idx if not texts[i].strip())
+        unread = [i for i in idx if not texts[i].strip()] if occ is not None else []
+        return {'found': found, 'by': by, 'free': free, 'unread': unread, 'ambiguous': amb, 'occ': occ, 'icon_ms': None}
+    occ = ir['occ']
+    missing = set(ir['missing']) | {n for n in names if n not in ir['known']}     # 沒有道具圖 / 道具圖索引查不到的名稱 → 只能 OCR
+    for nm in names:
+        hits = ir['hits'].get(nm) or []
+        found[nm] = hits[0] if hits else None
+        if hits:
+            by[nm] = 'icon'
+            if ir['cells'][hits[0]].get('ambiguous'):
+                amb.append(nm)
+    todo = [n for n in names if found[n] is None]
+    unresolved = list(ir['unresolved'])
+    ocr_cells = []
+    if todo and ITEM_MATCH == 'auto':
+        hit_cells = {h for v in ir['hits'].values() for h in v}
+        if any(n in missing for n in todo):          # 沒有道具圖的名稱：縮圖認得是要找的別的名稱的格以外，全部 OCR
+            ocr_cells = [i for i, o in enumerate(occ) if o and i not in hit_cells]
+        else:
+            ocr_cells = unresolved
+        ocr_cells = sorted(set(ocr_cells))
+    texts = {}
+    if ocr_cells:
+        texts = {i: read_slot_name(i) for i in ocr_cells}
+        if names_hidden([i in ocr_cells for i in range(n_slots())], texts) and ensure_names_shown(occ):
+            texts = {i: read_slot_name(i) for i in ocr_cells}
+        for nm in todo:
+            hit = next((i for i in ocr_cells if texts[i] and name_match(texts[i], nm)), None)
+            if hit is not None:
+                found[nm], by[nm] = hit, 'ocr'
+    unread = [i for i in unresolved if not str(texts.get(i) or '').strip()]
+    return {'found': found, 'by': by, 'free': occ.count(False), 'unread': unread, 'ambiguous': amb, 'occ': occ, 'icon_ms': ir['ms']}
+
+
 def find_item(want: str, depot: bool = False, popup_fallback: bool = True, hint: int | None = None) -> int | None:
     """want 在目前頁（背包 / 倉庫左半）的格號（0 起算）。hint = 上一次找到的格號：先只點那格核對彈窗名稱，吻合就直接回傳（省掉逐格開彈窗 + ESC，2026-10-13）。
+    2026-10-14 縮圖先（ITEM_MATCH auto / icon）：一次截圖比 want + 相似圖 → 命中的格照分數排：圖只屬於 want → 直接回（呼叫端動作前會開彈窗核對）；
+    同圖多名 → 讀那格名字（名字沒顯示才開彈窗）。auto 縮圖沒中 → 照舊路徑（圖示樣板 / 格名 OCR / 逐格彈窗）。
     有圖示樣板：① 圖示比對只挑吻合的格（不掃全部格）→ ② 點進去核對彈窗名稱，相符才回傳（不靠格名 OCR，不逐格開彈窗）。
     沒樣板：逐格 OCR 名稱；找不到再逐格開彈窗讀名稱（慢、保險）"""
+    tried = set()
     if hint is not None and 0 <= hint < n_slots(depot) and open_slot_popup(hint, depot):
+        tried.add(hint)
         nm = popup_name(want)
         close_popup()
         if nm and name_match(nm, want):
             return hint
+    ir = icon_read('depot' if depot else 'bag', [want], pool=[]) if ITEM_MATCH != 'ocr' else None   # 只比 want + 相似圖（彈窗會核對，不用整個工作集）
+    if ir is not None:                                 # 縮圖（GameClient 道具圖）挑格 → 開彈窗核對名稱（通常 1 格）
+        LAST['icon_hits'] = ir['hits'].get(want) or []
+        for i in ir['hits'].get(want) or []:
+            if i in tried:
+                continue
+            if not ir['cells'][i].get('ambiguous'):
+                return i                               # 這張圖只屬於 want（呼叫端動作前照舊開彈窗核對名稱）
+            t = read_slot_name(i, depot)               # 同圖多名（千年龜的殼 / 未知的殼…）：先讀這格名字（約 0.2 s）
+            if t.strip():
+                if name_match(t, want):
+                    return i
+                continue
+            if not open_slot_popup(i, depot):          # 名字沒顯示：開彈窗核對
+                continue
+            tried.add(i)
+            nm = popup_name(want)
+            close_popup()
+            if nm and name_match(nm, want):
+                return i
+        if ITEM_MATCH == 'icon':
+            return None
+        # auto：縮圖沒中 ≠ 沒有（被蓋住 / 沒有道具圖 / 分數不夠）→ 照舊路徑再確認
     cand = icon_match_slots(want, depot)
     if cand is not None:
         for i in cand:
+            if i in tried:
+                continue
             if not open_slot_popup(i, depot):
                 continue
             nm = popup_name(want)
@@ -695,26 +863,14 @@ def find_items(role: str, names) -> tuple:
         rc = select_role(role)
         if rc:
             return rc, out
-        occ = slot_occupancy()
-        idx = [i for i in range(n_slots()) if occ is None or occ[i]]
-        texts = {i: read_slot_name(i) for i in idx}
-        if occ is not None and names_hidden(occ, texts):
-            if ensure_names_shown(occ):
-                texts = {i: read_slot_name(i) for i in idx}
-        todo = list(names)
-        for i in idx:
-            t = texts[i]
-            for nm in list(todo):
-                if t and name_match(t, nm):
-                    out[nm] = i
-                    todo.remove(nm)
-        for nm in todo:
-            out[nm] = None
-        if occ is None:
-            out['_free'] = sum(1 for i in idx if not texts[i].strip())
-        else:
-            out['_free'] = occ.count(False)
-            out['_unread'] = [i for i in idx if not texts[i].strip()]
+        r = _names_in_bag(names)
+        out.update(r['found'])
+        out['_free'] = r['free']
+        if r['occ'] is not None:
+            out['_unread'] = r['unread']
+        out['_by'] = r['by']
+        if r['ambiguous']:
+            out['_ambiguous'] = r['ambiguous']
     return 0, out
 
 
@@ -728,6 +884,11 @@ def dedup_text(t) -> str:
 
 
 def read_bag_names() -> tuple:
+    """目前選中角色、背包頁：→ (occ | None, {格號: 名稱 OCR})（purge 用：勾選目標要名稱 OCR，提示窗清單再核對；不走縮圖）"""
+    return read_bag_names_ocr()
+
+
+def read_bag_names_ocr() -> tuple:
     """目前選中角色、背包頁：→ (occ | None, {格號: 名稱 OCR})；只讀有道具的格（像素判空格），名稱全空 = 「顯示道具名」被關 → 點開一次再讀"""
     occ = slot_occupancy()
     idx = [i for i in range(n_slots()) if occ is None or occ[i]]
@@ -748,16 +909,51 @@ def list_all(roles) -> tuple:
             rc = select_role(r)
             if rc:
                 return rc, out
-            occ, texts = read_bag_names()
-            out[r] = {'slots': {i: dedup_text(t) for i, t in texts.items() if t.strip()},
-                      'free': occ.count(False) if occ else None,
-                      'unread': [i for i, t in texts.items() if not t.strip()]}
+            out[r] = read_bag_items()
     return 0, out
 
 
+def read_bag_items() -> dict:
+    """背包頁（角色已選好）每格是什麼 → {'slots': {格: 名稱}, 'free', 'unread': [格], 'by': {格: 'icon'|'ocr'}, 'icons': {格: {imageId, score, ambiguous}}}。
+    auto：一次截圖比 item_pool()（+ 相似圖）→ 認得的格用縮圖名稱（同圖多名 → 「名/名」並標 ambiguous）；沒認出 / 被蓋住的格才名稱 OCR。
+    icon：認不出的格列 unread。ocr / 不能用縮圖：舊法（每格 OCR）"""
+    ir = icon_read('bag', item_pool(), pool=[]) if ITEM_MATCH != 'ocr' else None
+    if ir is None:
+        occ, texts = read_bag_names_ocr()
+        return {'slots': {i: dedup_text(t) for i, t in texts.items() if t.strip()},
+                'free': occ.count(False) if occ else None,
+                'unread': [i for i, t in texts.items() if not t.strip()], 'by': {i: 'ocr' for i, t in texts.items() if t.strip()}}
+    occ, cells = ir['occ'], ir['cells']
+    slots, by, icons = {}, {}, {}
+    for i, c in sorted(cells.items()):
+        if c['ok']:
+            slots[i], by[i] = icon_label(c), 'icon'
+            icons[i] = {'imageId': c['imageId'], 'score': c['score'], 'ambiguous': c['ambiguous']}
+    unres = [i for i in ir['unresolved']]
+    unread = []
+    if unres and ITEM_MATCH == 'auto':
+        texts = {i: read_slot_name(i) for i in unres}
+        if names_hidden([i in unres for i in range(n_slots())], texts) and ensure_names_shown(occ):
+            texts = {i: read_slot_name(i) for i in unres}
+        for i in unres:
+            t = dedup_text(texts[i])
+            if t.strip():
+                slots[i], by[i] = t, 'ocr'
+            else:
+                unread.append(i)
+    else:
+        unread = unres
+    return {'slots': dict(sorted(slots.items())), 'free': occ.count(False), 'unread': unread, 'by': by, 'icons': icons,
+            'icon_ms': ir['ms']}
+
+
 def item_slots(want: str) -> list:
-    """背包頁：名稱 OCR 吻合 want 的所有格號（同名多格，例：千年龜的殼不疊加、每個佔一格）"""
-    _, texts = read_bag_names()
+    """背包頁：want 的所有格號（同名多格，例：千年龜的殼不疊加、每個佔一格）。auto / icon：縮圖命中的格（分數高到低再依格號）；
+    auto 縮圖一格都沒中 → 名稱 OCR（舊法）。只是候選：動作前照舊開彈窗核對"""
+    ir = icon_read('bag', [want], pool=[]) if ITEM_MATCH != 'ocr' else None
+    if ir is not None and (ir['hits'].get(want) or ITEM_MATCH == 'icon'):
+        return sorted(ir['hits'].get(want) or [])
+    _, texts = read_bag_names_ocr()
     return [i for i, t in sorted(texts.items()) if t.strip() and name_match(t, want)]
 
 

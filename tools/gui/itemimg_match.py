@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """背包 / 倉庫道具格縮圖 ↔ GameClient 道具 Sprite 的像素比對（只用標準函式庫）。2026-10-14 階段 2（notes/plan-item-icon-match.md）。
 
-**尚未接線**：bag.py / questrun 等現有執行路徑都還沒呼叫本模組（接線是計畫階段 3）；目前只有離線 CLI 與離線測試。
+接線（2026-10-14 階段 3 / 4）：bag.py 的 find_item / find_items / list_all / item_slots 先用本模組挑格（bag.ITEM_MATCH / 環境變數 PSA_ITEM_MATCH=auto|icon|ocr），
+動作類（use / store / take / drop / purge）照舊開彈窗 / 提示窗核對名稱。比對核心與寵物縮圖（petimg_match）共用 imgmatch.py。
 
 圖示來源：tools/extract/item_images.py 抽出的 tools/.cache/item-images/<imageId>.png + index.tsv（不進 git；沒抽就丟 FileNotFoundError）。
 版面（2880×1659 客戶區 = 1440×830 截圖座標；tools/.cache 既有背包 / 倉庫截圖離線量的）：
@@ -76,6 +77,7 @@ LOOK_MIN = 0.45     # 相似圖粗分門檻
 _INDEX = None       # imageId → {'names': [...], 'w', 'h'}（只收屬於道具的 Sprite）
 _BYNAME = None      # 繁中名 → [imageId…]
 _MISSING = None     # 沒有 Sprite 的道具名 → [imageId…]
+_BYNORM = None      # 正規化名（去掉 [地] 這類方括號 / 空白）→ [imageId…]（「大地的羈絆」對「大地的羈絆[地]」）
 _RAW = {}           # imageId → 原始樣板（全部不透明點）
 _TPL = {}           # imageId → 比對樣板（去掉接近空格棕的點）
 _LOOK = {}          # (imageId, k, min) → 相似圖
@@ -84,7 +86,7 @@ _COARSE = None
 
 # ---- 索引 ----
 def index() -> dict:
-    global _INDEX, _BYNAME, _MISSING
+    global _INDEX, _BYNAME, _MISSING, _BYNORM
     if _INDEX is None:
         rows = item_images.read_index(str(IMG_DIR))
         if rows is None:
@@ -104,8 +106,20 @@ def index() -> dict:
                 for n in c[2].split('、'):
                     if n:
                         miss.setdefault(n, []).append(c[0])
-        _INDEX, _BYNAME, _MISSING = idx, byname, miss
+        bynorm = {}
+        for n, ids in byname.items():
+            for i in ids:
+                bynorm.setdefault(norm(n), [])
+                if i not in bynorm[norm(n)]:
+                    bynorm[norm(n)].append(i)
+        _INDEX, _BYNAME, _MISSING, _BYNORM = idx, byname, miss, bynorm
     return _INDEX
+
+
+def norm(name: str) -> str:
+    """名稱正規化：去掉 [地] / 【…】/（…）括號段與空白（同 bag.norm_name 的括號規則）"""
+    import re
+    return re.sub(r'\s+', '', re.sub(r'[\[【（(][^\]】）)]*[\]】）)]', '', str(name or '')))
 
 
 def ids_for_name(name: str) -> list:
@@ -118,6 +132,8 @@ def ids_for_name(name: str) -> list:
         return list(_BYNAME[name])
     if name in _MISSING:
         return []
+    if norm(name) in _BYNORM:                       # 「大地的羈絆」→「大地的羈絆[地]」
+        return list(_BYNORM[norm(name)])
     raise KeyError(f'道具圖索引找不到「{name}」')
 
 
@@ -164,6 +180,11 @@ def lookalikes(iid: str, k: int = LOOK_K, min_score: float = LOOK_MIN) -> list:
     不在候選裡的換色版會過門檻（離線：山賊的羽飾格只找青貝首飾的換色版 22014 → 0.572 誤判；加進來就由正確的圖勝出）"""
     key = (iid, k, min_score)
     if key not in _LOOK:
+        disk = _look_disk()
+        dk = f'{iid}|{k}|{min_score}'
+        if dk in disk:
+            _LOOK[key] = list(disk[dk])
+            return list(_LOOK[key])
         cell = {(dx, dy): RING_BROWN for dy in range(-37, 38) for dx in range(-37, 38)}
         cell.update(imgmatch.placed(raw_template(iid), 0, 0))
         sc = []
@@ -174,7 +195,36 @@ def lookalikes(iid: str, k: int = LOOK_K, min_score: float = LOOK_MIN) -> list:
             if v >= min_score:
                 sc.append((v, j))
         _LOOK[key] = [j for _, j in sorted(sc, reverse=True)[:k]]
+        disk[dk] = _LOOK[key]
+        _look_save(disk)
     return list(_LOOK[key])
+
+
+_LOOKDISK = None
+
+
+def _look_stamp() -> str:
+    return f"{(IMG_DIR / 'index.tsv').stat().st_mtime_ns}:{SCALE}:{COARSE_STRIDE}:{DROP_BG_LIKE}:{TOL}"
+
+
+def _look_disk() -> dict:
+    """lookalikes 的磁碟快取 tools/.cache/itemimg-look.json（戳記 = index.tsv / 倍率 / 粗樣板設定；不符就丟掉重算）。
+    list_all 對整個工作集（約 40 個名稱）擴充相似圖，第一次每個約 0.1 秒，之後讀檔"""
+    global _LOOKDISK
+    if _LOOKDISK is None:
+        try:
+            d = json.loads((COARSE_DIR / 'itemimg-look.json').read_text(encoding='utf-8'))
+            _LOOKDISK = d['look'] if d.get('stamp') == _look_stamp() else {}
+        except (OSError, ValueError, KeyError, TypeError):
+            _LOOKDISK = {}
+    return _LOOKDISK
+
+
+def _look_save(d: dict) -> None:
+    try:
+        (COARSE_DIR / 'itemimg-look.json').write_text(json.dumps({'stamp': _look_stamp(), 'look': d}, ensure_ascii=False), encoding='utf-8')
+    except OSError:
+        pass
 
 
 def coarse_templates() -> dict:
@@ -207,6 +257,29 @@ def text_px(c, dx=0, dy=0) -> bool:
     return min(c) > 200 or c[0] + c[1] + c[2] < 90
 
 
+BAND_MIN_WHITE = 3     # 名字字列：一列（dy −40～+9）白字點（三通道最小 > 200）≥ 這麼多 → 那一列 ±BAND_PAD 列整條不比
+BAND_MIN_SCORE, BAND_MARGIN = 0.62, 0.12   # 第二輪點少、棕色圖容易冒充（不在候選的貝殼被認成橡樹果 0.58）→ 門檻比第一輪嚴
+BAND_PAD = 2           # （2026-10-14 實機：兩行名字「巴巴洛的許可證」「大地的羈絆[地]」蓋住圖示上半，只丟字本身的點時反鋸齒殘邊讓別的圖拿高分 → 第二輪整列丟）
+
+
+def band_region(img, cx: int, cy: int, cells: dict) -> dict:
+    """第二輪比對用：cells 再丟掉「有名字白字的整列」（± BAND_PAD）。名字關掉 / 沒疊到的格不變"""
+    get = imgmatch.as_getter(img)
+    x0, y0, x1, y1 = CLIP
+    bad = set()
+    for dy in range(y0, 10):
+        n = 0
+        for dx in range(x0, x1 + 1):
+            c = get(cx + dx, cy + dy)
+            if c is not None and min(c) > 200:
+                n += 1
+        if n >= BAND_MIN_WHITE:
+            bad.update(range(dy - BAND_PAD, dy + BAND_PAD + 1))
+    if not bad:
+        return cells
+    return imgmatch.Grid({q: c for q, c in cells.items() if (q[1] - cy) not in bad})
+
+
 def occupied(img, kind: str, slot) -> bool:
     """有沒有道具（bag.slot_occupied：格心周圍 25 點偏離空格棕；倉庫格同一套）"""
     get = imgmatch.as_getter(img)
@@ -224,9 +297,8 @@ def occlusion(img, kind: str, slot) -> int:
     ring = KINDS[kind]['ring']
     if not ring:
         return 0
-    get = imgmatch.as_getter(img)
     cx, cy = _xy(kind, slot)
-    return sum(1 for dx in ring for dy in range(-30, 37, 3) if _dark_brown(get(cx + dx, cy + dy)))
+    return imgmatch.occlusion(img, cx, cy, [(dx, dy) for dx in ring for dy in range(-30, 37, 3)], _dark_brown)
 
 
 def occupancy(img, kind: str) -> list:
@@ -253,8 +325,9 @@ def identify(img, kind: str, slot, pool=None, cells=None) -> dict:
     空格也會照比（呼叫端先用 occupied 排除；match_slots 會排除）"""
     cx, cy = _xy(kind, slot)
     occ = occlusion(img, kind, slot) if cells is None else 0
+    second_pass = cells is None
     if cells is None:
-        cells = imgmatch.region(img, cx, cy, CLIP, text_px)
+        cells = imgmatch.Grid(imgmatch.region(img, cx, cy, CLIP, text_px))
     if pool is None:
         ids, miss, coarse = list(index()), [], coarse_templates()
     else:
@@ -265,18 +338,17 @@ def identify(img, kind: str, slot, pool=None, cells=None) -> dict:
         return dict(res, imageId=None, best=None, score=0.0, second=0.0, second_id=None, ok=False, name=None,
                     names=[], ambiguous=False, tie=None)
     ranked = _rank(cells, kind, cx, cy, ids, coarse)
-    top_s, top_i, top_p = ranked[0]
-    sec_s, sec_i, sec_p = ranked[1] if len(ranked) > 1 else (0.0, None, None)
-    ok = top_s >= MIN_SCORE and top_s - sec_s >= MARGIN and not res['occluded']
-    tie = None
-    if not ok and not res['occluded'] and sec_i and min(top_s, sec_s) >= MIN_SCORE:
-        t = imgmatch.tiebreak(cells, imgmatch.placed(template(top_i), top_p[1], top_p[2]),
-                              imgmatch.placed(template(sec_i), sec_p[1], sec_p[2]))
-        tie = {'winner': (top_i, sec_i)[t['winner']] if t['winner'] is not None else None, 'votes': t['votes']}
-        if t['winner'] is not None:
-            ok = True
-            if t['winner'] == 1:
-                top_s, top_i, sec_s, sec_i = sec_s, sec_i, top_s, top_i
+    c = imgmatch.classify(cells, ranked, template, MIN_SCORE, MARGIN, gate=not res['occluded'])   # 被遮擋 → 不判定也不投票
+    if second_pass and not c['ok'] and not res['occluded']:
+        bc = band_region(img, cx, cy, cells)                # 第二輪：名字字列整列丟掉再比（只救第一輪判不出的格）
+        if bc is not cells:
+            ranked2 = _rank(bc, kind, cx, cy, ids, coarse)
+            c2 = imgmatch.classify(bc, ranked2, template, BAND_MIN_SCORE, BAND_MARGIN)
+            if c2['ok']:
+                ranked, c = ranked2, c2
+                res['band'] = True
+    (top_s, top_i, _), (sec_s, sec_i, _) = c['top'], c['second']
+    ok, tie = c['ok'], c['tie']
     names = names_for_id(top_i) if ok else []
     in_pool = [n for n in (pool or []) if not n.startswith('#') and top_i in ids_for_name(n)] if ok else []
     return dict(res, imageId=top_i if ok else None, best=top_i, score=round(top_s, 3), second=round(sec_s, 3),

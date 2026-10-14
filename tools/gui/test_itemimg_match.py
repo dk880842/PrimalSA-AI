@@ -248,6 +248,26 @@ def test_empty_and_banner(fx):
           r['hits']['大地的羈絆[地]'] == [] and r['cells'][1]['occluded'], r['cells'][1]['dark'])
 
 
+def test_names_band():
+    """2026-10-14 實機（DKBO5 背包，名字開著）：兩行名字蓋住圖示上半。第 1 格巴巴洛的許可證第一輪輸給火山岩碎片 → 第二輪整列丟字救回；
+    第 2 格大地的羈絆、第 3 格不可思議的貝殼（不在工作集）第二輪也不准冒充（貝殼曾被認成橡樹果 0.58）→ None 交給 OCR"""
+    p = HERE / 'fixtures' / 'itemimg_live_names.png'
+    w, h, bpp, rows = imgmatch.decode(p)
+    X0, Y0 = 707, 200
+
+    def get(x, y):
+        if 0 <= x - X0 < w and 0 <= y - Y0 < h:
+            return tuple(rows[y - Y0][(x - X0) * bpp:(x - X0) * bpp + 3])
+        return None
+    import bag
+    pool = [n for n in bag.item_pool() if n in M._BYNAME or M.norm(n) in M._BYNORM]
+    r = M.match_slots(get, 'bag', pool, pool=[], slots=[0, 1, 2])
+    c = r['cells']
+    check('名字疊圖：巴巴洛的許可證第二輪（整列丟字）認出 24222', c[0]['imageId'] == '24222' and c[0].get('band'), (c[0]['imageId'], c[0]['score']))
+    check('名字疊圖：大地的羈絆 / 不在工作集的貝殼 → None（不冒充，交給 OCR）', c[1]['imageId'] is None and c[2]['imageId'] is None,
+          [(c[i]['best'], c[i]['score']) for i in (1, 2)])
+
+
 def main() -> int:
     if '--make-fixtures' in sys.argv:
         return make_fixtures()
@@ -260,6 +280,7 @@ def main() -> int:
     test_regression(fx)
     test_absent(fx)
     test_empty_and_banner(fx)
+    test_names_band()
     print('全部通過' if not fails else f'{fails} 項失敗')
     return 1 if fails else 0
 

@@ -138,6 +138,7 @@ cards = {0: {'index': 1, 'name': '朵拉比斯', 'growth': None, 'level': 1}, 3:
 truth = {0: '朵拉比斯', 3: '摩娜西普', 5: '朵拉比斯', 7: None}
 clicked = []
 sv = (pet.glyph_cards, pet.click_card, pet.wait_for_card, pet.read_ident, pet.card_level_now, pet.species_reg)
+pet.IMG_ON = False                    # 假倉庫沒有縮圖（2026-10-14 起找卡會比縮圖第二道確認；不能去截真遊戲畫面）
 pet.glyph_cards = lambda d: cards
 pet.click_card = lambda k, note: clicked.append(k) or True
 pet.wait_for_card = lambda k, depot: ({}, True)

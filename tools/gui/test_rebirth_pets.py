@@ -549,8 +549,9 @@ class FakeAss:
 
 fa = FakeAss()
 T = rp.Tools()
-saved = (ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, rp.Tools._ass_tab, rp.Tools._checked)
-ass._many, ass.panel_open, rp.ocr_lines, uikit.gui = fa.many, (lambda: True), fa.ocr, fa.gui
+saved = (ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, rp.Tools._ass_tab, rp.Tools._checked, ass.gui)
+# ass.gui 是 walk.gui（真的 gui.ps1）：不換掉的話 ass.close_panel 會在真遊戲上點 1318,90（2026-10-14 實際點了 6 輪 × 4 下，打開地圖傳送面板）
+ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, ass.gui = fa.many, (lambda: True), fa.ocr, fa.gui, fa.gui
 rp.Tools._ass_tab = lambda self, role, tab: 0
 rp.Tools._checked = lambda self, xy: next(fa.chk[fa.role][w] for w, d in rp.LOCK_XY.items() if d['check'] == xy)
 pets = {r: [S(1, unnamed='49/9/8/2', species=BRA, state='騎乘'), S(2, name=DOR, state='出戰')] for r in ROLES}
@@ -569,7 +570,7 @@ fa.chk['DKBO2']['戰寵'] = False
 check('  下拉讀不到目標 → 7、不選不勾、收下拉', rc == 7 and bad == 'DKBO2' and fa.chk['DKBO2']['戰寵'] is False and fa.dd is None, f'rc={rc} {bad}')
 (rc, sts), _ = quiet(T.lock_get_many, ROLES)
 check('lock_get_many：一次讀 5 人', rc == 0 and len(sts) == 5 and sts['DKBO']['戰寵'] is True)
-ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, rp.Tools._ass_tab, rp.Tools._checked = saved
+ass._many, ass.panel_open, rp.ocr_lines, uikit.gui, rp.Tools._ass_tab, rp.Tools._checked, ass.gui = saved
 
 
 # ---------------- 2026-10-13：--confirm-buy-catch / 戰寵逐隻驗 Lv1 / 禮盒 95 重試 ----------------

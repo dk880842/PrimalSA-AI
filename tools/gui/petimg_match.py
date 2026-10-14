@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""寵物縮圖 ↔ 知識庫頭像的像素比對（認物種；只用標準函式庫）。2026-10-12 離線設計 + 驗證；同日接線到 pet.py（img_ident：名字 / 登錄檔都認不出時的備援），實機唯讀 list 驗證寵物格。
+"""寵物縮圖 ↔ 知識庫頭像的像素比對（認物種；只用標準函式庫）。2026-10-12 離線設計 + 驗證；2026-10-14 起是 pet.py 的主要辨識（judge：候選限定 +
+遮擋偵測，名字 / 成長字串當第二道確認），比對核心與道具縮圖（itemimg_match）共用 imgmatch.py（逐格同分回歸 359 / 359）。
 
 為什麼：沒名字的新寵物（名字框顯示成長字串 49/9/8/2）認物種要靠 learn-species 先登錄，而且成長字串會撞
 （48/9/5/3 兩個物種相同）。寵物面板每格縮圖、倉庫卡縮圖畫的就是 Monster.imageId 的頭像 Sprite
@@ -34,17 +35,18 @@
     get(x, y) → (r,g,b)（截圖座標）；ok=False 時 species=None（不猜）。
   rank_among(get, kind, cx, cy, names) → 任務候選相對比較（多 'hist' / 'hist_second'）。match_rows(rows, bpp, kind, cx, cy, names) → 同上（PNG 解碼列）。read_cell(kind, cx, cy) → dict（經 uikit.px，一次讀整格）。
   family(names) → 同系別（Monster.petType）全部有頭像的物種名。cells_of(kind) → [(格號, cx, cy)]。is_empty(get, cx, cy) → 空格（爪印）。
+  judge(get, kind, cx, cy, names, keep=(), family_stage=True, quick=False) → rank_among 欄位 + occ / occluded / stage / keep_scores（pet.py 主判定）。
+  occlusion(get, kind, cx, cy) → 格子外圍被壓暗的點數（≥ OCC_MIN = 被浮字橫幅蓋住）。
 """
 import argparse
 import json
 import sys
-import struct
 import time
-import zlib
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import imgmatch  # noqa: E402  （共用核心：樣板 / 分數 / 位置 / 判定 / 主色 / 投票 / 遮擋 / 粗篩快取，道具 itemimg_match 也用）
 import pngread  # noqa: E402
 
 ROOT = HERE.parents[1]
@@ -163,18 +165,7 @@ def template(iid: str, kind: str) -> list:
     if key in _TPL:
         return _TPL[key]
     index()
-    w, h, bpp, rows = pngread.decode((IMG_DIR / 'head' / _HEAD[iid]).read_bytes())
-    s = KINDS[kind]['scale']
-    tw, th = int(w * s), int(h * s)
-    pts = []
-    for ty in range(th):
-        sy = min(h - 1, int((ty + 0.5) / s))
-        for tx in range(tw):
-            sx = min(w - 1, int((tx + 0.5) / s))
-            p = rows[sy][sx * bpp:sx * bpp + bpp]
-            if bpp == 4 and p[3] < ALPHA_MIN:
-                continue
-            pts.append((tx - tw // 2, ty - th // 2, p[0], p[1], p[2]))
+    pts = imgmatch.template(imgmatch.decode(IMG_DIR / 'head' / _HEAD[iid]), KINDS[kind]['scale'], ALPHA_MIN)
     _TPL[key] = pts
     return pts
 
@@ -184,35 +175,9 @@ def coarse_templates(kind: str) -> dict:
     第一次要解碼 1000+ 張頭像（約 10 s），之後讀快取 tools/.cache/petimg-coarse-<kind>.bin（index.tsv 或倍率變了自動重算）"""
     if kind in _COARSE:
         return _COARSE[kind]
-    stamp = f"{(IMG_DIR / 'index.tsv').stat().st_mtime_ns}:{KINDS[kind]['scale']}:{COARSE_STRIDE}".encode()
-    path = COARSE_DIR / f'petimg-coarse-{kind}.bin'
-    out = None
-    try:
-        raw = zlib.decompress(path.read_bytes())
-        head, body = raw.split(b'\n', 1)
-        if head == stamp:
-            out, pos = {}, 0
-            while pos < len(body):
-                ln = body[pos]
-                iid = body[pos + 1:pos + 1 + ln].decode()
-                n = struct.unpack_from('<H', body, pos + 1 + ln)[0]
-                pos += 3 + ln
-                out[iid] = list(struct.iter_unpack('<bbBBB', body[pos:pos + 5 * n]))
-                pos += 5 * n
-    except (OSError, ValueError, zlib.error, struct.error):
-        out = None
-    if out is None or set(out) != set(index()):
-        out = {i: template(i, kind)[::COARSE_STRIDE] for i in index()}
-        blob = bytearray()
-        for iid, pts in out.items():
-            b = iid.encode()
-            blob += bytes([len(b)]) + b + struct.pack('<H', len(pts))
-            for t in pts:
-                blob += struct.pack('<bbBBB', *t)
-        try:
-            path.write_bytes(zlib.compress(stamp + b'\n' + bytes(blob)))
-        except OSError:
-            pass
+    stamp = f"{(IMG_DIR / 'index.tsv').stat().st_mtime_ns}:{KINDS[kind]['scale']}:{COARSE_STRIDE}"
+    out = imgmatch.coarse_cache(COARSE_DIR / f'petimg-coarse-{kind}.bin', stamp, list(index()),
+                                lambda i: template(i, kind)[::COARSE_STRIDE])
     _COARSE[kind] = out
     return out
 
@@ -225,59 +190,35 @@ def cell_points(kind: str, cx: int, cy: int) -> list:
     return [(cx + dx, cy + dy) for dy in range(y0, y1 + 1) for dx in range(x0, x1 + 1) if not k['mask'](dx, dy)]
 
 
+MIN_N = 40          # 有效點少於這個數 → 分數 0（粗找也用同一個下限，沿用 2026-10-12 的行為）
+
+
+def _ex(kind: str, cx: int, cy: int) -> tuple:
+    k = KINDS[kind]
+    return cx + k['center'][0], cy + k['center'][1]
+
+
 def _score(tpl, get_d, ox, oy, step):
-    """樣板放在 (ox, oy)（頭像中心的截圖座標）的 inlier 比例；get_d = {(x,y): rgb}（已去遮罩 / 可見範圍）"""
-    hit = n = 0
-    for i in range(0, len(tpl), step):
-        dx, dy, r, g, b = tpl[i]
-        c = get_d.get((ox + dx, oy + dy))
-        if c is None:
-            continue
-        n += 1
-        if abs(c[0] - r) + abs(c[1] - g) + abs(c[2] - b) <= 3 * TOL:
-            hit += 1
-    return (hit / n if n >= 40 else 0.0), n
+    """樣板放在 (ox, oy)（頭像中心的截圖座標）的 inlier 比例（imgmatch.score）；get_d = {(x,y): rgb}（已去遮罩 / 可見範圍）"""
+    return imgmatch.score(tpl, get_d, ox, oy, TOL, step, MIN_N)
 
 
 def _coarse_score(tpl, cells, kind, cx, cy, step=4, stride=1):
-    """位移步 step 的粗找 → (最佳分數, ox, oy)"""
-    k = KINDS[kind]
-    ex, ey = cx + k['center'][0], cy + k['center'][1]
-    sx, sy = k['search']
-    best = (-1.0, ex, ey)
-    for oy in range(ey - sy, ey + sy + 1, step):
-        for ox in range(ex - sx, ex + sx + 1, step):
-            s, _ = _score(tpl, cells, ox, oy, stride)
-            if s > best[0]:
-                best = (s, ox, oy)
-    return best
+    """位移步 step 的粗找 → (最佳分數, ox, oy)（imgmatch.coarse_pos）"""
+    ex, ey = _ex(kind, cx, cy)
+    return imgmatch.coarse_pos(tpl, cells, ex, ey, KINDS[kind]['search'], TOL, step, stride, MIN_N)
 
 
 def _best_pos(tpl, cells, kind, cx, cy):
-    k = KINDS[kind]
-    ex, ey = cx + k['center'][0], cy + k['center'][1]
-    sx, sy = k['search']
-    best = (-1.0, ex, ey)
-    for oy in range(ey - sy, ey + sy + 1, 2):
-        for ox in range(ex - sx, ex + sx + 1, 2):
-            s, _ = _score(tpl, cells, ox, oy, 3)
-            if s > best[0]:
-                best = (s, ox, oy)
-    _, bx, by = best
-    fine = (-1.0, bx, by)
-    for oy in range(by - 1, by + 2):
-        for ox in range(bx - 1, bx + 2):
-            s, _ = _score(tpl, cells, ox, oy, 1)
-            if s > fine[0]:
-                fine = (s, ox, oy)
-    return fine
+    ex, ey = _ex(kind, cx, cy)
+    return imgmatch.best_pos(tpl, cells, ex, ey, KINDS[kind]['search'], TOL, 2, 3, MIN_N, coarse_min_n=MIN_N)
 
 
 def _cells(get, kind: str, cx: int, cy: int) -> dict:
     """一格的可比像素 {(x,y): rgb}（可見範圍、去遮罩、去倉庫卡字）"""
     pts = cell_points(kind, cx, cy)
     cells = get if isinstance(get, dict) else {p: tuple(get(*p)) for p in pts}
-    return {p: cells[p] for p in pts if p in cells and not _text_px(kind, p[0] - cx, p[1] - cy, cells[p])}
+    return imgmatch.Grid({p: cells[p] for p in pts if p in cells and not _text_px(kind, p[0] - cx, p[1] - cy, cells[p])})
 
 
 def match(get, kind: str, cx: int, cy: int, names=None) -> dict:
@@ -289,117 +230,144 @@ def match(get, kind: str, cx: int, cy: int, names=None) -> dict:
         co = coarse_templates(kind) if not names else {i: template(i, kind)[::COARSE_STRIDE] for i in ids}
         ids = sorted(ids, key=lambda i: _coarse_score(co[i], cells, kind, cx, cy)[0], reverse=True)[:SHORTLIST]
     pos = {i: _best_pos(template(i, kind), cells, kind, cx, cy) for i in ids}
-    ranked = sorted(((p[0], i) for i, p in pos.items()), reverse=True)
-    top_s, top_i = ranked[0]
-    top_k = species_key(species_name(top_i))
-    # 第二名 = 「不同物種」裡最高的（同 imageId 已合併；2D 版視為同物種）
-    sec_s, sec_i = next(((sc, i) for sc, i in ranked[1:] if species_key(species_name(i)) != top_k), (0.0, None))
-    ok = top_s >= MIN_SCORE[kind] and top_s - sec_s >= MARGIN
-    tie = None
-    if not ok and sec_i and min(top_s, sec_s) >= MIN_SCORE[kind]:
-        tie = _tiebreak(cells, kind, (top_i, pos[top_i]), (sec_i, pos[sec_i]))
-        if tie['winner'] is not None:
-            ok = True
-            if tie['winner'] == sec_i:
-                top_s, top_i, sec_s, sec_i = sec_s, sec_i, top_s, top_i
+    ranked = sorted(((p[0], i, p) for i, p in pos.items()), key=lambda t: (t[0], t[1]), reverse=True)
+    # 第二名 = 「不同物種」裡最高的（同 imageId 已合併；2D 版視為同物種）；分差不夠 → 第二關投票（imgmatch.classify）
+    c = imgmatch.classify(cells, ranked, lambda i: template(i, kind), MIN_SCORE[kind], MARGIN, group=_group)
+    (top_s, top_i, _), (sec_s, sec_i, _) = c['top'], c['second']
+    ok = c['ok']
     return {'species': species_name(top_i) if ok else None, 'imageId': top_i if ok else None,
             'best_species': species_name(top_i), 'score': round(top_s, 3), 'second': round(sec_s, 3),
-            'second_species': species_name(sec_i) if sec_i else None, 'ok': ok, 'tie': tie,
-            'ranked': [(species_name(i), round(s, 3)) for s, i in ranked[:5]]}
+            'second_species': species_name(sec_i) if sec_i else None, 'ok': ok, 'tie': c['tie'],
+            'ranked': [(species_name(i), round(s, 3)) for s, i, _ in ranked[:5]]}
 
 
 # ---- 任務候選內的相對比較（2026-10-13 卡坦 4 鯊 / 4 雞：同系換色版，全 Monster / --family 會混進長得像的別系）----
 REL_MARGIN = 0.06   # 候選內第一、第二名（不同物種）inlier 分差至少這麼多（離線實測最小 0.089：倉庫卡 克克洛斯 vs 奇寶）
-HIST_LEVELS = 4     # 主色直方圖：每通道量化成 4 級（64 格）
+HIST_LEVELS = imgmatch.HIST_LEVELS   # 主色直方圖：每通道量化成 4 級（64 格）
 HIST_MARGIN = 0.05  # 主色直方圖交集分數，第一、第二名至少差這麼多（離線實測最小 0.082）
 
 
-def _q(c) -> tuple:
-    return tuple(min(HIST_LEVELS - 1, v * HIST_LEVELS // 256) for v in c)
+def _group(iid: str) -> str:
+    """imageId → 物種比較鍵（同物種的 2D 版算同一隻）"""
+    return species_key(species_name(iid))
 
 
 def color_score(cells: dict, kind: str, iid: str, pos) -> float:
-    """頭像主色特徵：樣板放在最佳位置 pos，比「樣板不透明點的顏色分布」與「畫面同位置的顏色分布」（量化直方圖交集，0～1）。
+    """頭像主色特徵（imgmatch.color_score）：樣板放在最佳位置 pos，比「樣板不透明點的顏色分布」與「畫面同位置的顏色分布」（量化直方圖交集，0～1）。
     對換色版（鯊魚系 4 隻、火雞系 4 隻：同輪廓不同配色）比逐點 inlier 更分得開（鯊魚實測分差 0.27～0.68）"""
-    from collections import Counter
-    _, ox, oy = pos
-    ht, hc = Counter(), Counter()
-    for dx, dy, r, g, b in template(iid, kind):
-        c = cells.get((ox + dx, oy + dy))
-        if c is None:
-            continue
-        ht[_q((r, g, b))] += 1
-        hc[_q(c)] += 1
-    n = sum(ht.values())
-    return sum(min(ht[k], hc[k]) for k in ht) / n if n else 0.0
+    return imgmatch.color_score(cells, template(iid, kind), pos, HIST_LEVELS)
 
 
 def rank_among(get, kind: str, cx: int, cy: int, names) -> dict:
-    """只在 names（這次任務的候選物種，例：pet_catch --assign 的物種）之間做相對比較，不擴到同系 / 全部 Monster。
+    """只在 names（這次任務的候選物種，例：pet_catch --assign 的物種）之間做相對比較，不擴到同系 / 全部 Monster（imgmatch.rank_among）。
     兩個特徵都要同意才 ok：① 逐點 inlier（match 同一套）第一名 ≥ MIN_SCORE[kind] 且與第二名（不同物種）差 ≥ REL_MARGIN；
-    ② 主色直方圖（color_score）第一名是同一隻、且與第二名差 ≥ HIST_MARGIN。任一不成立 → ok=False、species=None（不猜）。
+    ② 主色直方圖（color_score）第一名是同一隻、且與第二名差 ≥ HIST_MARGIN。兩特徵方向一致、只是分差不夠
+    （倉庫卡 奇寶 / 克克洛斯：冠毛被成長字串蓋住，inlier 差 0.02、主色差 0.03）→ 第三關投票（贏家要是同一隻；2026-10-14 卡坦 21 張全判對、0 誤判）。
+    任一不成立 → ok=False、species=None（不猜）。
     → {'species', 'imageId', 'best_species', 'score', 'second', 'second_species', 'hist', 'hist_second', 'ok', 'ranked'}"""
-    cells = _cells(get, kind, cx, cy)
-    ids = ids_for(names)
-    sc, pos_of = {}, {}
-    for i in ids:
-        pos = _best_pos(template(i, kind), cells, kind, cx, cy)
-        sc[i] = (pos[0], color_score(cells, kind, i, pos))
-        pos_of[i] = pos
-    ranked = sorted(((v[0], i) for i, v in sc.items()), reverse=True)
-    top_s, top_i = ranked[0]
-    top_k = species_key(species_name(top_i))
-    sec_s, sec_i = next(((s_, i) for s_, i in ranked[1:] if species_key(species_name(i)) != top_k), (0.0, None))
-    hr = sorted(((v[1], i) for i, v in sc.items()), reverse=True)
-    h_top_i = hr[0][1]
-    h_sec = next((h for h, i in hr[1:] if species_key(species_name(i)) != species_key(species_name(h_top_i))), 0.0)
-    agree = top_s >= MIN_SCORE[kind] and species_key(species_name(h_top_i)) == top_k
-    ok = agree and top_s - sec_s >= REL_MARGIN and sc[top_i][1] - h_sec >= HIST_MARGIN
-    tb = None
-    if agree and not ok and sec_i:
-        # 兩個特徵方向一致、只是分差不夠（倉庫卡 奇寶 / 克克洛斯：冠毛被成長字串蓋住，inlier 差 0.02、主色差 0.03）→
-        # 第三關：只看兩樣板明顯不同的點投票（_tiebreak，同 match 的第二關），贏家要是同一隻且票數 ≥ TIE_RATIO（2026-10-14 卡坦 21 張全判對、0 誤判）
-        tb = _tiebreak(cells, kind, (top_i, pos_of[top_i]), (sec_i, pos_of[sec_i]))
-        ok = tb['winner'] == top_i
-    return {'species': species_name(top_i) if ok else None, 'imageId': top_i if ok else None, 'tiebreak': tb,
+    return _among_ids(_cells(get, kind, cx, cy), kind, cx, cy, ids_for(names))
+
+
+def _among_ids(cells: dict, kind: str, cx: int, cy: int, ids, memo: dict | None = None) -> dict:
+    ex, ey = _ex(kind, cx, cy)
+    r = imgmatch.rank_among(cells, ids, lambda i: template(i, kind), ex, ey, KINDS[kind]['search'], MIN_SCORE[kind],
+                            REL_MARGIN, HIST_MARGIN, group=_group, tol=TOL, coarse_min_n=MIN_N, memo=memo)
+    (top_s, top_i), (sec_s, sec_i) = r['top'], r['second']
+    ok, sc = r['ok'], r['sc']
+    return {'species': species_name(top_i) if ok else None, 'imageId': top_i if ok else None, 'tiebreak': r['tie'],
             'best_species': species_name(top_i), 'score': round(top_s, 3), 'second': round(sec_s, 3),
             'second_species': species_name(sec_i) if sec_i else None,
-            'hist': round(sc[top_i][1], 3), 'hist_second': round(h_sec, 3), 'hist_best': species_name(h_top_i), 'ok': ok,
-            'ranked': [(species_name(i), round(s_, 3), round(sc[i][1], 3)) for s_, i in ranked[:5]]}
+            'hist': round(sc[top_i][1], 3), 'hist_second': round(r['hist_second'], 3), 'hist_best': species_name(r['hist_best']),
+            'ok': ok, 'ranked': [(species_name(i), round(s_, 3), round(sc[i][1], 3)) for s_, i in r['ranked'][:5]]}
+
+
+# ---- 候選限定主判定 judge（2026-10-14：pet.py 縮圖升為主要辨識）----
+# 遮擋偵測：格子外圍本來是面板米色底的點（寵物格左右外側 dx ±50、倉庫卡左右框 dx ±46，各 dy −40～40 每 4 點，共 42 點），
+# 被浮動「獲得 EXP」橫幅 / 半透明遮罩蓋住會壓暗成灰棕（imgmatch.dimmed_beige）。離線（262 張寵物面板截圖、非空格）：
+# 正常寵物格 0～1 點、正常倉庫卡 0～10 點；play agent 2026-10-14 thumb-DKBO2 / DKBO3 被橫幅蓋住的 4 張卡 16～29 點（其中 3 張限定候選判不出）。
+OCC_PTS = {'slot': [(dx, dy) for dx in (-50, 50) for dy in range(-40, 41, 4)],
+           'card': [(dx, dy) for dx in (-46, 46) for dy in range(-40, 41, 4)]}
+OCC_MIN = {'slot': 12, 'card': 14}     # 寵物格沒有被蓋住的實例（門檻照倉庫卡比例推，待實機補樣本）
+JUDGE_SHORT = 4                        # 候選多於這個數時先粗比對留這麼多個（+ 一定要比的 keep）再做 rank_among
+JUDGE_QUICK = 2                        # quick 模式：keep 之外只留同系別粗比對前 2 個
+_FAMILY = {}
+
+
+def occlusion(get, kind: str, cx: int, cy: int) -> int:
+    """格子外圍被壓暗的點數（≥ OCC_MIN[kind] = 被橫幅 / 遮罩蓋住；imgmatch.occlusion + dimmed_beige）"""
+    if isinstance(get, dict):
+        d = get
+        get = lambda x, y: d.get((x, y))           # noqa: E731
+    return imgmatch.occlusion(get, cx, cy, OCC_PTS[kind], imgmatch.dimmed_beige)
+
+
+def family_of(name: str) -> list:
+    """family([name]) 的快取版（讀 Monster.jsonl 一次 / 名字）"""
+    if name not in _FAMILY:
+        _FAMILY[name] = family([name])
+    return _FAMILY[name]
+
+
+def _shortlist(cells, kind, cx, cy, ids, keep_ids, n=JUDGE_SHORT) -> list:
+    if len(ids) <= n:
+        return list(ids)
+    co = {i: template(i, kind)[::COARSE_STRIDE] for i in ids}
+    pre = sorted(ids, key=lambda i: _coarse_score(co[i], cells, kind, cx, cy)[0], reverse=True)
+    out = pre[:n]
+    return out + [i for i in keep_ids if i not in out]
+
+
+def judge(get, kind: str, cx: int, cy: int, names, keep=(), family_stage: bool = True, quick: bool = False) -> dict:
+    """候選限定的主判定（pet.py 縮圖為主用）：
+      1. 遮擋偵測：被浮字橫幅 / 遮罩蓋住 → occluded=True、ok=False（不硬認；呼叫端等它消失重讀）。
+      2. 候選 names（沒有頭像的名字略過）粗篩留 JUDGE_SHORT 個（keep = 文字說的物種，一定留著比）→ rank_among（inlier + 主色 + 投票）。
+      3. family_stage：第一名過門檻 → 加第一名的同系別（換色版）再比一次，以第二輪為準
+         （候選裡只有兄弟時防兄弟頂替；例：克克洛斯 對 [奇寶] 單獨比 0.76；文字說奇寶時也一樣要比，否則兄弟會被「確認」）。
+      keep_scores = {keep 物種: 它自己的最佳 inlier 分數}：呼叫端用來判斷「文字說的物種縮圖根本不像」（見 pet.combine_ident 的 KEEP_FLOOR）。
+    quick=True 且有 keep（大量唯讀清點，例：depot-list 卡片字已讀出名字）：候選只用 keep + 同系別前 JUDGE_QUICK 個（不比其他已知物種），
+      約快 2 倍；文字整個讀錯成別系物種時只剩 KEEP_FLOOR（縮圖不像）擋得到，所以存取前的確認不要用 quick。
+    開集（全部 Monster）不在這裡：只當參考，不准據以存取（見 match(names=None)）。
+    → rank_among 的欄位 + {'occ', 'occluded', 'stage': 'cand'|'family'|'occluded'|'none'}"""
+    occ = occlusion(get, kind, cx, cy)
+    empty = {'species': None, 'imageId': None, 'best_species': None, 'score': 0.0, 'second': 0.0, 'second_species': None,
+             'hist': 0.0, 'hist_second': 0.0, 'hist_best': None, 'ok': False, 'ranked': [], 'tiebreak': None, 'occ': occ}
+    if occ >= OCC_MIN[kind]:
+        return dict(empty, occluded=True, stage='occluded')
+    have = {n for ns in index().values() for n in ns}
+    if quick and any(n in have for n in keep):
+        names = []
+    names = [n for n in dict.fromkeys(list(names) + list(keep)) if n in have]
+    if not names:
+        return dict(empty, occluded=False, stage='none')
+    keep = [n for n in keep if n in have]
+    cells = _cells(get, kind, cx, cy)
+    ids, keep_ids = ids_for(names), ids_for(keep) if keep else []
+    memo = {}
+    short = _shortlist(cells, kind, cx, cy, ids, keep_ids)
+    r, stage = _among_ids(cells, kind, cx, cy, short, memo), 'cand'
+    if family_stage and r['score'] >= MIN_SCORE[kind]:
+        fam = [n for n in family_of(r['best_species']) if n not in names]
+        if fam:
+            top = ids_for([r['best_species']])
+            more = [i for i in ids_for(fam) if i not in short]
+            short2 = _shortlist(cells, kind, cx, cy, short + more, list(dict.fromkeys(keep_ids + top)), JUDGE_QUICK if quick else JUDGE_SHORT + 2)
+            r, stage = _among_ids(cells, kind, cx, cy, short2, memo), 'family'
+    ks = {n: round(max(memo[i][0][0] for i in ids_for([n]) if i in memo), 3) for n in keep
+          if any(i in memo for i in ids_for([n]))}
+    return dict(r, occ=occ, occluded=False, stage=stage, keep_scores=ks)
 
 
 def _tiebreak(cells, kind, a, b) -> dict:
-    """前兩名（不同物種）分數太近時的第二關：兩個樣板各放在自己的最佳位置，每個畫面點「明顯比較像誰」就投給誰
-    （至少像其中一個 TIE_GOOD、兩邊差距 ≥ TIE_GAP 才算票）。例：倉庫卡上 克克洛斯（黃冠）/ 奇寶（紅冠）只差在被名字字串蓋住一半的冠毛。
+    """前兩名（不同物種）分數太近時的第二關（imgmatch.tiebreak）：a / b = (imageId, (s, ox, oy))，兩個樣板各放在自己的最佳位置，
+    每個畫面點「明顯比較像誰」就投給誰。例：倉庫卡上 克克洛斯（黃冠）/ 奇寶（紅冠）只差在被名字字串蓋住一半的冠毛。
     → {'winner': imageId 或 None, 'votes': [a 票, b 票]}"""
-    def placed(iid, p):
-        _, ox, oy = p
-        return {(ox + dx, oy + dy): (r, g, bb) for dx, dy, r, g, bb in template(iid, kind)}
-    ta, tb = placed(*a), placed(*b)
-    va = vb = 0
-    for q, c in cells.items():
-        ca, cb = ta.get(q), tb.get(q)
-        if ca is None or cb is None:
-            continue
-        da, db = sum(abs(x - y) for x, y in zip(c, ca)), sum(abs(x - y) for x, y in zip(c, cb))
-        if min(da, db) > TIE_GOOD or abs(da - db) < TIE_GAP:
-            continue
-        if da < db:
-            va += 1
-        else:
-            vb += 1
-    n = va + vb
-    win = None
-    if n >= TIE_MIN_PTS:
-        if va / n >= TIE_RATIO:
-            win = a[0]
-        elif vb / n >= TIE_RATIO:
-            win = b[0]
-    return {'winner': win, 'votes': [va, vb]}
+    t = imgmatch.tiebreak(cells, imgmatch.placed(template(a[0], kind), a[1][1], a[1][2]),
+                          imgmatch.placed(template(b[0], kind), b[1][1], b[1][2]), TIE_GOOD, TIE_GAP, TIE_MIN_PTS, TIE_RATIO)
+    return {'winner': (a[0], b[0])[t['winner']] if t['winner'] is not None else None, 'votes': t['votes']}
 
 
 def rows_getter(rows, bpp: int):
-    return lambda x, y: tuple(rows[y][x * bpp:x * bpp + 3])
+    return imgmatch.rows_getter(rows, bpp)
 
 
 def match_rows(rows, bpp: int, kind: str, cx: int, cy: int, names=None) -> dict:
@@ -418,9 +386,9 @@ def cells_of(kind: str) -> list:
 
 
 def read_cell(kind: str, cx: int, cy: int):
-    """現場讀一格（唯讀，經 uikit.px 一次讀完；寵物格 4537 點，常駐 server 約 0.2 s，2026-10-12 實機）→ dict 可直接餵 match；讀不到 None"""
+    """現場讀一格（唯讀，經 uikit.px 一次讀完；寵物格 4537 點 + 遮擋取點 42 點，常駐 server 約 0.2 s，2026-10-12 實機）→ dict 可直接餵 match / judge；讀不到 None"""
     import uikit
-    pts = cell_points(kind, cx, cy)
+    pts = cell_points(kind, cx, cy) + [(cx + dx, cy + dy) for dx, dy in OCC_PTS[kind]]
     cols = uikit.px(pts)
     return dict(zip(pts, cols)) if cols else None
 

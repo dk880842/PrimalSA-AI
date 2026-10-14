@@ -26,7 +26,7 @@
     learn-species 對讀不出的格也可用（只收第 2～5 格、等待中、非騎寵，--confirm-growth 要跟現場 OCR 行不矛盾、縮圖不矛盾）
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、
     --no-glyph（不用字形樣板 petglyph：名字框成長字串 / 倉庫卡字與等級改回全部 OCR + 逐張選卡；2026-10-14）、--timing、
-    --no-icache（不用身分跨程序快取：成長字串以名字框點陣完全相同為鍵、縮圖結果以整格像素 + 候選為鍵；只在 list / levels / set-state-many / rest-all 用，
+    --no-icache（不用身分跨程序快取：成長字串以名字框點陣完全相同為鍵、縮圖結果以整格像素 + 候選為鍵；只在 list / levels / set-state-many / rest-all / depot-list 用，
     存倉 / 取出 / 丟寵 / learn-species 一律現場 OCR；tools/.cache/pet-tpl/ident-cache-<版面>.json，7 天過期，2026-10-13 review 1013b §1.1）、
     --candidates 物種,物種（任務候選：沒名字的寵物 / 倉庫卡只在這些之間比縮圖，inlier + 主色都同意才算；有把握且登錄檔不矛盾 → 當 species，2026-10-13 卡坦 4 鯊 / 4 雞）
   最後一行一律印 JSON：{"ok", "rc", ...}；給其他腳本 import：pet.list_roles / set_state / rest_all 回退出碼，結果 dict 在 pet.LAST。
@@ -41,8 +41,12 @@
   - 狀態：下方三顆鈕（出戰 / 騎乘 / 休息）亮的（棕底）就是目前狀態。
   - 騎寵（uikit.MOUNTS = 瑪斯貝卡 / 布拉奇多斯）：名字「像」騎寵（is_mount_like，鬆）或狀態 = 騎乘 → set-state / rest-all 不動（73），要動需 --allow-mount。
 
-縮圖認物種（2026-10-12 接線 petimg_match）：read_slot 名字樣板 / OCR / 登錄檔都認不出時，比寵物格縮圖與知識庫頭像 → img_species / img_score /
-  species_src='img'（只當顯示與「更嚴」騎寵判斷，不寫進 species，store / set-state 身分不放寬）；take 找卡 / 取前 / 取後驗名在名字框認不出時可用（img_target）。--no-img 關。
+縮圖認物種（petimg_match；2026-10-14 起是主要辨識）：寵物格 / 倉庫卡縮圖（候選限定：--candidates / 任務候選，或已知清單 + 文字說的物種 + 騎寵，
+  再加第一名的同系別；inlier + 主色 + 投票）為主，名字樣板 / 成長字串字形 + 登錄檔是第二道確認：
+  兩者一致 → species_src 'img+name' / 'img+reg'；沒名字的字串沒登錄、縮圖有把握 → 升為 species（'img'，store / take 可用，守門規則照舊）；
+  縮圖有把握是別種、或文字說的物種縮圖分數 < KEEP_FLOOR（縮圖不像）→ ident_conflict（身分 None：store / set-state 72 / 73、take 不取 72、取出後 76）；
+  縮圖被浮字橫幅蓋住（遮擋偵測）→ 每 0.4 s 重拍最多 5 次，仍蓋住 → 這次不用縮圖（照文字，不硬認）。開集（全部 Monster）只給 list 顯示 img_guess，
+  不准據以存取。list / depot-list 每個角色 / 倉庫頁只截一張圖（uikit.shot_getter）共用；depot-list 卡片字已讀出名字的卡用 quick（只跟同系別比）。--no-img 關（回純文字）。
 沒名字的新寵物（#87 / #92，2026-10-11；離線驗證，實機待驗）：剛抓到的寵物名字框顯示「成長字串」a/b/c/d（實測 49/9/8/2、49/9/7/2、48/9/7/1、47/10/7/1、45/10/8/1），
   名字樣板與 Monster 表 OCR 都認不出。list 會給 name=None、unnamed='49/9/8/2'、raw_name='?(49/9/8/2)'（OCR ≥ 2 行完整相同才採用，否則不當字串）。
   物種（species）靠「縮圖簽名 + 成長字串登錄檔」多重確認（tools/.cache/pet-tpl/species.json，學出來的）：學法 = learn-species（呼叫端要有可信標籤，
@@ -515,77 +519,144 @@ def species_reg(ctx: dict) -> dict:
     return ctx['reg']
 
 
-def ident_species(i: int, growth: str | None, ctx: dict) -> str | None:
-    """沒名字的寵物（在寵物欄第 i 格，0 起算）→ 物種：縮圖簽名 + 成長字串登錄檔多重確認；沒登錄 = None（不猜）。
-    有任務候選（ctx['img_only']，--candidates / pet_catch register）時改成：候選內相對比較（petimg_match.rank_among，inlier + 主色）
-    有把握 → 登錄檔沒記這個字串、或記的是同一隻 → 採用；登錄檔記的是別隻 → 矛盾 None。沒把握 → 退回舊規則。
-    （2026-10-13 卡坦 4 鯊 / 4 雞是換色版：16 點縮圖簽名分不開 → 舊規則常 None，只好人工比腹部顏色）
-    2026-10-14 登錄檔 v2（一個字串可對多物種，見 petmatch.growth_species）：字串只當候選過濾 ——
-    字串對到 ≥ 2 種（撞號）→ 只在這幾種之間再比一次縮圖（rank_among：inlier + 主色〔毛色 / 腹部色〕都要過分差），有把握才採用，否則 None（不准存取）；
-    縮圖認的物種不在字串的候選裡 → 矛盾 None"""
+def unnamed_species(i: int, growth: str | None, ctx: dict, im: dict | None = None) -> tuple:
+    """沒名字的寵物（寵物欄第 i 格，0 起算；名字框 = 成長字串 growth）→ (物種或 None, 來源, 衝突說明或 None)。2026-10-14 起縮圖為主：
+      縮圖（候選限定 img_ident，文字候選 = 字串的登錄物種）有把握 → combine_ident：字串沒登錄 → 縮圖（'img'）；登錄物種含它 → 'img+reg'；
+      登錄的是別種 → 衝突（None，不准存取）。
+      縮圖沒把握 / 被浮字蓋住 / 關閉 → 舊規則（petmatch.identify_species：16 點縮圖簽名命中登錄檔、字串已登錄要同物種；撞號 → None）。
+    im = 呼叫端已讀好的縮圖結果（read_slot 先讀）；None → 現場讀"""
     reg = species_reg(ctx)
     cands = petmatch.growth_species(reg, growth)
-    if len(cands) >= 2:
-        im = img_ident('slot', i, dict(ctx, img_only=cands))    # 只在撞號的這幾種之間比（比 4 種一起比分差大）
-        if im:
-            ctx.setdefault('img_cache', {})[i] = im
-        sp = im and im.get('img_species')
-        return sp if sp in cands else None
-    if ctx.get('img_only'):
-        im = img_ident('slot', i, ctx)
-        if im:
-            ctx.setdefault('img_cache', {})[i] = im
-            sp = im.get('img_species')
-            if sp:
-                return sp if not cands or sp in cands else None
+    if len(cands) >= 2:                                        # 撞號：只在撞號的這幾種之間比（比整個候選一起比分差大）
+        im = img_ident('slot', i, dict(ctx, img_only=cands), cands)
+    elif im is None:
+        im = img_ident('slot', i, ctx, cands)
+    if im:
+        ctx.setdefault('img_cache', {})[i] = im
+    sp, src, conflict = combine_ident(cands, im)
+    if sp or conflict:
+        return sp, src.replace('text', 'reg') if src else src, conflict
+    if len(cands) >= 2:                                        # 撞號又沒縮圖把握 → 不猜
+        return None, None, None
     cols = uikit.px(thumb_pts(i))
-    return petmatch.identify_species(cols, growth, reg)
+    sp = petmatch.identify_species(cols, growth, reg)
+    return sp, ('reg' if sp else None), None
 
 
-# ---- 縮圖 ↔ 知識庫頭像（petimg_match，2026-10-12 接線）：名字 / 成長字串登錄檔都認不出時的物種備援 ----
-# 結果只放 img_species / img_score / species_src='img'，**不寫進 species**：species 是 store / set-state / take / rebirth_pets 的身分依據，
-# img 只當顯示與「更嚴」的騎寵判斷（img 認成騎寵 → mountlike），不放寬任何不可逆動作的驗名。
-IMG_ON = True                                  # --no-img 關；fake_pet.install 也關（假面板沒畫頭像）
-IMG_ONLY: list | None = None                   # --candidates：任務候選物種（縮圖只在這些之間相對比較；load_ctx 預設帶入）
-IMG_EXTRA = ['朵拉比斯', '迪基格斯', '金布伊']
-ICACHE_ON = True                               # --no-icache 關（身分跨程序快取，見 rows_key 上方說明）    # 一定放進候選的常用物種（另加騎寵、名字樣板、物種登錄檔裡的）
+def ident_species(i: int, growth: str | None, ctx: dict) -> str | None:
+    """沒名字的寵物 → 物種或 None（unnamed_species 的物種；取出後驗新寵物用）"""
+    return unnamed_species(i, growth, ctx)[0]
+
+
+def _skey(name: str | None) -> str | None:
+    """物種比較鍵（「2D貝魯卡」= 貝魯卡；同 petimg_match.species_key，不為此 import）"""
+    return name[2:] if name and name.startswith('2D') else name
+
+
+KEEP_FLOOR = {'slot': 0.65, 'card': 0.45}   # 文字說的物種，自己的縮圖分數低於這個 = 「縮圖根本不像它」→ 衝突
+# 離線（img_ref 280 格 + play agent 72 格，沒被蓋住的）：對的物種寵物格最低 0.906、倉庫卡最低 0.622；被浮字蓋住的另有遮擋偵測先擋掉
+
+
+def combine_ident(text_sp, im) -> tuple:
+    """純函式：文字（名字 = 1 種；成長字串登錄 = 0～多種）+ 縮圖結果 → (物種或 None, 來源, 衝突說明或 None)。
+    縮圖有把握：文字沒有 → (縮圖, 'img')；文字含它 → (那個名字, 'img+text')；文字不含 → (None, 'conflict', 說明)。
+    縮圖沒把握：文字說的物種（有頭像的）每一個自己的分數都 < KEEP_FLOOR（縮圖根本不像）→ 衝突；否則 (None, None, None)，呼叫端照舊用文字。
+    沒讀 / 被蓋住（im None 或 img_occluded）→ (None, None, None)"""
+    isp = (im or {}).get('img_species')
+    if not isp:
+        ks = (im or {}).get('img_keep') or {}
+        kind = (im or {}).get('img_kind')
+        text_sp = [t for t in dict.fromkeys(text_sp or []) if t]
+        if text_sp and kind in KEEP_FLOOR and not im.get('img_occluded') and all(t in ks for t in text_sp) \
+                and all(ks[t] < KEEP_FLOOR[kind] for t in text_sp):
+            return None, 'conflict', f'縮圖不像 {"/".join(text_sp)}（分數 {max(ks[t] for t in text_sp)} < {KEEP_FLOOR[kind]}，最像 {im.get("img_best")} {im.get("img_score")}）'
+        return None, None, None
+    text_sp = [t for t in dict.fromkeys(text_sp or []) if t]
+    if not text_sp:
+        return isp, 'img', None
+    hit = next((t for t in text_sp if _skey(t) == _skey(isp)), None)
+    if hit:
+        return hit, 'img+text', None
+    return None, 'conflict', f'文字是 {"/".join(text_sp)}、縮圖是 {isp}（{im.get("img_score")}）'
+
+
+# ---- 縮圖 ↔ 知識庫頭像（petimg_match）：2026-10-14 起是主要辨識（使用者：「先把縮圖的功能寫進腳本」）----
+# 候選限定：呼叫端 --candidates / 任務定義（ctx['img_only']），否則「已知清單」（騎寵 + IMG_EXTRA + 名字樣板學過的 + 物種登錄檔裡的），
+# 再加文字（名字 / 成長字串登錄）說的物種與騎寵；文字沒獨立確認時再加第一名的同系別（petimg_match.judge，粗篩 4 個 → rank_among：inlier + 主色 + 投票）。
+# 名字樣板 / 成長字串字形是第二道確認：兩者都有且不同 → 衝突（ident_conflict）→ 身分 None → store / set-state / take 72（不確定）。
+# 被浮字橫幅蓋住（judge 的遮擋偵測）→ 每 IMG_OCC_WAIT_S 重拍、最多 IMG_OCC_POLLS 次；仍蓋住 → 縮圖這次不算（不硬認），身分只剩文字（= 舊行為）。
+# 開集（全部 Monster）只在 list（ctx['img_open']）、文字與候選縮圖都認不出時算一次 → img_guess（顯示參考），**不進 img_species / species、不准據以存取**。
+# 存取的安全規則不變：騎寵 / 第 1 格 / 騎乘 / 出戰（guard_store）、按鈕前現場驗證、取出後再驗。
+IMG_ON = True                                  # --no-img 關（回到純文字辨識）；fake_pet.install 也關（假面板沒畫頭像）
+IMG_ONLY: list | None = None                   # --candidates：任務候選物種（load_ctx 預設帶入）
+IMG_EXTRA = ['朵拉比斯', '迪基格斯', '金布伊']   # 一定放進已知清單的常用物種（另加騎寵、名字樣板、物種登錄檔裡的）
+ICACHE_ON = True                               # --no-icache 關（身分跨程序快取，見 rows_key 上方說明）
+IMG_OCC_POLLS, IMG_OCC_WAIT_S = 5, 0.4         # 縮圖被浮字蓋住：重拍間隔 / 次數（EXP 橫幅每 3～6 秒蓋 1.2～1.6 秒）
+IMG_FAMILY_TASK = True                         # 任務候選（--candidates）也做同系別第二輪（離線卡坦截圖驗過不退步才開）
+IMG_KEY_VER = 'v2'                             # 身分快取 img 鍵的版本（2026-10-14 judge 結果格式）
 
 
 def img_candidates(ctx: dict) -> list:
-    """第一輪候選：騎寵 + IMG_EXTRA + 名字樣板學過的 + 物種登錄檔裡的（只留有頭像的）；ctx 快取"""
+    """已知清單：騎寵 + IMG_EXTRA + 名字樣板學過的 + 物種登錄檔裡的（只留有頭像的）；ctx 快取"""
     if 'img_names' not in ctx:
         import petimg_match
         reg = species_reg(ctx)
         names = list(uikit.MOUNTS) + IMG_EXTRA + list((ctx.get('tpl') or {}).get('name') or {}) \
             + list(reg.get('thumb') or {}) + list((reg.get('growth') or {}).values())
+        names += [sp for g in (reg.get('growth_src') or {}) for sp in petmatch.growth_species(reg, g)]
         have = {n for ns in petimg_match.index().values() for n in ns}
         ctx['img_names'] = [n for n in dict.fromkeys(names) if n in have]
     return ctx['img_names']
 
 
-def img_match(cells, kind: str, cx: int, cy: int, ctx: dict) -> dict:
-    """已讀好的一格像素 → {'img_species'（ok 才有值，否則 None）, 'img_score', 'img_best', 'img_second', 'img_stage'}。
-    第 1 輪已知物種；過門檻 → 第 2 輪加上第一名的同系別（換色版）再比一次，以第 2 輪為準（避免只有兄弟在候選時誤認）；
-    第 1 輪連門檻都沒過（真物種不在已知清單）→ 放寬到全部 Monster（每格多約 1.3 s）。都不 ok → None，不猜"""
+def img_names(ctx: dict, text=()) -> list:
+    """這一格的縮圖候選 = 任務候選（img_only）或已知清單 + 文字說的物種 + 騎寵"""
+    base = list(ctx.get('img_only') or img_candidates(ctx))
+    return list(dict.fromkeys(base + [t for t in text if t] + list(uikit.MOUNTS)))
+
+
+def img_match(get, kind: str, cx: int, cy: int, ctx: dict, text=()) -> dict:
+    """已讀好的畫面（get(x,y) 或 {(x,y): rgb}）→ {'img_species'（有把握才有值）, 'img_score', 'img_best', 'img_second', 'img_hist',
+    'img_stage'（cand / family / occluded / none）, 'img_occluded', 'img_occ'}（petimg_match.judge）"""
     import petimg_match as M
-    if ctx.get('img_only'):                                  # 任務候選：只在候選之間相對比較（+ 主色），不擴到同系 / 全部 Monster
-        r = M.rank_among(cells, kind, cx, cy, ctx['img_only'])
-        return {'img_species': r['species'] if r['ok'] else None, 'img_score': r['score'], 'img_best': r['best_species'],
-                'img_second': [r['second_species'], r['second']], 'img_hist': [r['hist'], r['hist_second']], 'img_stage': 'task'}
-    known = img_candidates(ctx)
-    r, stage = M.match(cells, kind, cx, cy, known), 'known'
-    if r['score'] >= M.MIN_SCORE[kind]:
-        fam = list(dict.fromkeys(known + M.family([r['best_species']])))
-        if len(fam) > len(known):
-            r, stage = M.match(cells, kind, cx, cy, fam), 'family'
-    else:
-        r, stage = M.match(cells, kind, cx, cy, None), 'all'
+    text = [t for t in dict.fromkeys(text) if t]
+    fam = IMG_FAMILY_TASK or not ctx.get('img_only')
+    r = M.judge(get, kind, cx, cy, img_names(ctx, text), keep=text, family_stage=fam, quick=bool(ctx.get('img_quick')))
     return {'img_species': r['species'] if r['ok'] else None, 'img_score': r['score'], 'img_best': r['best_species'],
-            'img_second': [r['second_species'], r['second']], 'img_stage': stage}
+            'img_second': [r['second_species'], r['second']], 'img_hist': [r['hist'], r['hist_second']],
+            'img_stage': r['stage'], 'img_occluded': r['occluded'], 'img_occ': r['occ'], 'img_keep': r.get('keep_scores') or {},
+            'img_kind': kind}
 
 
-def img_ident(kind: str, idx: int, ctx: dict) -> dict | None:
-    """現場讀寵物欄第 idx 格（kind='slot'）/ 倉庫第 idx 張卡（'card'）縮圖認物種（唯讀；一次 uikit.px 約 7000 點）。
+def img_frame(ctx: dict, fresh: bool = False):
+    """縮圖用的畫面 getter：批次讀（list_role / read_depot_cards 開頭放 ctx['img_frame']）時共用一張截圖；其他時候每次現拍。
+    fresh=True（被浮字蓋住要重拍）→ 現拍並換掉批次那張。截不到 → None（呼叫端退回 uikit.px 逐點讀）"""
+    if not fresh and ctx.get('img_frame') is not None:
+        return ctx['img_frame']
+    g = uikit.shot_getter('petimg')
+    if 'img_frame' in ctx:
+        ctx['img_frame'] = g
+    return g
+
+
+def _img_key(get, kind: str, cx: int, cy: int, names, text) -> str:
+    """身分快取鍵：整格像素（含遮擋取點）+ 候選 + 文字 + 版本完全相同 → 判定結果必然相同"""
+    import petimg_match as M
+    h = hashlib.sha1(f'{IMG_KEY_VER}|{kind}|{cx},{cy}|{",".join(names)}|{",".join(text)}|'.encode())
+    if isinstance(get, dict):                                 # uikit.px 讀的整格（read_cell）
+        items = sorted(get.items())
+    else:
+        pts = M.cell_points(kind, cx, cy) + [(cx + dx, cy + dy) for dx, dy in M.OCC_PTS[kind]]
+        items = [(q, get(*q)) for q in pts]
+    for q, c in items:
+        h.update(bytes(int(v) & 255 for v in (c or (0, 0, 0))[:3]))
+    return h.hexdigest()[:24]
+
+
+def img_ident(kind: str, idx: int, ctx: dict, text=()) -> dict | None:
+    """現場縮圖認物種（唯讀）：寵物欄第 idx 格（kind='slot'）/ 倉庫第 idx 張卡（'card'），0 起算。text = 文字說的物種（名字 / 字串登錄），
+    一定放進候選且有它就不做同系別第二輪。畫面 = img_frame（批次共用一張截圖；截不到退回 uikit.px 讀整格）。
+    被浮字蓋住 → 每 IMG_OCC_WAIT_S 重拍，最多 IMG_OCC_POLLS 次，仍蓋住 → img_occluded=True、img_species None（不硬認）。
     IMG_ON 關、沒有頭像匯出（tools/.cache/pet-images）、讀不到像素 → None"""
     if not IMG_ON or ctx.get('no_img'):
         return None
@@ -599,38 +670,70 @@ def img_ident(kind: str, idx: int, ctx: dict) -> dict | None:
         return None
     _, cx, cy = M.cells_of(kind)[idx]
     t = time.time()
-    cells = M.read_cell(kind, cx, cy)
-    if cells is None:
-        return None
-    ikey = None
-    if icache(ctx) is not None:                              # 跨程序快取：整格像素 + 候選名單完全相同 → 比對結果必然相同
-        names = ctx.get('img_only') or img_candidates(ctx)
-        h = hashlib.sha1(f'{kind}|{cx},{cy}|{",".join(names)}|'.encode())
-        for pt in sorted(cells):
-            h.update(bytes(int(v) & 255 for v in cells[pt]))
-        ikey = h.hexdigest()[:24]
-        hit = ctx['icache']['img'].get(ikey)
-        if hit:
-            ctx['icache_hits'] = ctx.get('icache_hits', 0) + 1
-            r = dict(hit[0], img_ms=int((time.time() - t) * 1000), img_cached=True)
-            uikit.mark(f'img {kind} {idx + 1} (cache)')
-            return r
-    try:
-        r = img_match(cells, kind, cx, cy, ctx)
-    except KeyError as e:                                   # --candidates 給了知識庫頭像沒有的名字
-        if not ctx.get('img_warned'):
-            log(f'縮圖認物種：{e}')
-            ctx['img_warned'] = True
-        return None
+    text = [x for x in dict.fromkeys(text or ()) if x]
+    r = None
+    for attempt in range(IMG_OCC_POLLS + 1):
+        get = img_frame(ctx, fresh=attempt > 0)
+        if get is None:
+            get = M.read_cell(kind, cx, cy)
+            if get is None:
+                return None
+        ikey = None
+        if icache(ctx) is not None:                              # 跨程序快取：整格像素 + 候選完全相同 → 判定結果必然相同
+            ikey = _img_key(get, kind, cx, cy, img_names(ctx, text) + (['#quick'] if ctx.get('img_quick') else []), text)
+            hit = ctx['icache']['img'].get(ikey)
+            if hit:
+                ctx['icache_hits'] = ctx.get('icache_hits', 0) + 1
+                uikit.mark(f'img {kind} {idx + 1} (cache)')
+                return dict(hit[0], img_ms=int((time.time() - t) * 1000), img_cached=True)
+        try:
+            r = img_match(get, kind, cx, cy, ctx, text)
+        except KeyError as e:                                   # --candidates 給了知識庫頭像沒有的名字
+            if not ctx.get('img_warned'):
+                log(f'縮圖認物種：{e}')
+                ctx['img_warned'] = True
+            return None
+        if not r['img_occluded'] or attempt == IMG_OCC_POLLS:
+            break
+        uikit.mark(f'img-occluded {kind} {idx + 1}')
+        uikit.sleep(IMG_OCC_WAIT_S)                            # 被浮字橫幅蓋住：等它消失重拍（不硬認）
     r['img_ms'] = int((time.time() - t) * 1000)
-    if ikey:
+    if r['img_occluded']:
+        log(f'{"寵物格" if kind == "slot" else "倉庫卡"} {idx + 1} 縮圖一直被浮字蓋住（{r["img_occ"]} 點），這次不用縮圖')
+    elif ikey:
         icache_put(ctx, 'img', ikey, {k: v for k, v in r.items() if k != 'img_ms'})
     uikit.mark(f'img {kind} {idx + 1}')
     return r
 
 
+def img_conflict(kind: str, idx: int, ctx: dict, name: str | None) -> str | None:
+    """存取前的縮圖第二道確認：縮圖（候選限定、含 name）有把握認成別的物種 → 衝突說明；吻合 / 沒把握 / 被蓋住 / 關閉 → None"""
+    if not name:
+        return None
+    im = img_ident(kind, idx, ctx, [name])
+    sp, src, why = combine_ident([name], im)
+    return why
+
+
+def img_open_guess(kind: str, idx: int, ctx: dict) -> dict:
+    """開集參考（全部 Monster，約 1.5 s / 格）：只給 list 顯示 → {'img_guess', 'img_guess_score'}；**不准據以存取**"""
+    try:
+        import petimg_match as M
+        _, cx, cy = M.cells_of(kind)[idx]
+        get = img_frame(ctx) or M.read_cell(kind, cx, cy)
+        if get is None:
+            return {}
+        r = M.match(get, kind, cx, cy, None)
+    except (OSError, ImportError, KeyError):
+        return {}
+    uikit.mark(f'img-open {kind} {idx + 1}')
+    return {'img_guess': r['species'], 'img_guess_score': r['score']} if r['species'] else {}
+
+
 def slot_ident(sl: dict):
-    """格子的有效身分名：有名字用名字；沒名字但物種已確認 → 物種；否則 None"""
+    """格子的有效身分名：有名字用名字；沒名字但物種已確認 → 物種；否則 None。名字 / 縮圖衝突（ident_conflict）→ None（不確定）"""
+    if sl.get('ident_conflict'):
+        return None
     return sl.get('name') or (sl.get('species') if sl.get('unnamed') else None)
 
 
@@ -673,7 +776,7 @@ def unreadable_species(idn: dict, kind: str, idx: int, ctx: dict, cands=()) -> s
     reg = species_reg(ctx)
     if not any(petmatch.growth_species(reg, g) for g in cs):
         return None
-    im = img_ident(kind, idx, ctx)
+    im = img_ident(kind, idx, ctx, [sp for g in cs for sp in petmatch.growth_species(reg, g)])
     return candidate_species(idn['raw'], cs, im and im.get('img_species'), reg)
 
 
@@ -717,7 +820,7 @@ def read_slot(i: int, ctx: dict) -> dict:
         uikit.sleep(SLOT_BANNER_POLL_S)         # 樣板都有卻對不上：多半是 EXP 橫幅 / 浮字蓋住（掛機中常見，每 3～6 秒蓋 1.2～1.6 秒），短間隔輪詢等它消失
         uikit.mark(f'banner-retry {i + 1}')
     d = {'slot': i + 1, 'empty': False, 'name': None, 'via': None, 'state': None, 'level': None}
-    ctx.pop('img_cache', None)                             # 縮圖結果只給「這一格」用（ident_species → 下面的補充顯示）
+    ctx.pop('img_cache', None)                             # 縮圖結果只給「這一格」用
     if rows is None:
         d['err'] = '讀不到像素'
         return d
@@ -730,10 +833,35 @@ def read_slot(i: int, ctx: dict) -> dict:
         d['ocr'] = raw
     if ident.get('glyph'):
         d['glyph'] = True                                # 成長字串由字形樣板讀出（沒 OCR）
-    if ident['growth']:                                  # 沒名字的新寵物：成長字串 = 這隻的身分；物種由縮圖 / 登錄檔確認
+    reg = species_reg(ctx)
+    # 文字說的物種（第二道確認）：名字 → 它；成長字串 → 登錄物種（0～多種）；讀不出但有候選字串 → 候選字串的登錄物種
+    if d['name']:
+        text = [d['name']]
+    elif ident['growth']:
+        text = petmatch.growth_species(reg, ident['growth'])
+    else:
+        text = petmatch.growth_species(reg, ident.get('guess'))
+    im = img_ident('slot', i, ctx, text)                     # 縮圖為主（候選限定；被浮字蓋住會等它消失重拍）
+    if im:
+        d.update(im)
+    if d['name']:                                            # 有名字：縮圖有把握且不同 → 衝突（身分 None，不准存取）
+        sp, src, why = combine_ident(text, im)
+        if why:
+            d['ident_conflict'] = why
+            log(f'第 {i + 1} 格 {why} → 不確定（不准存取）')
+        elif sp:
+            d['species_src'] = 'img+name'
+    elif ident['growth']:                                    # 沒名字的新寵物：成長字串 = 這隻的身分；物種 = 縮圖為主、登錄檔第二道確認
         d['unnamed'] = ident['growth']
         d['raw_name'] = f'?({ident["growth"]})'
-        d['species'] = ident_species(i, ident['growth'], ctx)
+        sp, src, why = unnamed_species(i, ident['growth'], ctx, im)
+        d.update((ctx.get('img_cache') or {}).get(i) or {})     # 撞號時是「只在撞號物種之間」那次的縮圖結果
+        d['species'] = sp
+        if why:
+            d['ident_conflict'] = why
+            log(f'第 {i + 1} 格 ?({ident["growth"]}) {why} → 不確定（不准存取）')
+        if src and src != 'conflict':
+            d['species_src'] = src
     elif not d['name'] and petmatch.ink(name_rows) >= petmatch.MIN_INK['name']:     # 名字框有字但名字 / 成長字串都讀不出（2026-10-14 40/9/6/5）
         d['unreadable'] = True
         if ident.get('guess'):
@@ -743,23 +871,17 @@ def read_slot(i: int, ctx: dict) -> dict:
         d['level'], d['lv_via'] = lv, via
     elif via:
         d['lv_reject'] = via
-    if d.get('species'):
-        d['species_src'] = 'reg'
-    if d.get('species') and (ctx.get('img_cache') or {}).get(i, {}).get('img_species') == d['species']:
-        d.update(ctx['img_cache'][i])
-        d['species_src'] = 'img+reg' if species_reg(ctx).get('growth', {}).get(d.get('unnamed')) else 'img'
-    if not d['name'] and not d.get('species'):              # 名字樣板 / OCR / 物種登錄檔都認不出 → 縮圖比知識庫頭像（只當補充，見 img_ident）
-        im = (ctx.get('img_cache') or {}).get(i) or img_ident('slot', i, ctx)
-        if im:
-            d.update(im)
-            if im['img_species']:
-                d['species_src'] = 'img'
-    gs = guess_species(d, species_reg(ctx))
+    if not d['name'] and not d.get('species') and d.get('img_species') and not d.get('ident_conflict'):
+        d['species_src'] = 'img'                              # 只有縮圖（名字框讀不出、沒成長字串）：顯示用，沒有 unnamed → slot_ident 仍 None
+    gs = guess_species(d, reg)
     if gs:                                                   # 名字框讀不出：候選字串已登錄 + 縮圖同物種 → 當作沒名字的該物種（store / take 身分可用）
         d.update(unnamed=d['guess'], raw_name=f'?({d["guess"]})', species=gs, species_src='img+reg-guess')
+    if ctx.get('img_open') and not d['name'] and not d.get('species') and not d.get('img_species') \
+            and not d.get('img_occluded') and IMG_ON and not ctx.get('no_img'):
+        d.update(img_open_guess('slot', i, ctx))              # 開集參考（只顯示，不准據以存取）
     ocr_texts = ([d['name']] if d['name'] else []) + d.get('ocr', [])
     d['mountlike'] = any(uikit.is_mount_like(t) for t in ocr_texts) or d.get('species') in uikit.MOUNTS \
-        or d.get('img_species') in uikit.MOUNTS                # img 認成騎寵只會更嚴（多擋），不會放行
+        or d.get('img_species') in uikit.MOUNTS or d.get('img_guess') in uikit.MOUNTS   # 縮圖（含開集參考）認成騎寵只會更嚴（多擋），不會放行
     return d
 
 
@@ -771,6 +893,14 @@ def list_role(role: str, ctx: dict) -> tuple:
     f = scan_frames()
     if f is None:
         return uikit_fail(EXIT_PANEL, '讀不到面板像素'), []
+    ctx['img_frame'] = img_frame(ctx, fresh=True) if IMG_ON and not ctx.get('no_img') and not all(f['empty']) else None   # 5 格縮圖共用一張截圖
+    try:
+        return _list_slots(role, f, ctx)
+    finally:
+        ctx.pop('img_frame', None)
+
+
+def _list_slots(role: str, f: dict, ctx: dict) -> tuple:
     slots = []
     for i in range(5):
         if f['empty'][i]:
@@ -933,7 +1063,12 @@ def fmt_slot(s: dict) -> str:
     if s.get('empty'):
         return f'  {s["slot"]}  （空）'
     nm = s.get('name') or (s.get('raw_name', '?') + (f'≈{s["species"]}' if s.get('species') else
-                                                      f'≈{s["img_species"]}(圖{s["img_score"]:.2f})' if s.get('img_species') else ''))
+                                                      f'≈{s["img_species"]}(圖{s["img_score"]:.2f})' if s.get('img_species') else
+                                                      f'≈?{s["img_guess"]}(開集{s["img_guess_score"]:.2f})' if s.get('img_guess') else ''))
+    if s.get('ident_conflict'):
+        nm = f'{nm}!衝突'
+    elif s.get('species_src', '').startswith('img+'):
+        nm = f'{nm}✓圖'                                  # 文字與縮圖兩道都確認
     lv = s.get('level')
     return f'  {s["slot"]}  {nm:<8} {s.get("state") or "?":<3} Lv{lv if lv is not None else "?"}'
 
@@ -947,6 +1082,7 @@ def list_roles(role_arg: str = 'all', as_json: bool = False, pause: bool = False
         return _out(uikit.EXIT_USAGE, {'roles': {}}, t0, '角色名不認得')
     info = {'roles': {}}
     ctx = load_ctx(learn, use_icache=True)
+    ctx['img_open'] = True                         # list 才算開集參考（img_guess，只顯示）
     with Session(pause) as s:
         if s.rc:
             return _out(s.rc, info, t0)
@@ -1056,7 +1192,9 @@ def find_slot(slots: list, want: str, slot_no: int | None, pick: str | None = No
         return None, f'有 {len(hits)} 隻 {want}（格 {[h["slot"] for h in hits]}），請用 --slot 指定'
     unk = [x['slot'] for x in slots if not x.get('empty') and not slot_ident(x)]
     unn = [f'{x["slot"]}:{x["raw_name"]}' for x in slots if x.get('unnamed') and not x.get('species')]
-    return None, f'找不到 {want}' + (f'（格 {unk} 名字讀不出來' + (f'；沒名字且物種未確認：{unn}，先 learn-species' if unn else '') + '）' if unk else '')
+    con = [f'{x["slot"]}:{x["ident_conflict"]}' for x in slots if x.get('ident_conflict')]
+    return None, f'找不到 {want}' + (f'（格 {unk} 名字讀不出來 / 不確定' + (f'；沒名字且物種未確認：{unn}，先 learn-species' if unn else '')
+                                    + (f'；名字與縮圖衝突：{con}' if con else '') + '）' if unk else '')
 
 
 def shift_slots(slots: list, stored: int) -> list:
@@ -1456,14 +1594,20 @@ def read_ident(ctx: dict, retries: int = BANNER_RETRIES, wait: float = BANNER_WA
 
 
 def _img_hint(sl: dict) -> str:
-    """拒絕訊息附註：縮圖比頭像的結果只供人參考（不當存倉依據）"""
-    return f'（縮圖比對像 {sl["img_species"]} {sl.get("img_score")}，只供參考、不當存倉依據）' if sl.get('img_species') else ''
+    """拒絕訊息附註：縮圖結果（沒能成為身分時）/ 開集參考只供人參考"""
+    if sl.get('img_species'):
+        return f'（縮圖像 {sl["img_species"]} {sl.get("img_score")}，但沒有可用的身分，只供參考）'
+    if sl.get('img_guess'):
+        return f'（開集縮圖像 {sl["img_guess"]} {sl.get("img_guess_score")}，只供參考、不當存倉依據）'
+    return ''
 
 
 def guard_store(sl: dict, allow_slot1: bool, allow_mount_store: str | None = None) -> str | None:
     """存倉硬性禁止：回拒絕原因（None = 可以）。騎寵絕不存；唯一例外 allow_mount_store = 該寵物的「正式名」且 sl 名字完全相同（不接受像）、
     狀態須已是等待（騎乘 / 出戰都擋，先 set-state 等待）；其餘規則（名字 / 狀態讀不出、第 1 格要 --allow-slot1）照舊"""
     nm = slot_ident(sl)
+    if sl.get('ident_conflict'):
+        return f'名字 / 成長字串與縮圖衝突（{sl["ident_conflict"]}），不確定、拒絕存倉'
     if not nm:
         if sl.get('unnamed'):
             return f'{sl.get("raw_name")} 沒名字且物種未確認（縮圖 / 成長字串登錄檔對不上；可能是騎寵），拒絕存倉；先 learn-species' + _img_hint(sl)
@@ -1656,6 +1800,9 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     ident = read_ident(ctx)
     if not ident_confirms(ident, sl, 'slot', i, ctx):
         return bad(EXIT_DEPOT, f'倉庫分頁中選取的是 {ident["name"] or ident["growth"]}（要 {want}），不點存入')
+    why = img_conflict('slot', i, ctx, slot_ident(sl))                  # 縮圖第二道確認（倉庫分頁也看得到寵物欄縮圖）
+    if why:
+        return bad(EXIT_DEPOT, f'第 {sl["slot"]} 格名字 / 字串對上 {want}，但縮圖衝突（{why}），不確定、不點存入')
     now_cols = uikit.px(thumb_pts(i) + thumb_pts(0))
     if now_cols is None or not thumb_same(pre_t, now_cols[:16]) or (i != 0 and not mount_same(pre_mount, now_cols[16:])):
         uikit.snap('pet-store-thumb')
@@ -1683,6 +1830,10 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
     new_idx = next((k for k in range(20) if not d2['empty'][k] and d['empty'][k]), free_idx)
     found = find_card(d2, depot, lambda idn, k: ident_confirms(idn, sl, 'card', k, ctx), ctx, first=new_idx, info=info)
     info['depot_index'] = None if found is None else found + 1
+    why = found is not None and img_conflict('card', found, ctx, slot_ident(sl))
+    if why:
+        uikit.snap('pet-store-imgconflict')
+        return bad(EXIT_VERIFY, f'存入後在倉庫第 {found + 1} 格找到名字 / 字串吻合的卡，但卡片縮圖衝突（{why}）！請人看截圖')
     if found is None:
         uikit.snap('pet-store-notfound')
         return bad(EXIT_VERIFY, f'存入後寵物欄 / 倉庫張數都對，但倉庫 {depot} 裡逐張看不到 {want}（{sl.get("raw_name") or want}）！請人看截圖')
@@ -1721,13 +1872,13 @@ def ambiguous_img(kind: str, idx: int, growth: str | None, ctx: dict):
     cands = petmatch.growth_species(species_reg(ctx), growth)
     if len(cands) < 2:
         return cands, None
-    im = img_ident(kind, idx, dict(ctx, img_only=cands))
+    im = img_ident(kind, idx, dict(ctx, img_only=cands), cands)
     sp = im and im.get('img_species')
     return cands, (sp if sp in cands else None)
 
 
 def img_target(kind: str, idx: int, idn: dict, t: dict, ctx: dict, info: dict | None = None) -> bool:
-    """take 的補充驗名：名字框認不出目標時（沒名字 / 名字讀不出、成長字串登錄檔不知道），縮圖認出的物種 == 目標名字 → True。
+    """take 的縮圖驗名：名字框認不出目標時（沒名字 / 名字讀不出、成長字串登錄檔不知道），縮圖（候選限定、含目標）認出的物種 == 目標名字 → True。
     只用在 take（可逆：取出後還會再驗）；目標有指定成長字串、或卡片有名字 / 登錄檔已知成長字串時一律 False（照原規則）"""
     if not t.get('name') or t.get('growth') or idn.get('name'):
         return False
@@ -1740,7 +1891,7 @@ def img_target(kind: str, idx: int, idn: dict, t: dict, ctx: dict, info: dict | 
         return t['name'] in cands and sp == t['name']
     if idn.get('guess') and (species_reg(ctx).get('growth') or {}).get(idn['guess']) not in (None, t['name']):   # 讀不出但候選字串登錄成別的物種 → 不靠縮圖放行
         return False
-    im = img_ident(kind, idx, ctx)
+    im = img_ident(kind, idx, ctx, [t['name']])                   # 候選限定（含目標；不走開集）
     if info is not None and im:
         info.setdefault('img', []).append({'kind': kind, 'index': idx + 1, 'species': im['img_species'], 'score': im['img_score']})
     return bool(im) and im['img_species'] == t['name']
@@ -2010,12 +2161,12 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
                 seen[k + 1] = f'{seen[k + 1] or "?"}≈{t["name"]}(圖)'
             else:
                 continue
-        elif t.get('name') and not idn['name'] and idn['growth']:
-            # 只靠成長字串對上（唯一登錄，可能是 v2 前互蓋留下的錯單值）：縮圖有把握是別種 → 不取（errlog #810：49/10/6/3 當加克拉取出、取後物種不符 76）
-            im = img_ident('card', k, ctx)
-            x = im and im.get('img_species')
-            if x and x != t['name']:
-                seen[k + 1] = f'{seen[k + 1]}≠圖{x}'
+        elif t.get('name'):
+            # 文字（名字 / 成長字串登錄）對上：縮圖第二道確認，有把握是別種 → 衝突、不取（errlog #810：49/10/6/3 當加克拉取出、取後物種不符 76；
+            # 2026-10-14 起名字對上的卡也比）
+            why = img_conflict('card', k, ctx, t['name'])
+            if why:
+                seen[k + 1] = f'{seen[k + 1]}≠圖（{why}）'
                 continue
         if t.get('level') is None:
             info['cards'] = seen
@@ -2142,8 +2293,13 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
     img_ok = not (nm and target_ok(idn, t, reg)) and (unreadable_target(idn, 'card', idx, t, ctx) or img_target('card', idx, idn, t, ctx, info))
     if img_ok:
         info['img_pre'] = True
-    if (not nm or not target_ok(idn, t, reg)) and not img_ok:
-        what = f'是 {nm}' if nm else '名字框讀不出來'
+    conflict = None
+    if nm and target_ok(idn, t, reg) and t.get('name'):
+        conflict = img_conflict('card', idx, ctx, t['name'])          # 縮圖第二道確認：有把握是別種 → 不確定、不取
+        if conflict:
+            info['img_conflict'] = conflict
+    if ((not nm or not target_ok(idn, t, reg)) and not img_ok) or conflict:
+        what = (f'是 {nm}' if nm else '名字框讀不出來') + (f'（縮圖衝突：{conflict}）' if conflict else '')
         if can_relocate:
             return relocate(what)
         return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格{what}，不是 {fmt_target(t)}；沒取出' + ('' if nm is None else '（格子可能遞補了，重讀倉庫或改用 --pet 找）'))
@@ -2177,8 +2333,10 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
     info['name'] = nm2
     want = t.get('name')
     if idn2['growth']:                                         # 沒名字：縮圖確認物種（取出的新寵物縮圖在寵物欄，倉庫分頁也看得到）
-        sp = ident_species(new_slot - 1, idn2['growth'], ctx)
+        sp, _src, why2 = unnamed_species(new_slot - 1, idn2['growth'], ctx)
         info['species'] = sp
+        if why2:
+            return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），成長字串登錄與縮圖衝突（{why2}）！停手交人處理，不自動存回')
         if sp and petmatch.learn_species(reg, sp, None, idn2['growth']):
             ctx['rdirty'] = True
         if want and sp != want and not (sp is None and (card_is(idn2, want, reg) or img_target('slot', new_slot - 1, idn2, t, ctx, info))):
@@ -2190,6 +2348,8 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
         info['species'] = t.get('name')
     elif (want and nm2 != want and not (nm2 is None and img_target('slot', new_slot - 1, idn2, t, ctx, info))) or t.get('growth'):
         return bad(EXIT_VERIFY, f'取出來的是 {nm2}（第 {new_slot} 格），不是預期的 {fmt_target(t)}！停手交人處理，不自動存回')
+    elif want and nm2 == want and (why2 := img_conflict('slot', new_slot - 1, ctx, want)):     # 名字對上：縮圖第二道確認
+        return bad(EXIT_VERIFY, f'取出來的第 {new_slot} 格名字是 {nm2}，但縮圖衝突（{why2}）！停手交人處理，不自動存回')
     el = t.get('level')
     if el is not None and info.get('pre_level') != el:        # 取前卡片等級沒讀到：切回寵物分頁讀新寵物等級（倉庫分頁中間沒有等級欄）
         if not goto_pet_tab():
@@ -2375,25 +2535,41 @@ def take_plan(ops: list, depot: str = 'personal', skip_missing: bool = False, pa
 
 
 def card_ident(k: int, idn: dict, ctx: dict) -> dict:
-    """倉庫第 k 張卡（0 起算，已選中、idn = 名字框身分）→ {'index', 'name', 'growth', 'guess', 'species', 'src'}（只供計數 / 顯示，不當取出依據）。
-    物種：名字 → 名字；成長字串（或讀不出時的候選字串）已登錄 → 登錄物種；都沒有 → 縮圖（img_ident card；--candidates 時只在候選內比）"""
-    reg = (species_reg(ctx).get('growth') or {})
+    """倉庫第 k 張卡（0 起算；idn = 名字框 / 卡片字身分）→ {'index', 'name', 'growth', 'guess', 'species', 'src', 'img'…}（只供計數 / 顯示，不當取出依據）。
+    2026-10-14 起縮圖為主：卡片縮圖（候選限定，文字物種一定在候選）+ 文字第二道確認（combine_ident）——
+      名字 / 字串登錄物種與縮圖有把握的結果相同 → 'img+name' / 'img+reg'；不同 → 衝突（species None、src 'conflict'）；
+      只有縮圖 → 'img'（讀不出時候選字串登錄成別種 → 衝突）；縮圖沒把握 / 被蓋住 → 舊規則（名字 / 唯一登錄 / 撞號 None / 讀不出共用規則）"""
+    reg_all = species_reg(ctx)
+    reg = (reg_all.get('growth') or {})
     d = {'index': k + 1, 'name': idn.get('name'), 'growth': idn.get('growth'), 'guess': idn.get('guess'), 'species': None, 'src': None}
+    if d['name']:
+        text = [d['name']]
+    elif d['growth']:
+        text = petmatch.growth_species(reg_all, d['growth'])
+    else:
+        text = petmatch.growth_species(reg_all, d['guess'])
+    im = img_ident('card', k, ctx, text)
+    if im:
+        d['img'] = im.get('img_species')
+        d['img_score'] = im.get('img_score')
+        if im.get('img_occluded'):
+            d['img_occluded'] = True
+    sp, src, why = combine_ident(text, im)
+    if why:
+        d['species'], d['src'], d['conflict'] = None, 'conflict', why
+        return d
+    if sp and (d['name'] or d['growth'] or not d['guess']):          # 只有候選字串（讀不出）→ 照共用規則（要跟 OCR 行不矛盾，見下）
+        d['species'] = sp
+        d['src'] = ('img+name' if d['name'] else 'img+reg') if src == 'img+text' else 'img'
+        return d
     if d['name']:
         d['species'], d['src'] = d['name'], 'name'
     elif d['growth'] and reg.get(d['growth']):
         d['species'], d['src'] = reg[d['growth']], 'reg'
-    elif d['growth'] and len(petmatch.growth_species(species_reg(ctx), d['growth'])) >= 2:   # 撞號：只在候選物種之間比縮圖，沒把握 = None
-        d['species'] = ambiguous_img('card', k, d['growth'], ctx)[1]
-        d['src'] = 'reg-multi+img' if d['species'] else 'ambiguous'
+    elif d['growth'] and len(petmatch.growth_species(reg_all, d['growth'])) >= 2:   # 撞號又沒縮圖把握 = None
+        d['src'] = 'ambiguous'
     elif (us := unreadable_species(idn, 'card', k, ctx)):               # 讀不出：候選字串登錄 + 縮圖一致（共用規則）
         d['species'], d['src'] = us, 'reg+img'
-    else:
-        im = img_ident('card', k, ctx)
-        if im and im.get('img_species'):
-            d['species'], d['src'] = im['img_species'], 'img'
-            if d['guess'] and reg.get(d['guess']) not in (None, im['img_species']):     # 候選字串登錄成別的物種 → 矛盾，不算
-                d['species'], d['src'] = None, 'conflict'
     return d
 
 
@@ -2404,6 +2580,16 @@ def read_depot_cards(depot: str, ctx: dict) -> tuple:
         return rc, []
     out = []
     gl = glyph_cards(d)                                  # 先讀卡片上的字（不選卡）：讀得出名字 / 成長字串的卡不用點（2026-10-14 掛機中選卡會被戰鬥結束刷新跳回）
+    ctx['img_frame'] = img_frame(ctx, fresh=True) if IMG_ON and not ctx.get('no_img') else None   # 全部卡片縮圖共用一張截圖
+    ctx['img_quick'] = True                              # 唯讀清點：卡片字已讀出名字的卡只跟同系別比（petimg_match.judge quick）
+    try:
+        return _read_cards(d, depot, gl, ctx, out)
+    finally:
+        ctx.pop('img_frame', None)
+        ctx.pop('img_quick', None)
+
+
+def _read_cards(d: dict, depot: str, gl: dict, ctx: dict, out: list) -> tuple:
     for k in [i for i in range(20) if not d['empty'][i]]:
         c = gl.get(k)
         if c and (c['name'] or c['growth']):
@@ -2462,7 +2648,7 @@ def depot_list(role_arg: str, depots: list, pause: bool = False, learn: bool = T
     if not roles or not depots or any(x not in ('personal', 'public') for x in depots):
         print(f'pet：depot-list 參數不對（角色 {role_arg!r}、倉庫 {depots!r}）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
-    ctx = load_ctx(learn)
+    ctx = load_ctx(learn, use_icache=True)          # 唯讀清點：卡片縮圖結果走身分快取（同一張卡像素完全相同才沿用）
     final = 0
     with Session(pause, need_calm=True) as s:
         if s.rc:

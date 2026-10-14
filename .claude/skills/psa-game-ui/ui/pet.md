@@ -121,6 +121,28 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 250 200; wait 400
 NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清單（寵物名 + 綠字「0轉N級」）、卡 y 約 341 / 446 / 544（第 3 張被截半，清單可往下 drag 700,520→700,400）、確定 706,614、右上 ✕ 970,213。順序每人不同，**依名字點卡**，卡片變黃底（探點 900,y，最多等 3 秒）才按確定。**視窗消失 ≠ 交出**（2026-10-14 DKBO 交魯尼帖斯按確定、視窗消失，伺服器沒收走）：交後讀追蹤步號前進才算，讀不到再讀寵物欄，驗不到 126。腳本：`pet_turnin.py dino <角色…>`，說明見 psa-pet-quest。
 丟寵提示窗「確定要丟棄【名字】嗎?」+「回收站保存48小時!」：確定 615,557 / 取消 813,557；名字行是黃字，OCR 要 `-Dark 120`（petdrop.confirm_names_ok）。
 
+## 縮圖為主（2026-10-14 起；使用者：「先把縮圖的功能寫進腳本，寵物跟道具應該可以共用」）
+**下面「pet.py 接線（2026-10-12）」的「img 只是備援、不寫進 species」已改掉，以本段為準。**
+- **共用核心**：`imgmatch.py`（樣板 / 分數 / 位置 / classify 前兩名判定 / tiebreak 投票 / 主色 color_score / rank_among / 遮擋偵測 occlusion / 粗篩快取 / Grid 平面陣列加速）由 petimg_match 與 itemimg_match 共用。petimg 改用核心後 359 格 × 3 種比對（match / rank_among 兩組候選）逐格同分；Grid 加速約 2 倍、結果相同。
+- **判定（`petimg_match.judge`）**：遮擋偵測 → 候選限定（`--candidates` / 任務候選，否則已知清單 + 文字說的物種 + 騎寵）粗篩 4 個 → rank_among（inlier + 主色 + 投票）→ 第一名過門檻就加它的同系別再比一次（防換色版頂替，文字說的是兄弟也一樣要比）。`keep_scores` = 文字說的物種自己的分數。
+- **pet.py 怎麼用（`img_ident` / `combine_ident`）**：
+  - 名字（樣板 / OCR）或成長字串登錄物種 = 文字；縮圖有把握且相同 → `species_src` `img+name` / `img+reg`（list 顯示 `✓圖`）；
+  - 沒名字、字串沒登錄、縮圖有把握 → **升為 species（`img`），store / take 可用**（守門規則照舊：騎寵 / 第 1 格 / 騎乘 / 狀態讀不出）；
+  - 縮圖有把握是別種，或文字說的物種縮圖分數 < `KEEP_FLOOR`（寵物格 0.65、倉庫卡 0.45；離線對的物種最低 0.906 / 0.622）→ `ident_conflict`（list 顯示 `!衝突`）→ `slot_ident` None → store / set-state 72、guard_store 拒絕；take 找卡跳過、取前不取（72 或重新定位）、取出後 76；store 按鈕前寵物格縮圖再確認（75）、存後找到的卡縮圖衝突 76。
+  - 縮圖沒把握（不在候選、分數不夠）→ 照文字（舊行為）；名字框讀不出且只有縮圖 → 只顯示 `img_species`，照舊不能存（沒有身分）。
+  - **被浮字橫幅蓋住**（格子外圍米色底被壓暗：寵物格 dx ±50、倉庫卡 dx ±46 共 42 點，`imgmatch.dimmed_beige`；正常 0～10 點、play agent 15:xx 被蓋 4 張卡 16～29 點；門檻寵物格 12、卡 14）→ 每 0.4 s 重拍最多 5 次，仍蓋住 → 這次不用縮圖（照文字，不硬認）。寵物格沒有被蓋住的實例（門檻照卡片推）。
+  - **開集**（全部 Monster）只在 `list`、文字與候選縮圖都認不出時算 → `img_guess`（顯示 `≈?物種(開集)`），不進 species、不准據以存取（只會讓騎寵判斷更嚴）。
+  - 讀圖：`list` 每個角色、`depot-list` 每個倉庫頁只截一張圖（`uikit.shot_getter`，約 0.3 s）共用；被蓋住才重拍。其他（store / take 的確認）每次現拍。截不到退回 `uikit.px` 讀整格。
+  - `depot-list` 卡片字已讀出名字的卡用 quick（只跟同系別比，約 0.14 s / 張；離線 263 張 261 對 2 None、文字故意給錯 263 / 263 被 KEEP_FLOOR 擋下）；`depot-list` 也開身分快取（卡片像素完全相同才沿用）。
+- **離線**：play agent 72 格（寵物格 10 + 卡 62）限定候選 68 對 / 0 錯 / 4 被蓋住（判 occluded、等重拍）；img_ref 280 格 18 種候選 275 對 / 0 錯 / 5 None；`test_pet_img.py`（縮圖升 species、一致 / 衝突、KEEP_FLOOR、遮擋重拍與不硬認、開集只參考、img_conflict / card_ident）。
+- **實機唯讀（2026-10-14 17:0x，奇努伊村非戰鬥，5 人各 2 隻：布拉奇多斯〔成長字串〕+ 朵拉比斯）**：
+  | 指令 | 改前 | 改後 |
+  |---|---|---|
+  | `list --role all --no-icache` | 11.8 s | 15.2～16.5 s（10 / 10 對，全部 `img+reg` / `img+name` 兩道確認；每格縮圖 0.19～0.34 s、每人截圖 0.3～0.4 s） |
+  | `list --role all`（身分快取） | 11.5～14.2 s | 12.8 s（10 格快取命中） |
+  | `depot-list --depot public,personal --role all`（65 張卡） | 18.3 s | 冷 33.5 s / 快取 20.6 s；各物種張數與改前完全相同，65 張都兩道確認（55 `img+name`、10 `img+reg`） |
+  沒有實測到浮字橫幅（村子裡沒戰鬥）；存取路徑（store / take）只有離線測試。
+
 ## 縮圖認物種 `petimg_match.py`（2026-10-12 離線設計 + 驗證；同日接線到 pet.py 並實機唯讀 list 驗證，見下方「pet.py 接線」）
 用知識庫頭像（`tools/extract/pet_images.py` 匯出的 `tools/.cache/pet-images/head/<名>_<monsterId>_<imageId>.png`，Sprite = Monster.imageId）直接比寵物格 / 倉庫卡縮圖認物種，不靠名字、不用先 learn-species、不怕成長字串撞號（實測 33/8/3/8 同時出現在 火雞 / 奇寶 / 克克洛斯 三種的倉庫卡上）。
 - **版面**（217 張寵物面板截圖量的，截圖座標）：寵物格縮圖 = 頭像約 **1.05 倍**、中心在格心 (+6,+2) 附近；倉庫卡**有縮圖**（同一張頭像放大到約 **1.26 倍**、中心 (+5,+1)，只露出臉的中段），上方白字名字 / 成長字串、下方綠字「0轉N級」。頭像 PNG 被裁過透明邊（高多半 80、寬 66～80），裁切偏移沒匯出 → 每個候選在 ±8 / ±4 px 內找最佳位置。選中倉庫卡時中間是 3D 模型（不是頭像，沒拿來比）。
@@ -174,7 +196,7 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
 - **成長字串快取**：沒名字的寵物（騎寵布拉奇多斯、剛抓的任務寵）名字框是成長字串，舊版每個 `pet.py` 子程序每格都要 OCR 2 組設定 + 縮圖比對（實測 3.5～4.5 秒 / 格，有名字的 1 秒）。
   現在以**名字框二值化點陣完全相同**為鍵（`pet.rows_key`，sha1）記成長字串、以**整格 4537 點像素 + 候選名單完全相同**為鍵記縮圖比對結果，存 `tools/.cache/pet-tpl/ident-cache-<版面>.json`（`ver` 版本、每筆時間，7 天過期、各留最近 400 筆）。
   只做「同樣輸入 → 上次的結果」，判定規則不變；OCR 讀錯的字串過不了 `parse_growth`（≥ 2 行相同）本來就不進快取。點陣在快取裡的格也不再等 EXP 橫幅重讀（`growth_known`）。
-- **只在** `list` / `levels` / `set-state-many` / `rest-all` 用（`load_ctx(use_icache=True)`）；`store` / `take` / `store-many` / `take-many` / `petdrop` / `learn-species` / `rebirth_pets`（抓寵登錄）一律現場 OCR，**存倉、取出、丟寵的現場驗名不變**。`--no-icache` 關；JSON 多 `icache_hits`。
+- **只在** `list` / `levels` / `set-state-many` / `rest-all` / `depot-list`（2026-10-14 起，唯讀清點）用（`load_ctx(use_icache=True)`）；`store` / `take` / `store-many` / `take-many` / `petdrop` / `learn-species` / `rebirth_pets`（抓寵登錄）一律現場 OCR，**存倉、取出、丟寵的現場驗名不變**。`--no-icache` 關；JSON 多 `icache_hits`。
 - **`pet.py levels [--role all] [--slots 2,3,4,5] [--json]`**：唯讀，每人選頭像 → 只點指定格 → 只讀等級（樣板 → OCR 共識，同 `level_from_rows`）+ 名字框點陣指紋 `nh`（不認名字 / 身分）。`list` 每格也多 `nh`。petquest 練寵輪詢：第一次 list、之後 levels，`nh` 對不上 / 格變空 → 那輪改讀 list。
 - 實機要確認：①同一隻寵物名字框點陣在不同時間是否真的完全相同（不同 → 只是快取沒中，照舊 OCR）；②levels 在快戰掛機中讀等級的穩定度、每人耗時。
 
