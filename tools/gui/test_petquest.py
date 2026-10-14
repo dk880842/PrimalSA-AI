@@ -461,9 +461,38 @@ check('merge_levels：nh 不同 / 變空格 / 沒讀到 → 不合併（改讀�
       and pq.merge_levels(base, {'DKBO': [{'slot': 2, 'empty': True}]}, need)[0] is None and pq.merge_levels(base, {'DKBO': []}, need)[0] is None)
 check('task_slots：各角色任務寵格聯集', pq.task_slots({'A': [{'slot': 2, 'name': '魯尼帖斯'}], 'B': [{'slot': 3, 'name': '魯尼帖斯'}, {'slot': 1, 'name': 'x'}]}, need) == [2, 3])
 k = ('DKBO', '魯尼帖斯')
-check('train_confirm：第一次 ≥ 門檻 → pending；連兩輪 ≥ 且不降、升 ≤ 10 → due', pq.train_confirm({k: 18}, {}, need) == ([], [k]) and pq.train_confirm({k: 20}, {k: 18}, need) == ([k], []))
-check('train_confirm：前一輪沒達標 / 讀值下降 / 大跳（OCR 錯值）→ 不算', pq.train_confirm({k: 18}, {k: 17}, need)[0] == [] and pq.train_confirm({k: 19}, {k: 25}, need)[0] == []
-      and pq.train_confirm({k: 128}, {k: 18}, need)[0] == [] and pq.train_confirm({k: None}, {k: 20}, need) == ([], []))
+def _tc(need_, *rounds):
+    t = pq.TrainConfirm(need_)
+    outs = [t.update(r) for r in rounds]
+    return t, outs
+t, o = _tc(need, {k: 18}, {k: 20})
+check('TrainConfirm：第一次 ≥ 門檻 → pending；連兩次 ≥ → 鎖定', o[0] == ([], [k]) and o[1] == ([k], []) and t.done([k]))
+t, _ = _tc(need, {k: 18}, {k: 17}, {k: 18})
+check('TrainConfirm：中間掉到 < 門檻 → 連續次數歸零', not t.locked)
+t, _ = _tc(need, {k: 128}, {k: 128}, {k: 200})
+check('TrainConfirm：誤讀（> 門檻+60 / > 140）忽略、不鎖定', not t.locked)
+t, _ = _tc(need, {k: 18}, {k: None}, {k: 19})
+check('TrainConfirm：讀不到不清第一次讀值 → 下一次 ≥ 就鎖定', t.done([k]))
+t, _ = _tc(need, {k: 18}, {k: 40})
+check('TrainConfirm：高速升級（一輪升 22 級）仍鎖定（舊 TRAIN_STABLE_UP=10 會卡）', t.done([k]))
+# 重現 10-14 卡坦：5 人 13 隻，每輪讀到的子集不同（浮字蓋住 → None / 改讀 list）、N 每輪不同
+need13 = {'加克拉': 25, '加格': 25, '邦恩吉': 25}
+keys = [(r, sp) for r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5') for sp in need13]
+t = pq.TrainConfirm(need13)
+rounds = [{kk: (30 + i if (i + j) % 3 else None) for i, kk in enumerate(keys)} for j in range(5)]
+for r in rounds:
+    t.update(r)
+    if t.done(keys):
+        break
+check('TrainConfirm：每輪子集不同（浮字干擾）→ 逐隻累積，5 輪內全部鎖定（舊邏輯永遠重置）', t.done(keys), str(len(t.locked)))
+t = pq.TrainConfirm(need13)
+t.update({kk: 30 for kk in keys})
+t.update({keys[0]: 30})
+t.update({keys[0]: None})
+check('TrainConfirm：鎖定後讀不到 / 只讀部分都不清', keys[0] in t.locked and not t.over({keys[0]: 80}))
+t = pq.TrainConfirm(need13)
+check('TrainConfirm.over：未鎖定且超過門檻+15 → True；剛好 +15 / 已鎖定 / > 140 → False',
+      t.over({keys[0]: 41}) and not t.over({keys[0]: 40}) and not t.over({keys[0]: 141}))
 s = grow(Sim(2016))
 _lv = s.pet
 _bad = [1]

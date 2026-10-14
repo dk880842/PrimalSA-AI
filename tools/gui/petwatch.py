@@ -508,7 +508,7 @@ def main(argv=None, dry_args: bool = False):
                     st['ts'] = time.strftime('%H:%M:%S')
                     save_state(st)
                     due, pending = confirm_due(res, prev, a.target_level)
-                    prev = dict(res)
+                    prev = {**prev, **{c: v for c, v in res.items() if v is not None}}      # 讀不到的人保留上次讀值（不因一輪讀不到重置確認）
                     if pending:
                         log(f'{pending} 第一次讀到 ≥ {a.target_level}，下一輪再讀一次確認（讀值不穩不換）')
                         next_scan = time.time() + min(a.interval, 8)

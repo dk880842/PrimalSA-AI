@@ -32,7 +32,7 @@
                 take-many 中途失敗：訊息帶已取到的；重跑自動只補缺的（卡坦兩輪同樣套用）
     train[N]    自動轉換戰寵 on（轉換級數使用者設 30）→ 第一種任務寵 5 人出戰 → pet_catch.py --verify-battle → grind.py start --spot 柯奧4F龜洞
                 → 每 POLL_S（30）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
-                  levels 那格變空 / nh 不同 → 改讀完整 list；全部連兩輪 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25；第二輪不降、最多升 TRAIN_STABLE_UP=10 級）
+                  levels 那格變空 / nh 不同 → 改讀完整 list；全部連兩輪 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25；逐隻累積：某隻連兩次 ≥ 門檻即鎖定、之後不清；不限升級幅度，誤讀 > 門檻+60 忽略；未鎖定者超過門檻+15 → 強制再讀完整 list，全 ≥ 門檻就結束）
                 → 關遇敵 → 自動轉換戰寵 off → pet.py rest-all（任務寵改等待；成功記進度檔 rested）
     turnin[N]   questrun.py run <ID> --after none --pet-turnin [--rested]（train 段 30 分內 rest-all 成功才帶：questrun 交件前不重做 rest-all）
                 （恐龍：解散逐人 pet_turnin；卡坦：隊長交一次）；卡坦第 1 輪交完讀步號 = 2 才算
@@ -92,7 +92,9 @@ BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
 import catchbuy  # noqa: E402  外掛「+」買可抓捕數的共用邏輯（rebirth_pets 同一份）
 PLUS_XY, PLUS_COST, MONEY_BOX = catchbuy.PLUS_XY, catchbuy.PLUS_COST, catchbuy.MONEY_BOX      # 紅區：只有 --confirm-buy-bait 才點
 POLL_S = 30.0                      # 練寵讀等級間隔（2026-10-13 review 1013b §2.3：只讀等級 pet.py levels，跟 petwatch 一樣 30 秒；舊版 120 秒 + 每次讀 5 人全部身分 91 秒）
-TRAIN_STABLE_UP = 10              # 練寵確認：連兩輪都 ≥ 門檻、且第二輪比第一輪不降、最多升這麼多級（低等寵一場可升數級；讀錯值多半是大跳或下降）
+TRAIN_MISREAD_UP = 60            # 讀值 > 門檻 + 這麼多視為誤讀忽略；TRAIN_OVER：未鎖定的寵物超過門檻這麼多 → 強制再讀完整 list（防過度練）
+TRAIN_OVER = 15
+PET_MAX_LEVEL = 140
 RESTED_S = 30 * 60                 # train 段 rest-all 成功後這麼久內的 turnin 段帶 --rested（questrun 交件前不重做）
 TRAIN_MAX_S = 45 * 60              # 練寵最多等這麼久（S5 約 9 分、S6 約 5 分）
 PROGRESS_TRUST_S = 24 * 3600
@@ -294,21 +296,44 @@ def task_levels(roles_slots: dict, need: dict, roles=ALL_ROLES) -> dict:
     return out
 
 
-def train_confirm(cur: dict, prev: dict, need: dict) -> tuple:
-    """本輪 / 上一輪讀值 {(角色, 物種): 等級} → (確定達標的鍵, 第一次讀到達標要下一輪確認的鍵)。
-    沿用 petwatch.confirm_due 的「連兩輪讀值都 ≥ 門檻才算」（OCR 偶發錯值不會連兩輪都達標），差值容許改成「不降、最多升 TRAIN_STABLE_UP 級」：
-    任務寵 1～30 級一場戰鬥可升好幾級，套 petwatch 的 ±2（77 級金布伊用）會一直確認不了"""
-    due, pending = [], []
-    for k, v in cur.items():
-        lv = need.get(k[1])
-        if v is None or lv is None or v < lv:
-            continue
-        p = prev.get(k)
-        if p is not None and p >= lv and 0 <= v - p <= TRAIN_STABLE_UP:
-            due.append(k)
-        else:
-            pending.append(k)
-    return due, pending
+class TrainConfirm:
+    """練寵達標確認（逐隻累積，鎖定後不清）。鍵 = (角色, 物種)。
+    某隻連兩次讀值都 ≥ 門檻 → 鎖定為達標，之後讀不到 / 點陣不同 / 改讀 list 都不清掉；全部鎖定即結束。
+    讀值 > 門檻 + TRAIN_MISREAD_UP 或 > 140 視為誤讀，忽略（不計入連續次數、不清既有進度）；讀到 < 門檻 → 連續次數歸零；讀不到（None）→ 不動。
+    不再限制兩次之間的升級幅度（高速練功一輪升 >10 級正常）。
+    over = 有未鎖定的寵物已超過門檻 + TRAIN_OVER（過度練的安全上限）→ 呼叫端應立刻再讀一次完整 list"""
+
+    def __init__(self, need: dict):
+        self.need = need
+        self.locked, self.streak = set(), {}
+
+    def update(self, cur: dict) -> tuple:
+        """本輪讀值 {(角色, 物種): 等級或 None} → (本輪新鎖定的鍵, 第一次讀到達標等下一次確認的鍵)"""
+        new, pending = [], []
+        for k, v in cur.items():
+            lv = self.need.get(k[1])
+            if k in self.locked or v is None or lv is None:
+                continue
+            if v > lv + TRAIN_MISREAD_UP or v > PET_MAX_LEVEL:
+                continue
+            if v < lv:
+                self.streak.pop(k, None)
+                continue
+            if self.streak.get(k):
+                self.locked.add(k)
+                new.append(k)
+            else:
+                self.streak[k] = True
+                pending.append(k)
+        return new, pending
+
+    def done(self, keys) -> bool:
+        keys = list(keys)
+        return bool(keys) and all(k in self.locked for k in keys)
+
+    def over(self, cur: dict) -> bool:
+        return any(k not in self.locked and v is not None and self.need.get(k[1]) is not None
+                   and self.need[k[1]] + TRAIN_OVER < v <= PET_MAX_LEVEL for k, v in cur.items())
 
 
 def merge_levels(base: dict, lv: dict, need: dict) -> tuple:
@@ -766,7 +791,8 @@ class Run:
                 return self.pass_or(rc, EXIT_TRAIN, f'練寵準備：{why} 失敗 rc={rc}', f'uv run --no-project python tools/gui/{script} {" ".join(map(str, args))}')
         t0 = self.T.clock()
         need = rd['need']
-        base, prev = None, {}                                          # base = 最近一次完整 list（身分 + 格位 + nh）；之後只讀等級
+        tc = TrainConfirm(need)
+        base = None                                          # base = 最近一次完整 list（身分 + 格位 + nh）；之後只讀等級
         while True:
             self.T.sleep(POLL_S)
             if base is None:
@@ -788,11 +814,23 @@ class Run:
             else:
                 cur = task_levels(rs, need)
                 lag = {f'{r}:{sp}': v for (r, sp), v in cur.items() if v is None or v < need[sp]}
-            due, pending = train_confirm(cur, prev, need)
-            prev = cur
-            ok = bool(cur) and len(due) == len(cur)
-            event(f'{stage}：5 人任務寵全部達標（連兩輪確認）' if ok else
-                  f'{stage}：練寵進度 未達標 {lag}' + (f'；第一次讀到達標、下一輪確認 {len(pending)} 隻' if pending else ''))
+            new, pending = tc.update(cur)
+            if not rc and not tc.done(cur) and tc.over(cur):
+                big = {f'{r}:{sp}': v for (r, sp), v in cur.items() if v is not None and v > need[sp] + TRAIN_OVER}
+                event(f'{stage}：已有寵物超過門檻 +{TRAIN_OVER}（{big}）→ 強制再讀完整 list 確認')
+                rc2, rs2 = self.pet_list(ALL_ROLES, cand)
+                if rc2 in PASS:
+                    return rc2
+                if not rc2:
+                    base = rs2
+                    cur = task_levels(rs2, need)
+                    lag = {f'{r}:{sp}': v for (r, sp), v in cur.items() if v is None or v < need[sp]}
+                    tc.update(cur)
+                    if cur and all(v is not None and v >= need[k[1]] for k, v in cur.items()):
+                        tc.locked.update(cur)               # 安全上限：完整 list 全部 ≥ 門檻 → 直接結束，不再等第二次
+            ok = tc.done(cur)
+            event(f'{stage}：5 人任務寵全部達標（逐隻連兩次確認）' if ok else
+                  f'{stage}：練寵進度 未達標 {lag}' + (f'；第一次讀到達標、待確認 {len(pending)} 隻' if pending else '') + f'（已鎖定 {len(tc.locked)}）')
             if ok:
                 break
             if self.T.clock() - t0 > TRAIN_MAX_S:
