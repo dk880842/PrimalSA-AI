@@ -94,6 +94,7 @@ class Game:
         self.tele_fail = False
         self.screens = []                # read_screen 序列：(n_px, state_dict, enc)
         self.t = 0.0
+        self.transition = None       # uikit.transition_now 假回傳（None / 'loading' / 'black'）
         self.heal_fail = False
         self.pre = None                  # leader_team_read 的結果（None = 照舊 char.ensure + team.check 兩步）
 
@@ -175,6 +176,7 @@ def install(g, stat_missing=False):
         return 0, {'state': 'idle', 'full': False}, g.enc
     grind.read_screen = rs
     grind.wait_banner_gone = lambda timeout=0: g.log.append('banner_wait') or True
+    U.transition_now = lambda: g.transition                     # 轉場特徵：測試一律假的（絕不讀真遊戲）
     return g
 
 
@@ -307,6 +309,11 @@ g = install(Game())
 g.screens = [(0, {'state': 'unknown', 'full': False}, True), (0, {'state': 'unknown', 'full': False}, True), idle(), banner(), idle(), banner()]
 rc, j, _ = run('ensure', confirm_secs=10)
 check('unknown ×2 夾 idle → 不算 9', rc == 0)
+g = install(Game())
+g.transition = 'loading'
+g.screens = [(0, {'state': 'unknown', 'full': False}, True)] * 5 + [idle(), banner(), idle(), banner()]
+rc, j, _ = run('ensure', confirm_secs=10)
+check('載入畫面（transition）×5 不算 unknown → 不退 9', rc == 0, f'rc={rc}')
 
 # 1b) 2026-10-12：當前 + 隊伍一次讀（leader_team_read）→ 不再 char.ensure / team.check
 g = install(Game())

@@ -130,6 +130,13 @@ def screen(full: bool = False) -> dict:
     return screen_sigs.classify(dict(zip(pts, cols)))
 
 
+def transition_now() -> str | None:
+    """現場讀一次：地圖轉場畫面（screen_sigs.transition：'loading' / 'black'）或 None。只在 screen() 判 unknown 時才值得問"""
+    pts = screen_sigs.transition_points()
+    cols = px(pts)
+    return screen_sigs.transition(dict(zip(pts, cols))) if cols is not None else None
+
+
 def hud_visible() -> bool:
     return sig_match(screen_sigs.SIG_HUD)
 
@@ -179,7 +186,8 @@ def watch_preflight_ok() -> bool:
 
 def preflight(src: str, fast: bool = True) -> int:
     """開跑前檢查，回退出碼（0 = 可以動）：版面不是 2880x1659 → 2；netwatch halt → 直接 sys.exit(10)；
-    battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）。
+    battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）；
+    載入圖 / 全黑轉場（transition_now）不計次、等它過去（最多 screen_sigs.TRANSITION_MAX_S 秒）。
     fast=True 且 watch 狀態夠新時（watch_preflight_ok）省掉 layout / netwatch / 畫面連讀（約 0.36 s → 約 0.02 s）；battle.lock 一律檢查"""
     import battleguard
     fast_ok = fast and watch_preflight_ok()
@@ -197,11 +205,19 @@ def preflight(src: str, fast: bool = True) -> int:
     if fast_ok:
         mark('preflight(watch)')
         return EXIT_OK
-    for i in range(UNKNOWN_N):
-        if screen().get('state') not in ('unknown', 'error'):
+    i, t_trans = 0, None
+    while i < UNKNOWN_N:
+        st = screen().get('state')
+        if st not in ('unknown', 'error'):
             mark('preflight')
             return EXIT_OK
-        if i < UNKNOWN_N - 1:
+        if st == 'unknown' and transition_now():          # 載入圖 / 全黑轉場：等它過去，不計次（最多 TRANSITION_MAX_S 秒，之後照舊計次）
+            t_trans = clock() if t_trans is None else t_trans
+            if clock() - t_trans < screen_sigs.TRANSITION_MAX_S:
+                sleep(1.0)
+                continue
+        i += 1
+        if i < UNKNOWN_N:
             sleep(UNKNOWN_GAP_S)
     print(f'{src}：畫面連 {UNKNOWN_N} 次不認得（疑似驗證視窗），停手通知使用者（鐵則 5）', file=sys.stderr)
     return EXIT_UNKNOWN_SCREEN

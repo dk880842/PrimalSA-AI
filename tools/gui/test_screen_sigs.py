@@ -372,11 +372,29 @@ check('只有字形點（沒有舊三點）也認得載入畫面', S.is_loading(
 check('新插畫載入圖：is_loading 中、annotate = loading', S.is_loading(_px)
       and S.annotate(_px, {'state': 'unknown'}) == ['loading'])
 check('loading_text 缺點 → False', not S.loading_text({}))
-# 英文版 Loading... 雙進度條（2026-10-14 實機 quest rc 9 誤報）
-_bar = {(x, y): (r, g, b) for x, y, r, g, b, _ in S.SIG_LOADING_BAR}
-check('英文版載入圖（綠 / 橘雙進度條）：is_loading 中', S.is_loading(_bar))
-_bar2 = dict(_bar); _bar2[(200, 758)] = (56, 48, 38)
-check('橘條缺 → 不認載入畫面', not S.is_loading(_bar2))
+# 英文版 Loading... 雙進度條（2026-10-14 實機 quest rc 9 誤報）：真實取點 fixture，進度無關（綠條很短的 tpS0 也要中）
+_bfx = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'loading_bar_px.json').read_text(encoding='utf-8'))
+_bpts = [tuple(p) for p in _bfx['pts']]
+check('loading_bar fixture 取點 = loading_bar_points()', _bpts == S.loading_bar_points())
+_bpx = {smp['file']: dict(zip(_bpts, [tuple(c) for c in smp['px']])) for smp in _bfx['samples']}
+_bbad = [smp['file'] for smp in _bfx['samples'] if S.loading_bar(_bpx[smp['file']]) != smp['loading']]
+_npos = sum(smp['loading'] for smp in _bfx['samples'])
+check(f'loading_bar：{len(_bfx["samples"])} 張真實樣本（{_npos} 張英文載入圖、其餘含快速組隊提示 / 猜謎塔 / 歷次 rc 9 截圖）全對', not _bbad and _npos >= 4, str(_bbad))
+_short = _bpx['p4/tpS0.png']
+check('綠條還很短（tpS0，三個軌道點都是空軌）也認得 → is_loading、annotate = loading', S.is_loading(_short)
+      and S.annotate(_short, {'state': 'unknown'}) == ['loading'])
+_bar = _bpx['quest-log/031712-UNKNOWN.png']
+_bar2 = dict(_bar); _bar2[(300, 725)] = (56, 48, 38)                 # 綠條：空 → 填（x700 綠）= 不單調
+check('綠條空了又填（不是進度條）→ 不認', not S.loading_bar(_bar2))
+_bar3 = dict(_bar); _bar3[(700, 758)] = (120, 200, 230)
+check('軌道點顏色不像填色也不像空軌 → 不認', not S.loading_bar(_bar3))
+_bar4 = dict(_bar); _bar4[(550, 740)] = (60, 60, 60)
+check('外框一點不符 → 不認', not S.loading_bar(_bar4))
+check('loading_bar 缺點 → False', not S.loading_bar({}))
+check('loading_probe_points 含舊三點 + 字形 + 進度條、無重複', len(set(S.loading_probe_points())) == len(S.loading_probe_points())
+      and set(S.loading_bar_points()) <= set(S.loading_probe_points()) and {(x, y) for x, y, _ in S.LOADING_TEXT_PTS} <= set(S.loading_probe_points()))
+check('watch 用的 loading_points 含進度條點（英文版載入圖 watch 也標 loading）',
+      set(S.loading_bar_points()) <= set(S.loading_points()) | set(S.points()) | set(S.annot_points()))
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

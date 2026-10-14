@@ -54,6 +54,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
   89 --confirm-rebirth 停下等人
   97 接任務失敗（info.accept_rc = questdetail 退出碼；已完成 / 條件不達標 / 標題對不上都不亂點）
   98 轉生獎勵寵無法確認（三轉起：沒快照 / 0 或多隻候選 / 名字或 Lv 讀不出）→ 一律不丟，人看寵物欄
+載入畫面卡住：quest.py 回 43（載入 / 轉場畫面 60 秒）→ 不重登、重跑同一指令（每階段最多 2 次）。
 卡住自動重登：任何階段的 quest.py 回 19（自動巡路卡住）/ 42（VS 牌卡死）→ stuckrecover.relogin_team（relogin.py --stuck --confirm，只按已帶入帳密的「登錄」；105 → team.form）→
 team.check / form → 重吃龍王 → 重跑同一個 quest.py 指令；每階段最多 2 次（info.relogin_rc 記重登碼），仍卡 / 重登失敗 → 84；重登遇 9 / 10 → 原碼停手。--fight（單人重打）不重登。
 驗證視窗（quest 回 2 / uikit 回 9）→ 一律回 9 並停手（鐵則 5）；斷線（netwatch halt）→ 10。
@@ -379,6 +380,7 @@ class Run:
         self.warnings: list = []
         self.backtracked = False                        # 32021 走回 32020 的備援只試一次
         self.relogins: dict = {}                        # 階段 → 已自動全員重登次數（每階段最多 stuckrecover.RELOGIN_MAX）
+        self.retries: dict = {}                         # 階段 → quest.py 43（載入畫面卡住）已重跑次數（每階段最多 stuckrecover.RELOGIN_MAX）
         self.cur = ''                                   # 目前階段名
 
     # -- 紀錄 --
@@ -424,6 +426,10 @@ class Run:
             rc, tail = self.T.quest(args, timeout)
             self.info['quest_rc'] = rc
             event(f'quest.py 退出碼 {rc}')
+            if stuckrecover.is_retry(rc) and stuckrecover.allowed(self.retries.get(self.cur, 0)):   # 43 載入畫面卡住：不重登，重跑同一指令
+                self.retries[self.cur] = self.retries.get(self.cur, 0) + 1
+                event(f'{self.cur}：quest.py 43 載入畫面卡住 → 重跑同一指令（第 {self.retries[self.cur]}/{stuckrecover.RELOGIN_MAX} 次）')
+                continue
             if not (recoverable and stuckrecover.is_stuck(rc) and stuckrecover.allowed(self.relogins.get(self.cur, 0))):
                 return rc, tail
             n = self.relogins[self.cur] = self.relogins.get(self.cur, 0) + 1

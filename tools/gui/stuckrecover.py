@@ -7,6 +7,7 @@ quest.py 回 19（自動巡路卡住，刷新角色 / 點地面 / 走出口都�
 本檔只放「判斷 + 呼叫順序 + 計次」，呼叫端各自負責重登前後的善後（questrun：戰鬥設定 / HP / 遇敵；rebirth：龍王的守護重吃）。
 
   is_stuck(rc)                       quest.py 退出碼是不是這類（19 / 42）
+  is_retry(rc)                       quest.py 退出碼是不是「不用重登、重跑同一片就好」（43 載入 / 轉場畫面卡 60 秒；載入中沒有 HUD，relogin 也登出不了）
   allowed(done, max_n=RELOGIN_MAX)   已重登 done 次，還能不能再來（每任務 / 每階段最多 RELOGIN_MAX=2 次）
   relogin_team(relogin_fn, regroup_fn, log)  → (status, code)：status = 'ok' / 'halt'（9 驗證視窗、10 斷線，code 原碼透傳，一律停手）/
                                       'relogin_fail'（relogin 非 0 / 105，code = relogin 退出碼）/ 'regroup_fail'（105 後重組失敗，code = team 退出碼）
@@ -20,6 +21,7 @@ sys.path.insert(0, str(HERE))
 import uikit  # noqa: E402
 
 STUCK_RC = (19, 42)
+RETRY_RC = (43,)                 # quest.EXIT_LOADING_STUCK：載入畫面卡住 → 重跑同一片（quest.py 會再等一輪 60 秒），每任務 / 階段最多 RELOGIN_MAX 次
 RELOGIN_TEAM = 105               # relogin.py：重登進遊戲了但隊伍檢查 / 組隊失敗
 RELOGIN_MAX = 2                  # 每個任務 / 階段最多自動全員重登幾次
 HALT_RC = (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)
@@ -27,6 +29,10 @@ HALT_RC = (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)
 
 def is_stuck(rc) -> bool:
     return rc in STUCK_RC
+
+
+def is_retry(rc) -> bool:
+    return rc in RETRY_RC
 
 
 def allowed(done: int, max_n: int = RELOGIN_MAX) -> bool:

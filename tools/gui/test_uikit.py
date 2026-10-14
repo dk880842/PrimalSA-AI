@@ -232,9 +232,39 @@ uikit.watch_state = lambda max_age=1.0: None            # 預設 watch 不可用
 uikit.watch_screen = lambda max_age=1.0: None
 check('preflight 主畫面 = 0', uikit.preflight('t') == 0)
 g = install(Game(unknown=True))
+g.painted[screen_sigs.BLACK_PTS[0]] = (90, 90, 90)          # 假畫面其餘點是黑色 = 會被當全黑轉場；點亮一點 = 真的不認得
 rc = uikit.preflight('t')
-check('preflight unknown 連 3 次 → 9', rc == 9 and g.reads == 3 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
+check('preflight unknown 連 3 次 → 9（每次多讀一次轉場特徵）', rc == 9 and g.reads == 6 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
 check('preflight unknown 時 0 點擊', g.clicks == [])
+
+# 轉場（載入圖 / 全黑）：不計次、等它過去；超過 TRANSITION_MAX_S 才照舊計次 → 9
+_bfx = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'loading_bar_px.json').read_text(encoding='utf-8'))
+_load_px = {tuple(pt): tuple(c) for pt, c in zip(_bfx['pts'], next(x for x in _bfx['samples'] if x['file'] == 'p4/tpS0.png')['px'])}
+
+
+class Loading(Game):
+    """前 until 秒是英文版載入圖（真實取點 tpS0），之後回主畫面"""
+
+    def __init__(self, until):
+        super().__init__(unknown=True)
+        self.until = until
+
+    def sync(self):
+        self.unknown = self.t < self.until
+        super().sync()
+        for pt, c in _load_px.items():
+            if self.unknown:
+                self.painted[pt] = c
+            else:
+                self.painted.pop(pt, None)
+
+
+g = install(Loading(20.0))
+rc = uikit.preflight('t')
+check('preflight 載入圖 20 秒後回主畫面 → 0（載入期間不計次）', rc == 0 and g.t >= 20.0 and g.clicks == [], f'rc={rc} t={g.t}')
+g = install(Loading(1e9))
+rc = uikit.preflight('t')
+check('preflight 載入圖一直不結束 → 上限後照舊計次 → 9', rc == 9 and g.t >= screen_sigs.TRANSITION_MAX_S and g.clicks == [], f'rc={rc} t={g.t}')
 
 
 class Flaky(Game):

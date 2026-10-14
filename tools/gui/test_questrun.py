@@ -1122,6 +1122,9 @@ uikit.close_panel = lambda p, known_open=False: (_closed.append(p.name), True)[1
 quest.event = lambda *a, **k: None
 quest.log = lambda *a, **k: None
 check('close_stray_panel：組隊面板開著 → 關它並回 True', quest.close_stray_panel() is True and _closed == ['TEAMPANEL'])
+uikit.is_open = lambda p: p.name == 'QTEAM'
+_closed.clear()
+check('close_stray_panel：快速組隊「提示」視窗（重登殘留，errlog #700）→ 只點 ✕ 關（QTEAM），回 True', quest.close_stray_panel() is True and _closed == ['QTEAM'])
 uikit.is_open = lambda p: False
 check('close_stray_panel：沒有已知面板 → False（照舊當不認得）', quest.close_stray_panel() is False)
 uikit.is_open, uikit.close_panel, quest.event, quest.log, uikit.known_panel, quest.snap = _so
@@ -1382,6 +1385,15 @@ f = Fake(status={D17: [questrun.DOING]}, quest=[(42, [])] * 5)
 rc = go(f, [2017])
 check(f'42 一直來 → 重登 {questrun.RELOGIN_MAX} 次後 112', rc == questrun.EXIT_STEP and f.names().count('relogin') == questrun.RELOGIN_MAX)
 check('classify 29 → select_loop、42 → vs_stuck', questrun.classify(29) == 'select_loop' and questrun.classify(42) == 'vs_stuck')
+# --- B6b：quest.py 43 載入畫面卡住 → 不重登、重跑同一片；每任務最多 RELOGIN_MAX 次 ---
+f = Fake(status={D17: [questrun.DOING]}, quest=[(43, []), (0, done_tail)])
+rc = go(f, [2017])
+check('quest.py 43（載入畫面卡 60 秒）→ 不重登、重跑同一片 → 續跑完成', rc == 0 and 'relogin' not in f.names() and f.names().count('quest') == 2, str(f.names()))
+f = Fake(status={D17: [questrun.DOING]}, quest=[(43, [])] * 5)
+rc = go(f, [2017])
+check(f'43 一直來 → 重跑 {questrun.stuckrecover.RELOGIN_MAX} 次後 112（不重登、不當驗證視窗 9）', rc == questrun.EXIT_STEP and f.names().count('quest') == questrun.stuckrecover.RELOGIN_MAX + 1
+      and 'relogin' not in f.names() and '載入畫面' in questrun.LAST['info'].get('msg', ''), str(f.names()))
+check('classify 43 → loading_stuck', questrun.classify(43) == 'loading_stuck')
 # --- 交寵物（S5 / S6）---
 f = Fake(status={D19: [questrun.DOING]}, quest=[(29, [])])
 rc = go(f, [2019], after='none', pet_turnin=True)

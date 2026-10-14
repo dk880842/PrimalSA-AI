@@ -82,6 +82,7 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；其他（�
   40 任務 NPC 只有「再見」（quest.py 已 ESC）→ 背包 / 信箱處理：背包空格 < 1 的人刪白名單 → mail.py claim 領「丟失的物品」→ 續跑（不重置任務；每任務最多 BYE_RECOVER_MAX=2 次）；
      背包沒滿且信箱沒有丟失信（mail 112）→ 153；背包刪不出空位 / mail 114 等 → 154；
   19 自動巡路卡住（quest.py 已刷新角色 + 點地面解卡 3 次）→ questrun 再「刷新 + 走上附近出口」最多 2 次，仍不行 → 全員重登（見下）；
+  43 載入 / 轉場畫面連續 60 秒（quest.py 沒點任何東西）→ 重跑同一片，每任務最多 RELOGIN_MAX=2 次，再卡 → 112；
   42 快速戰鬥 VS 牌卡死 90 秒 → 全員重登；3 追蹤沒反應連 2 次以上且全隊頭上 VS 牌卡住 → 全員重登。
      全員重登 = relogin.run(confirm=True, stuck=True)（起始畫面可以是巡路 / 快速戰鬥；登入畫面只按遊戲已帶入帳密的「登錄」，鐵則 2）→ relogin 的 team.check
      （105 隊伍不對 → team.form --regroup）→ 關原地遇敵 → 戰鬥設定檢查 → 續片；每任務最多 RELOGIN_MAX=2 次，再卡 / 重登失敗 → 112；
@@ -459,10 +460,10 @@ def retry_form(T, form_fn, what: str, tries: int = FORM_TRIES) -> int:
 
 # ---------------------------------------------------------------- 純函式
 def classify(rc: int, tail=()) -> str:
-    """quest.py 退出碼 → 動作字串（測試直接餵）：done? / boss / stuck3 / gone / team / stall / select_loop / battle / irrev / verify / halt / knocked / bye / hp_low / vs_stuck / other"""
+    """quest.py 退出碼 → 動作字串（測試直接餵）：done? / boss / stuck3 / gone / team / stall / select_loop / battle / irrev / verify / halt / knocked / bye / hp_low / vs_stuck / loading_stuck / other"""
     return {0: 'check', 37: 'boss', 38: 'boss_team', 3: 'no_track', 5: 'gone', 30: 'team', 32: 'team', 33: 'stall', 29: 'select_loop', 25: 'battle',
             39: 'irrev', 18: 'reward_stuck', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked',
-            40: 'bye', 41: 'hp_low', 42: 'vs_stuck'}.get(rc, 'other')
+            40: 'bye', 41: 'hp_low', 42: 'vs_stuck', 43: 'loading_stuck'}.get(rc, 'other')
 
 
 def early_end(tail) -> bool:
@@ -1228,6 +1229,7 @@ class Run:
         team_retry = 0
         rewarps = 0
         relogins = 0
+        loading_retries = 0
         boss_retries = 0
         reward_retries = 0
         bye_recovers = 0
@@ -1333,6 +1335,12 @@ class Run:
                 return self.fail(EXIT_STALL, f'任務 {tid}：對話 ↔ 選擇對象面板循環沒進展（quest.py 29）{why}，停手交人', quest_rc=rc)
             if act == 'battle':
                 return self.fail(EXIT_BATTLE, f'任務 {tid}：完整戰鬥自動戰鬥卡住（quest.py 25）', quest_rc=rc)
+            if act == 'loading_stuck':                                 # quest.py 43：載入 / 轉場畫面卡 60 秒（沒點任何東西）→ 重跑同一片；載入中沒 HUD，重登登出不了
+                if not stuckrecover.allowed(loading_retries):
+                    return self.fail(EXIT_STEP, f'任務 {tid}：載入畫面卡住（quest.py 43），已重跑 {loading_retries} 次仍卡，停手交人（看 snap loading-stuck）', quest_rc=rc)
+                loading_retries += 1
+                event(f'任務 {tid}：載入畫面卡住（quest.py 43）→ 重跑同一片（第 {loading_retries}/{stuckrecover.RELOGIN_MAX} 次）')
+                continue
             if act == 'vs_stuck':                                      # quest.py 42：快速戰鬥 VS 牌卡死（刷新無效）→ 全員重登
                 if relogins >= RELOGIN_MAX:
                     return self.fail(EXIT_STEP, f'任務 {tid}：VS 牌卡死（quest.py 42），本任務已全員重登 {relogins} 次，停手交人', quest_rc=rc)

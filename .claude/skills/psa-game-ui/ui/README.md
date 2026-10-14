@@ -63,7 +63,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | `idle` | 主畫面 | 外掛紅字 / 底部圖示列 / 右下按鈕任一組命中；**不代表沒有驗證視窗** |
 | `walking` `dialog` `reward` `select` `battle` | 自動跑路中 / 對話框 / 獲得物品視窗 / 選擇對象面板 / 戰鬥中 | 舊有 |
 | `panel` + `pet` / `bag` / `ass` / `team` / `qteam` / `switch` / `setting` / `transfer` / `quest` / `role` | 面板：寵物 / 背包 / 外掛 / 組隊 / 快速組隊 / 切換角色 / 設置 / 傳送 / 任務 / 人物資訊（主畫面點頭像開出，✕ 1335,112） | **主判據 = 頂部標題板的字**（`PANEL_TITLE`，每面板 8 點中 7；各面板標題位置各自固定，只有寵物 / 人物資訊共用同一塊牛角板；字被蓋不到、不怕 EXP 浮字蓋框線）；標題都不中才退回 ✕ + 8 點框線備援；認得的面板不計入 unknown 計時、不產生 verify_suspect。右側直式分頁（寵物 / 倉庫 / 圖鑑、基礎 / 精靈）是子分頁、有選中 / 未選中兩種外觀，不作判據。切換角色標題在 EXP 橫幅出現時會被蓋（走備援）。改 screen_sigs 後 watch 要重啟才生效 |
-| `unknown` + annot `login` / `charsel` / `loading` / `black` | 登入畫面 / 選角畫面 / 載入畫面 / 黑畫面（轉場） | 已知畫面，不計 unknown |
+| `unknown` + annot `login` / `charsel` / `loading` / `black` | 登入畫面 / 選角畫面 / 載入畫面（「加載中」字形 / 英文版「Loading...」綠橘雙進度條，進度無關）/ 黑畫面（轉場） | 已知畫面，不計 unknown；quest.py / uikit.preflight 轉場最多等 60 秒（見 ui/quest.md「轉場等待與上限」） |
 | `unknown` + annot `popup_keypad` / `popup_qty` / `popup_confirm` + `over_bag` / `over_pet`（2026-10-12） | 面板：背包＋數字鍵盤 / 面板：背包＋數量輸入視窗 / 面板：寵物＋確定 / 取消提示窗 | 模態彈窗把底下整個畫面壓暗成約 ×0.5（實測背包 ×0.50、寵物 ×0.47）。**兩個條件都成立才認**：①底下是壓暗的背包或寵物面板（標題板 8 點同一比例 k ∈ 0.40～0.56）②彈窗本身 8 點中 7 吻合三種之一（拆分數字鍵盤、「數量輸入」、確定藍 / 取消橘兩顆鈕的「提示」確認窗＝丟寵 / 存入戰鬥寵）。已知畫面，不計 unknown。驗證視窗、網路異常提示（只有一顆確定）、道具詳情（穿戴 / 丟棄）等其他彈窗疊在面板上仍是 unknown → 10 s 照報。樣本 `fixtures/popup_px.json`（正例 20 張：鍵盤 3 / 數量輸入 7 / 確認窗 10；負例 9 張），tools/.cache 1306 張 1440×830 截圖 0 誤判（errlog #243 #244 #254 #261 #264 都是這三種彈窗，不是切換面板） |
 | `unknown`（其餘） | 不認得的畫面 | 連續 10 s → `alerts.unknown_long`（自動存截圖 `tools/.cache/watch-alerts/`）+ `verify_suspect` |
 

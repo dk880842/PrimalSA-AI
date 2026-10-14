@@ -140,13 +140,61 @@ def loading_text(px: dict) -> bool:
     return sum(map(white, on)) >= LOADING_ON_MIN * len(on) and sum(map(white, off)) <= LOADING_OFF_MAX * len(off)
 
 
-# 英文版載入圖（2026-10-14：「Loading...」黃字 + 底部綠 / 橘雙進度條；綠條長度會變，只取左段 2 點 + 橘條 2 點）
-SIG_LOADING_BAR = _t([(200, 725, 8, 255, 18), (400, 725, 8, 255, 18), (200, 758, 255, 170, 13), (700, 758, 255, 170, 13)], TOL)
+# 英文版載入圖（2026-10-14 03:17 quest-log/031712-UNKNOWN.png：「Loading...」黃字 + 底部綠 / 橘雙進度條，切換地圖時出現）。
+# 舊版（10ca3a6）只取綠條 x=200/400 + 橘條兩點 = 要求進度已過 x=400；剛開始載入時綠條還短 / 空 → 不認 → 仍可能連 3 次 unknown。
+# 改成「進度無關」：(1) 兩條進度條的米色外框三橫線（y 704 / 740 / 775，x 250～1150 四點，不透明 UI、整條同色，背景插畫換了也不變）
+# (2) 兩條軌道各 3 點（x 300 / 700 / 1100）= 填色（綠 / 橘）或空軌深棕，且左→右單調（填色後面才可以是空軌，不可空了又填）。
+LOADING_BAR_TOL = 22
+LOADING_BAR_FRAME = [(x, y, r, g, b, LOADING_BAR_TOL) for y, (r, g, b) in ((704, (169, 148, 117)), (740, (175, 155, 123)), (775, (189, 168, 133)))
+                     for x in (250, 550, 850, 1150)]
+LOADING_BAR_TRACK_X = (300, 700, 1100)
+LOADING_BAR_TRACKS = ((725, 'green'), (758, 'orange'))      # (y, 填色)
+
+
+def _bar_cell(c, fill: str) -> str | None:
+    """進度條軌道一點 → 'fill'（綠 8,255,18 / 橘 255,170,13）、'empty'（空軌深棕 56,48,38）或 None（都不像）"""
+    r, g, b = c
+    if fill == 'green' and g >= 200 and r <= 80 and b <= 80:
+        return 'fill'
+    if fill == 'orange' and r >= 230 and 130 <= g <= 215 and b <= 80:
+        return 'fill'
+    if max(c) <= 90 and r >= b and abs(r - 56) <= 30 and abs(g - 48) <= 30 and abs(b - 38) <= 30:
+        return 'empty'
+    return None
+
+
+def loading_bar(px: dict) -> bool:
+    """英文版載入圖雙進度條（外框 12 點全中 + 兩條軌道單調填色）；缺點 → False"""
+    if not _match_safe(px, LOADING_BAR_FRAME):
+        return False
+    for y, fill in LOADING_BAR_TRACKS:
+        if any((x, y) not in px for x in LOADING_BAR_TRACK_X):
+            return False
+        cells = [_bar_cell(px[(x, y)], fill) for x in LOADING_BAR_TRACK_X]
+        if None in cells:
+            return False
+        if 'empty' in cells and 'fill' in cells[cells.index('empty'):]:      # 空了又填 = 不是進度條
+            return False
+    return True
+
+
+def loading_bar_points() -> list:
+    return [(x, y) for x, y, *_ in LOADING_BAR_FRAME] + [(x, y) for y, _ in LOADING_BAR_TRACKS for x in LOADING_BAR_TRACK_X]
+
+
+def loading_probe_points() -> list:
+    """現場判斷載入畫面要讀的全部點（舊三點 + 「加載中」字形 + 英文版進度條；quest.loading_screen / uikit.loading_now 共用）"""
+    seen, out = set(), []
+    for pt in [(x, y) for x, y, *_ in SIG_LOADING] + [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points():
+        if pt not in seen:
+            seen.add(pt)
+            out.append(pt)
+    return out
 
 
 def is_loading(px: dict) -> bool:
-    """載入畫面：舊三點特徵、「加載中」字形、英文版「Loading」雙進度條任一成立"""
-    return _match_safe(px, SIG_LOADING) or loading_text(px) or _match_safe(px, SIG_LOADING_BAR)
+    """載入畫面：舊三點特徵、「加載中」字形、英文版「Loading」雙進度條（進度無關）任一成立"""
+    return _match_safe(px, SIG_LOADING) or loading_text(px) or loading_bar(px)
 # 「選擇對象」面板（點 NPC 後右側跳出的米色面板）
 SIG_SELECT = _t([(1112, 300, 104, 79, 48), (1112, 400, 104, 79, 48), (1112, 470, 104, 79, 48), (1416, 300, 93, 68, 36), (1416, 470, 93, 68, 36),
                  (1120, 470, 247, 216, 177), (1250, 490, 245, 229, 191), (1410, 470, 246, 219, 182)], TOL)
@@ -259,6 +307,26 @@ def is_black(px: dict) -> bool:
     return all(pt in px and max(px[pt]) < BLACK_MAX for pt in BLACK_PTS)
 
 
+TRANSITION_MAX_S = 60.0          # 轉場畫面（載入圖 / 全黑）最多等這麼久；超過當卡住（quest.py 43、uikit.preflight 照舊 9）
+
+
+def transition_points() -> list:
+    """transition() 要讀的全部點（載入畫面三種特徵 + 全黑 10 點，不重複）"""
+    pts = loading_probe_points()
+    seen = set(pts)
+    return pts + [pt for pt in BLACK_PTS if pt not in seen]
+
+
+def transition(px: dict) -> str | None:
+    """地圖轉場畫面（腳本「等它過去、不點、不算不認得」）→ 'loading'（任一種載入圖）/ 'black'（全黑）/ None。
+    只在 classify = unknown 時才問（有 HUD 的畫面不可能是轉場）；驗證 / 答題視窗不會有進度條外框、字形或全黑 10 點"""
+    if is_loading(px):
+        return 'loading'
+    if is_black(px):
+        return 'black'
+    return None
+
+
 def classify(px: dict) -> dict:
     """px 含 points() 的所有點 → {'state', 'gold', 'full', 'cmd', 'auto_off'}。
     state：dialog / reward / battle / panel / select / walking / idle / unknown（優先序不可動：HUD 紅字在戰鬥 / 選擇面板時還在，所以 idle 排最後）
@@ -363,9 +431,13 @@ def annot_points() -> list:
 
 
 def loading_points() -> list:
-    """「加載中」字形遮罩的取樣點（不在 points() / annot_points()，那兩組被凍結 fixture 綁住；watch 另外加讀）"""
-    seen = set(points()) | set(annot_points())
-    return [(x, y) for x, y, _ in LOADING_TEXT_PTS if (x, y) not in seen]
+    """「加載中」字形遮罩 + 英文版進度條的取樣點（不在 points() / annot_points()，那兩組被凍結 fixture 綁住；watch 另外加讀）"""
+    seen, out = set(points()) | set(annot_points()), []
+    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points():
+        if pt not in seen:
+            seen.add(pt)
+            out.append(pt)
+    return out
 
 
 def _match_safe(px: dict, sig) -> bool:

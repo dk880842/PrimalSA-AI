@@ -366,6 +366,30 @@ s = Script([UNK])
 rc = run2(['--no-track', '--max-seconds', '60'], s)
 ok &= check('exit 2，t >= 5', rc == 2 and s.t - 1000 >= 5.0, f'rc={rc} t={s.t - 1000}')
 
+print('(k4) 地圖轉場（載入圖 / 全黑）：等、不點、不計入不認得；載入圖超過 LOADING_MAX_S → 43，全黑超過 → 落回不認得規則 2')
+_keep_tr = quest.transition_screen
+_tr = {'until': 10.0, 'kind': 'loading'}
+quest.transition_screen = lambda: _tr['kind'] if s.t - 1000 < _tr['until'] else None
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '120'], s)
+ok &= check('載入 10 秒後變真的不認得 → 等完載入才開始數，exit 2 且 t >= 15', rc == 2 and s.t - 1000 >= 15.0, f'rc={rc} t={s.t - 1000}')
+ok &= check('載入期間 0 點擊', not [c for c in s.clicks if c[1].startswith('click')], str(s.clicks[:5]))
+_tr['until'] = 1e9
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '300'], s)
+ok &= check(f'載入圖一直不結束 → 退出碼 {quest.EXIT_LOADING_STUCK}（約 {quest.LOADING_MAX_S:.0f} 秒，不是 2）', rc == quest.EXIT_LOADING_STUCK and quest.LOADING_MAX_S <= s.t - 1000 < quest.LOADING_MAX_S + 5,
+            f'rc={rc} t={s.t - 1000}')
+_tr['kind'] = 'black'
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '300'], s)
+ok &= check('全黑一直不結束 → 上限後落回不認得規則 → 2（全黑沒有正面特徵，鐵則 5 從嚴）', rc == 2 and s.t - 1000 >= quest.LOADING_MAX_S, f'rc={rc} t={s.t - 1000}')
+s = Script([IDLE, UNK, UNK, IDLE, UNK])
+_tr.update(kind='loading', until=1e9)
+rc = run2(['--no-track', '--max-seconds', '300'], s)
+ok &= check('轉場中間回過主畫面 → 計時重來（兩段各自 < 上限不誤判卡住）', rc == quest.EXIT_LOADING_STUCK and s.t - 1000 >= quest.LOADING_MAX_S + 3, f'rc={rc} t={s.t - 1000}')
+ok &= check('transition_wait：上限內 True、超過 False', quest.transition_wait(100.0, 100.0 + quest.LOADING_MAX_S - 1) and not quest.transition_wait(100.0, 100.0 + quest.LOADING_MAX_S))
+quest.transition_screen = _keep_tr
+
 
 # ---- 事故後新增：隊伍檢查 / 戰鬥鎖檔 / --npc auto 取目前步驟 ----
 import argparse

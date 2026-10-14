@@ -64,7 +64,10 @@
   主畫面   外掛鈕紅字 ASS（沒對話框 / 巡路 / 戰鬥時）→ 檢測方針（使用者指定）：
            1. 場景裡有黃色「?」「!」任務標記 → 優先點它（findmark.ps1 找黃色色塊，點標記下方的 NPC）
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
-  不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）
+  轉場     載入畫面（「加載中」字形 / 英文版「Loading...」綠橘雙進度條〔進度無關，綠條剛開始很短也認〕/ 舊三點）或全黑 → 等待、不點、不計入不認得（screen_sigs.transition）；
+           同一串連續超過 LOADING_MAX_S=60 秒 → 存 snap loading-stuck、退出碼 43（questrun / rebirth 重跑同一片，stuckrecover.RETRY_RC）。
+  不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）；
+           每一串的第 1 次另存 *-unknown1.png（事後看得到前面是什麼畫面）。第 2 次起先試 close_stray_panel（已知殘留面板 / 快速組隊「提示」只點 ✕）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
   預設模式 BOSS 戰收尾（errlog #68，2026-10-11）：非 --solo / --fight 時，任務戰（對話框 / 黃問號後 QUEST_BATTLE_WINDOW 秒內開打；打到一半又開始 Auto Walking 的後續遇敵不算）打完、閒置滿 IDLE_CONFIRM_SECS 後
            **先驗隊伍（check_team）再停手、不點追蹤 / 黃問號、不接下一步**：滿員 = 退出碼 37、不滿 / 讀不到 = 38（事件 log 寫誰不在隊；重打流程由呼叫端做：char.py switch 被打飛者當單人隊長 → 追蹤自動傳送 → 重打 → 切回 DKBO → team.form）。
@@ -72,7 +75,7 @@
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
 結束時印「走路不計時 N 秒」「本片戰鬥 N 場」兩行（questrun 解析：巡路不計時、沒打仗才沿用全隊 HP）。
-退出碼：42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：43 載入 / 轉場畫面連續 LOADING_MAX_S 秒（結束本片，呼叫端重跑）、42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -279,15 +282,25 @@ def bye_button_only() -> bool:
     return bye_lines_only(dialog_button_lines())
 
 
-def loading_screen() -> bool:
-    """現場讀「加載中」字形點（+ 舊三點）→ 是不是地圖轉場的載入畫面（screen_sigs.is_loading）"""
-    pts = screen_sigs.loading_probe_points()
+def transition_screen() -> str | None:
+    """現場讀一次 → 地圖轉場畫面種類（screen_sigs.transition：'loading' 任一種載入圖〔加載中字形 / 英文版 Loading 雙進度條 / 舊三點〕、'black' 全黑）或 None"""
+    pts = screen_sigs.transition_points()
     try:
         out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
         cols = [tuple(int(v) for v in c.split(',')) for c in out]
     except Exception:
-        return False
-    return len(cols) == len(pts) and screen_sigs.is_loading(dict(zip(pts, cols)))
+        return None
+    return screen_sigs.transition(dict(zip(pts, cols))) if len(cols) == len(pts) else None
+
+
+def loading_screen() -> bool:
+    """相容舊名：是不是轉場畫面（載入圖 / 全黑）"""
+    return transition_screen() is not None
+
+
+def transition_wait(t0: float, now: float) -> bool:
+    """純函式：這一串轉場畫面（從 t0 起）還能繼續等嗎？超過 LOADING_MAX_S → False（當卡住，退出碼 EXIT_LOADING_STUCK）"""
+    return now - t0 < LOADING_MAX_S
 
 
 def button_probe_ok(px: dict) -> bool:
@@ -547,6 +560,11 @@ def close_stray_panel() -> bool:
             gui('key', '{ESC}')
             time.sleep(0.6)
             return not uikit.is_open(uikit.PLAYERPICK)
+        if uikit.is_open(uikit.QTEAM):                     # 快速組隊「提示」（5 人名單 + 組隊鈕）：重登 / team.form 中斷殘留（errlog #700）→ 只點 ✕，絕不按組隊
+            shot = snap('stray-qteam')
+            ok_ = uikit.close_panel(uikit.QTEAM, known_open=True)
+            event('畫面上有快速組隊「提示」視窗（重登 / 組隊中斷殘留）→ 點 ✕ 關閉（不按組隊）' + ('' if ok_ else '，但關不掉'), shot)
+            return ok_
         for p in (uikit.TEAMPANEL, uikit.SWITCH):
             if uikit.is_open(p):
                 event(f'誤開了「{p.name}」面板（戰鬥剛結束時刷新鈕點到主畫面按鈕）→ 點 ✕ 關閉')
@@ -994,6 +1012,9 @@ def unstick_refresh_due(tries: int) -> bool:
 
 WALK_UNSTICK_MAX = 3                 # 同一次 quest.py 最多自動解卡這麼多次，再卡 → 退出碼 19（交人；27～29 舊碼不重用）
 EXIT_WALK_STUCK = 19
+# 地圖轉場（載入圖 / 全黑）：等它過去、不點任何東西、不計入不認得次數；連續超過 LOADING_MAX_S 秒 → 當卡住，退出碼 43（呼叫端重跑；stuckrecover.RETRY_RC）
+LOADING_MAX_S = screen_sigs.TRANSITION_MAX_S
+EXIT_LOADING_STUCK = 43
 
 
 def _errlog(msg: str, fixed: str | None = None) -> None:
@@ -1828,6 +1849,7 @@ def _main() -> int:
     event(f'開始監測（每 {a.every}s，最長 {a.max_seconds}s）')
     unknown = 0
     unknown_t0 = 0.0             # 這一串不認得的第一次時間
+    trans_t0 = 0.0               # 這一串轉場畫面（載入圖 / 全黑）的第一次時間；0 = 不在轉場
     track_fail = 0
     track_t = 0.0                # 最後一次點任務追蹤的時間（TRACK_RETRY_SECS）
     idle_t0 = 0.0                # 這一串閒置的第一次時間（IDLE_CONFIRM_SECS）
@@ -2002,6 +2024,7 @@ def _main() -> int:
         last = st
         if st != 'unknown':
             unknown = 0
+            trans_t0 = 0.0
         if st == 'idle':
             if idle_streak == 0:
                 idle_t0 = time.time()
@@ -2372,14 +2395,26 @@ def _main() -> int:
                 event(f'只有「再見」一顆鈕的對話框（OCR 確認，不是驗證視窗）：{why} → 已 ESC 關閉，任務接不下去，退出碼 {EXIT_BYE_ONLY}', shot)
                 print('任務 NPC 只有「再見」，任務接不下去（已 ESC）', flush=True)
                 return EXIT_BYE_ONLY
-        elif st == 'unknown' and loading_screen():
-            log('載入畫面（「加載中」字形，換圖轉場）→ 等待，不計入不認得畫面')   # 2026-10-12 新插畫載入圖誤判 unknown 連 3 次 → 退出碼 2
+        elif st == 'unknown' and (tk := transition_screen()) and (tk == 'loading' or not trans_t0 or transition_wait(trans_t0, time.time())):
+            # 2026-10-12 新插畫「加載中」、10-14 英文版 Loading 雙進度條（綠條還短時舊特徵不中）誤判 unknown 連 3 次 → 退出碼 2。
+            # 載入圖（正面特徵）等超過上限 → 43（呼叫端重跑）；全黑只是「沒特徵」，等超過上限就落回下面的不認得規則（照舊 3 次 → 2，鐵則 5 從嚴）
+            now = time.time()
+            if not trans_t0:
+                trans_t0 = now
+                log(f'{"載入畫面" if tk == "loading" else "全黑轉場"}（換圖轉場）→ 等待，不點、不計入不認得畫面（上限 {LOADING_MAX_S:.0f} 秒）')
+            elif not transition_wait(trans_t0, now):
+                shot = snap('loading-stuck')
+                event(f'載入畫面連續 {now - trans_t0:.0f} 秒沒結束 → 當卡住，沒點任何東西，退出碼 {EXIT_LOADING_STUCK}（呼叫端重跑；斷線由 netwatch 處理）', shot)
+                _errlog(f'quest.py 載入畫面卡 {now - trans_t0:.0f} 秒 → 退出碼 {EXIT_LOADING_STUCK}')
+                return EXIT_LOADING_STUCK
             unknown = 0
             time.sleep(1.0)
             continue
-        elif st == 'unknown' or st == 'error':
+        elif st == 'unknown' or st == 'error':          # trans_t0 不在這裡清：全黑超時落到這裡後，下一輪不可再重新等 60 秒
             if unknown == 0:
                 unknown_t0 = time.time()
+                if st == 'unknown':
+                    snap('unknown1')                     # 這一串不認得的第一張（10-14 08:12 只有第 3 次的圖，看不到前面是什麼畫面）
             unknown += 1
             log(f'不認得的畫面 {unknown}/3 {s}')
             if unknown >= 2 and close_stray_panel():       # 戰鬥剛結束時「刷新角色」的 850,765 會點到主畫面的「組隊」鈕（2026-10-11 小豬愛情故事）→ 已知面板直接關，不算驗證視窗

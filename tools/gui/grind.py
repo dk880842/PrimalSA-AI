@@ -222,7 +222,7 @@ def confirm(secs: float) -> dict:
         if events >= EXP_NEED:
             return {'result': 'ok', 'events': events, 'polls': polls, 'max_px': max_px}
         full = full + 1 if c.get('full') else 0
-        unk = unk + 1 if (c.get('state') in ('unknown', 'error') and not hit) else 0
+        unk = unk + 1 if (c.get('state') in ('unknown', 'error') and not hit and not (c.get('state') == 'unknown' and uikit.transition_now())) else 0   # 載入圖 / 全黑轉場不算
         off = off + 1 if enc is False else 0
         if full >= FULL_N:
             return {'result': 'full_battle', 'events': events, 'polls': polls, 'max_px': max_px}
