@@ -479,6 +479,53 @@ setup(g)
 rc, sts, msg, info = ass.set_many({'DKBO': None})
 check('面板打不開 → 2', rc == ass.EXIT_NO_PANEL and g.ground_clicks == 0)
 
+
+class LGame(Game):
+    """點某角色頭像時遊戲把外掛面板關掉（2026-10-14 08:13 斷線 / 08:15 重登後隊員上線：點 DKBO3 後面板消失）。
+    lose = {角色: 會關幾次}；hud_after_lose=False → 面板消失後主畫面外掛鈕也不見（斷線回登入畫面）"""
+    def __init__(self, *a, lose=None, hud_after_lose=True, **k):
+        super().__init__(*a, **k)
+        self.lose = dict(lose or {})
+        self.hud_after_lose = hud_after_lose
+
+    def click(self, x, y):
+        hit = [r for r, xy in ass.ROLES.items() if xy == (x, y) or (xy[0] + ass.LABEL_DX, xy[1]) == (x, y)]
+        if self.panel and hit and self.lose.get(hit[0], 0) > 0:
+            self.lose[hit[0]] -= 1
+            self.clicks.append((x, y))
+            self.panel = False
+            self.hud = self.hud_after_lose
+            return
+        super().click(x, y)
+
+
+print('(22b) 選角色時外掛面板被遊戲關掉 → 重開面板再選（2026-10-14 questrun rc 109 / ass rc 3 DKBO3）')
+g = LGame(role='DKBO', lose={'DKBO3': 1}, checks={'自動戰鬥': True})
+setup(g)
+rc, sts, msg, info = ass.set_many({r: None for r in ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO']})
+check('點 DKBO3 後面板消失 1 次 → 重開面板、選到 DKBO3、5 人讀完 rc 0', rc == 0 and len(sts) == 5 and info.get('reopen') == ['DKBO3'], f'rc={rc} {msg} {info}')
+check('  面板開 2 次 / 關 1 次、沒點到地面、結束選在 DKBO', g.clicks.count(ass.ASS_BTN) == 2 and g.clicks.count(ass.CLOSE_BTN) == 1 and g.ground_clicks == 0 and g.role == 'DKBO' and not g.panel,
+      f'{g.clicks.count(ass.ASS_BTN)} {g.clicks.count(ass.CLOSE_BTN)} {g.ground_clicks}')
+g = LGame(role='DKBO', lose={'DKBO3': 99})
+setup(g)
+rc, sts, msg, info = ass.set_many({r: None for r in ['DKBO2', 'DKBO3', 'DKBO']})
+check('面板一再消失 → 重開 2 次後放棄、rc 6（不是 3「被遮住」）、DKBO2 結果保留、沒點到地面', rc == ass.EXIT_PANEL_LOST and info['role'] == 'DKBO3' and list(sts) == ['DKBO2']
+      and g.clicks.count(ass.ASS_BTN) == 1 + ass.PANEL_REOPEN and g.ground_clicks == 0 and '消失' in msg, f'rc={rc} {msg}')
+g = LGame(role='DKBO', lose={'DKBO3': 1}, hud_after_lose=False)
+setup(g)
+t0 = g.t
+rc, sts, msg, info = ass.set_many({r: None for r in ['DKBO2', 'DKBO3', 'DKBO']})
+check('面板消失且外掛鈕也不見（斷線回登入畫面）→ rc 6、只等 REOPEN_TIMEOUT 不等滿 40 秒、零地面點擊',
+      rc == ass.EXIT_PANEL_LOST and '打不開' in msg and g.t - t0 < ass.OPEN_TIMEOUT and g.ground_clicks == 0, f'rc={rc} {msg} t={g.t - t0:.1f}')
+g = LGame(role='DKBO', lose={'DKBO3': 1})
+setup(g)
+rc, st, msg = ass.get_states('DKBO3')
+check('單人 get_states 也一樣：面板消失 1 次 → 重開後 rc 0', rc == 0 and g.role == 'DKBO3' and g.clicks.count(ass.ASS_BTN) == 2, f'rc={rc} {msg}')
+g = CGame(role='DKBO', cover={'DKBO3': 10 ** 9})
+setup(g)
+rc, sts, msg, info = ass.set_many({r: None for r in ['DKBO2', 'DKBO3']})
+check('面板開著但頭像一直被蓋住 → 仍回 3（不重開面板）', rc == ass.EXIT_NO_ROLE and g.clicks.count(ass.ASS_BTN) == 1 and '面板開著' in msg, f'rc={rc} {msg}')
+
 print('(23) 頂部跑馬燈（綠髮吉祥物）蓋住 DKBO3：實機截圖 fixture')
 FIXD = json.loads(FIX.read_text(encoding='utf-8'))
 

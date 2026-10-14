@@ -94,6 +94,7 @@ class Game:
         self.sel_kind = 'pet'            # pet | card（最後選的是哪種；右側面板與按鈕依它）
         self.sel_card = None
         self.resort = False              # 存入後倉庫依名字重新排序（實機 #84）
+        self.compact = False             # 取出後後面的卡往前遞補（實機 #294 / #843：倉庫沒有空洞）；預設 False = 留空格（舊測試）
         self.store_dead = False          # 存入 / 取出鈕沒反應
         self.on_depot = None             # 進倉庫分頁時執行的 callback（模擬寵物欄被別人改動）
         self.btn_ocr_override = None
@@ -351,7 +352,11 @@ class Game:
         elif self.sel_card is not None and None in pets:
             c = dep[self.sel_card]
             pets[pets.index(None)] = dict(c, state='等待')
-            dep[self.sel_card] = None
+            if self.compact:
+                dep.pop(self.sel_card)
+                dep.append(None)
+            else:
+                dep[self.sel_card] = None
             self.sel_card = None
 
     # ---- OCR ----

@@ -454,9 +454,23 @@ _use('quest-log/080443-UNKNOWN.png')
 check('known_panel：背包頁殘留 → bag', uikit.known_panel() == 'bag')
 _use('quest-log/075938-UNKNOWN.png')
 check('known_panel：倉庫頁殘留（同一個背包面板）→ bag', uikit.known_panel() == 'bag')
+import bag as _bag  # noqa: E402
+check('  倉庫頁樣本：BAGDEPOT 認得、BAG 不認得（分頁特徵點 180,390 / 660,510）', uikit.is_open(_bag.DEPOT) and not uikit.is_open(_bag.BAG))
+_use('quest-log/080443-UNKNOWN.png')
+check('  背包頁樣本：BAG 認得、BAGDEPOT 不認得', uikit.is_open(_bag.BAG) and not uikit.is_open(_bag.DEPOT))
 for _rel in ('quest-log/060801-UNKNOWN.png', 'ui-log/080426-bag-nopopup.png', 'watch-alerts/unknown-1791843913.png', 'quest-log/060732-boss-done.png'):
     _use(_rel)
     check(f'known_panel：{_rel} → None（不是可關的面板）', uikit.known_panel() is None)
+for _rel in ('quest-log/082154-UNKNOWN.png', 'ui-log/082145-bag-tab.png'):
+    _use(_rel)
+    check(f'known_panel：背包殘留 + 底部「關閉 + 頭像」列蓋住舊點 730,688（{_rel}，2026-10-14 rc 9 / 龍王 rc 90）→ bag', uikit.known_panel() == 'bag')
+    import bag as _bag
+    check(f'  {_rel}：BAG（背包頁）認得、BAGDEPOT 不認得', uikit.is_open(_bag.BAG) and not uikit.is_open(_bag.DEPOT))
+# 背包 / 刪除模式特徵點不准落在底部「關閉 + 頭像」列（約 x 150～780、y 672～800；戰鬥刷新角色叫出、戰後可能殘留，疊在面板上）
+_ROW = (150, 672, 630, 128)
+import bag as _bag  # noqa: E402
+_hit = [(p.name, s[:2]) for p in (_bag.BAGANY, _bag.BAG, _bag.DEPOT, _bag.DELMODE) for s in p.sig if uikit.in_rect(s[0], s[1], _ROW)]
+check('背包 / 倉庫 / 刪除模式 Panel 特徵點都不在底部關閉列範圍', not _hit, str(_hit))
 uikit.px = lambda pts: None
 check('known_panel：讀不到 → None', uikit.known_panel() is None)
 _closed = []

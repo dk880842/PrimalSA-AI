@@ -972,6 +972,49 @@ check('  面板開 / 關各 1 次、倉庫分頁點 1 次、公共子分頁點 1
 check('  沒有逐格讀寵物欄（點寵物格只有取出後選新寵物那 4 下）', sum(1 for c in g.clicks if c[0] == pet.SLOT_X) == 4, str([c for c in g.clicks if c[0] == pet.SLOT_X]))
 print(f'      （批次取 4 隻共 {len(g.clicks)} 下點擊）')
 # 同名多隻：等級讀不出來 → 不盲取；讀得到 → 取對的
+# ---- 2026-10-14 格號遞補（errlog #843～851 卡坦分配：公共倉庫取出一隻後後面的卡往前補位，沿用舊格號就對不上）----
+check('parse_target ~N 格號提示：只在有名字 / 成長字串時收；超出 1～20 拒絕；fmt 往返',
+      pet.parse_target('加克拉~4') == {'name': '加克拉', 'growth': None, 'level': None, 'hint': 4}
+      and pet.parse_target('#34/7/4/8@1~12')['hint'] == 12 and pet.parse_target('@1~3') is None and pet.parse_target('加克拉~21') is None
+      and pet.parse_target('朵拉比斯') == {'name': '朵拉比斯', 'growth': None, 'level': None}
+      and pet.fmt_target(pet.parse_target('加克拉#34/7/4/8@1~5')) == '加克拉#34/7/4/8@1~5')
+_h = {0: 3, 1: 4, 2: 2, 3: 9}
+pet.shift_hints(_h, [0, 1, 2], 3)
+check('shift_hints：同倉庫取走第 3 格 → 提示 4 變 3、≤3 不動、別的倉庫（項 3）不動', _h == {0: 3, 1: 3, 2: 2, 3: 9}, str(_h))
+pet.shift_hints(_h, [0, 1, 2], None)
+check('shift_hints：取走哪格不明 → 不動（取前仍會核對身分）', _h == {0: 3, 1: 3, 2: 2, 3: 9})
+_U = lambda g_, lv=1: {'name': '加格', 'unnamed': g_, 'level': lv}       # noqa: E731  沒名字的新寵物卡（名字框 = 成長字串）
+_MOUNT = [{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None]
+
+
+def _ctake(cards, plan):
+    g_ = new(pets=mk_pets(DKBO2=list(_MOUNT)), depot=fake_pet.mk_depot(DKBO2={'public': cards}))
+    g_.compact = True                                                  # 實機：取出後後面的卡往前遞補
+    rc_, out_, err_ = run(pet.take_plan, pet.parse_plan(plan), 'public')
+    return g_, rc_, last_json(out_), err_
+
+
+g, rc, j, err = _ctake(['左迪洛斯', _U('34/7/4/8'), _U('31/7/4/8'), '加克拉', '摩娜西普'], 'DKBO2:#31/7/4/8~3,DKBO2:加克拉~4')
+check('遞補：先取第 3 格 → 第 4 格的加克拉補到第 3 格；計畫提示 ~4 自動 -1 → 直接取第 3 格、不用重新定位',
+      rc == 0 and [p and (p.get('unnamed') or p['name']) for p in g.pets['DKBO2'][1:3]] == ['31/7/4/8', '加克拉']
+      and [o.get('index') for o in j['ops']] == [3, 3] and not any(o.get('relocated') for o in j['ops'])
+      and [c and (c.get('unnamed') or c['name']) for c in g.depot['DKBO2']['public'][:3]] == ['左迪洛斯', '34/7/4/8', '摩娜西普'], f'rc={rc} {j["ops"]} {err[-200:]}')
+g, rc, j, err = _ctake(['左迪洛斯', '加克拉', '摩娜西普'], 'DKBO2:加克拉~3')
+check('提示過期（第 3 格是摩娜西普）→ 重讀倉庫以身分定位到唯一的加克拉（第 2 格）取出',
+      rc == 0 and g.pets['DKBO2'][1]['name'] == '加克拉' and j['ops'][0]['relocated']['from'] == 3 and j['ops'][0]['relocated']['to'] == 2 and depot_free(g) == 1, f'rc={rc} {j["ops"]}')
+g, rc, j, err = _ctake(['左迪洛斯', _U('34/7/4/8'), '加克拉', _U('34/7/4/8')], 'DKBO2:#34/7/4/8~1')
+check('提示過期且同字串 2 張（撞號）→ 72、取出鈕 0 次（不猜）', rc == 72 and depot_free(g) == 0 and '2 張' in j['ops'][0].get('msg', ''), f'rc={rc} {j["ops"]}')
+g, rc, j, err = _ctake(['左迪洛斯', _U('34/7/4/8', 1), '加克拉', _U('34/7/4/8', 2)], 'DKBO2:#34/7/4/8~4')
+check('同字串 2 張、提示指對那張 → 取提示的第 4 張（Lv2），不是第一張吻合的', rc == 0 and g.pets['DKBO2'][1]['level'] == 2 and g.depot['DKBO2']['public'][1]['level'] == 1, f'rc={rc} {j["ops"]}')
+g, rc, j, err = _ctake(['左迪洛斯', '加克拉'], 'DKBO2:加克拉~7')
+check('提示指到空格（遞補後已沒那麼多張）→ 以身分定位取第 2 格', rc == 0 and g.pets['DKBO2'][1]['name'] == '加克拉' and j['ops'][0]['relocated']['to'] == 2, f'rc={rc} {j["ops"]}')
+g = new(pets=mk_pets(DKBO2=list(_MOUNT)), depot=fake_pet.mk_depot(DKBO2={'public': ['左迪洛斯', '加克拉']}))
+g.compact = True
+rc, out, err = run(pet.take, 'DKBO2', 'public', 1, '加克拉')
+check('單次 take --index 不受影響：第 1 格不是加克拉 → 72 不取、不自動改找（身分照驗）', rc == 72 and depot_free(g) == 0 and not last_json(out).get('relocated'), f'rc={rc}')
+g, rc, j, err = _ctake(['左迪洛斯', _U('34/7/4/8'), _U('31/7/4/8'), '加克拉'], 'DKBO2:#34/7/4/8,DKBO2:#31/7/4/8,DKBO2:加克拉')
+check('沒給提示的 take-many：每隻都現場以身分找（取走後遞補也取對）', rc == 0 and [p and (p.get('unnamed') or p['name']) for p in g.pets['DKBO2'][1:4]] == ['34/7/4/8', '31/7/4/8', '加克拉'], f'rc={rc} {j["ops"]}')
+
 twin = {'DKBO': {'personal': [{'name': '朵拉比斯', 'level': 126}, {'name': '朵拉比斯', 'level': 1}]}}
 g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None]), depot=fake_pet.mk_depot(**twin))
 rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯', None, 1)

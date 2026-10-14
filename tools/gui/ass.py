@@ -19,7 +19,7 @@
 流程：開外掛 → 驗證面板真的開了 → 選角色並驗證 → pixel 讀四項 → （set：只點與目標不同的，再讀確認）→ 關面板（X 1318,90）並驗證。
 安全：每次點面板內座標前都先 pixel 驗證面板還開著（面板沒開時點這些座標會穿透到地面讓角色走掉）；
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
-退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色 / 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
+退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色（面板開著但頭像被遮住 / 點了不變）/ 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到；選角色時面板被遊戲關掉、重開 2 次仍不行）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
         12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 13 battle：人物首次動作的值確定不對（不自動改）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
 戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
@@ -30,6 +30,8 @@
 給其他腳本 import：ass.get_states(role) / ass.set_states(role, {項目: bool}) → (rc, 狀態 dict 或 None, 訊息)；
 ass.set_many({角色: {項目: bool} 或 None}) 一次開面板逐人讀 / 改 → (rc, {角色: 狀態}, 訊息, info)（P8，grind 用）。
 選角色（select_role）頭像被不透明東西（EXP 橫幅文字）蓋住會先等一下、沒選中會重試、第 3 次起改點名字標籤（2026-10-11 DKBO3 選不到的修正；失敗時面板開著存 tools/.cache/ass-select-fail-<角色>.png）。
+選角色時面板整個消失（不是被遮住；2026-10-14 08:13 斷線、08:15 重登後隊員陸續上線，點 DKBO3 後外掛面板被遊戲關掉 → 舊版誤報 rc 3「頭像 sel」= 讀到地圖黑底）：
+  select_role_reopen 先等戰鬥結束、重開面板（REOPEN_TIMEOUT 15 秒）再選，最多 PANEL_REOPEN=2 次；已讀 / 改好的前面角色不重做。仍不行 → 6（不是 3）。
 頂部跑馬燈（伺服器公告「恭喜玩家…」「翻倍成功」，左端綠髮啦啦隊吉祥物）疊在外掛面板上、剛好蓋住 DKBO3 頭像並吃掉點擊（2026-10-11 rc 52 的根因，
 失敗截圖 4 / 4 都是它）：select_role 偵測到就不往吉祥物上點、等它消失（最多 MARQUEE_WAIT 秒）；set_many 遇到時先把 DKBO3 挪到隊長前面最後做；
 跑馬燈在時 selected_role 用其他 4 人推斷（4 人都沒選中 = 選中的是被蓋住的 DKBO3）。
@@ -367,8 +369,9 @@ def _session(role: str, changes: dict | None, items=None, no_wait: bool = False)
         return EXIT_NO_PANEL, None, f'外掛面板 {OPEN_TIMEOUT:.0f} 秒內打不開（戰鬥 / 對話 / 載入中擋住？）；沒點任何面板內座標'
     rc, states, msg = EXIT_OK, None, ''
     try:
-        if not select_role(role):
-            return EXIT_NO_ROLE, None, f'選不到角色 {role}（圓鈕沒變選中，或面板中途消失）'
+        rc_, why = select_role_reopen(role, no_wait)
+        if rc_:
+            return rc_, None, why
         states = read_checks()
         if states is None:
             return EXIT_PANEL_LOST, None, '讀不到勾選框像素'
@@ -431,8 +434,9 @@ def _pet_session(role: str, want: dict | None, no_wait: bool = False):
         return EXIT_NO_PANEL, None, f'外掛面板 {OPEN_TIMEOUT:.0f} 秒內打不開；沒點任何面板內座標'
     st = None
     try:
-        if not select_role(role):
-            return EXIT_NO_ROLE, None, f'選不到角色 {role}'
+        rc_, why = select_role_reopen(role, no_wait)
+        if rc_:
+            return rc_, None, why
         if not pet_on_top():
             return EXIT_NOT_TOP, None, '右半面板不在頂端（讀不到「戰寵動作」標題）；不點。請先 shot 看畫面、手動捲回頂端'
         st = read_pet()
@@ -513,6 +517,43 @@ def _visit_checks(changes):
     return visit
 
 
+PANEL_REOPEN = 2                 # 選角色時面板被關掉（不是我們關的）→ 重開面板再選的次數上限
+REOPEN_TIMEOUT = 15.0            # 重開時等外掛鈕出現的上限（斷線回登入畫面時不要卡滿 OPEN_TIMEOUT 40 秒）
+
+
+def select_role_reopen(role: str, no_wait: bool = False, info: dict | None = None) -> tuple:
+    """set_many / battle_check 逐人選角色：select_role；選的過程中**面板整個消失**（不是被遮住）→ 等戰鬥結束、重開面板再選（最多 PANEL_REOPEN 次）。
+    2026-10-14 08:13 / 08:15 questrun 交接 rc 109（ass rc 3「選不到 DKBO3（頭像 sel）」）根因：點 DKBO3 頭像後外掛面板被遊戲關掉
+    （08:13 是斷線回登入畫面、08:15 是重登後隊員陸續上線 / 原地遇敵剛切換時），舊版不分「面板消失」與「被遮住」直接回 3，
+    且面板消失後讀的是地圖黑底 → 誤報「頭像 sel」。已選好、已讀改的前面角色不受影響（設定存在伺服器，重開面板照樣在）。
+    回 (0, '') 成功；(EXIT_IN_BATTLE, 訊息) 重開前等戰鬥逾時；(EXIT_PANEL_LOST, 訊息) 面板重開不了 / 重開後又消失；(EXIT_NO_ROLE, 訊息) 面板開著但選不到"""
+    if select_role(role):
+        return 0, ''
+    n = 0
+    while not panel_open() and n < PANEL_REOPEN:
+        n += 1
+        if info is not None:
+            info.setdefault('reopen', []).append(role)
+        log(f'ass：選 {role} 時外掛面板消失（斷線 / 開戰 / 隊員上線刷新 UI？）→ 重開面板再選（第 {n} 次）')
+        ok_, why = wait_not_battle(no_wait)
+        if not ok_:
+            return EXIT_IN_BATTLE, f'選 {role} 時外掛面板消失，重開前：{why}'
+        if not open_panel(REOPEN_TIMEOUT):
+            gui('shot', f'ass-select-fail-{role}.png')
+            return EXIT_PANEL_LOST, (f'選 {role} 時外掛面板消失，重開 {REOPEN_TIMEOUT:.0f} 秒內打不開（斷線回登入畫面 / 載入中 / 對話擋住？'
+                                     f'截圖 tools/.cache/ass-select-fail-{role}.png）')
+        if select_role(role):
+            log(f'ass：重開外掛面板後選到 {role}')
+            return 0, ''
+    gui('shot', f'ass-select-fail-{role}.png')          # tools/.cache/；之後看是什麼蓋住
+    if not panel_open():
+        return EXIT_PANEL_LOST, f'選 {role} 時外掛面板一再消失（重開 {n} 次仍不行；截圖 tools/.cache/ass-select-fail-{role}.png）'
+    st_ = avatar_state(role)
+    why = (f'頭像被頂部跑馬燈（綠髮吉祥物公告）蓋住，等了 {MARQUEE_WAIT:.0f} 秒仍沒消失' if st_ == 'marquee'
+           else f'頭像 {st_}；面板開著但被遮住 / 重試 {SELECT_TRIES} 次仍沒選中')
+    return EXIT_NO_ROLE, f'選不到角色 {role}（{why}）'
+
+
 def set_many(plan: dict, no_wait: bool = False) -> tuple:
     """一次開外掛面板，依 plan 的順序逐人選角色、讀勾選、（有 changes 就只點不對的並確認）、最後關面板。
     plan = {角色: {項目: bool} 或 None（只讀）}；選角色走 select_role（內建等遮擋 + 重試）。
@@ -546,13 +587,10 @@ def _many(plan: dict, visit, no_wait: bool = False) -> tuple:
                 continue
             i += 1
             t = clock()
-            if not select_role(role):
+            rc_, why = select_role_reopen(role, no_wait, info)
+            if rc_:
                 info['role'] = role
-                gui('shot', f'ass-select-fail-{role}.png')      # 面板還開著時的畫面（tools/.cache/；之後看是什麼蓋住）
-                st_ = avatar_state(role)
-                why = (f'頭像被頂部跑馬燈（綠髮吉祥物公告）蓋住，等了 {MARQUEE_WAIT:.0f} 秒仍沒消失' if st_ == 'marquee'
-                       else f'頭像 {st_}；被遮住 / 重試 {SELECT_TRIES} 次仍沒選中，或面板消失')
-                return EXIT_NO_ROLE, out, f'選不到角色 {role}（{why}）', info
+                return rc_, out, why, info
             rc, st, msg, todo = visit(role)
             if todo:
                 info['changed'][role] = todo

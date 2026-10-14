@@ -12,6 +12,10 @@
   uv run --no-project python tools/gui/pet.py take DKBO --depot public --pet 朵拉比斯        # 不給格號：現場逐張選卡讀名字找（沒名字的卡靠成長字串登錄檔）
   uv run --no-project python tools/gui/pet.py take-many --role all --pets 朵拉比斯 [--depot personal|public] [--skip-missing]
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"   # 每人不同目標
+  uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO4:#34/7/4/8~7,DKBO5:#31/7/4/8~8"   # ~N = 格號提示（撞號 / 同字串多張時指定哪張）
+    格號提示（2026-10-14 errlog #843～851）：取出一隻後同倉庫後面的卡往前遞補 → 後續項目的提示自動 -1（shift_hints）；取前一定核對身分，
+    提示那張不是目標 → relocate_card 重讀整個倉庫以身分定位（只收唯一吻合；多張且有 @等級 再比卡片等級），仍判不出 → 72 不取。
+    單次 take --index 不受影響：不符就 72（不自動改找）。沒給提示的目標照舊每次現場逐張找（快取只決定先看哪張，取走後格號也跟著 -1）
   uv run --no-project python tools/gui/pet.py set-state-many --role all 朵拉比斯 出戰 [--allow-mount]   # 多人同一隻寵物改狀態（面板只開一次）
   批次（2026-10-12）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 左欄頭像換角色連續做 → 關一次。目標字串 = 名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級
     @等級：同名多隻讀卡片綠字等級挑（-Green OCR；讀不到 / 讀成尾巴 123→23 = 不確定 → 逐張加讀；仍不確定且同名 ≥ 2 張 → 72 不取，2026-10-14 卡坦 restore）
@@ -1738,7 +1742,8 @@ def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, in
 
 
 # ---- 取出目標（2026-10-12 B：不准盲取格號；errlog #294 --index 盲取遞補後的格子取到左迪洛斯）----
-TARGET_RE = re.compile(r'^(?P<name>[^#@]*?)\s*(?:#\s*(?P<growth>\d{1,3}/\d{1,3}/\d{1,3}/\d{1,3}))?\s*(?:@\s*(?:[Ll][Vv])?(?P<level>\d{1,3}))?$')
+TARGET_RE = re.compile(r'^(?P<name>[^#@~]*?)\s*(?:#\s*(?P<growth>\d{1,3}/\d{1,3}/\d{1,3}/\d{1,3}))?\s*(?:@\s*(?:[Ll][Vv])?(?P<level>\d{1,3}))?'
+                       r'\s*(?:~\s*(?P<hint>\d{1,2}))?$')
 CARD_LVL_BOX = (-50, 18, 100, 26)        # 倉庫卡下緣綠字「0轉129級」：相對卡心 (dx, dy, w, h)（depot5.png 實測位置；OCR 待實機量）
 # 綠字用 -Green 二值化（2026-10-14 離線量 depot5.png：舊的 -Dark 0 把 126 讀成 26 / 6、129 讀成「0級」；-Green 100 讀成 126×3、129×2 + 29×1、133×3）
 # 卡坦 restore 實機：朵拉比斯 Lv123 卡讀成 23（掉了百位）→ 被排除，另一張 Lv130 讀不出 → 只剩它一張候選被取出（errlog #788～796）
@@ -1751,7 +1756,8 @@ CARD_DIGIT_FIX = str.maketrans({'l': '1', 'I': '1', '|': '1', '丨': '1', 'i': '
 def parse_target(text):
     """取出目標字串 → {'name', 'growth', 'level'}（純函式）。
     '朵拉比斯' / '朵拉比斯@126'（同名多隻用等級分）/ '#35/7/3/8'（沒名字的新寵物，成長字串）/ '克邦凱斯#35/7/3/8@1'。
-    名字對不到 Monster 表、格式錯、三者全空 → None"""
+    '~N' 結尾 = 格號提示（倉庫第 N 格，1～20；同字串撞號時用來指定哪一張，take_plan 取走前面的卡會自動遞補 -1，取前一定核對身分）→ t['hint']（沒給就沒有這個 key）。
+    名字對不到 Monster 表、格式錯、三者全空、格號超出 1～20 或格號沒配名字 / 成長字串 → None"""
     m = TARGET_RE.match(str(text or '').strip())
     if not m:
         return None
@@ -1760,11 +1766,16 @@ def parse_target(text):
     if raw and not name:
         return None
     t = {'name': name, 'growth': m['growth'], 'level': int(m['level']) if m['level'] else None}
+    if m['hint']:
+        if not 1 <= int(m['hint']) <= 20 or not (name or m['growth']):      # 格號提示一定要配名字 / 成長字串（身分），不准只靠格號 + 等級
+            return None
+        t['hint'] = int(m['hint'])
     return t if (t['name'] or t['growth'] or t['level'] is not None) else None
 
 
 def fmt_target(t: dict) -> str:
-    return (t.get('name') or '') + (f'#{t["growth"]}' if t.get('growth') else '') + (f'@{t["level"]}' if t.get('level') is not None else '')
+    return ((t.get('name') or '') + (f'#{t["growth"]}' if t.get('growth') else '') + (f'@{t["level"]}' if t.get('level') is not None else '')
+            + (f'~{t["hint"]}' if t.get('hint') else ''))
 
 
 def target_ok(idn: dict, t: dict, reg: dict) -> bool:
@@ -1872,6 +1883,17 @@ def shift_cache(cache: dict, idx: int) -> None:
     cache.update(moved)
 
 
+def shift_hints(hints: dict, keys, taken: int | None) -> None:
+    """純函式（就地改 hints = {第幾項: 格號}）：同一個倉庫（keys = 用同一個倉庫的項目）取走第 taken 格（1 起算）後，
+    格號提示 > taken 的 -1（後面的卡往前遞補，#294 / #843 實機）；≤ taken / taken 不明（None）不動。
+    提示只是「先看哪張」：取前一定核對身分，不符就 relocate_card 以身分重新定位（只收唯一吻合），所以算錯也不會取錯"""
+    if taken is None:
+        return
+    for k in keys:
+        if k in hints and hints[k] > taken:
+            hints[k] -= 1
+
+
 def _ensure_depot(depot: str) -> tuple:
     """現在在倉庫分頁且子分頁 = depot → (0, d)；不是就切（open_depot 每步驗證）"""
     d = scan_depot()
@@ -1944,6 +1966,41 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
     return None, f'{depot} 倉庫裡逐張看不到 {fmt_target(t)}（讀到 {seen}）'
 
 
+def relocate_card(depot: str, idx: int, t: dict, ctx: dict, info: dict, cache: dict) -> tuple:
+    """格號提示那張不是目標 → 現場重讀整個倉庫（逐張選卡讀名字框，只選取無副作用）找身分吻合的卡 → (index 或 None, 說明)。
+    只認嚴格身分（target_ok 且卡上有名字 / 成長字串；不靠縮圖）；吻合剛好 1 張 → 它；多張且有等級目標 → 卡片綠字等級剛好 1 張相等 → 它；
+    0 張 / 仍多張 → None（不猜，72）。先看提示格前面的卡（遞補只會往前移），由近到遠"""
+    reg = species_reg(ctx)
+    d = scan_depot()
+    if not (d and d['sig'] and d['tab'] == depot):
+        return None, '倉庫分頁不在'
+    filled = [k for k in range(20) if not d['empty'][k]]
+    order = [k for k in range(idx - 1, -1, -1) if k in filled] + [k for k in filled if k > idx]
+    hits, seen = [], {}
+    for k in order:
+        if not click_card(k, f'pet 重新定位 第 {k + 1} 格'):
+            return None, '面板特徵不在'
+        _, ok = wait_for_card(k, depot)
+        if not ok:
+            seen[k + 1] = 'select-fail'
+            continue
+        idn = read_ident(ctx, 4, 1.0)
+        cache[k] = {'name': idn['name'], 'growth': idn['growth']}
+        seen[k + 1] = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
+        if (idn['name'] or idn['growth']) and target_ok(idn, t, reg):
+            hits.append(k)
+    info['relocate_seen'] = seen
+    if len(hits) > 1 and t.get('level') is not None:
+        lv_hits = [k for k in hits if card_level_now(k, extra=True) == t['level']]
+        if len(lv_hits) == 1:
+            return lv_hits[0], ''
+    if len(hits) == 1:
+        return hits[0], ''
+    if not hits:
+        return None, f'沒有任何一張是 {fmt_target(t)}（讀到 {seen}）'
+    return None, f'有 {len(hits)} 張吻合 {fmt_target(t)}（格 {[k + 1 for k in hits]}），判不出是哪張，不猜'
+
+
 def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, cache: dict) -> int:
     """取出一隻（角色已選好；倉庫分頁不在就切）。idx = 指定格（0 起算，取前核對）/ None = 找目標。cache = 這個倉庫的卡片身分快取（批次共用）。
     零點擊條件：寵物欄滿 77、找不到 / 不符 72、按鈕驗證 75；取出後驗證不符 76（不自動存回）"""
@@ -1971,8 +2028,22 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
                 info['msg'] = why
                 return EXIT_NAME
             return bad(EXIT_NAME, why + '；沒取出')
-        info['index'] = idx + 1
+    info['index'] = idx + 1
+    # 計畫的格號提示（take_plan 目標 ~N）不是目標 → 以身分重新定位一次（取出後後面的卡往前遞補 / 格號過期，errlog #843～851 卡坦分配）；
+    # 單次 take --index 沒有 hint，不走這裡（照舊：不符 72 不取）
+    can_relocate = bool(t.get('hint')) and info.get('relocated') is None and bool(t.get('name') or t.get('growth'))
+
+    def relocate(what):
+        k, why = relocate_card(depot, idx, t, ctx, info, cache)
+        info['relocated'] = {'from': idx + 1, 'to': None if k is None else k + 1, 'why': why}
+        if k is None:
+            return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格{what}，不是 {fmt_target(t)}；重讀整個倉庫：{why}；沒取出')
+        log(f'倉庫第 {idx + 1} 格{what}，不是 {fmt_target(t)}；重讀倉庫找到唯一吻合的第 {k + 1} 格（遞補 / 格號過期）→ 改取那張（取前照樣核對）')
+        return _take_in_depot(role, depot, k, t, ctx, info, cache)
+
     if d['empty'][idx]:
+        if can_relocate:
+            return relocate('是空的')
         return bad(EXIT_NAME, f'{depot} 倉庫第 {idx + 1} 格是空的，沒有點')
     depot_before = 20 - sum(d['empty'])
     g = scan_depot()
@@ -1990,10 +2061,11 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
     img_ok = not (nm and target_ok(idn, t, reg)) and (unreadable_target(idn, 'card', idx, t, ctx) or img_target('card', idx, idn, t, ctx, info))
     if img_ok:
         info['img_pre'] = True
-    if not nm and not img_ok:
-        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格名字框讀不出來；沒取出')
-    if not target_ok(idn, t, reg) and not img_ok:
-        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {fmt_target(t)}；沒取出（格子可能遞補了，重讀倉庫或改用 --pet 找）')
+    if (not nm or not target_ok(idn, t, reg)) and not img_ok:
+        what = f'是 {nm}' if nm else '名字框讀不出來'
+        if can_relocate:
+            return relocate(what)
+        return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格{what}，不是 {fmt_target(t)}；沒取出' + ('' if nm is None else '（格子可能遞補了，重讀倉庫或改用 --pet 找）'))
     if t.get('level') is not None and info.get('pre_level') is None and not info.get('level_unverified'):
         lv = card_level_now(idx)
         if lv != t['level'] and lv is not None:
@@ -2181,6 +2253,7 @@ def take_plan(ops: list, depot: str = 'personal', skip_missing: bool = False, pa
         print(f'pet：{cmd} 參數不對（倉庫 {depot!r}、目標 {ops!r}）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
     ops = group_ops(ops)
+    hints = {i: t['hint'] for i, (_, t) in enumerate(ops) if t.get('hint')}     # 第 i 項的格號提示（~N）：取走前面的卡會遞補，跟著 shift_hints 調整（不改 t 本身）
     ctx = load_ctx(learn)
     ctx['skip_missing'] = skip_missing
     caches: dict = {}
@@ -2189,7 +2262,7 @@ def take_plan(ops: list, depot: str = 'personal', skip_missing: bool = False, pa
         if s.rc:
             return _out(s.rc, info, t0)
         try:
-            for r, t in ops:
+            for i, (r, t) in enumerate(ops):
                 op = {'role': r, 'pet': fmt_target(t), 'depot': depot, 'clicked': False}
                 info['ops'].append(op)
                 if r != cur:
@@ -2198,8 +2271,14 @@ def take_plan(ops: list, depot: str = 'personal', skip_missing: bool = False, pa
                         op['rc'] = final = rc
                         break
                     cur = r
-                rc = _take_in_depot(r, depot, None, t, ctx, op, caches.setdefault('public' if depot == 'public' else r, {}))
+                key = 'public' if depot == 'public' else r
+                hint = hints.get(i)
+                if hint:
+                    op['hint'] = hint
+                rc = _take_in_depot(r, depot, hint - 1 if hint else None, t, ctx, op, caches.setdefault(key, {}))
                 op['rc'] = rc
+                if op.get('clicked'):                             # 取走一張（不論後驗成敗）→ 同一個倉庫後面的格號提示遞補 -1
+                    shift_hints(hints, [j for j, (rr, _) in enumerate(ops) if ('public' if depot == 'public' else rr) == key], op.get('index'))
                 if rc and op.get('missing') and skip_missing:
                     op['skipped'] = op.pop('msg', '')
                     op['rc'] = 0
@@ -2448,7 +2527,7 @@ def main() -> int:
     p = sub.add_parser('take-many', help='批次取出：面板 / 倉庫分頁只開一次，左欄頭像換角色連續取（現場逐張找名字）', parents=[cp])
     p.add_argument('--role', default=None, help='all 或逗號分隔（配 --pets：每人取同樣的目標）')
     p.add_argument('--pets', default=None, help='目標（逗號分隔）：名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級')
-    p.add_argument('--plan', default=None, help='每人不同目標：DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126')
+    p.add_argument('--plan', default=None, help='每人不同目標：DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126；結尾 ~N = 倉庫格號提示（取走前面的卡自動遞補，取前核對身分，不符以身分重新定位）')
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
     p.add_argument('--skip-missing', action='store_true')
     p = sub.add_parser('depot-list', help='唯讀：倉庫卡片清單 + 各物種張數（逐張選卡讀名字；公共一次、個人每人一次）', parents=[cp])
