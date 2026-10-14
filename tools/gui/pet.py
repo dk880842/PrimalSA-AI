@@ -1856,6 +1856,7 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
         return bad(EXIT_FULL, f'{depot} 倉庫滿了（20 / 20），沒有點存入鈕')
     depot_before = 20 - sum(d['empty'])
     free_idx = d['empty'].index(True)
+    keys_before = card_keys(d)                                     # 存入前整頁卡片字形（0 點擊）：存入後靠前後差異定位新卡
     # 按鈕前最後一關：該格被選中、名字仍是目標、縮圖沒變（沒補位換人）、騎寵位沒動、按鈕底色 + 文字 = 存入
     f = scan_frames()
     if f is None or not (f['sel'] == [k == i for k in range(5)]):
@@ -1892,9 +1893,18 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
         return bad(EXIT_VERIFY, '存入後第 1 格（騎寵）縮圖變了！請人立刻看截圖確認')
     # 事後驗證（#84）：倉庫存入後會重新排序，不能認固定格位 → 寵物欄空格 +1 / 倉庫張數 +1（上面 wait_counts 已確認）
     # 再「現場逐張選卡讀名字」確認倉庫裡找得到這隻（先看新增的那格，再依序其他格）；沒名字的寵物比成長字串
-    new_idx = next((k for k in range(20) if not d2['empty'][k] and d['empty'][k]), free_idx)
+    # 新卡位置以「存入前後卡片清單的差異」為準（2026-10-14 修：倉庫存入後重排，空格差異 / 第一張同名卡都會指錯；errlog 倉庫格號記錯）
+    cands = locate_new_card(keys_before, card_keys(d2))
+    new_idx = cands[0] if cands else next((k for k in range(20) if not d2['empty'][k] and d['empty'][k]), free_idx)
     found = find_card(d2, depot, lambda idn, k: ident_confirms(idn, sl, 'card', k, ctx), ctx, first=new_idx, info=info, glyph_first=True)
-    info['depot_index'] = None if found is None else found + 1
+    if cands and len(cands) == 1:
+        info['depot_index'] = None if found is None else found + 1
+    elif cands:                                                    # 同名同字的卡不只一張、無法分辨哪張是新的：不報假格號
+        info['depot_index'] = None
+        info['depot_index_candidates'] = [k + 1 for k in cands]
+    else:                                                          # 讀不出前後清單：沿用舊做法，但標明不確定
+        info['depot_index'] = None if found is None else found + 1
+        info['depot_index_sure'] = False
     why = found is not None and img_conflict('card', found, ctx, slot_ident(sl), named=bool(sl.get('name')))
     if why:
         uikit.snap('pet-store-imgconflict')
@@ -1906,7 +1916,8 @@ def _store_body(role: str, want: str, depot: str, slot_no, allow_slot1: bool, ct
         if petmatch.learn_species(species_reg(ctx), sl['species'], None, sl['unnamed']):
             ctx['rdirty'] = True
     uikit.mark('store verified')
-    print(f'pet：{role} 的 {want}（原第 {sl["slot"]} 格）存入{"個人" if depot == "personal" else "公共"}倉庫第 {found + 1} 格')
+    where = f'第 {found + 1} 格' if info.get('depot_index') else (f'第 {" / ".join(map(str, info["depot_index_candidates"]))} 格之一（同名卡無法分辨）' if info.get('depot_index_candidates') else f'第 {found + 1} 格（未驗證）')
+    print(f'pet：{role} 的 {want}（原第 {sl["slot"]} 格）存入{"個人" if depot == "personal" else "公共"}倉庫{where}')
     return 0
 
 
@@ -1960,6 +1971,46 @@ def img_target(kind: str, idx: int, idn: dict, t: dict, ctx: dict, info: dict | 
     if info is not None and im:
         info.setdefault('img', []).append({'kind': kind, 'index': idx + 1, 'species': im['img_species'], 'score': im['img_score']})
     return bool(im) and im['img_species'] == t['name']
+
+
+def card_keys(d: dict | None) -> list | None:
+    """倉庫頁面 → 20 格的卡片鍵 [None（空）| (名字, 成長字串, 等級) | '?'（有卡但字形讀不出）]；讀不到頁面 / 字形關閉 → None"""
+    gl = glyph_cards(d)
+    if not d or not gl:
+        return None
+    out = []
+    for k in range(20):
+        if d['empty'][k]:
+            out.append(None)
+            continue
+        c = gl.get(k)
+        out.append((c.get('name'), c.get('growth'), c.get('level')) if c and (c.get('name') or c.get('growth')) else '?')
+    return out
+
+
+def locate_new_card(before: list | None, after: list | None) -> list:
+    """存入前後的卡片鍵（card_keys）→ 新多出來那張的候選 index（0 起算；純函式）。
+    先假設其餘卡保持相對順序（拿掉 after 的某一張 = before）→ 所有成立的位置；不成立（重排）→ 鍵的多重集差異。
+    '?' 當萬用字元。同鍵的相鄰卡拿掉哪張都成立 → 回傳整串（呼叫端知道無法分辨）。前後張數不是 +1 / 讀不到 → []"""
+    if before is None or after is None:
+        return []
+    b = [(k, x) for k, x in enumerate(before) if x]
+    a = [(k, x) for k, x in enumerate(after) if x]
+    if len(a) != len(b) + 1:
+        return []
+
+    def eq(x, y):
+        return x == y or x == '?' or y == '?'
+    out = []
+    for j in range(len(a)):
+        rest = a[:j] + a[j + 1:]
+        if all(eq(x[1], y[1]) for x, y in zip(rest, b)):
+            out.append(a[j][0])
+    if out:
+        return out
+    from collections import Counter
+    extra = Counter(x for _, x in a) - Counter(x for _, x in b)     # 多出來的鍵
+    return [k for k, x in a if extra.get(x, 0) > 0]
 
 
 def card_order(filled: list, first: int | None) -> list:

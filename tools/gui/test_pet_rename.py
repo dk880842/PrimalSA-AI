@@ -276,6 +276,37 @@ rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵�
 check('字形讀對 → 取出只點 1 次倉庫卡（不逐張找）', rc == 0 and g.card_clicks == [2] and g.pets['DKBO'][2]['name'] == '朵拉比斯', f'rc={rc} {g.card_clicks} {err[-200:]}')
 pet.glyph_cards = real_glyph
 
+# 倉庫已有同名卡 + 批次存回兩隻同名：各自格號要以「存入前後卡片清單差異」為準（2026-10-14 實機：兩隻都被記成同一格、與實際相反）
+fresh_tpl()
+real_glyph = pet.glyph_cards
+old5 = {'name': BRA, 'level': 5}
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': [dict(old5), dict(U('43/9/6/5', BRA), level=1), dict(old5), dict(U('42/9/6/5', BRA), level=2), '朵拉比斯', dict(old5)]}))
+g.compact = True
+g.resort = True
+pet.glyph_cards = fake_pet.glyph_stub(g)
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'])
+j = last_json(out)
+pub = g.depot['DKBO']['public']
+idxs = sorted(r['to_index'] for r in j['fixed'])
+real = sorted(k + 1 for k, c in enumerate(pub) if c and c['name'] == BRA and c.get('level') in (1, 2))
+check('同名多張批次存回：兩隻 to_index = 倉庫裡新卡的實際格號（不是同名第一張）', rc == 0 and len(j['fixed']) == 2 and None not in idxs and idxs == real and len(set(idxs)) == 2,
+      f'rc={rc} to={idxs} real={real} {[c and (c["name"], c.get("level")) for c in pub[:7]]} {err[-200:]}')
+check('  log 文字的格號與實際一致', all(f'倉庫第 {k} 格' in out for k in idxs), out[-400:])
+a, b = [None, (BRA, None, 5), (BRA, None, 5)], [None, (BRA, None, 5), (BRA, None, 1), (BRA, None, 5)]
+check('locate_new_card：同名不同等級 → 唯一格', pet.locate_new_card(a[1:], b[1:]) == [1], str(pet.locate_new_card(a[1:], b[1:])))
+check('locate_new_card：完全同鍵 → 回傳整串候選（無法分辨）', pet.locate_new_card([('a', None, 1)], [('a', None, 1), ('a', None, 1)]) == [0, 1])
+check('locate_new_card：張數不是 +1 / 讀不到 → []', pet.locate_new_card([('a', None, 1)], [('a', None, 1)]) == [] and pet.locate_new_card(None, [('a', None, 1)]) == [])
+# 完全同鍵（名字 + 等級都同）→ 不報假格號：to_index 為 None、候選列在 depot_index_candidates（用 store 直接驗）
+fresh_tpl()
+g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': [dict(U('43/9/6/5', BRA), level=1), dict(U('42/9/6/5', BRA), level=1)]}))
+g.compact = True
+g.resort = True
+pet.glyph_cards = fake_pet.glyph_stub(g)
+rc, out, err = run(pet.depot_fix_names, 'DKBO', ['public'])
+j = last_json(out)
+check('完全同鍵的卡：第二隻存回的格號不確定時不報假格號（None）、不當失敗', rc == 0 and len(j['fixed']) == 2 and j['fixed'][-1].get('to_index') is None, f'rc={rc} {j["fixed"]}')
+pet.glyph_cards = real_glyph
+
 # 改名後直接存：只點 1 次頭像（選角色），存回前不重選頭像
 fresh_tpl()
 g = new(pets=mk_pets(), depot=mk_depot(DKBO={'public': [U('43/9/6/5')]}))
