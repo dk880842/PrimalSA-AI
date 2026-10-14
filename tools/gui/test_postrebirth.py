@@ -119,13 +119,20 @@ rc = go(f, confirm_drop=True, from_seg='bag2', to_seg='bag2')
 check('刪完白名單仍不足 → 174（名單外不刪）', rc == pr.EXIT_BAG and '仍有人空格' in pr.LAST['info']['msg'])
 
 # ---------------- 失敗 / 續跑
-f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156]})
+f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 0]})
+rc = go(f, confirm_drop=True, to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run' and a[1] == '2031']
+check('紅暴 156（沒龍王）→ 自動改跑 questrun --solo（同樣的丟棄 / 買藥參數）→ 0', rc == 0 and len(hr) == 2 and '--solo' not in hr[0] and '--solo' in hr[1]
+      and '--buy-missing' in hr[0] and '--buy-missing' in hr[1] and '--drop-items' in hr[1] and pr.LAST['ran'][-1] == 'hero', str(hr))
+f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 112]})
 rc = go(f, confirm_drop=True)
-check('紅暴 156（沒龍王）→ 173、訊息指向單人逃跑、後面不跑', rc == pr.EXIT_HERO and '單人逃跑' in pr.LAST['info']['msg'] and pr.LAST['ran'] == ['inventory', 'adult', 'yayoi']
+check('紅暴單人逃跑也失敗 → 173、訊息帶 --solo 指令、後面不跑', rc == pr.EXIT_HERO and '--solo' in pr.LAST['info']['manual'] and pr.LAST['ran'] == ['inventory', 'adult', 'yayoi']
       and not any(s == 'petquest.py' for s, _ in f.calls))
 f2 = Fake()
 rc = go(f2, confirm_drop=True, reset=False)
 check('重跑 = 從紅暴續跑（前 3 段進度檔跳過）', rc == 0 and pr.LAST['ran'][0] == 'hero' and not any(a[1] == '2999' for s, a in f2.calls if s == 'questrun.py' and a[0] == 'run'))
+f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 9]})
+check('紅暴單人逃跑回 9（驗證視窗）→ 透傳', go(f, confirm_drop=True) == 9)
 f = Fake(rcs={('questrun.py', 'run'): [0, 0, 0, 112]})
 rc = go(f)
 check('1.82 前段 questrun 112 → 172、手動指令含 --from q182a', rc == pr.EXIT_QUEST and '--from q182a' in pr.LAST['info']['manual'])

@@ -7,12 +7,17 @@
         [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 0] [--hp-check-every 3] [--no-boss-retry]
         [--verify risk|each|off] [--no-verify-all] [--verify-skipped] [--no-battle-check] [--battle-check-always]
         [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
-        [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post]
+        [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post] [--solo] [--buy-missing]
+  --solo（2026-10-14，紅暴沒龍王 156 的退路；只限 questdefs 有 solo 的任務，其他 110；**未實機**）：不吃龍王，接取後 DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 →
+        每輪讀步號：步 < solo.group_from = 解散 → quest.py --solo 單人逃跑到 NPC（20；21 補血重跑 ≤2）→ team.form → quest.py --stop-after-dialog --disband-after；
+        kind=fight = 先組隊再 do_fight；步 ≥ group_from = 組隊 quest.py --stop-after-rewards 1；GONE / 5 = 完成 → DKBO 戰寵改回 → post → --drop-*；同一步 4 次沒前進 112
+  --buy-missing：check_prereq 只缺耐久力回複藥 → shopbuy.run（解散 → 逐人到醫院藥劑師買 → 組隊）→ 重讀；失敗 110（postrebirth hero 段一律帶）
   龍王的守護（2026-10-12 起）預設**不吃**，要吃加 --dragon；--no-dragon 保留相容（= 預設，no-op）。
   --dragon（2026-10-13 使用者定）對 questdefs 標 dragon（NO_DRAGON = 彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 以外）的任務吃，--dragon-all 全吃；
   questdefs dragon_required（紅暴 2031）不看 --dragon 一定吃，背包 / 公共倉庫都沒有 → 156（改走單人逃跑）；
   第一次從公共倉庫整疊取出，剩的**留在 DKBO 背包**，run 結束（成功或失敗；9 / 10 / 116 / 152 等畫面要留給人看的除外）才整疊存回公共倉庫；
   中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 開頭（不吃時）/ 結束補存。depot_use 判 buff 已在（skip）不計「已吃」
+  龍王失敗（depot_use 非 0，9 / 10 等除外）→ 等 1 秒再 quest.clear_leftovers 收尾（depot_use 自己也 tidy；2026-10-14 08:21 step=open 背包面板殘留 → 下一片誤報 9）。
   龍王用完（2026-10-14）：同一次 run 內第一次 depot_use 回 92 且 step=take（背包 / 倉庫都沒有）→ 記 dragon_unavailable（只在記憶體，每次 run 重置），
   事件 log 記一次「龍王已用完，本次不再吃」，後續任務 / 片不再呼叫 depot_use；dragon_required（紅暴）照舊再試、不行 156；其他失敗（90 面板等）仍下一片再試
   uv run --no-project python tools/gui/questrun.py status [任務ID …]          # 唯讀（要開 / 關任務詳情面板）：印各任務目前狀態（當前角色）
@@ -24,7 +29,7 @@
 流程：
   交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 清殘留（quest.clear_leftovers：NPC 對話框 / 只有再見 / 選擇對象 → ESC 不回答、獲得物品 → 確認、
                         已知面板〔背包 / 倉庫、組隊、切換、寵物…；標題板字 + ✕ 都命中〕→ 點 ✕；preflight 回 9 時也先清一次再重驗；清不掉的不認得畫面 → 9）
-                        → 關原地遇敵 + 等戰鬥結束 → 再清一次殘留（2026-10-13 08:00 / 08:01 背包面板、NPC 對話窗殘留 → ass 選不到頭像 / 外掛面板打不開 109）→ team.form 滿 5 人（同一次切換面板讀「當前」，不是 DKBO 才 char.ensure；
+                        → 關原地遇敵 + 等戰鬥結束 → 再清一次殘留 → 畫面還是戰鬥就等到打完（最多 240 秒，2026-10-14 09:17 戰鬥中 form 40 / 42 → 111）（2026-10-13 08:00 / 08:01 背包面板、NPC 對話窗殘留 → ass 選不到頭像 / 外掛面板打不開 109）→ team.form 滿 5 人（同一次切換面板讀「當前」，不是 DKBO 才 char.ensure；
                         2026-10-12 起不另跑 char.current，省 1～2 次開關面板）
                         → （2026-10-12 四寶玉之謎 DKBO 人物首次動作「風的精靈Lv.5」沒勾、BOSS 戰 2 人陣亡）戰鬥設定檢查 ass.battle_check：
                         一次開外掛面板、左欄頭像逐人（隊長最後）讀 5 人自動戰鬥 + DKBO 人物首次動作（值 風的精靈 + 打勾），只改不對的勾選、讀回確認；
@@ -77,11 +82,13 @@
 quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；其他（時間到 / 提前結束 / 模糊）一律不開詳情直接下一片；5 找不到任務 = 完成；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
   （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
   quest.py 回 0 沒有「任務完成」（時間到 / 提前結束 / 模糊）→ 直接下一片，完成由下一片 quest.py「任務完成」或回 5 判定（2026-10-14 起不再讀詳情確認）
-  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 當完成（不看詳情）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
+  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 當完成（不看詳情）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次；失敗時畫面在戰鬥 → 等打完再試、不計次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
   41 片內戰鬥後全隊 HP 偏低（只有 --team-hp-min > 0 才會出現）→ 補血（小護士）+ team.form → 下一片（每任務最多 HP_LOW_MAX=5 次，超過 111）；
   40 任務 NPC 只有「再見」（quest.py 已 ESC）→ 背包 / 信箱處理：背包空格 < 1 的人刪白名單 → mail.py claim 領「丟失的物品」→ 續跑（不重置任務；每任務最多 BYE_RECOVER_MAX=2 次）；
      背包沒滿且信箱沒有丟失信（mail 112）→ 153；背包刪不出空位 / mail 114 等 → 154；
   19 自動巡路卡住（quest.py 已刷新角色 + 點地面解卡 3 次）→ questrun 再「刷新 + 走上附近出口」最多 2 次，仍不行 → 全員重登（見下）；
+  （2026-10-14 碧青洞窟）3 / 30 每片讀座標：連 STUCK_SLICES=4 片 3 / 30（至少一片 3）、步號沒前進、stuckrecover.no_progress 成立（一對互通地圖出口間來回 / 同圖原地）
+     → 全員重登（同下，共用 RELOGIN_MAX）→ 出口來回時 walk.leave_junction 走出口到對面、離開回頭出口 ≥ 8 格 → 續片；用完 112。3 時步號比上次大 = 該步完成（不算卡住，下一片）；
   43 載入 / 轉場畫面連續 60 秒（quest.py 沒點任何東西）→ 重跑同一片，每任務最多 RELOGIN_MAX=2 次，再卡 → 112；
   42 快速戰鬥 VS 牌卡死 90 秒 → 全員重登；3 追蹤沒反應連 2 次以上且全隊頭上 VS 牌卡住 → 全員重登。
      全員重登 = relogin.run(confirm=True, stuck=True)（起始畫面可以是巡路 / 快速戰鬥；登入畫面只按遊戲已帶入帳密的「登錄」，鐵則 2）→ relogin 的 team.check
@@ -103,7 +110,7 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；其他（�
   119 接取失敗（info.accept_rc 是 questdetail 的 120～128）
   150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～126〔126 = 按了確定但驗不到交出〕 / 切回 DKBO / 重組；info.turnin）
   151 丟獎勵寵 / 道具失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；--drop-items：bag.purge 93 / 96；info.drop）
-  156 dragon_required 任務（紅暴）沒有龍王的守護 buff 也吃不到（背包 / 公共倉庫都沒有 → 改走單人逃跑 psa-quest-solo §4；一時失敗 → 處理後重跑）
+  156 dragon_required 任務（紅暴）沒有龍王的守護 buff 也吃不到（背包 / 公共倉庫都沒有 → 改跑 `run 2031 --solo`〔postrebirth 自動〕；一時失敗 → 處理後重跑）
   157 任務完成後獎勵處理失敗（questdefs post：bag.depot_many 存個人 / 公共倉庫、pet.store_many 寵物存個人；info.post）
       post 目前：紅暴 2031 英雄的祝福 → 個人、龍王的守護 → 公共；黃金羚羊之謎 2014 摩娜西普 → 個人寵物倉庫；五兄弟之謎 2012 人龍隨機蛋 → 公共（使用者 2026-10-13；--no-post 關）
   153 任務接不下去：quest.py 40（任務 NPC 只有「再見」）且背包有空、信箱沒有丟失的物品（或處理 2 次後 NPC 仍只有再見）→ 停手回報（條件不符？請人看）
@@ -147,6 +154,13 @@ EXIT_NEEDPETS = 155                                                   # 追蹤�
 EXIT_BYE, EXIT_BAGMAIL = 153, 154                                    # 任務 NPC 只有再見（背包 / 信箱都不是原因）/ 背包滿自動處理失敗（153～154 grep 過沒被用）
 EXIT_NODRAGON = 156                                                   # dragon_required 任務（紅暴 2031）沒有龍王的守護 buff 也吃不到 → 改走單人逃跑（156 grep 過沒被用）
 EXIT_POST = 157                                                       # 任務完成後的獎勵處理（questdefs post：存個人 / 公共倉庫）失敗（157 grep 過沒被用）
+SOLO_RUN_S = 900                # --solo：quest.py --solo 單人巡路到 NPC 的上限秒數（psa-quest-solo §2）
+SOLO_TALK_S = 120               # --solo：到 NPC 後組隊對話 quest.py --stop-after-dialog --disband-after 的上限秒數
+SOLO_GROUP_S = 900              # --solo：group_from 以後的步（紅暴步 7 / 8）組隊 quest.py --stop-after-rewards 1 的上限秒數（步 8 跨圖巡路）
+SOLO_SAME_MAX = 3               # --solo：同一步號連做幾次都沒前進 → 112
+SOLO_KNOCK_MAX = 2              # --solo：單人巡路被打飛（quest.py 21）最多補血重跑幾次
+SOLO_PET = {'first': '防禦', 'first_on': True, 'normal': '攻擊'}         # 跑路角色 DKBO 戰寵動作（psa-quest-solo §1，使用者 2026-10-10）
+SOLO_PET_BACK = {'first': '攻擊', 'first_on': False, 'normal': '攻擊'}   # 結束後改回
 FIGHT_TRIES = 2                 # kind=fight 步（紅暴步 6）：沒點到 NPC / 沒開打 / 輸了（35，先補血）最多打幾次
 FIGHT_S = 300                   # kind=fight 步 quest.py --fight --max-seconds
 FIGHT_NEAR = 3                  # 已在 fight 步 map / xy 這麼多格內 → 不再便捷傳送
@@ -165,6 +179,8 @@ WALK_CAP_S = 900.0              # quest.py 單次連續自動巡路最多不計�
 DEFAULT_SPOT = '地雷區'
 MAIL_GLOW_READS, MAIL_GLOW_GAP = 4, 0.3                              # 信封發亮會閃：讀 4 次（約 1 秒）任一次亮就算有信
 FORM_TRIES = 3                  # team.form 原地重試次數（小錯不退出）
+BATTLE_WAIT_S, BATTLE_POLL_S = 240.0, 3.0                              # 交接 / form 失敗時畫面在戰鬥：最多等這麼久、每幾秒看一次（2026-10-14 09:17）
+BATTLE_WAITS = 3                # retry_form 因戰鬥等待的最多輪數（不計入 FORM_TRIES）
 TEAM_FRESH_S = 30.0             # 隊伍在這麼多秒內驗過（form 成功 / quest.py 37）→ 接取前不重組、quest.py 加 --team-fresh（2026-10-12 解救老爺爺：開始前 4 次 + quest.py 啟動 1 次開關切換面板）
 DONE_TRUST_S = 2 * 3600         # 進度檔記「已完成」且在這段時間內 → 重啟續跑直接跳過（超過視為可能轉生 / 封印書重置過，重新讀一次詳情）
 DONE, DOING, PENDING = '已完成', '進行中', '待接取'
@@ -174,8 +190,10 @@ BATTLE_OK_S = 30 * 60           # 戰鬥設定檢查 OK 後這麼久內（之間
 HP_FRESH_S = 5 * 60             # 全隊 HP 讀過（且沒人偏低）/ 剛補完血後這麼久內、之間沒有戰鬥 → 任務開始前沿用（review §5.2）
 HP_EVERY = 3                    # quest.py --hp-check-every 預設（路上一般戰鬥每幾場讀一次全隊 HP；questdefs hp_every 可覆寫，連戰任務 1）
 RELOGIN_MAX = stuckrecover.RELOGIN_MAX   # 每個任務最多自動全員重登幾次（VS 牌卡死 / 巡路卡住解不開）
+STUCK_SLICES = stuckrecover.STUCK_SLICES   # 連續幾片 quest.py 3 / 30 且座標沒進展 → 卡住（重登 + 離開交界）
 RELOGIN_TEAM = stuckrecover.RELOGIN_TEAM   # relogin.py：重登進遊戲了但隊伍檢查 / 組隊失敗 → questrun 再 team.form --regroup
 BAG_ITEM = 92                   # bag.EXIT_ITEM：背包 / 倉庫找不到該道具
+BUYABLE = ('耐久力回複藥',)      # check_prereq 缺了可以 --buy-missing 自動買的（shopbuy.py medicine）
 NO_TOUCH = (uikit.EXIT_USAGE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT, 116, 152)   # 失敗退出時畫面要留給人看（驗證視窗 / 斷線 / 不可逆對話 / 領獎窗）→ 不再開背包存龍王
 LAST: dict = {}
 
@@ -332,6 +350,34 @@ class Tools(rebirth.Tools):
         """全員重登（stuck=True：起始畫面可以是巡路卡住 / 快速戰鬥 VS 牌卡死；登入畫面只按「登錄」，鐵則 2）"""
         return stuckrecover.real_relogin()
 
+    def map_warps(self):
+        return stuckrecover.map_warps()
+
+    def solo_setup(self):
+        """單人逃跑前（psa-quest-solo §1）：DKBO 戰寵 首次動作 = 防禦（勾）、一般動作 = 攻擊；DKBO 快速戰鬥 關（完整戰鬥才有逃跑鈕）→ ass 退出碼"""
+        import ass
+        rc, _st, _msg = ass.set_pet(LEADER, dict(SOLO_PET))
+        if rc:
+            return rc
+        rc, _st, _msg = ass.set_states(LEADER, {'快速戰鬥': False})
+        return rc
+
+    def solo_restore(self):
+        """單人逃跑完：DKBO 戰寵改回 首次動作 = 攻擊（不勾）、一般動作 = 攻擊（快速戰鬥由恢復掛機 grind.py 重開）→ ass 退出碼"""
+        import ass
+        rc, _st, _msg = ass.set_pet(LEADER, dict(SOLO_PET_BACK))
+        return rc
+
+    def shop_buy(self, roles):
+        """缺的人去薩姆吉爾醫院藥劑師買耐久力回複藥（shopbuy.run，會解散 → 逐人單人買 → 切回 DKBO → 組隊）→ (rc, info)"""
+        import shopbuy
+        return shopbuy.run(list(roles), confirm_spend=True)
+
+    def unbounce(self, pair):
+        """出口來回跳：走出口到對面、離開回頭出口（walk.leave_junction）→ 最後座標 / None"""
+        import walk
+        return walk.leave_junction(*pair)
+
     def unstick_exit(self):
         import quest as _q
         import walk
@@ -439,15 +485,50 @@ def save_progress(d: dict) -> None:
         pass
 
 
+def wait_battle_end(T, what: str, max_s: float = BATTLE_WAIT_S) -> bool:
+    """畫面是戰鬥（完整戰鬥 / 快速戰鬥 VS 牌，T.screen_state() == 'battle'）就每 BATTLE_POLL_S 秒看一次，等到不是戰鬥 → True；
+    max_s 秒還在打 → False。T 沒有 screen_state（舊呼叫端）→ True。2026-10-14 09:17：交接時還在戰鬥，team.form 開不了切換面板 40 / 42 三次 → 111"""
+    ss = getattr(T, 'screen_state', None)
+    if ss is None:
+        return True
+    waited = 0.0
+    while True:
+        try:
+            st = ss()
+        except Exception:                                              # noqa: BLE001
+            return True
+        if st != 'battle':
+            if waited:
+                event(f'{what}：戰鬥已結束（等了 {waited:.0f} 秒）')
+            return True
+        if waited >= max_s:
+            event(f'{what}：等了 {waited:.0f} 秒仍在戰鬥')
+            return False
+        if not waited:
+            event(f'{what}：畫面還在戰鬥 → 等打完再動（最多 {max_s:.0f} 秒）')
+        T.sleep(BATTLE_POLL_S)
+        waited += BATTLE_POLL_S
+
+
 def retry_form(T, form_fn, what: str, tries: int = FORM_TRIES) -> int:
     """team.form 原地重試（可恢復的小錯：切換面板偶爾讀到 0 張卡片 rc 42、誤開面板）：失敗 → 關誤開面板 → 等 2 秒 → 再組；
-    9（驗證視窗）/ 10（斷線）立即透傳；超過 tries 次才回最後一個失敗碼。questrun.Run.form 與 bossretry.form_as 共用"""
+    9（驗證視窗）/ 10（斷線）立即透傳；超過 tries 次才回最後一個失敗碼。questrun.Run.form 與 bossretry.form_as 共用。
+    （2026-10-14 09:17）失敗時畫面在戰鬥 → 等戰鬥結束（wait_battle_end）再試，**不計次**（最多 BATTLE_WAITS 輪，防無限迴圈）"""
     rc = 0
-    for i in range(tries):
+    i = waits = 0
+    while i < tries:
         rc = form_fn()
         if not rc or rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
             return rc
-        event(f'{what}：team.form 失敗 rc={rc}（{i + 1}/{tries}）→ 關誤開面板、2 秒後原地重試')
+        ss = getattr(T, 'screen_state', None)
+        if ss is not None and waits < BATTLE_WAITS and ss() == 'battle':
+            waits += 1
+            event(f'{what}：team.form 失敗 rc={rc}，畫面在戰鬥 → 等打完再組（不計次，第 {waits}/{BATTLE_WAITS} 輪）')
+            if not wait_battle_end(T, what):
+                return rc
+            continue
+        i += 1
+        event(f'{what}：team.form 失敗 rc={rc}（{i}/{tries}）→ 關誤開面板、2 秒後原地重試')
         cs = getattr(T, 'close_stray', None)
         if cs:
             try:
@@ -464,6 +545,11 @@ def classify(rc: int, tail=()) -> str:
     return {0: 'check', 37: 'boss', 38: 'boss_team', 3: 'no_track', 5: 'gone', 30: 'team', 32: 'team', 33: 'stall', 29: 'select_loop', 25: 'battle',
             39: 'irrev', 18: 'reward_stuck', 2: 'verify', uikit.EXIT_UNKNOWN_SCREEN: 'verify', uikit.EXIT_HALT: 'halt', 21: 'knocked',
             40: 'bye', 41: 'hp_low', 42: 'vs_stuck', 43: 'loading_stuck'}.get(rc, 'other')
+
+
+def step_advanced(prev, cur) -> bool:
+    """追蹤步號是否前進（都要是 >0 的整數；GONE / None / 0 不算）"""
+    return isinstance(prev, int) and isinstance(cur, int) and prev > 0 and cur > prev
 
 
 def early_end(tail) -> bool:
@@ -583,6 +669,11 @@ def print_plan(defs, opts: dict) -> None:
         print('[逐人驗證] --verify defer：沒風險事件的任務 run 結束不驗，留在進度檔待驗清單（12 小時）給呼叫端收尾驗')
     if opts.get('verify', 'risk') == 'risk':
         print('[逐人驗證] 沒風險事件的任務延後：全部任務結束後其他 4 人每人開一次詳情批次讀（失敗退出留進度檔，下次 run 結束再驗）')
+    if opts.get('solo'):
+        print('[單人逃跑 --solo] 不吃龍王；DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 < group_from：解散 → quest.py --solo → team.form → '
+              '--stop-after-dialog --disband-after；fight 步：組隊 → do_fight；步 ≥ group_from：組隊 --stop-after-rewards 1 → 完成後 DKBO 戰寵改回')
+    if opts.get('buy_missing'):
+        print('[--buy-missing] 前置只缺耐久力回複藥 → shopbuy（解散 → 逐人到醫院藥劑師買 500 石幣 → 組隊）→ 重讀；失敗 110')
     if opts.get('drop_items'):
         print(f'[丟獎勵道具] 全部成功後：{"、".join(opts["drop_items"])} 5 人 bag.purge（只勾名單內、提示窗清單核對；穿著的不動；失敗 151）')
     if opts.get('drop_reward'):
@@ -591,7 +682,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[交接回去] 全部成功 → grind.py start --spot {opts["spot"]}（不重啟 follow）；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 / 道具 156 紅暴沒龍王（改走單人逃跑）157 完成後獎勵存倉失敗 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 / 道具 156 紅暴沒龍王（改跑 --solo 單人逃跑）157 完成後獎勵存倉失敗 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -715,6 +806,9 @@ class Run:
                 self.st['dragon_in_bag'] = True                        # 取出後才失敗：龍王在 DKBO 背包，下次跳過取出、run 結束存回
             self.warn(f'龍王的守護失敗 rc={rc} {info}；這段不用龍王（會遇敵）')
             self.save()
+            if rc not in NO_TOUCH:                                     # 2026-10-14 08:21 / 08:49 / 09:01：depot_use 90 step=open 後背包面板晚一步才開 / 對話框蓋住 → 下一片 quest.py 誤報 9
+                self.T.sleep(1.0)                                      # 面板可能晚一步才出現：等一下再清
+                self.clear_leftovers('龍王的守護失敗後')
             if rc == BAG_ITEM and info.get('step') == 'take':
                 if not self.dragon_unavailable:
                     self.dragon_unavailable = True
@@ -748,8 +842,8 @@ class Run:
                 break
             self.T.sleep(3)
         why = ('背包與公共倉庫都沒有龍王的守護' if st == 'none' else f'龍王的守護吃不到（{st}，rc={self.info.get("dragon_rc")}）')
-        return self.fail(EXIT_NODRAGON, f'任務 {d["id"]}「{d["detail"]}」要有龍王的守護 buff 才組隊跑：{why} → 改走單人逃跑（psa-quest-solo SKILL.md §4 紅暴專屬：'
-                         f'questdetail.py accept → ass.py pet DKBO first 防禦 normal 攻擊 → team.py disband → 每步 quest.py --solo …）；'
+        return self.fail(EXIT_NODRAGON, f'任務 {d["id"]}「{d["detail"]}」要有龍王的守護 buff 才組隊跑：{why} → 改走單人逃跑（同一行指令加 --solo：'
+                         f'questrun.py run {d["id"]} --solo --buy-missing …；postrebirth hero 段自動接；手動流程 psa-quest-solo SKILL.md §4）；'
                          '確認倉庫真的沒有再走逃跑，一時失敗就處理後重跑', dragon=st)
 
     def dragon_return(self, where: str) -> int:
@@ -787,6 +881,8 @@ class Run:
             return self.fail(EXIT_HANDOVER, f'關原地遇敵失敗：{e}')
         if self.clear_leftovers('戰鬥設定檢查前') == 'unknown':     # 2026-10-13 08:00 / 08:01：背包面板 / NPC 對話窗殘留 → ass 選不到頭像 / 外掛面板打不開（109）
             return self.fail(uikit.EXIT_UNKNOWN_SCREEN, '戰鬥設定檢查前畫面不認得（疑似驗證視窗）→ 停手通知使用者（鐵則 5）')
+        if not wait_battle_end(T, '交接'):                              # 2026-10-14 09:17：關遇敵只等 20 秒，完整戰鬥還在打 → form 開不了切換面板 40 / 42 → 111
+            return self.fail(EXIT_HANDOVER, f'交接：等了 {BATTLE_WAIT_S:.0f} 秒仍在戰鬥（自動戰鬥沒開？），請人看畫面')
         rc = self.battle_gate('交接')                                   # 戰鬥已結束（上一步等過）才開外掛面板
         if rc:
             return rc
@@ -1100,6 +1196,21 @@ class Run:
         miss = {r: v for r, v in miss.items() if v}
         if low:
             return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 要 5 人 ≥{lv} 級：不到 / 讀不到 {low}', prereq_level=low)
+        if miss and self.o.get('buy_missing') and all(set(v) <= set(BUYABLE) for v in miss.values()):
+            who = sorted(miss)
+            event(f'{d["detail"]} 前置：{who} 缺 {names} → shopbuy 自動買（--buy-missing；解散 → 逐人到薩姆吉爾醫院藥劑師買 → 組隊）')
+            brc, binfo = self.T.shop_buy(who)
+            self.info['shopbuy'] = {'rc': brc, 'info': binfo}
+            self.team_ok_at = 0.0                                      # shopbuy 解散 / 重組過
+            if brc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return brc
+            if brc:
+                return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 前置：shopbuy 買 {names} 失敗 rc={brc}（180～184 見 shopbuy.py）', shopbuy_rc=brc)
+            rc, res = self.T.team_read(ALL_ROLES, names)
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            miss = {r: [n for n in names if not ((v or {}).get('have') or {}).get(n)] for r, v in (res or {}).items()} if not rc else {r: names for r in who}
+            miss = {r: v for r, v in miss.items() if v}
         if miss:
             return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 開始前背包要有 {names}：缺 / 讀不到 {miss}'
                              f'（去哪買：uv run --no-project python tools/query/psa.py item {names[0]}；薩姆吉爾的醫院 1005 藥劑師等）', prereq_missing=miss)
@@ -1182,7 +1293,10 @@ class Run:
         rc = self.check_prereq(d)                                      # 紅暴：5 人 ≥80 級、背包各有耐久力回複藥
         if rc:
             return rc
-        rc = self.require_dragon(d)                                    # 紅暴：沒龍王 buff 就吃，都沒有 → 156（改走單人逃跑）
+        solo = bool(self.o.get('solo') and d.get('solo'))
+        if self.o.get('solo') and not d.get('solo'):
+            return self.fail(EXIT_PREFLIGHT, f'任務 {tid}「{d["detail"]}」沒有 questdefs solo 設定，不能 --solo（目前只有紅暴 2031）')
+        rc = 0 if solo else self.require_dragon(d)                     # 紅暴：沒龍王 buff 就吃，都沒有 → 156（改走單人逃跑）；--solo 本來就是沒龍王的退路，不吃
         if rc:
             return rc
         if self.team_fresh():                                          # 交接剛組完（同一秒內連開 2 次切換面板，2026-10-12）→ 沿用
@@ -1215,6 +1329,8 @@ class Run:
             if rc:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
+        if solo:
+            return self.run_solo(d, ts, t0)
         if self.o.get('pet_turnin') and self.o.get('rested') and self.rested != tid:
             self.rested = tid                                          # --rested：呼叫端（petquest 練完）剛 rest-all 過且驗過 → 接取後 / 交寵物前都不重做（review 1013b §2.2）
             event(f'任務 {tid}：--rested → 呼叫端剛做過 rest-all（任務寵已等待），交寵物前不重做')
@@ -1235,6 +1351,8 @@ class Run:
         bye_recovers = 0
         hp_lows = 0
         turnin_tried = False
+        bounce: list = []                                              # 連續 quest.py 3 / 30 的片，每片結束讀的座標（出口來回跳 / 原地不前進偵測，stuckrecover.no_progress）
+        seen_step = None                                               # 最近讀到的追蹤步號（3 時步號前進 = 該步其實完成了，不算卡住）
         for k in range(self.o['max_slices']):
             if time.time() - t0 > self.o['max_min'] * 60:
                 return self.fail(EXIT_SLICES, f'任務 {tid} 超過 {self.o["max_min"]} 分鐘仍未完成')
@@ -1242,6 +1360,8 @@ class Run:
             self.ensure_dragon(d)
             from_pending = self.pending is not None
             step, kind, sd = self.special_step(d)
+            if isinstance(step, int) and step > 0:
+                seen_step = step
             if kind == 'manual' and d.get('turnin') and self.o.get('pet_turnin') and not turnin_tried:
                 turnin_tried = True                                    # 每任務只試一次：交完還停在 manual = 有人沒交到 → 下一圈 115
                 rc = self.do_turnin(d, step)
@@ -1284,6 +1404,10 @@ class Run:
             ts['last_rc'] = rc
             act = classify(rc, tail)
             event(f'任務 {tid} 第 {k + 1} 片 quest.py 退出碼 {rc}（{act}）')
+            if act in ('no_track', 'team'):
+                bounce.append((rc, self.read_pos_safe()))                  # 3 / 30 交替（碧青 2026-10-14）：記每片座標，連 STUCK_SLICES 片沒進展 → 重登 + 離開交界
+            else:
+                bounce.clear()
             if act == 'verify':
                 T.snap('questrun-verify')
                 return self.fail(uikit.EXIT_UNKNOWN_SCREEN, 'quest.py 看到不認得的畫面（疑似驗證視窗）→ 停手通知使用者（鐵則 5）', quest_rc=rc)
@@ -1381,6 +1505,12 @@ class Run:
                 continue
             if act == 'team':
                 self.mark_risk(f'隊伍散了（quest.py {rc}）')
+                ret = self.unbounce(tid, bounce, relogins)
+                if ret is not None:
+                    if ret[0]:
+                        return ret[0]
+                    relogins, rewarps, team_retry = ret[1], 0, 0
+                    continue
                 if team_retry >= 3:                                    # 對話剛收起時切換面板偶爾打不開（2026-10-11 小豬愛情故事最後一段），多給幾次
                     return self.fail(EXIT_HANDOVER, f'任務 {tid}：隊伍檢查連續失敗（quest.py {rc}）', quest_rc=rc)
                 team_retry += 1
@@ -1390,14 +1520,30 @@ class Run:
                 continue
             if act == 'no_track':
                 st2, kind2, sd2 = self.special_step(d)
+                stp = st2
+                if kind2 != 'walk' and stp is None:                    # 沒有特殊步驟的任務：這裡才讀一次步號（只在 3 時讀，給 pet_prep 與「步號前進」共用）
+                    stp = self.T.read_step(d['track'])
                 if d.get('pet_prep') and kind2 != 'walk':              # 步驟需要先抓 / 練寵（卡坦步 2 抓雞：追蹤本來就不會巡路）→ 不刷新 6 次，直接回明確退出碼 + 下一步指令
-                    stp = st2 if st2 is not None else self.T.read_step(d['track'])
                     hint = questdefs.pet_prep_hint(d, stp) if stp is not None else None
                     if hint:
                         return self.fail(EXIT_NEEDPETS, f'任務 {tid}：追蹤沒反應，{hint}', step=stp, quest_rc=rc)
                 if kind2 == 'walk':
                     self.pending = (st2, kind2, sd2)
                     continue                                           # 下一圈 special_step 會走 walk
+                if step_advanced(seen_step, stp):                      # 2026-10-14 猜謎三兄弟步 1：對話拿到金布伊後追蹤已進下一步、quest.py 才回 3 → 該步其實完成
+                    event(f'任務 {tid}：quest.py 3 但追蹤步號 {seen_step} → {stp} 已前進 → 該步完成，不算卡住，下一片')
+                    seen_step = stp
+                    rewarps = 0
+                    bounce.clear()
+                    continue
+                if isinstance(stp, int) and stp > 0:
+                    seen_step = stp
+                ret = self.unbounce(tid, bounce, relogins)
+                if ret is not None:
+                    if ret[0]:
+                        return ret[0]
+                    relogins, rewarps, team_retry = ret[1], 0, 0
+                    continue
                 if rewarps >= 2 and relogins < RELOGIN_MAX and self.T.vs_stuck():   # 刷新 + 點追蹤都無效且全隊頭上 VS 牌卡住（無戰鬥介面）→ 主動全員重登（碧青 12 樓 2026-10-12）
                     relogins += 1
                     rc2 = self.relogin_recover(tid, f'VS 牌卡住（無戰鬥介面、刷新 {rewarps} 次無效）', relogins)
@@ -1444,6 +1590,221 @@ class Run:
                 return self.fail(EXIT_STEP, f'任務 {tid}：自動巡路卡住，解卡與全員重登 {relogins} 次都無效（quest.py 19），請人看 snap walk-stuck', quest_rc=rc)
             return self.fail(EXIT_STEP, f'任務 {tid}：quest.py 非預期退出碼 {rc}', quest_rc=rc)
         return self.fail(EXIT_SLICES, f'任務 {tid}：{self.o["max_slices"]} 片後仍未完成')
+
+    # -- 單人逃跑（--solo；紅暴沒龍王的退路，psa-quest-solo §2 / §4；2026-10-14 02:41～02:55 手動流程寫成）--
+    def run_solo(self, d, ts, t0) -> int:
+        """每步讀追蹤步號：kind=fight → do_fight（HP → 便捷傳送 → 組隊 → --fight）；步號 ≥ solo.group_from → 組隊 quest.py --stop-after-rewards 1；
+        其他 → 解散 → quest.py --solo 單人巡路（逃跑）到 NPC（20）→ team.form → quest.py --stop-after-dialog --disband-after。
+        追蹤欄找不到（GONE / quest.py 5）= 完成 → DKBO 戰寵改回 → task_done（post 存倉）。單人逃跑 = 風險事件（完成時當場逐人驗）"""
+        T, tid, track = self.T, d['id'], d['track']
+        group_from = (d.get('solo') or {}).get('group_from', 10 ** 6)
+        self.mark_risk('單人逃跑（隊伍反覆解散 / 組隊）')
+        rc = T.solo_setup()
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            return self.fail(EXIT_HANDOVER, f'任務 {tid} 單人逃跑前 DKBO 外掛設定（戰寵 首次 防禦 / 一般 攻擊、快速戰鬥 關）失敗 ass rc={rc}', solo_rc=rc)
+        event(f'任務 {tid}：單人逃跑模式（步 < {group_from} 單人跑到 NPC 再組隊對話；fight 步便捷傳送組隊打；步 ≥ {group_from} 組隊跑）')
+        last, same, unread, knocked, boss_retries = None, 0, 0, 0, 0
+        for k in range(self.o['max_slices']):
+            if time.time() - t0 > self.o['max_min'] * 60:
+                return self.fail(EXIT_SLICES, f'任務 {tid}（單人逃跑）超過 {self.o["max_min"]} 分鐘仍未完成')
+            ts['slices'] = k + 1
+            step = T.read_step(track)
+            if step == T.gone():
+                return self.solo_done(d, ts, t0, k)
+            if not isinstance(step, int) or step <= 0:
+                unread += 1
+                if unread >= 3:
+                    return self.fail(EXIT_STEP, f'任務 {tid}（單人逃跑）追蹤步號連 3 次讀不到（追蹤欄被擋 / 卡片不在第一頁？）')
+                T.sleep(2)
+                continue
+            unread = 0
+            if step == last:
+                same += 1
+                if same >= SOLO_SAME_MAX:
+                    return self.fail(EXIT_STEP, f'任務 {tid}（單人逃跑）步 {step} 做了 {SOLO_SAME_MAX + 1} 次都沒前進，停手交人', step=step)
+            else:
+                last, same = step, 0
+            sd = (d.get('steps') or {}).get(step) or {}
+            event(f'任務 {tid}（單人逃跑）第 {k + 1} 輪：步 {step}' + (f'（{sd.get("kind")}）' if sd else ''))
+            if sd.get('kind') == 'fight':
+                if not self.team_fresh():                              # 前一步對話完 --disband-after 已解散：先組好隊，便捷傳送才全隊一起過去（02:52 手動同順序）
+                    rc = self.form(f'任務 {tid} 步 {step} BOSS 前（單人逃跑後組隊）')
+                    if rc:
+                        return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：team.form 失敗 rc={rc}')
+                ret, qrc = self.do_fight(d, step, sd)
+                if ret is not None:
+                    return ret
+                if qrc == 37:
+                    continue
+                if qrc in (38, 21):
+                    if not self.o.get('boss_retry', True) or boss_retries >= BOSS_RETRY_MAX:
+                        return self.fail(EXIT_TEAM, f'任務 {tid} 步 {step}：BOSS 後隊伍不滿 / 被打飛（{qrc}），bossretry 關閉或次數用完', quest_rc=qrc)
+                    boss_retries += 1
+                    brc, binfo = T.boss_retry(track, **self.br_kw())
+                    self.info.setdefault('boss_retry', []).append(binfo)
+                    self.st['battle_ok_at'] = 0
+                    if brc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                        return brc
+                    if brc:
+                        return self.fail(EXIT_TEAM, f'任務 {tid} 步 {step}：bossretry 退出碼 {brc}', boss_retry_rc=brc)
+                    self.team_ok_at = time.time()
+                    continue
+                if qrc in (2, uikit.EXIT_UNKNOWN_SCREEN):
+                    T.snap('questrun-verify')
+                    return self.fail(uikit.EXIT_UNKNOWN_SCREEN, 'quest.py --fight 看到不認得的畫面（疑似驗證視窗）→ 停手通知使用者（鐵則 5）', quest_rc=qrc)
+                if qrc == uikit.EXIT_HALT:
+                    return qrc
+                return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：quest.py --fight 退出碼 {qrc}', quest_rc=qrc)
+            if step >= group_from:
+                rc = self.solo_group_step(d, step)
+            else:
+                rc, knocked = self.solo_run_step(d, step, knocked)
+            if rc == 'gone':
+                return self.solo_done(d, ts, t0, k)
+            if rc:
+                return rc
+        return self.fail(EXIT_SLICES, f'任務 {tid}（單人逃跑）：{self.o["max_slices"]} 輪後仍未完成')
+
+    def solo_quest_rc(self, tid, step, qrc, what: str):
+        """單人逃跑各段 quest.py 的共用退出碼處理 → 'gone'（5 = 完成）/ 非 0 退出碼 / None（呼叫端自己判斷）"""
+        if qrc == 5:
+            return 'gone'
+        if qrc in (2, uikit.EXIT_UNKNOWN_SCREEN):
+            self.T.snap('questrun-verify')
+            return self.fail(uikit.EXIT_UNKNOWN_SCREEN, f'任務 {tid} 步 {step} {what}：不認得的畫面（疑似驗證視窗）→ 停手通知使用者（鐵則 5）', quest_rc=qrc)
+        if qrc == uikit.EXIT_HALT:
+            return qrc
+        if qrc == 39:
+            self.T.snap('questrun-irrev')
+            return self.fail(EXIT_IRREV, f'任務 {tid} 步 {step} {what}：對話含不可逆字樣（quest.py 39），沒按', quest_rc=qrc)
+        if qrc == 33:
+            return self.fail(EXIT_STALL, f'任務 {tid} 步 {step} {what}：對話無進展（quest.py 33）', quest_rc=qrc)
+        return None
+
+    def solo_run_step(self, d, step, knocked: int) -> tuple:
+        """對話步：解散 → quest.py --solo（逃跑巡路，到 NPC ESC 對話框 → 20）→ team.form（隊員拉到隊長旁）→
+        quest.py --stop-after-dialog --disband-after（對話 / 領獎完就停並解散）。→ (rc | 'gone' | 0, knocked)"""
+        T, tid, track = self.T, d['id'], d['track']
+        rc = T.team_disband()
+        self.team_ok_at = 0.0
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc, knocked
+        if rc:
+            return self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：單人跑前解散隊伍失敗 team rc={rc}'), knocked
+        qrc, tail = T.quest(['--solo', '--task', track, '--max-seconds', SOLO_RUN_S], SOLO_RUN_S + WALK_CAP_S + 120)
+        event(f'任務 {tid} 步 {step}：quest.py --solo 退出碼 {qrc}')
+        r = self.solo_quest_rc(tid, step, qrc, '單人巡路')
+        if r is not None:
+            return r, knocked
+        if qrc == 21:                                                   # 被打飛回村（psa-quest-solo §3）：補血後重跑這一步
+            knocked += 1
+            if knocked > SOLO_KNOCK_MAX:
+                return self.fail(EXIT_TEAM, f'任務 {tid} 步 {step}：單人巡路被打飛 {knocked} 次，停手交人（等級 / 路線？）', quest_rc=qrc), knocked
+            event(f'任務 {tid} 步 {step}：單人巡路被打飛（21）→ 補血後重跑（第 {knocked}/{SOLO_KNOCK_MAX} 次）')
+            try:
+                T.heal()
+            except RuntimeError as e:
+                return self.fail(EXIT_HANDOVER, f'補血失敗：{e}'), knocked
+            return 0, knocked
+        if qrc != 20:
+            return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：quest.py --solo 退出碼 {qrc}（預期 20 到達 NPC；3 = 追蹤沒反應、19 / 42 卡住）', quest_rc=qrc), knocked
+        rc = self.form(f'任務 {tid} 步 {step} 到 NPC 後')
+        if rc:
+            return (rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else
+                    self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：到 NPC 後 team.form 失敗 rc={rc}')), knocked
+        qrc, tail = T.quest(['--task', track, '--stop-after-dialog', '--disband-after', '--max-seconds', SOLO_TALK_S], SOLO_TALK_S + 180)
+        self.team_ok_at = 0.0
+        event(f'任務 {tid} 步 {step}：組隊對話 quest.py --stop-after-dialog --disband-after 退出碼 {qrc}')
+        r = self.solo_quest_rc(tid, step, qrc, '組隊對話')
+        if r is not None:
+            return r, knocked
+        if qrc in (0, 24, 26):                                          # 24 = 對話完遊戲自己又巡路（已解散）；26 = 解散沒做成（下一步開頭會再 team.disband）
+            return 0, knocked
+        if qrc == 18:
+            rr = T.reward_retry()
+            if rr != 'stuck':
+                return 0, knocked
+            T.snap('questrun-reward-stuck')
+            return self.fail(EXIT_REWARD, f'任務 {tid} 步 {step}：領獎視窗關不掉，請人工處理', quest_rc=qrc), knocked
+        if qrc in (30, 32):
+            return 0, knocked                                           # 隊伍不符：下一輪同一步重跑（會重新解散 → 單人跑 → 組隊）
+        return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：組隊對話 quest.py 退出碼 {qrc}', quest_rc=qrc), knocked
+
+    def solo_group_step(self, d, step):
+        """步號 ≥ group_from（紅暴步 7 龍王對話、步 8 回村交勾玉）：組隊 quest.py --stop-after-rewards 1（psa-quest-solo §4-6 / 7）→ 0 | 'gone' | 退出碼"""
+        T, tid, track = self.T, d['id'], d['track']
+        if not self.team_fresh():
+            rc = self.form(f'任務 {tid} 步 {step} 組隊步前')
+            if rc:
+                return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：team.form 失敗 rc={rc}')
+        qrc, tail = T.quest(['--task', track, '--stop-after-rewards', 1, '--max-seconds', SOLO_GROUP_S], SOLO_GROUP_S + WALK_CAP_S + 120)
+        self.team_ok_at = 0.0
+        event(f'任務 {tid} 步 {step}：組隊 quest.py --stop-after-rewards 1 退出碼 {qrc}')
+        r = self.solo_quest_rc(tid, step, qrc, '組隊步')
+        if r is not None:
+            return r
+        if qrc == 0 or qrc in (30, 32, 37):
+            return 0
+        if qrc == 18:
+            rr = T.reward_retry()
+            if rr != 'stuck':
+                return 0
+            T.snap('questrun-reward-stuck')
+            return self.fail(EXIT_REWARD, f'任務 {tid} 步 {step}：領獎視窗關不掉，請人工處理', quest_rc=qrc)
+        if qrc == 29:
+            return self.fail(EXIT_STALL, f'任務 {tid} 步 {step}：對話 ↔ 選擇對象循環（quest.py 29；步 7 龍王對話卡住多半是有人寵物欄滿）', quest_rc=qrc)
+        return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：組隊步 quest.py 退出碼 {qrc}', quest_rc=qrc)
+
+    def solo_done(self, d, ts, t0, k) -> int:
+        """單人逃跑完成：DKBO 戰寵改回（失敗只警告）→ 進度檔 → task_done（post：英雄的祝福存個人、龍王的守護存公共）"""
+        tid = d['id']
+        rc = self.T.solo_restore()
+        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            return rc
+        if rc:
+            self.warn(f'任務 {tid}：DKBO 戰寵動作改回（首次 攻擊 不勾 / 一般 攻擊）失敗 ass rc={rc}，請手動 ass.py pet DKBO first 攻擊 first off normal 攻擊')
+        ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
+        self.save()
+        event(f'任務 {tid}「{d["detail"]}」已完成（單人逃跑；追蹤欄找不到該任務；{int(time.time() - t0)} 秒、{k + 1} 輪）')
+        return self.task_done(d, ts)
+
+    def read_pos_safe(self):
+        try:
+            return self.T.read_pos()
+        except Exception:                                              # noqa: BLE001
+            return None
+
+    def unbounce(self, tid, bounce: list, relogins: int):
+        """出口來回跳 / 原地不前進（2026-10-14 碧青洞窟 08:48～09:10：quest.py 3 / 30 交替 20 分鐘從沒觸發重登）：
+        連續 STUCK_SLICES 片 3 / 30（至少一片是 3）、步號沒前進、stuckrecover.no_progress 成立 → 全員重登（relogin_recover：重登 → 隊伍檢查 / 重組 → 關遇敵 → 戰鬥設定）→
+        kind=junction 時 walk.leave_junction(A, B)：走出口到對面、離開回頭出口 ≥ walk.AWAY_MIN 格 → 下一片重點追蹤。
+        → None = 沒判定卡住（呼叫端照舊處理）；(rc, relogins)：rc 非 0 = 直接回傳的退出碼，0 = 已處理、續片"""
+        win = bounce[-STUCK_SLICES:]
+        if len(win) < STUCK_SLICES or not any(r == 3 for r, _ in win):   # 純 30 / 32 連續（隊伍組不起來）照舊走 team 分支（3 輪 → 111）
+            return None
+        warps = getattr(self.T, 'map_warps', stuckrecover.map_warps)()
+        np_ = stuckrecover.no_progress([p for _, p in win], warps, STUCK_SLICES)
+        if not np_:
+            return None
+        pts = [p for _, p in win if p]
+        what = (f'出口來回跳 {np_["pair"][0]}↔{np_["pair"][1]}' if np_['kind'] == 'junction' else '原地不前進') + f'（連 {STUCK_SLICES} 片 quest.py 3 / 30，座標 {pts}）'
+        self.mark_risk('卡住（出口來回跳 / 原地）')
+        if relogins >= RELOGIN_MAX:
+            return self.fail(EXIT_STEP, f'任務 {tid}：{what}，本任務已全員重登 {relogins} 次仍卡，停手交人', bounce=pts), relogins
+        relogins += 1
+        bounce.clear()
+        rc = self.relogin_recover(tid, what, relogins)
+        if rc:
+            return rc, relogins
+        if np_['kind'] == 'junction':
+            try:
+                r = self.T.unbounce(np_['pair'])
+                event(f'任務 {tid}：重登後離開交界 {np_["pair"]} → {r}（再點追蹤）')
+            except Exception as e:                                     # noqa: BLE001
+                event(f'任務 {tid}：離開交界失敗：{e}（照樣再點追蹤）')
+        return 0, relogins
 
     def relogin_recover(self, tid, why: str, n: int) -> int:
         """全員重登（relogin.py --confirm，stuck=True）→ 隊伍檢查（relogin 自己 team.check；105 = 隊伍不對 → team.form --regroup）→ 關遇敵 → 戰鬥設定檢查。
@@ -1596,7 +1957,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False,
         battle_check: bool = True, pet_turnin: bool = False, drop_reward=None, confirm_drop=None,
         verify: str = 'risk', dragon_all: bool = False, hp_every: int = HP_EVERY, battle_cache: bool = True,
-        post: bool = True, drop_items=None, confirm_drop_items=None, rested: bool = False) -> int:
+        post: bool = True, drop_items=None, confirm_drop_items=None, rested: bool = False, solo: bool = False, buy_missing: bool = False) -> int:
     """use_dragon 預設 False（2026-10-12 起不吃龍王的守護；--dragon 對 questdefs 標 dragon 的任務吃（NO_DRAGON 以外全部），dragon_all 全吃）。
     verify = risk（預設：風險事件才當場逐人驗，其餘 run 結束批次驗）/ each（舊行為：每任務完成當場驗）/ off；verify_all=False 相容舊參數 = off。
     drop_reward 要和 confirm_drop 名單完全相同才會丟（不可逆）"""
@@ -1632,7 +1993,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     opts = dict(after=after, dragon=use_dragon, spot=spot, max_slices=max_slices, slice_s=slice_s, max_min=max_min, hp_min=hp_min, trust_progress=trust_progress,
                 team_hp_min=team_hp_min, boss_retry=boss_retry, verify=verify, verify_skipped=verify_skipped,
                 battle_check=battle_check, pet_turnin=pet_turnin, drop_reward=drops, dragon_all=dragon_all, hp_every=hp_every,
-                battle_cache=battle_cache, post=post, drop_items=ditems, rested=rested)
+                battle_cache=battle_cache, post=post, drop_items=ditems, rested=rested, solo=solo, buy_missing=buy_missing)
     if dry_run:
         print_plan(defs, opts)
         return 0
@@ -1793,6 +2154,8 @@ def main() -> int:
         p.add_argument('--confirm-drop-items', default='', help='--drop-items 的確認（名單要完全相同）')
         p.add_argument('--no-post', action='store_true', help='任務完成後不做 questdefs post 的獎勵存倉（紅暴：英雄的祝福存個人、龍王的守護存公共）')
         p.add_argument('--rested', action='store_true', help='配 --pet-turnin：呼叫端剛 pet.py rest-all 過（petquest 練完）→ 交寵物前不重做 rest-all')
+        p.add_argument('--solo', action='store_true', help='單人逃跑模式（只限 questdefs 有 solo 的任務 = 紅暴 2031；沒龍王 156 的退路，psa-quest-solo）')
+        p.add_argument('--buy-missing', action='store_true', help='前置缺耐久力回複藥 → shopbuy.py 自動買（每人 500 石幣；解散 → 逐人單人買 → 組隊）')
     p = sub.add_parser('plan')
     common(p)
     p = sub.add_parser('status')
@@ -1835,7 +2198,7 @@ def main() -> int:
               battle_check=not a.no_battle_check, pet_turnin=a.pet_turnin, drop_reward=a.drop_reward, confirm_drop=a.confirm_drop,
               verify=getattr(a, 'verify', 'risk'), dragon_all=a.dragon_all, hp_every=getattr(a, 'hp_check_every', HP_EVERY),
               battle_cache=not getattr(a, 'battle_check_always', False), post=not a.no_post, drop_items=a.drop_items,
-              confirm_drop_items=a.confirm_drop_items, rested=a.rested)
+              confirm_drop_items=a.confirm_drop_items, rested=a.rested, solo=a.solo, buy_missing=a.buy_missing)
     if a.dragon and a.no_dragon:
         print('questrun：--dragon 和 --no-dragon 不能同時給', file=sys.stderr)
         return uikit.EXIT_USAGE

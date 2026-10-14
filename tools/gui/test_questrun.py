@@ -496,8 +496,8 @@ f = Fake(status={D17: [questrun.DOING]}, quest=[(32, [])] * 4)
 check('32 連續 4 次 → 111', go(f, [2017]) == questrun.EXIT_HANDOVER)
 
 # 8) 3 追蹤沒反應、沒 walk 步驟 → 112
-f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8)
-check('3 且無 walk 步驟 → 112', go(f, [2017]) == questrun.EXIT_STEP and 'grind_start' not in f.names())
+f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8, pos=None)
+check('3 且無 walk 步驟（座標讀不到 = 沒有原地證據）→ 刷新 6 次後 112、不重登', go(f, [2017]) == questrun.EXIT_STEP and 'grind_start' not in f.names() and 'relogin' not in f.names())
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(3, []), (0, [])])
 rc = go(f, [2017])
 check('3 且無 walk 步驟 → 先 unfreeze（刷新 + 出口格重踏）再重跑 quest', rc == 0 and f.names().count('unfreeze') == 1 and f.names().count('quest') == 2, str(f.names()))
@@ -508,7 +508,7 @@ f = Fake(status={D19: [questrun.DOING]}, steps=[2] * 6, quest=[(3, [])] * 8)
 rc = go(f, [2019])
 check('2019 步 2 追蹤沒反應 → 155、不 unfreeze', rc == questrun.EXIT_NEEDPETS and 'unfreeze' not in f.names(), str(f.names()))
 check('155 訊息帶 pet_catch 指令與火雞系', 'pet_catch.py' in questrun.LAST['info'].get('msg', '') and '火雞系' in questrun.LAST['info'].get('msg', ''), questrun.LAST['info'].get('msg'))
-f = Fake(status={D19: [questrun.DOING]}, steps=[], quest=[(3, [])] * 8)
+f = Fake(status={D19: [questrun.DOING]}, steps=[], quest=[(3, [])] * 8, pos=None)
 rc = go(f, [2019])
 check('2019 步號讀不到 → 照舊 112（刷新重試）', rc == questrun.EXIT_STEP and f.names().count('unfreeze') >= 1, str(f.names()))
 
@@ -544,8 +544,8 @@ rc = go(f, [2017])
 n = f.names()
 check('重登進遊戲但隊伍不對（105）→ team.form --regroup → 關遇敵 → 續跑', rc == 0 and n.index('relogin') < n.index('team_regroup') < len(n) - 1 - n[::-1].index('quest')
       and n.count('enc_off') == 2, str(n))
-f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8)
-check('沒 VS 卡死 → 不重登', go(f, [2017]) == questrun.EXIT_STEP and 'relogin' not in f.names())
+f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 8, pos=None)
+check('沒 VS 卡死（座標讀不到）→ 不重登', go(f, [2017]) == questrun.EXIT_STEP and 'relogin' not in f.names())
 
 # 9) 5：詳情已完成 → 成功；仍進行中 → 112
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(5, [])])
@@ -901,7 +901,7 @@ check('2999：步 1 quest 回 3 → 才 walk 再 quest；完成後恢復掛機',
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[2], quest=[(0, [])])
 go(f, [2999])
 check('2999：步 2（default）不 walk', 'walk_to' not in f.names() and 'quest' in f.names())
-f = Fake(status={D99: [questrun.DOING, questrun.DOING, questrun.DONE]}, steps=[None, 2], quest=[(3, [])] * 8)
+f = Fake(status={D99: [questrun.DOING, questrun.DOING, questrun.DONE]}, steps=[None, 2], quest=[(3, [])] * 8, pos=None)
 rc = go(f, [2999])
 check('2999：步號讀不到時 quest 回 3 → 112（沒有可走的 walk 步驟）', rc == questrun.EXIT_STEP)
 f = Fake(status={D99: [questrun.DOING, questrun.DONE]}, steps=[None, 1], quest=[(3, []), (0, [])], pos=(10204, 14, 7))
@@ -1625,5 +1625,193 @@ with contextlib.redirect_stdout(buf):
     questrun.run([2017], dry_run=True, verify='defer')
 check('plan --verify defer 說明延後到呼叫端收尾', 'defer' in buf.getvalue() and '收尾' in buf.getvalue())
 
+# ================= 2026-10-14 轉生後重做實跑 5 項修正 =================
+import stuckrecover  # noqa: E402
+W = [dict(fMap=200, fX=139, fY=1008, tMap=3400, tX=60, tY=41), dict(fMap=200, fX=140, fY=1008, tMap=3400, tX=61, tY=41),
+     dict(fMap=3400, fX=60, fY=40, tMap=200, tX=139, tY=1007), dict(fMap=3400, fX=61, fY=40, tMap=200, tX=140, tY=1007),
+     dict(fMap=3400, fX=46, fY=79, tMap=200, tX=124, tY=1047)]
+BOUNCE_POS = [(3400, 60, 41), (200, 139, 1007), (200, 135, 1003), (3400, 61, 41)]       # 碧青 08:48～09:10 實際讀到的座標
+check('junction：200 ↔ 3400 出口間來回 → (目前圖, 對面圖)', stuckrecover.junction(BOUNCE_POS, W) == (3400, 200))
+check('junction：只在 3400 出口旁打轉也算（對面 200）', stuckrecover.junction([(3400, 60, 41), (3400, 61, 41)], W) == (3400, 200))
+check('junction：離出口太遠 → None', stuckrecover.junction([(3400, 30, 41), (200, 139, 1007)], W) is None)
+check('junction：三張圖 / 讀得到 < 2 → None', stuckrecover.junction([(3400, 60, 41), (200, 139, 1007), (1000, 1, 1)], W) is None
+      and stuckrecover.junction([None, (3400, 60, 41)], W) is None)
+check('no_progress：junction / same / 有進展 / 不夠片數',
+      stuckrecover.no_progress(BOUNCE_POS, W) == {'kind': 'junction', 'pair': (3400, 200)}
+      and stuckrecover.no_progress([(1000, 10, 10), (1000, 11, 10), None, (1000, 10, 12)], W) == {'kind': 'same'}
+      and stuckrecover.no_progress([(1000, 10, 10), (1000, 20, 10), (1000, 30, 10), (1000, 40, 10)], W) is None
+      and stuckrecover.no_progress(BOUNCE_POS[:3], W) is None)
+check('step_advanced：1→2 前進；GONE / None / 同步號不算', questrun.step_advanced(1, 2) and not questrun.step_advanced(2, 2)
+      and not questrun.step_advanced(1, 'GONE') and not questrun.step_advanced(None, 2))
+
+
+class BounceFake(Fake):
+    """每次 read_pos 依序給碧青的座標；unbounce 記 pair"""
+    def __init__(self, *a, seq=(), **k):
+        super().__init__(*a, **k)
+        self.seq = list(seq)
+
+    def read_pos(self):
+        return self.seq.pop(0) if len(self.seq) > 1 else (self.seq[0] if self.seq else self.pos)
+
+    def map_warps(self):
+        return W
+
+    def unbounce(self, pair):
+        self.rec('unbounce', pair)
+        return (200, 125, 990)
+
+
+D02 = questdefs.get(2002)['detail']
+# 1) 碧青 3 / 30 交替 4 片、座標在 200 ↔ 3400 出口間 → 全員重登 → 離開交界 → 續片完成
+f = BounceFake(status={D02: [questrun.DOING]}, quest=[(3, []), (30, []), (3, []), (3, []), (0, ['任務完成：假'])], seq=BOUNCE_POS)
+rc = go(f, [2002])
+n = f.names()
+check('碧青 3/30 交替 4 片在出口間 → relogin → unbounce(3400,200) → 續片完成', rc == 0 and n.count('relogin') == 1 and ('unbounce', (3400, 200)) in f.calls
+      and n.index('relogin') < n.index('unbounce') < len(n) - 1 - n[::-1].index('quest'), str(n))
+check('重登後關遇敵 + 戰鬥設定再查', 'relogin' in n and n[n.index('relogin'):].count('enc_off') >= 1 and 'battle_check' in n[n.index('relogin'):], str(n))
+# 2) 一直來回 → 重登 RELOGIN_MAX 次後 112
+f = BounceFake(status={D02: [questrun.DOING]}, quest=[(3, []), (30, [])] * 12, seq=BOUNCE_POS * 10)
+rc = go(f, [2002])
+check('一直來回 → 重登 2 次後 112（不無限迴圈）', rc == questrun.EXIT_STEP and f.names().count('relogin') == questrun.RELOGIN_MAX
+      and '出口來回跳' in questrun.LAST['info'].get('msg', ''), f'{rc} {questrun.LAST["info"].get("msg")}')
+# 3) 原地 4 片 3（座標同一點）→ 重登但不走交界
+f = Fake(status={D17: [questrun.DOING]}, quest=[(3, [])] * 4 + [(0, ['任務完成：假'])], pos=(1000, 50, 50))
+rc = go(f, [2017])
+check('原地 4 片 3 → 重登（不 unbounce）→ 續片完成', rc == 0 and f.names().count('relogin') == 1 and 'unbounce' not in f.names(), str(f.names()))
+# 4) 純 30 連續（沒有 3）→ 不走重登，照舊 team 分支 111
+f = BounceFake(status={D17: [questrun.DOING]}, quest=[(30, [])] * 4, seq=BOUNCE_POS)
+check('純 30 連續 → 不重登，照舊 111', go(f, [2017]) == questrun.EXIT_HANDOVER and 'relogin' not in f.names())
+# 5) quest.py 3 但步號前進（猜謎三兄弟步 1 → 2 的通用版）→ 不算卡住、不刷新
+f = Fake(status={D99: [questrun.DOING]}, steps=[2, 3, 3], quest=[(3, []), (0, ['任務完成：假'])], pos=None)
+rc = go(f, [2999])
+check('3 但步號 2 → 3 前進 → 該步完成、不 unfreeze、下一片', rc == 0 and 'unfreeze' not in f.names() and f.names().count('quest') == 2, str(f.names()))
+# 6) 龍王失敗（90 step=open）→ 等一下 + 清殘留（背包面板）
+f = Fake(status={D15: [questrun.DOING]}, quest=[(0, [])])
+f.dragon = lambda have=False: (f.rec('dragon', have), (90, {'step': 'open'}))[1]
+rc = go(f, [2015], use_dragon=True)
+n = f.names()
+check('龍王 90 step=open → clear_leftovers 收尾', rc == 0 and 'dragon' in n and 'clear' in n[n.index('dragon'):], str(n))
+
+
+# 7) 交接時還在戰鬥 → 等打完才 form；form 失敗且在戰鬥 → 等打完、不計次
+class BattleFake(Fake):
+    def __init__(self, *a, battle_reads=0, **k):
+        super().__init__(*a, **k)
+        self.battle_reads = battle_reads
+
+    def screen_state(self):
+        if self.battle_reads > 0:
+            self.battle_reads -= 1
+            return 'battle'
+        return 'idle'
+
+    def clear_screen(self):
+        self.rec('clear')
+        return 'battle' if self.battle_reads else 'idle'
+
+
+f = BattleFake(status={D17: [questrun.DOING]}, quest=[(0, [])], battle_reads=3)
+rc = go(f, [2017])
+check('交接時在戰鬥 → 等到不是戰鬥才 team.form', rc == 0 and f.battle_reads == 0 and 'team_form' in f.names(), str(f.names()))
+f = BattleFake(status={D17: [questrun.DOING]}, quest=[(0, [])], team_rcs=[40, 40, 42, 0])
+_orig_tf = f.team_form
+
+
+def _tf():
+    r = _orig_tf()
+    if r:
+        f.battle_reads = 2                                    # 每次 form 失敗時畫面都在戰鬥
+    return r
+
+
+f.team_form = _tf
+rc = go(f, [2017])
+check('form 失敗 40/40/42 時都在戰鬥 → 等打完再試、不計次 → 第 4 次成功', rc == 0 and f.names().count('team_form') == 4, f'{rc} {f.names()}')
+check('retry_form：一直戰鬥 → 等 BATTLE_WAITS 輪後才算次數，不無限迴圈',
+      quiet(questrun.retry_form, BattleFake(battle_reads=10 ** 6), lambda: 40, 'x') == 40)
+
+
+# 8) 紅暴沒龍王 → --solo 單人逃跑（2026-10-14 02:41～02:55 手動流程）
+class SoloHero(Hero):
+    shop_rc = 0
+
+    def solo_setup(self):
+        self.rec('solo_setup')
+        return 0
+
+    def solo_restore(self):
+        self.rec('solo_restore')
+        return 0
+
+    def shop_buy(self, roles):
+        self.rec('shop_buy', tuple(roles))
+        if not self.shop_rc:
+            self.have = {}
+        return self.shop_rc, {'bought': list(roles)}
+
+
+SOLO_Q = [(20, []), (0, STOP)] * 5 + [(0, [])] + [(0, STOP)] * 2
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=SOLO_Q, steps=[1, 2, 3, 4, 5, 6, 7, 8, 'GONE'], bag={r: 8 for r in questrun.ALL_ROLES})
+f.no_dragon = True
+rc = go(f, [2031], after='none', solo=True, drop_items='薩姆吉爾的首飾', confirm_drop_items='薩姆吉爾的首飾', drop_reward='巴朵蘭恩', confirm_drop='巴朵蘭恩')
+n = f.names()
+qs = [c[1] for c in f.calls if c[0] == 'quest']
+check('--solo 紅暴 happy：不吃龍王 → 接取 → DKBO 戰寵防禦 → 步 1～5 解散 + --solo + 組隊對話 → 步 6 --fight → 步 7 / 8 組隊 → 完成', rc == 0 and 'dragon' not in n
+      and n.index('accept') < n.index('solo_setup') and sum('--solo' in q for q in qs) == 5 and sum('--disband-after' in q for q in qs) == 5
+      and sum('--fight' in q for q in qs) == 1 and n.count('disband') == 5, f'rc={rc} {qs}')
+check('--solo：步 6 前先組隊、便捷傳送龍王守衛', ('warp', (1160, 646), 5510, '龍王守衛') in f.calls)
+check('--solo：完成後 DKBO 戰寵改回、存倉（英雄的祝福 / 龍王的守護）、丟巴朵蘭恩 / 首飾', 'solo_restore' in n and ('store_many', '英雄的祝福', 'personal') in f.calls
+      and ('bag_drop', ('薩姆吉爾的首飾',)) in f.calls and ('pet_drop', '巴朵蘭恩', 1) in f.calls and n.index('solo_restore') < n.index('store_many'), str(n[-12:]))
+check('--solo：單人逃跑算風險事件 → 當場逐人驗', 'status_all' in n)
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(20, []), (0, STOP)] * 4 + [(21, [])] + [(20, []), (0, STOP)] + [(0, [])] + [(0, STOP)] * 2,
+             steps=[1, 2, 3, 4, 5, 5, 6, 7, 8, 'GONE'], bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2031], after='none', solo=True)
+check('--solo：單人巡路被打飛（21）→ 補血 → 同一步重跑 → 完成', rc == 0 and 'heal' in f.names(), f'rc={rc}')
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(20, []), (0, STOP)] * 10, steps=[2] * 10, bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2031], after='none', solo=True)
+check('--solo：同一步做 4 次沒前進 → 112', rc == questrun.EXIT_STEP and '沒前進' in questrun.LAST['info'].get('msg', ''), questrun.LAST['info'].get('msg'))
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(2, [])], steps=[1], bag={r: 8 for r in questrun.ALL_ROLES})
+check('--solo：quest.py --solo 回 2（不認得畫面）→ 9', go(f, [2031], after='none', solo=True) == uikit.EXIT_UNKNOWN_SCREEN)
+f = SoloHero(status={D17: [questrun.DOING]}, quest=[(0, [])])
+check('--solo 用在沒有 solo 設定的任務 → 110', go(f, [2017], after='none', solo=True) == questrun.EXIT_PREFLIGHT)
+# 9) 前置缺耐久力回複藥 + --buy-missing → shopbuy → 重讀 → 照跑；沒 --buy-missing 照舊 110；買失敗 110
+f = hero(HAPPY_Q, HAPPY_S)
+f.__class__ = SoloHero
+f.have = {'DKBO4': False}
+rc = go(f, [2031], after='none', buy_missing=True)
+n = f.names()
+check('缺藥 + --buy-missing → shopbuy(DKBO4) → 重讀 → 接取照跑', rc == 0 and ('shop_buy', ('DKBO4',)) in f.calls and n.count('team_read') == 2
+      and n.index('shop_buy') < n.index('accept'), f'rc={rc} {n[:14]}')
+f = hero(HAPPY_Q, HAPPY_S)
+f.__class__ = SoloHero
+f.have = {'DKBO4': False}
+f.shop_rc = 182
+rc = go(f, [2031], after='none', buy_missing=True)
+check('shopbuy 失敗 182 → 110、不接取', rc == questrun.EXIT_PREFLIGHT and 'accept' not in f.names() and 'shopbuy' in questrun.LAST['info'].get('msg', ''))
+
+
+# 10) walk.pick_away / exit_to / leave_junction（出口來回跳的走開動作；換掉 wait_pos / walk_to / _cells / psa.T，不碰遊戲）
+import walk  # noqa: E402
+_G = (30, 30, [1] * 900, set())                                # 30×30 全通行
+check('pick_away：離回頭出口 ≥ 8 格的第一格', walk.pick_away(_G, [(0, 0)], 1, 1) is not None
+      and max(abs(a) for a in walk.pick_away(_G, [(0, 0)], 1, 1)) >= 8)
+_blk = [1 if x < 3 and y < 3 else 0 for y in range(30) for x in range(30)]
+check('pick_away：牆擋住走不到 ≥ 8 格 → None', walk.pick_away((30, 30, _blk, set()), [(0, 0)], 1, 1) is None)
+_keep_w = (walk.wait_pos, walk.walk_to, walk._cells, walk.psa.T)
+_walked = []
+_posq = [(3400, 67, 48), (200, 139, 1007), (200, 125, 990)]
+walk.wait_pos = lambda tries=6, want_map=None, gap=0.5: _posq.pop(0) if len(_posq) > 1 else _posq[0]
+walk.walk_to = lambda m, x, y, start=None, exit_map=None, **k: (_walked.append((m, x, y, exit_map)), (exit_map or m, x, y))[1]
+walk._cells = lambda m: (300, 1100, [1] * (300 * 1100), set()) if m == 200 else None
+walk.psa.T = lambda name: [dict(w, isNotUse=0) for w in W] if name == 'MapWarp' else []
+r = quiet(walk.leave_junction, 3400, 200)
+check('leave_junction：在 3400 → 走出口 60,40 到 200 → 再離開回頭出口 ≥ 8 格', _walked[0] == (3400, 60, 40, 200) and len(_walked) == 2 and _walked[1][0] == 200
+      and max(abs(_walked[1][1] - 139), abs(_walked[1][2] - 1008)) >= walk.AWAY_MIN, str(_walked))
+_posq[:] = [(1000, 5, 5)]
+check('leave_junction：不在交界兩張圖 → None、不走', quiet(walk.leave_junction, 3400, 200) is None and len(_walked) == 2)
+walk.wait_pos, walk.walk_to, walk._cells, walk.psa.T = _keep_w
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
+
 sys.exit(1 if fails else 0)

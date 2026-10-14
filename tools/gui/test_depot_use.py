@@ -171,6 +171,10 @@ class FakeSession:
 
 bag.Session = FakeSession
 calls = []
+tidied = []                                                   # depot_use.tidy → bag.close_leftover（不讀真畫面）
+_real_close_leftover, _real_usleep = bag.close_leftover, depot_use.uikit.sleep
+bag.close_leftover = lambda dialog_esc=True: (tidied.append(dialog_esc), 'closed')[1]
+depot_use.uikit.sleep = lambda s: None
 bag.depot_take = lambda *a: (calls.append('take'), 0)[1]
 bag.buff_row = lambda: [None, None, None]
 _real_wait = bag._wait
@@ -179,12 +183,24 @@ bag.depot_store = lambda *a: (calls.append('store'), 0)[1]
 bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), bag.EXIT_PANEL)[1]
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('吃失敗 → 仍存回、回吃的 rc', rc == bag.EXIT_PANEL and calls == ['take', 'use', 'store'])
+check('吃失敗 → 收尾 tidy（close_leftover dialog_esc=True）', tidied == [True] and info.get('tidy') == 'closed')
+# 2026-10-14 08:21 / 08:49：Session 開背包判失敗（step=open, rc 90）但面板晚一步出現 → tidy 一定再關一次
+class FailSession(FakeSession):
+    rc = bag.EXIT_PANEL
+bag.Session = FailSession
+tidied.clear()
+calls.clear()
+rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
+check('step=open 失敗 90 → 不取不吃、tidy 關殘留', rc == bag.EXIT_PANEL and info['step'] == 'open' and not calls and tidied == [True])
+bag.Session = FakeSession
+tidied.clear()
 calls.clear()
 _seq = [[None, None, None], ['dragon', None, None]]
 bag.buff_row = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]          # 吃之前沒圖示、吃完關背包後看到
 bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('全流程成功 rc 0 buff', rc == 0 and info.get('buff') and calls == ['take', 'use', 'store'])
+check('成功 → 不 tidy', not tidied and 'tidy' not in info)
 calls.clear()
 bag.buff_row = lambda: [None, None, None]
 bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]

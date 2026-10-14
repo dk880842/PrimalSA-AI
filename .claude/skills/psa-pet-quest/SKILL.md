@@ -34,6 +34,7 @@ uv run --no-project python tools/gui/petquest.py run 3003 --confirm-drop        
 - **turnin**：`questrun.py run <ID> --after none --pet-turnin --rested`（`--rested`：train 段 30 分內 rest-all 成功才帶，questrun 交件前不再 rest-all，每次省 30～90 秒；review 1013b §2.2）（卡坦第 1 輪交完要讀到追蹤步號 2，否則 167）；猜謎 `questrun.py run 3003 --after none`。postrebirth 呼叫時帶 `--verify-defer` → 內部 questrun 加 `--verify defer`（交寵物本身是風險事件，仍當場逐人驗）。
 - **drop**（`--confirm-drop` 才做，沒給 → 168 停）：`petdrop.py all 布克布克 / 修寶 / 左迪洛斯 --confirm-name 同名 --max-level 1`。
 - **restore**：卡坦先把獎勵 Lv1 朵拉比斯存個人（store_reward）→ `take-many --depot personal --plan "角色:朵拉比斯@原等級"` → 出戰 → `pet_catch --lock 戰寵 --battle-pet 朵拉比斯` → `ass.py pet all normal 攻擊 --no-resume` → list 驗 5 人朵拉比斯出戰、等級 = 原等級（猜謎 ≥ 原等級）。**不恢復掛機**（交給呼叫端 grind）。
+- 猜謎步 1：quest.py 回 3 時先讀追蹤步號，已 > 1（對話給了金布伊、追蹤進「交77金豬」，2026-10-14 errlog #861）= 步 1 完成，照常驗金布伊；步號仍 1 才 161。
 - 退出碼 160 參數 / 161 接取（猜謎步 1 沒金布伊 → 點任務追蹤重試 / 人工）/ 162 準備 / 163 誘餌 · 買 / 164 抓 / 165 分配 / 166 練 / 167 交 / 168 丟 / 169 換回；9 / 10 透傳。離線測試 `test_petquest.py`（假寵物欄 / 倉庫模擬器）。
 - **待實機**：①石幣讀取框；②「+」按前後讀可抓捕數；③分批抓（count 4 → 1）與每批存公共；④卡坦第 1 輪交完 questrun 回 117 / 155 + 步號 2；⑤練寵 `pet.py levels` 輪詢在快戰中讀等級、nh 指紋會不會被 EXP 浮字弄亂（亂了只是改讀完整 list）；⑥全流程耗時；⑦`--reuse-setup` 第 2 批時欄位真的還是第 1 批的物種（遊戲抓完會不會重設欄位）；⑧抓寵第一次輪詢 100 / 40 秒是否太早（太早只是多開一次外掛面板）。
 

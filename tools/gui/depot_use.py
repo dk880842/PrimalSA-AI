@@ -8,7 +8,8 @@
 成敗判準：BUFF_KIND 的道具一定要看到圖示才回 0，沒看到 = 95（剩的已存回倉庫）；use_item 回 0 只代表「按了使用、彈窗關了」
 （2026-10-12 2倍智慧果按了使用、彈窗關了卻沒扣道具，舊版沒驗就回 0）。不在 BUFF_KIND 的道具沒辦法驗，維持 use_item 結果。
 每步失敗就停、回該步的退出碼（bag 90～96），不重點；取出後失敗會提醒「道具還在背包」。
-任何出口（成功 / 失敗 / 例外）都由 bag.Session 結束時 close_leftover 收尾：道具彈窗 ESC、NPC 對話框蓋住背包 → ESC（不回答）、背包外框在 → 點 ✕ 1280,113
+任何出口（成功 / 失敗 / 例外）都由 bag.Session 結束時 close_leftover 收尾；另外**非 0 結束一律再 tidy()**（等 1 秒再 close_leftover 一次：
+2026-10-14 08:21 / 08:49 / 09:01 rc 90 step=open，Session 判背包沒開所以沒關，面板晚一步才出現 → 下一片 quest.py 誤報 9）：道具彈窗 ESC、NPC 對話框蓋住背包 → ESC（不回答）、背包外框在 → 點 ✕ 1280,113
 （2026-10-13 08:04 rc 90：吃龍王途中自動巡路抵達看門者，對話框把背包藏起來，舊版沒關 → quest.py 誤報 rc 9）。questrun 在遊戲自動巡路中不呼叫本工具。
 questrun --dragon（2026-10-13 起）用 restore=False（剩的留在 DKBO 背包）、之後 have=True 直接從背包吃，run 結束才 bag.depot_store 存回；buff 判斷與 questrun 共用 bag.buff_state。
 最後一行 JSON {"ok","rc","step","buff",...}。
@@ -48,62 +49,85 @@ def use_one(role: str, want: str) -> int:
     return bag.use_item(role, want)
 
 
-def run(role: str, item: str, depot: str = 'public', restore: bool = True, have: bool = False, reopen: bool = True) -> tuple:
-    """→ (rc, info)。buff 圖示已在就跳過；encounter 先關、結束後一定開回（原本就關著也開回：本工具只在掛機時用）"""
-    info = {'role': role, 'item': item, 'depot': depot}
-    kind = bag.buff_kind(item)
-    enc_off = False
+TIDY_WAIT_S = 1.0               # 失敗收尾前先等一下：背包面板可能晚一步才開（open_panel_ex 判沒開、其實正在開）
+
+
+def tidy() -> str:
+    """任何失敗出口的收尾（2026-10-14 08:21 / 08:49 / 09:01 rc 90 step=open：Session 判背包沒開 → 沒關；面板晚一步出現 / 對話框蓋住，
+    下一片 quest.py 連 3 次不認得 → 9）：等 TIDY_WAIT_S → bag.close_leftover（道具彈窗 ESC、NPC 對話框 ESC 不回答、背包外框在 → ✕）。
+    不認得的畫面不碰。→ close_leftover 做了什麼（'' = 沒東西要關）"""
+    uikit.sleep(TIDY_WAIT_S)
     try:
-        heal.set_encounter(False)
-        enc_off = True
-        heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')       # 關遇敵不會中止正在打的那場：等 VS 牌消失
-        if kind and bag.has_buff(kind):                              # 圖示已在 = 還有效，整個跳過（不開背包）；吃了也驗不出有沒有吃到
-            info.update(buff_before=True, buff=True, step='skip', note=f'buff 列已有 {kind} 圖示，不吃')
-            return 0, info
-        info['buff_before'] = False
-        with bag.Session() as sess:                                      # 一次開背包做完 取出 → 使用 → 存回，最後才關（內部各步看到已開著不會關）
-            if sess.rc:
-                info['step'] = 'open'
-                return sess.rc, info
-            if not have:
-                rc = bag.depot_take(role, item, depot)
-                info['step'] = 'take'
-                if rc == bag.EXIT_ITEM and _in_bag(item):               # 倉庫空但背包有（上次取出後失敗沒存回）→ 用背包那份
-                    info['note'] = '倉庫沒有但背包有，直接用背包那份'
-                    rc = 0
-                if rc:
-                    if restore and rc != bag.EXIT_ITEM:                  # 取出動作可能已生效只是驗證不到（格子更新延遲）→ 一定試著存回；背包沒有會回 92，無害
-                        st = bag.depot_store(role, item, depot)
-                        if not st:
-                            info['store_note'] = '取出驗證失敗但背包其實有，已存回'
-                    return rc, info
-            # 取出後不管吃成不成功，剩下的都要存回倉庫（借出的道具要還）
-            use_rc = bag.use_item(role, item)                             # buff 列被背包面板蓋住，成敗等關背包後再看（見下）
-            info['step'] = 'use'
-            if restore:
-                st = bag.depot_store(role, item, depot)
-                if st == bag.EXIT_ITEM and not use_rc:
-                    info['store_note'] = '背包已沒有剩餘（只有一顆）'
-                elif st and st != bag.EXIT_ITEM:
-                    info['warn'] = f'{item} 還在 {role} 背包，沒存回倉庫（rc {st}）'
-                    return (use_rc or st), info
-        if kind and not use_rc:                                          # 成功判定看 buff 列圖示（龍王 = 人形、2倍智慧果 = EXP）；背包已關才看得到
-            info['buff'] = bag._wait(lambda: bag.has_buff(kind), 4.0)
-            if not info['buff']:
-                use_rc = bag.EXIT_VERIFY
-                info['warn_buff'] = f'使用後 buff 列沒看到 {kind} 圖示（沒吃到；剩的已存回倉庫）'
-                info['step'] = 'verify'
-                uikit.snap('depot-use-nobuff')
-        if use_rc:
-            return use_rc, info
-        info['step'] = 'done'
-        return 0, info
+        return bag.close_leftover(dialog_esc=True)
+    except Exception as e:                                               # noqa: BLE001
+        return f'error:{e}'
+
+
+def run(role: str, item: str, depot: str = 'public', restore: bool = True, have: bool = False, reopen: bool = True) -> tuple:
+    """→ (rc, info)。buff 圖示已在就跳過；encounter 先關、結束後一定開回（原本就關著也開回：本工具只在掛機時用）。
+    非 0 結束（9 / 10 除外，畫面要留給人看）一律先 tidy() 關殘留面板，再開回遇敵"""
+    info = {'role': role, 'item': item, 'depot': depot}
+    rc = 1
+    try:
+        rc, info = _run(role, item, depot, restore, have, info)
+        return rc, info
     finally:
+        if rc and rc not in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+            t = tidy()
+            if t:
+                info['tidy'] = t
         if reopen:
             try:
                 heal.set_encounter(True)
             except RuntimeError as e:
                 info['enc_warn'] = str(e)
+
+
+def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict) -> tuple:
+    kind = bag.buff_kind(item)
+    heal.set_encounter(False)
+    heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')       # 關遇敵不會中止正在打的那場：等 VS 牌消失
+    if kind and bag.has_buff(kind):                              # 圖示已在 = 還有效，整個跳過（不開背包）；吃了也驗不出有沒有吃到
+        info.update(buff_before=True, buff=True, step='skip', note=f'buff 列已有 {kind} 圖示，不吃')
+        return 0, info
+    info['buff_before'] = False
+    with bag.Session() as sess:                                      # 一次開背包做完 取出 → 使用 → 存回，最後才關（內部各步看到已開著不會關）
+        if sess.rc:
+            info['step'] = 'open'
+            return sess.rc, info
+        if not have:
+            rc = bag.depot_take(role, item, depot)
+            info['step'] = 'take'
+            if rc == bag.EXIT_ITEM and _in_bag(item):               # 倉庫空但背包有（上次取出後失敗沒存回）→ 用背包那份
+                info['note'] = '倉庫沒有但背包有，直接用背包那份'
+                rc = 0
+            if rc:
+                if restore and rc != bag.EXIT_ITEM:                  # 取出動作可能已生效只是驗證不到（格子更新延遲）→ 一定試著存回；背包沒有會回 92，無害
+                    st = bag.depot_store(role, item, depot)
+                    if not st:
+                        info['store_note'] = '取出驗證失敗但背包其實有，已存回'
+                return rc, info
+        # 取出後不管吃成不成功，剩下的都要存回倉庫（借出的道具要還）
+        use_rc = bag.use_item(role, item)                             # buff 列被背包面板蓋住，成敗等關背包後再看（見下）
+        info['step'] = 'use'
+        if restore:
+            st = bag.depot_store(role, item, depot)
+            if st == bag.EXIT_ITEM and not use_rc:
+                info['store_note'] = '背包已沒有剩餘（只有一顆）'
+            elif st and st != bag.EXIT_ITEM:
+                info['warn'] = f'{item} 還在 {role} 背包，沒存回倉庫（rc {st}）'
+                return (use_rc or st), info
+    if kind and not use_rc:                                          # 成功判定看 buff 列圖示（龍王 = 人形、2倍智慧果 = EXP）；背包已關才看得到
+        info['buff'] = bag._wait(lambda: bag.has_buff(kind), 4.0)
+        if not info['buff']:
+            use_rc = bag.EXIT_VERIFY
+            info['warn_buff'] = f'使用後 buff 列沒看到 {kind} 圖示（沒吃到；剩的已存回倉庫）'
+            info['step'] = 'verify'
+            uikit.snap('depot-use-nobuff')
+    if use_rc:
+        return use_rc, info
+    info['step'] = 'done'
+    return 0, info
 
 
 def main() -> int:

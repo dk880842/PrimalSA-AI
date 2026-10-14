@@ -524,6 +524,73 @@ def walk_onto_nearby_exit(max_d: int = 3) -> tuple | None:
     return step_to(p[0], e['fX'], e['fY'], exit_map=e['tMap'])
 
 
+# ---------------- 出口來回跳：走到對面再離開交界（2026-10-14 碧青洞窟 200 ↔ 3400；stuckrecover.no_progress 判定後、全員重登之後才用）----------------
+AWAY_MIN = 8                    # 離開回頭出口至少幾格（切比雪夫；09:14 手動從 200:139,1007 走到 125,990 約 17 格）
+AWAY_SEARCH = 4000              # BFS 最多看幾格
+
+
+def pick_away(cs, avoid, x: int, y: int, min_d: int = AWAY_MIN) -> tuple[int, int] | None:
+    """純函式：從 (x, y) 沿通行格 BFS（8 方向），第一個離 avoid 每一點都 ≥ min_d、離 NPC ≥ 2 的格 → 絕對座標；沒有 None（固定順序，可重現）"""
+    if not cs:
+        return None
+    w, h, c, npcs = cs
+    if not (0 <= x < w and 0 <= y < h):
+        return None
+    avoid = list(avoid or [])
+    seen, q, i = {(x, y)}, [(x, y)], 0
+    while i < len(q) and len(seen) < AWAY_SEARCH:
+        cx, cy = q[i]
+        i += 1
+        if (all(max(abs(cx - ax), abs(cy - ay)) >= min_d for ax, ay in avoid)
+                and not any(max(abs(cx - nx), abs(cy - ny)) <= 1 for nx, ny in npcs)):
+            return cx, cy
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                nx, ny = cx + dx, cy + dy
+                if (dx or dy) and (nx, ny) not in seen and 0 <= nx < w and 0 <= ny < h and c[ny * w + nx] == 1:
+                    seen.add((nx, ny))
+                    q.append((nx, ny))
+    return None
+
+
+def exit_to(map_id: int, x: int, y: int, to_map: int, max_d: int = 15):
+    """純函式：(x, y) 切比雪夫 max_d 內最近、通往 to_map 的出口 → MapWarp 那筆 / None（同距離取座標小的）"""
+    best = None
+    for e in psa.T('MapWarp'):
+        if e.get('fMap') != map_id or e.get('isNotUse') or e.get('tMap') != to_map:
+            continue
+        d = max(abs(e['fX'] - x), abs(e['fY'] - y))
+        if d <= max_d and (best is None or (d, e['fX'], e['fY']) < best[0]):
+            best = ((d, e['fX'], e['fY']), e)
+    return best[1] if best else None
+
+
+def leave_junction(a: int, b: int) -> tuple | None:
+    """自動巡路在 A↔B 兩張圖的出口間來回跳（stuckrecover.no_progress kind=junction）：目前在哪張就走出口到對面，
+    再離開對面「回頭出口」≥ AWAY_MIN 格（2026-10-14 09:14 手動解法：3400:67,48 → 出口 60,40 → 200:139,1007 → 走到 125,990 → 點追蹤 OK）。
+    → 最後 (map, x, y)；不在 A / B、附近沒出口、沒通行格資料 → None；走不動 RuntimeError 交給呼叫端"""
+    p = wait_pos()
+    if p is None or p[0] not in (a, b):
+        return None
+    other = b if p[0] == a else a
+    e = exit_to(p[0], p[1], p[2], other)
+    if not e:
+        return None
+    log(f'出口來回跳 {a}↔{b}：在 {p[0]}:{p[1]},{p[2]} → 走出口 ({e["fX"]},{e["fY"]}) 到 {other}')
+    q = walk_to(p[0], e['fX'], e['fY'], start=(p[1], p[2]), exit_map=other)
+    q = wait_pos(want_map=other) or q
+    if not q or q[0] != other:
+        return q
+    back = [(w['fX'], w['fY']) for w in psa.T('MapWarp') if w.get('fMap') == other and w.get('tMap') == p[0] and not w.get('isNotUse')]
+    t = pick_away(_cells(other), back, q[1], q[2])
+    if t is None:
+        log(f'{other} 沒有通行格資料 / 找不到離出口 ≥{AWAY_MIN} 格的地面 → 停在落點')
+        return q
+    log(f'離開交界：{other}:{q[1]},{q[2]} → {t[0]},{t[1]}（離回頭出口 ≥{AWAY_MIN} 格）')
+    walk_to(other, t[0], t[1], start=(q[1], q[2]))
+    return wait_pos(want_map=other)
+
+
 # ---------------- NPC ----------------
 def npc_screen(npc: tuple[int, int], at: tuple[int, int], dy: int = NPC_DY) -> tuple[int, int]:
     """站在 at 時，NPC（所在格 npc）身體的截圖座標"""

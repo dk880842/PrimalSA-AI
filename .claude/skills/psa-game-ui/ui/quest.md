@@ -176,6 +176,8 @@
 
 ## 猜謎三兄弟步 1（3003）
 - 不用爬塔：點任務追蹤就會直接傳送到 810 拿金布伊（使用者 2026-10-13 定；原 quiztower.py 已刪除）。沒拿到金布伊 → 再點任務追蹤重試 / 人工處理。
+- **步 1 對話給金布伊後 quest.py 回 3 不是卡住**（2026-10-14 13:35，errlog #861）：步 1 給寵物沒有「獲得物品」窗，`--stop-after-rewards 1` 不會停；追蹤已進步 2「交77金豬」，點追蹤不巡路 → 3。
+  petquest `step1` 收到 3 先讀追蹤步號，**已 > 1 = 步 1 完成**，照常 pet.py list 驗 5 人有金布伊；步號仍 1 才 161。questrun 的同類情況見下「步號前進」。
 
 ## 左側任務追蹤清單要滑動才找得到目標任務（2026-10-09 實測）
 - 追蹤區（任務條目框）是可捲動清單：預設第 1 格常是「漆黑洞窟(一轉)」，點它不會巡路。目標任務不在前兩格時，在清單裡 `drag 200 420 200 300`（往上拖 120px ≈ 捲一格）。
@@ -270,17 +272,33 @@
   - **提前結束不開詳情**：quest.py「步驟結束 …，提前結束」→ questrun 直接下一片（碧青洞窟 09:31 多開一次詳情 32 秒）；真的完成時下一片會印「任務完成」或回 5。
   - **自動全員重登**：quest.py 42（VS 牌卡死 90 秒）、19（quest.py 刷新 + 點地面解卡 3 次仍卡，questrun 再「刷新 + 走上附近出口」仍不行）、3 + 全隊 VS 牌卡住 → `relogin.run(confirm=True, stuck=True)`（起始畫面可為巡路中 / 快速戰鬥 VS 牌；登入畫面只按已帶入帳密的「登錄」，鐵則 2）
     → relogin 自己 team.check（105 隊伍不對 → `team.form --regroup`）→ 關原地遇敵 → 戰鬥設定重查 → 續片；每任務最多 `RELOGIN_MAX`＝2 次，之後 112。重登 = 風險事件（任務完成當場逐人驗）。
+  - **出口來回跳 / 原地不前進 → 重登 + 離開交界**（2026-10-14 碧青洞窟 08:48～09:10：加魯卡 200 (139,1007/1008) ↔ 奇喀喀村 3400 (60,40/41)，quest.py 3 / 30 交替 20 分鐘，舊版只刷新 + 重踏出口、從沒觸發重登，最後 112；
+    09:10～09:15 手動：全員重登 → 組隊 → 走出口到 200 → 離開出口約 17 格到 125,990 → 點追蹤 = 解開）：questrun 每片 quest.py 3 / 30 後讀一次座標，
+    **連 `STUCK_SLICES`＝4 片都是 3 / 30（至少一片是 3）且步號沒前進**，`stuckrecover.no_progress` 判定：①座標都落在同一對互通地圖 A↔B 的出口 `NEAR_EXIT`＝5 格內（`junction`，出口資料讀 MapWarp，不寫死地圖）或 ②同圖 3 格內原地
+    → `relogin_recover`（全員重登 → 隊伍檢查 / 重組 → 關遇敵 → 戰鬥設定）→ ①時再 `walk.leave_junction(A, B)`：目前在哪張就走出口到對面、再沿通行格 BFS 離開對面「回頭出口」≥ `walk.AWAY_MIN`＝8 格 → 下一片重點追蹤。
+    與上面重登共用 `RELOGIN_MAX` 次數，用完 112（訊息「出口來回跳 A↔B … 已重登 N 次仍卡」）。座標讀不到 = 沒有證據，不判。純 30 / 32 連續（隊伍組不起來）照舊 team 分支 3 輪 → 111。**未實機**。
+  - **步號前進不算卡住**（2026-10-14 猜謎三兄弟步 1 的通用版）：quest.py 3 時讀追蹤步號（有特殊步驟的任務本來就讀；其他任務只在 3 時讀一次），比上一次讀到的大 → 該步其實完成，直接下一片、不刷新 / 不計卡住。
+  - **戰鬥中不組隊**（2026-10-14 09:17：交接時畫面還在打〔清殘留回 battle，關遇敵只等 20 秒〕，team.form 開不了切換面板 40 / 40 / 42 → 111）：交接 form 前 `wait_battle_end` 等畫面不是戰鬥（每 3 秒看一次、最多 240 秒，超過 111）；
+    `retry_form`（questrun.form / bossretry 共用）form 失敗時畫面是戰鬥 → 等打完再試、**不計入 3 次**（最多 `BATTLE_WAITS`＝3 輪）。
+  - **龍王失敗後收尾**（2026-10-14 08:21 / 08:49 / 09:01：depot_use 90 step=open，Session 判背包沒開所以沒關，面板晚一步出現 / 對話框蓋住 → 下一片 quest.py 連 3 次不認得誤報 9）：
+    `depot_use.run` 非 0 出口（9 / 10 除外）一律 `tidy()`（等 1 秒 → `bag.close_leftover`：彈窗 ESC、NPC 對話框 ESC 不回答、背包 ✕）再開回遇敵；questrun `ensure_dragon` 失敗後再等 1 秒跑一次 `quest.clear_leftovers`。
   - **交寵物**：quest.py 29（對話 ↔ 選擇對象循環，S6 卡坦步 2 雞沒湊齊按完成 54 次）→ 117，訊息改「寵物沒湊齊 / 等級不夠 / 還在出戰？」；rest-all 失敗訊息帶提示（72 名字 / 縮圖都認不出、74 外掛鎖定戰寵還勾著）；
     恐龍博士 `--pet-turnin` 接取後已 rest-all，交寵物前不重做；`pet.plan_rest` 名字讀不出但縮圖認得物種（img_species，非騎寵）→ 照改等待（S5 剛抓的貝魯卡沒名字、rest-all 拒絕）。
   - **實機要確認**：①批次驗證的支線捲動能一次讀到多個任務（status_all 多標題）；②DKBO 背包整疊留著時 use_item 找得到、run 結束 depot_store 整疊存回；③relogin `--stuck` 在 VS 牌 / 巡路畫面時設置鈕（1210,760）點得開；④關閉列只點 2 次後，等列消失的時間是否比舊版連點短。
 
 ### 紅暴（英雄島前傳 2031）組隊打到底：questrun 納入（2026-10-13，**只有離線測試，實機未驗證**）
-使用者 2026-10-13：有龍王效果就不用逃跑 → 改組隊跑；完全沒龍王可吃才退回單人逃跑（`/psa-quest-solo` §4）。questdefs `QOTHER`（不進預設順序，指定 ID 才跑）。
+使用者 2026-10-13：有龍王效果就不用逃跑 → 改組隊跑；完全沒龍王可吃才退回單人逃跑（`/psa-quest-solo` §4，**2026-10-14 起 `questrun run 2031 --solo` 腳本化**，見下）。questdefs `QOTHER`（不進預設順序，指定 ID 才跑）。
 ```
 uv run --no-project python tools/gui/questrun.py run 2031 --after none \
     --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾
 ```
 - **前置**（`check_prereq`，背包開一次逐人讀，`bag.team_read`）：5 人 ≥80 級、背包各有耐久力回複藥（步 1 交掉；缺 → 110，訊息附 `psa.py item 耐久力回複藥`）；成人儀式由接取 / 逐人驗證把關；背包每人 ≥ 6 格（questdefs.bag_need）。
+  **`--buy-missing`**（postrebirth hero 段一律帶）：只缺耐久力回複藥 → `shopbuy.run(缺的人, confirm_spend=True)`（回村進醫院 → 解散 → 逐人單人到藥劑師 1005:24,63 買 ×1〔500 石幣，隊員不能和 NPC 互動〕→ 切回 DKBO → 組隊）→ 重讀；買失敗 110（shopbuy 180～184）。shopbuy 腳本本身**未實機**（2026-10-14 修掉舊版 heal.main / char.main 帶參數的 TypeError）。
+- **`--solo`：沒龍王的單人逃跑**（2026-10-14 02:41～02:55 手動流程寫成，questdefs `solo=dict(group_from=7)`；**未實機**）：不吃龍王；接取後 `solo_setup`（DKBO 戰寵 首次 防禦〔勾〕/ 一般 攻擊、DKBO 快速戰鬥 關，`ass.set_pet` / `set_states`）→ 每輪讀追蹤步號：
+  步 1～5 = 解散 → `quest.py --solo --task 英雄島前傳 --max-seconds 900`（逃跑巡路，到 NPC ESC 對話框 → 20；21 被打飛 → 補血重跑，最多 2 次）→ team.form → `quest.py --stop-after-dialog --disband-after --max-seconds 120`；
+  步 6 = 先 team.form → `do_fight`（同組隊模式：HP → 便捷傳送龍王守衛 → --fight → team.check，38 / 21 → bossretry）；步 7 / 8 = 組隊 `quest.py --stop-after-rewards 1 --max-seconds 900`；
+  追蹤欄找不到（GONE / quest.py 5）= 完成 → `solo_restore`（DKBO 戰寵改回 首次 攻擊 不勾 / 一般 攻擊）→ post 存倉 → 照舊 `--drop-reward` / `--drop-items`。同一步做 4 次沒前進 112；單人逃跑 = 風險事件（完成當場逐人驗）。
+  `--solo` 用在沒有 solo 設定的任務 → 110。
 - **龍王必要**（`dragon_required`，不看 `--dragon`）：接取前 `require_dragon` → 人形 buff 在就跑；沒有就吃（DKBO 背包 → 公共倉庫）；兩邊都沒有（depot 92）→ **156**「改走單人逃跑」；一時失敗（90 等）重試 3 次仍不行也 156（訊息不同：處理後重跑）。每片前照舊 `ensure_dragon` 補吃。
 - **每步收片**：每片 quest.py 加 `--stop-after-rewards 1`（步 1～5 勾玉、步 7、步 8 都有獲得物品窗），收片字樣「停止（--stop-after-rewards）」當提前結束、不開詳情；下一片前讀步號。步 1 點到同 NPC 閒聊（只有再見）→ quest.py ESC 回原流程（10-12 是 rc 2 誤報，已修未實機）。
 - **步 6 kind=fight**（`do_fight`）：（2026-10-14 起只看隊長 HUD HP，不讀全隊；`--team-hp-min > 0` 才讀）→ 不在 5510:50,17 三格內就便捷傳送「龍王守衛」（地圖傳送 → 便捷傳送分頁 259,432 → 1160,646，`heal.teleport`）→ team.form → `quest.py --fight --task 英雄島前傳 --step 6`；
@@ -297,13 +315,13 @@ uv run --no-project python tools/gui/questrun.py run 2031 --after none \
 uv run --no-project python tools/gui/postrebirth.py plan [--confirm-drop]                     # 印 13 段完整順序與每段指令
 uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--confirm-buy-bait] [--from 段] [--to 段] [--fresh]
 ```
-- 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 → **173** 改單人逃跑）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
+- 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031 --buy-missing`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 沒龍王 → **自動改跑 `run 2031 --solo`**〔同一串參數〕，仍失敗才 173）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
 - questrun 一律 `--after none`（中段不回練功）、`--dragon`（NO_DRAGON 的任務 questrun 自己不吃；紅暴必吃）。
 - 清背包：bag list 讀空格，**只有空格 < 門檻（① 6、② 8）的人才刪**；名單 = ui/bag.md 白名單（① PURGE1、② 加杉的手環 / 月光的手鐲 / 巴巴洛的許可證），龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪；先 `purge --dry-run`，有 `--confirm-drop` 才實刪；刪完仍不足 → 174（名單外不刪）。四大洞窟產物在 bag.PURGE_FORBID 永不刪。
 - **逐人驗證延到收尾（2026-10-13 review 1013b §2.1）**：questrun 段一律 `--verify defer`、petquest 帶 `--verify-defer`（內部 questrun 同樣 defer）：沒風險事件的任務不在各段結束各驗一次（每次 115～154 秒，約 7 次 ≈ 17 分），
   待驗清單留在 questrun 進度檔；有風險事件的任務 questrun 照舊當場驗、依賴任務（1.82 → 成人儀式）接取前照舊先驗。finish：`questrun status --role all` → 全員完成的任務自動移出待驗清單 →
   有人沒完成 → `questrun.py verify <not_done_ids> --role <落後者>`（進行中 → 交接 + bossretry --who 補人 → 再讀）→ 成功照常往下；待接取 / 補不上（108）→ 176。
-- 退出碼 170 參數 / 172 任務段（questrun 非 0）/ 173 紅暴沒龍王 / 174 清背包 / 175 寵物任務段（petquest 非 0）/ 176 收尾；9 / 10 透傳。離線測試 `test_postrebirth.py`。
+- 退出碼 170 參數 / 172 任務段（questrun 非 0）/ 173 紅暴單人逃跑（--solo）也失敗 / 174 清背包 / 175 寵物任務段（petquest 非 0）/ 176 收尾；9 / 10 透傳。離線測試 `test_postrebirth.py`。
 
 ### BOSS 戰後不滿 5 人自動補人：`bossretry.py`（2026-10-12；`--who` 模式實機驗過 DKBO3 / DKBO5 補完四寶玉之謎；questrun 38 / 21 與逐人驗證自動呼叫）
 照 memory psa-team-check-after-boss（2026-10-12 使用者更正）：照 0 轉龍王任務（英雄島前傳 2031 步 6）的做法——**落後的人當隊長、組滿 5 人、按追蹤回 BOSS 處全隊一起打**，不是掉隊者單人去打。errlog #222 / #226 / #238（四寶玉之謎 38 手動處理）。

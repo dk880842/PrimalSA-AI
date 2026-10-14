@@ -128,6 +128,7 @@ QOTHER = [
          steps={6: dict(kind='fight', map=5510, xy=(50, 17), warp=(1160, 646), warp_name='龍王守衛', npc='龍王的守衛 5510:53,17', hp_min=80)},
          bag_slots=6, boss=True, est_min=20, live=False, dragon_required=True, stop_after_rewards=1, min_level=80, need_items=['耐久力回複藥'],
          reward_pets=['巴朵蘭恩'], post=dict(store_personal=['英雄的祝福'], store_public=['龍王的守護']), drop_items=['薩姆吉爾的首飾'],
+         solo=dict(group_from=7),   # --solo（沒龍王 156 的退路）：步 1～5 單人逃跑到 NPC 再組隊對話、步 6 fight、步 7 / 8 組隊跑（2026-10-14 02:41～02:55 手動）
          note='紅暴（每轉必解）。使用者 2026-10-13：有龍王效果就組隊打到底（dragon_required，不看 --dragon；完全沒龍王可吃 → 156 改走單人逃跑 psa-quest-solo）。'
               '前置：成人儀式、5 人 ≥80 級、背包各有耐久力回複藥 ×1（步 1 交掉）。接取標題「英雄島前傳（必做）」。'
               '每步 --stop-after-rewards 1（步 1～5 對話 + 勾玉；步 1 點到同 NPC 閒聊只有再見 → quest.py ESC 回原流程）；'

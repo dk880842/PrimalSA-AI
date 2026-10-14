@@ -381,6 +381,15 @@ s = Sim(3003)
 s.quest = lambda a: s.out(0)                                 # 步 1 跑完但沒拿到金布伊（要爬塔）
 rc = go(3003, s, confirm_drop=True)
 check('猜謎步 1 後沒有金布伊 → 161、提示點任務追蹤重試', rc == pq.EXIT_ACCEPT and '任務追蹤' in pq.LAST['info'].get('manual', ''))
+s = Sim(3003)
+_q0 = s.quest
+s.quest = lambda a: (_q0(a), s.out(3))[1]                    # 2026-10-14 13:35：對話給了金布伊、追蹤進步 2、點追蹤不巡路 → quest.py 3
+rc = go(3003, s, confirm_drop=True)
+check('猜謎步 1 quest.py 3 但步號已是 2 + 5 人有金布伊 → 步 1 完成、續跑到 0', rc == 0 and names(s, 'petwatch.py'), f'rc={rc} {pq.LAST.get("info")}')
+s = Sim(3003)
+s.quest = lambda a: s.out(3)                                  # 真的沒反應：步號仍 1
+rc = go(3003, s, confirm_drop=True)
+check('猜謎步 1 quest.py 3 且步號仍 1 → 161', rc == pq.EXIT_ACCEPT, f'rc={rc}')
 
 # ---------------- 其他
 s = Sim(2016)

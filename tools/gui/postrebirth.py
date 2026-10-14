@@ -20,7 +20,11 @@
   inventory  唯讀盤點：exp.py read、bag.py list all、pet.py list --role all（失敗只警告；9 / 10 停）
   adult      questrun.py run 2999 --after none --dragon                                       失敗 172
   yayoi      questrun.py run 2017 --after none --dragon（NO_DRAGON：實際不吃）                  失敗 172
-  hero       questrun.py run 2031 --after none [--drop-reward 巴朵蘭恩 … --drop-items 薩姆吉爾的首飾 …]   156（沒龍王）→ 173 改單人逃跑；其他 172
+  hero       questrun.py run 2031 --after none --buy-missing [--drop-reward 巴朵蘭恩 … --drop-items 薩姆吉爾的首飾 …]
+             （--buy-missing：缺耐久力回複藥 → shopbuy 自動買）；156（背包 / 公共倉庫都沒有龍王）→ **自動改跑單人逃跑**
+             questrun.py run 2031 --solo …（同樣的丟棄 / 買藥參數；psa-quest-solo：解散 → quest.py --solo 跑到 NPC → 組隊對話 → 步 6 便捷傳送組隊 --fight
+             → 步 7 / 8 組隊 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾 → DKBO 戰寵改回；2026-10-14 02:41～02:55 手動流程）；
+             單人逃跑也失敗 → 173；其他 172
   q182a      questrun.py run 2015 2027 2018 2011 2024 2023 2020 2028 --after none --dragon    失敗 172
   bag1       清背包①：bag.py list all → 有人空格 < 6（1.82 後段最大 bag_slots 5 + 龍王 1）才刪 PURGE1 白名單（龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪）
              → 先 purge --dry-run、再實刪（要 --confirm-drop）→ 重讀仍不足 174
@@ -72,6 +76,7 @@ PURGE1 = ['儀之兜', '龍之槍', '龍之鎧', '龍之衣', '薩頓家的秘�
 PURGE2 = PURGE1 + ['杉的手環', '月光的手鐲', '巴巴洛的許可證']
 FLUTE, DRAGON_GEAR = '龍的魅力之笛', ('龍之槍', '龍之鎧', '龍之衣')
 NEED1, NEED2 = 6, 8                # 清背包①（1.82 後段最大 bag_slots 5 + 龍王 1）/ ②（四大洞窟，使用者建議 ≥ 8）
+HERO_SOLO = ['--solo']            # questrun 156（沒龍王）→ 單人逃跑重跑同一段（2026-10-14 起自動，不再停 173 交人）
 HERO_DROP = ['--drop-reward', '巴朵蘭恩', '--confirm-drop', '巴朵蘭恩', '--drop-items', '薩姆吉爾的首飾', '--confirm-drop-items', '薩姆吉爾的首飾']
 
 SEGMENTS = ['inventory', 'adult', 'yayoi', 'hero', 'q182a', 'bag1', 'q182b', 'bag2', 'caves', 'dino', 'katan', 'quiz', 'finish']
@@ -127,7 +132,7 @@ def seg_cmds(seg: str, o: dict) -> list:
         'inventory': [('exp.py', ['read']), ('bag.py', ['list', 'all']), ('pet.py', ['list', '--role', 'all', '--json'])],
         'adult': [('questrun.py', ['run', 2999, '--after', 'none', '--dragon'] + vd)],
         'yayoi': [('questrun.py', ['run', 2017, '--after', 'none', '--dragon'] + vd)],
-        'hero': [('questrun.py', ['run', 2031, '--after', 'none'] + vd + (HERO_DROP if o.get('confirm_drop') else []))],
+        'hero': [('questrun.py', ['run', 2031, '--after', 'none', '--buy-missing'] + vd + (HERO_DROP if o.get('confirm_drop') else []))],
         'q182a': [('questrun.py', ['run'] + Q182A + ['--after', 'none', '--dragon'] + vd)],
         'bag1': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE1) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
         'q182b': [('questrun.py', ['run'] + Q182B + ['--after', 'none', '--dragon'] + vd)],
@@ -260,9 +265,14 @@ class Run:
         rc, _ = self.sub(script, args)
         if not rc:
             return 0
-        if seg == 'hero' and rc == NODRAGON_RC:
-            return self.fail(EXIT_HERO, '紅暴：questrun 156 = 沒有龍王的守護 buff 也吃不到 → 改走單人逃跑（psa-quest-solo SKILL.md §4）；做完後 `run --from q182a` 續跑',
-                             'psa-quest-solo §4（questdetail.py accept「英雄島前傳（必做）」→ ass.py pet DKBO first 防禦 normal 攻擊 → team.py disband → 每步 quest.py --solo …）')
+        if seg == 'hero' and rc == NODRAGON_RC:                        # 2026-10-14：沒龍王 → 自動改單人逃跑（同一串參數加 --solo）
+            sargs = list(args) + HERO_SOLO
+            event('紅暴：questrun 156 = 背包 / 公共倉庫都沒有龍王的守護 → 自動改走單人逃跑（questrun --solo，psa-quest-solo）')
+            rc, _ = self.sub(script, sargs)
+            if not rc:
+                return 0
+            return rc if rc in PASS else self.fail(EXIT_HERO, f'紅暴單人逃跑：questrun --solo 退出碼 {rc}（意義見 questrun.py 檔頭）；做完後 `run --from q182a` 續跑',
+                                                   f'{fmt(script, sargs)}；或照 psa-quest-solo §4 手動；修好後 postrebirth.py run --from hero')
         code = EXIT_PET if script == 'petquest.py' else EXIT_QUEST
         return rc if rc in PASS else self.fail(code, f'{TITLES[seg]}：{script} 退出碼 {rc}（意義見該腳本檔頭）', f'{fmt(script, args)}；修好後 postrebirth.py run --from {seg}')
 
@@ -351,8 +361,8 @@ def print_plan(o: dict) -> None:
         if seg in ('bag1', 'bag2'):
             print(f'  （空格 < {NEED1 if seg == "bag1" else NEED2} 的人才刪；龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時；四大洞窟產物 / 龍王 / 誘餌等 bag.PURGE_FORBID 永不刪）')
         if seg == 'hero':
-            print('  （156 沒龍王 → 173 停，改單人逃跑 psa-quest-solo §4）' + ('' if o.get('confirm_drop') else '；沒 --confirm-drop：巴朵蘭恩 / 首飾不丟（之後寵物欄少 1 格，petquest 分批會變小）'))
-    print('退出碼：170 參數（171 保留：盤點只警告）172 任務段 173 紅暴沒龍王 174 清背包 175 寵物任務段 176 收尾；9 驗證視窗 10 斷線')
+            print('  （156 沒龍王 → 自動改跑 ' + fmt('questrun.py', seg_cmds('hero', o)[0][1] + HERO_SOLO) + '；仍失敗 173）' + ('' if o.get('confirm_drop') else '；沒 --confirm-drop：巴朵蘭恩 / 首飾不丟（之後寵物欄少 1 格，petquest 分批會變小）'))
+    print('退出碼：170 參數（171 保留：盤點只警告）172 任務段 173 紅暴單人逃跑失敗 174 清背包 175 寵物任務段 176 收尾；9 驗證視窗 10 斷線')
 
 
 def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, confirm_drop: bool = False, confirm_buy: bool = False,
