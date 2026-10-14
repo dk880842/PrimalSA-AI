@@ -101,7 +101,7 @@ quest.py 退出碼分支：0 → tail 有「任務完成」= 結束；其他（�
   117 對話無進展（quest.py 33）
   118 完整戰鬥自動戰鬥卡住（quest.py 25）
   119 接取失敗（info.accept_rc 是 questdetail 的 120～128）
-  150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～125 / 切回 DKBO / 重組；info.turnin）
+  150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～126〔126 = 按了確定但驗不到交出〕 / 切回 DKBO / 重組；info.turnin）
   151 丟獎勵寵 / 道具失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；--drop-items：bag.purge 93 / 96；info.drop）
   156 dragon_required 任務（紅暴）沒有龍王的守護 buff 也吃不到（背包 / 公共倉庫都沒有 → 改走單人逃跑 psa-quest-solo §4；一時失敗 → 處理後重跑）
   157 任務完成後獎勵處理失敗（questdefs post：bag.depot_many 存個人 / 公共倉庫、pet.store_many 寵物存個人；info.post）

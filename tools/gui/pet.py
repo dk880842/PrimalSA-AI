@@ -14,6 +14,7 @@
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"   # 每人不同目標
   uv run --no-project python tools/gui/pet.py set-state-many --role all 朵拉比斯 出戰 [--allow-mount]   # 多人同一隻寵物改狀態（面板只開一次）
   批次（2026-10-12）：面板開一次 → 倉庫分頁 / 子分頁切一次 → 左欄頭像換角色連續做 → 關一次。目標字串 = 名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級
+    @等級：同名多隻讀卡片綠字等級挑（-Green OCR；讀不到 / 讀成尾巴 123→23 = 不確定 → 逐張加讀；仍不確定且同名 ≥ 2 張 → 72 不取，2026-10-14 卡坦 restore）
   uv run --no-project python tools/gui/pet.py learn-species DKBO2 1 布拉奇多斯 --confirm-growth 49/9/8/2   # 登錄「這格沒名字的寵物是什麼物種」（縮圖 + 成長字串）
   uv run --no-project python tools/gui/pet.py depot-list --depot public[,personal] [--role DKBO2,DKBO3] [--candidates 魯尼帖斯,貝魯卡]   # 唯讀：倉庫卡片 + 各物種張數（只選卡不存取）
   名字框讀不出（2026-10-14 40/9/6/5：Windows OCR 把「40」讀成「姍」）：先加讀 -Zooms 5,6；仍讀不出 → list 給 unreadable=True、guess=候選字串（只有一種完整字串、
@@ -482,16 +483,25 @@ def ident_species(i: int, growth: str | None, ctx: dict) -> str | None:
     """沒名字的寵物（在寵物欄第 i 格，0 起算）→ 物種：縮圖簽名 + 成長字串登錄檔多重確認；沒登錄 = None（不猜）。
     有任務候選（ctx['img_only']，--candidates / pet_catch register）時改成：候選內相對比較（petimg_match.rank_among，inlier + 主色）
     有把握 → 登錄檔沒記這個字串、或記的是同一隻 → 採用；登錄檔記的是別隻 → 矛盾 None。沒把握 → 退回舊規則。
-    （2026-10-13 卡坦 4 鯊 / 4 雞是換色版：16 點縮圖簽名分不開 → 舊規則常 None，只好人工比腹部顏色）"""
+    （2026-10-13 卡坦 4 鯊 / 4 雞是換色版：16 點縮圖簽名分不開 → 舊規則常 None，只好人工比腹部顏色）
+    2026-10-14 登錄檔 v2（一個字串可對多物種，見 petmatch.growth_species）：字串只當候選過濾 ——
+    字串對到 ≥ 2 種（撞號）→ 只在這幾種之間再比一次縮圖（rank_among：inlier + 主色〔毛色 / 腹部色〕都要過分差），有把握才採用，否則 None（不准存取）；
+    縮圖認的物種不在字串的候選裡 → 矛盾 None"""
     reg = species_reg(ctx)
+    cands = petmatch.growth_species(reg, growth)
+    if len(cands) >= 2:
+        im = img_ident('slot', i, dict(ctx, img_only=cands))    # 只在撞號的這幾種之間比（比 4 種一起比分差大）
+        if im:
+            ctx.setdefault('img_cache', {})[i] = im
+        sp = im and im.get('img_species')
+        return sp if sp in cands else None
     if ctx.get('img_only'):
         im = img_ident('slot', i, ctx)
         if im:
             ctx.setdefault('img_cache', {})[i] = im
             sp = im.get('img_species')
-            sg = (reg.get('growth') or {}).get(growth) if growth else None
             if sp:
-                return sp if sg in (None, sp) else None
+                return sp if not cands or sp in cands else None
     cols = uikit.px(thumb_pts(i))
     return petmatch.identify_species(cols, growth, reg)
 
@@ -602,13 +612,12 @@ def ident_matches(ident: dict, sl: dict) -> bool:
 # 規則只有一條：候選成長字串（現場讀到的 guess，或呼叫端已知的字串）跟現場 OCR 每一行都不矛盾、已登錄成物種 X、
 # 現場縮圖（寵物格 / 倉庫卡，petimg_match）也認成 X、X 不是騎寵 → X。少任一條 → None（不猜）。只有縮圖照舊不算。
 def candidate_species(lines, cands, img_species, reg: dict) -> str | None:
-    """純函式：見上方規則。lines = 名字框 OCR 原文（None / 空 = 不比對 OCR，只給 read_slot 已確認過的 guess 用）"""
-    growth = reg.get('growth') or {}
-    hits = {growth.get(g) for g in cands or [] if g and growth.get(g) and (not lines or petmatch.growth_consistent(lines, g))}
-    if len(hits) != 1:
+    """純函式：見上方規則。lines = 名字框 OCR 原文（None / 空 = 不比對 OCR，只給 read_slot 已確認過的 guess 用）。
+    登錄檔 v2：候選字串可能對到多種（撞號）→ 候選物種 = 全部的聯集，縮圖認的物種在聯集裡才採用（縮圖本身要有把握）"""
+    hits = {sp for g in cands or [] if g and (not lines or petmatch.growth_consistent(lines, g)) for sp in petmatch.growth_species(reg, g)}
+    if not hits or img_species not in hits:
         return None
-    x = hits.pop()
-    return x if x not in uikit.MOUNTS and img_species == x else None
+    return img_species if img_species not in uikit.MOUNTS else None
 
 
 def guess_species(d: dict, reg: dict) -> str | None:
@@ -626,7 +635,7 @@ def unreadable_species(idn: dict, kind: str, idx: int, ctx: dict, cands=()) -> s
         return None
     cs = [g for g in dict.fromkeys([idn.get('guess'), *cands]) if g]
     reg = species_reg(ctx)
-    if not any((reg.get('growth') or {}).get(g) for g in cs):
+    if not any(petmatch.growth_species(reg, g) for g in cs):
         return None
     im = img_ident(kind, idx, ctx)
     return candidate_species(idn['raw'], cs, im and im.get('img_species'), reg)
@@ -732,10 +741,29 @@ def list_role(role: str, ctx: dict) -> tuple:
         rc = select_slot(i, f)
         if rc:
             return rc, slots
-        slots.append(read_slot(i, ctx))
+        d = read_slot(i, ctx)
+        prev = slots[-1] if slots and not slots[-1].get('empty') else None
+        for _ in range(STALE_RETRIES):                   # 名字框跟上一格點陣完全相同：可能是黃框先到、名字框還沒換（殘影）→ 等一下重讀
+            if not stale_suspect(prev, d):
+                break
+            uikit.sleep(STALE_WAIT_S)
+            uikit.mark('stale-retry')
+            d = read_slot(i, ctx)
+            d['stale_retry'] = True
+        slots.append(d)
         f = scan_frames() or f
     uikit.mark(f'list {role}')
     return 0, slots
+
+
+STALE_RETRIES = 2              # 2026-10-14 卡坦：DKBO2 第 4 格新寵物 49/10/6/3 register 漏登（推定讀到第 3 格殘影、兩格同字串被合併）
+STALE_WAIT_S = 0.6
+
+
+def stale_suspect(prev: dict | None, d: dict) -> bool:
+    """純函式：這格讀到的名字框點陣跟上一格（剛才選的那格）完全相同 → 可能是殘影，要重讀。
+    重讀後仍相同就照收（同字串的兩隻寵物點陣本來就相同，例：3 隻 43/9/6/5 魯尼帖斯）"""
+    return bool(prev and d.get('nh') and prev.get('nh') == d.get('nh'))
 
 
 # ---- 面板 / 戰鬥 / 遇敵 ----
@@ -1649,6 +1677,16 @@ def card_is(idn: dict, want: str | None, reg: dict) -> bool:
     return bool(g) and (reg.get('growth') or {}).get(g) == want
 
 
+def ambiguous_img(kind: str, idx: int, growth: str | None, ctx: dict):
+    """成長字串撞號（登錄檔 v2 對到 ≥ 2 種）→ (候選物種, 縮圖只在這幾種之間比、有把握的物種或 None)；不是撞號 → (候選, None)"""
+    cands = petmatch.growth_species(species_reg(ctx), growth)
+    if len(cands) < 2:
+        return cands, None
+    im = img_ident(kind, idx, dict(ctx, img_only=cands))
+    sp = im and im.get('img_species')
+    return cands, (sp if sp in cands else None)
+
+
 def img_target(kind: str, idx: int, idn: dict, t: dict, ctx: dict, info: dict | None = None) -> bool:
     """take 的補充驗名：名字框認不出目標時（沒名字 / 名字讀不出、成長字串登錄檔不知道），縮圖認出的物種 == 目標名字 → True。
     只用在 take（可逆：取出後還會再驗）；目標有指定成長字串、或卡片有名字 / 登錄檔已知成長字串時一律 False（照原規則）"""
@@ -1656,6 +1694,11 @@ def img_target(kind: str, idx: int, idn: dict, t: dict, ctx: dict, info: dict | 
         return False
     if idn.get('growth') and (species_reg(ctx).get('growth') or {}).get(idn['growth']):
         return False
+    cands, sp = ambiguous_img(kind, idx, idn.get('growth'), ctx)
+    if len(cands) >= 2:                                         # 撞號：縮圖只在撞號的物種之間決勝，目標不在候選 / 沒把握 → False
+        if info is not None:
+            info.setdefault('img', []).append({'kind': kind, 'index': idx + 1, 'species': sp, 'among': cands})
+        return t['name'] in cands and sp == t['name']
     if idn.get('guess') and (species_reg(ctx).get('growth') or {}).get(idn['guess']) not in (None, t['name']):   # 讀不出但候選字串登錄成別的物種 → 不靠縮圖放行
         return False
     im = img_ident(kind, idx, ctx)
@@ -1697,7 +1740,12 @@ def find_card(d: dict, depot: str, pred, ctx: dict, first: int | None = None, in
 # ---- 取出目標（2026-10-12 B：不准盲取格號；errlog #294 --index 盲取遞補後的格子取到左迪洛斯）----
 TARGET_RE = re.compile(r'^(?P<name>[^#@]*?)\s*(?:#\s*(?P<growth>\d{1,3}/\d{1,3}/\d{1,3}/\d{1,3}))?\s*(?:@\s*(?:[Ll][Vv])?(?P<level>\d{1,3}))?$')
 CARD_LVL_BOX = (-50, 18, 100, 26)        # 倉庫卡下緣綠字「0轉129級」：相對卡心 (dx, dy, w, h)（depot5.png 實測位置；OCR 待實機量）
-CARD_LVL_OPTS = [('-Dark', 0, '-Zooms', '2,3,4')]
+# 綠字用 -Green 二值化（2026-10-14 離線量 depot5.png：舊的 -Dark 0 把 126 讀成 26 / 6、129 讀成「0級」；-Green 100 讀成 126×3、129×2 + 29×1、133×3）
+# 卡坦 restore 實機：朵拉比斯 Lv123 卡讀成 23（掉了百位）→ 被排除，另一張 Lv130 讀不出 → 只剩它一張候選被取出（errlog #788～796）
+CARD_LVL_OPTS = [('-Green', 100, '-Zooms', '2,3,4'), ('-Green', 60, '-Zooms', '3,5')]
+CARD_LVL_EXTRA = [('-Green', 140, '-Zooms', '2,4,6'), ('-Dark', 0, '-Zooms', '2,3,4,5')]     # 讀不確定時逐張加讀（多倍率 / 另一種二值化）
+PET_MAX_LEVEL = 140                      # Config.petMaxLevel：超出範圍的 OCR 值丟掉
+CARD_DIGIT_FIX = str.maketrans({'l': '1', 'I': '1', '|': '1', '丨': '1', 'i': '1', 'O': '0', 'o': '0'})
 
 
 def parse_target(text):
@@ -1728,19 +1776,52 @@ def target_ok(idn: dict, t: dict, reg: dict) -> bool:
     return True
 
 
+def card_level_votes(lines) -> dict:
+    """倉庫卡綠字 OCR 行 → {等級: 幾行讀到}（純函式）。「轉」後面的 l / I / | 當 1、O 當 0；超出 1～PET_MAX_LEVEL 的值丟掉"""
+    from collections import Counter
+    c = Counter()
+    for t in lines or []:
+        m = re.search(r'轉\s*([0-9lIi|丨Oo]{1,3})', str(t))
+        if not m:
+            continue
+        txt = m[1].translate(CARD_DIGIT_FIX)
+        if txt.isdigit() and 1 <= int(txt) <= PET_MAX_LEVEL:
+            c[int(txt)] += 1
+    return dict(c)
+
+
 def parse_card_level(lines) -> int | None:
-    """倉庫卡綠字 OCR 行 → 等級（純函式）：各行「轉N」的 N 全部相同才採用；沒有 / 不一致 → None（不猜）"""
-    vals = {int(m[1]) for t in (lines or []) for m in [re.search(r'轉\s*(\d{1,3})', str(t))] if m}
-    return vals.pop() if len(vals) == 1 else None
+    """倉庫卡綠字 OCR 行 → 等級（純函式）。只有一種值 → 它；多種值時：最長（位數最多）的值至少 2 行讀到、
+    其他值都是它「掉了前面位數」的尾巴（129 / 29、126 / 26 / 6：OCR 常掉百位，很少多長一位）→ 最長的；否則 None（不猜）"""
+    vals = card_level_votes(lines)
+    if len(vals) == 1:
+        return next(iter(vals))
+    if not vals:
+        return None
+    top = max(vals, key=lambda v: (len(str(v)), vals[v]))
+    if vals[top] >= 2 and all(str(top).endswith(str(v)) for v in vals if v != top):
+        return top
+    return None
 
 
-def card_level_now(idx: int) -> int | None:
-    """倉庫第 idx 格（0 起算）卡片下緣的等級（OCR；倉庫分頁中間沒有等級欄，只有卡片綠字）。讀不到 None"""
+def level_uncertain(lv: int | None, want: int | None) -> bool:
+    """純函式：卡片讀到的等級 lv 跟目標 want 不同，但可能只是 OCR 掉了前面位數（123 → 23 / 3）或沒讀到 → 不能當「確定不是」"""
+    if want is None or lv == want:
+        return False
+    return lv is None or (len(str(lv)) < len(str(want)) and str(want).endswith(str(lv)))
+
+
+def card_level_now(idx: int, extra: bool = False) -> int | None:
+    """倉庫第 idx 格（0 起算）卡片下緣的等級（OCR；倉庫分頁中間沒有等級欄，只有卡片綠字；不用選卡）。讀不到 / 不一致 None。
+    先讀 CARD_LVL_OPTS 第一組，已有 ≥ 2 行同值且沒有矛盾就停；extra = 再加讀 CARD_LVL_EXTRA（逐張確認用）"""
     cx, cy = card_xy(idx)
     dx, dy, w, h = CARD_LVL_BOX
     lines = []
-    for opts in CARD_LVL_OPTS:
+    for opts in CARD_LVL_OPTS + (CARD_LVL_EXTRA if extra else []):
         lines += _petwatch().ocr((cx + dx, cy + dy, w, h), *opts)
+        v = parse_card_level(lines)
+        if v is not None and card_level_votes(lines).get(v, 0) >= 2 and not extra:
+            return v
     return parse_card_level(lines)
 
 
@@ -1801,13 +1882,15 @@ def _ensure_depot(depot: str) -> tuple:
 
 def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache: dict) -> tuple:
     """逐張選卡讀名字框找目標 → (index 或 None, 說明)。順序：快取裡像目標的格 → 沒讀過的格 → 其他（快取只是猜測，每張都現場讀）。
-    有等級目標：名字 / 字串吻合的卡再 OCR 卡片綠字等級，相等就選；讀不到等級的候選只有 1 張 → 選它（取出後再驗）；≥ 2 張讀不到 → None（不盲取）"""
+    有等級目標：名字 / 字串吻合的卡再 OCR 卡片綠字等級，相等就選。讀不到 / 讀成目標的尾巴（123 讀成 23，level_uncertain）= 不確定，
+    不當成「不是」：全部看完沒有相等的 → 不確定的卡逐張加讀（CARD_LVL_EXTRA），讀到相等就選；
+    仍不確定 → 只有「這名字全倉庫就這一張」才選它（取出後再驗等級），否則 None（不取；2026-10-14 卡坦 restore 取到 Lv130 的教訓）"""
     reg = species_reg(ctx)
     filled = [k for k in range(20) if not d['empty'][k]]
     hit = [k for k in filled if k in cache and target_ok(cache[k], t, reg)]
     unk = [k for k in filled if k not in cache]
     rest = [k for k in filled if k not in hit and k not in unk]
-    seen, cands = {}, []
+    seen, cands, named = {}, [], []
     for k in hit + unk + rest:
         if not click_card(k, f'pet 找倉庫卡 第 {k + 1} 格'):
             break
@@ -1828,18 +1911,29 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
             info['cards'] = seen
             return k, ''
         lv = card_level_now(k)
+        named.append(k)
         seen[k + 1] = f'{seen[k + 1]}@{lv}'
         if lv == t['level']:
             info['cards'], info['pre_level'] = seen, lv
             return k, ''
-        if lv is None:
+        if level_uncertain(lv, t['level']):
             cands.append(k)
+    unsure = []
+    for k in cands:                                                    # 逐張加讀（卡片綠字不用選卡就讀得到）
+        lv = card_level_now(k, extra=True)
+        seen[k + 1] = f'{seen[k + 1]}→{lv}'
+        if lv == t['level']:
+            info['cards'], info['pre_level'] = seen, lv
+            return k, ''
+        if level_uncertain(lv, t['level']):
+            unsure.append(k)
     info['cards'] = seen
-    if len(cands) == 1:
+    if len(unsure) == 1 and len(named) == 1:
         info['level_unverified'] = True
-        return cands[0], ''
-    if len(cands) > 1:
-        return None, f'{depot} 倉庫有 {len(cands)} 張 {fmt_target(t)} 候選（格 {[c + 1 for c in cands]}）但卡片等級讀不出來，不盲取'
+        return unsure[0], ''
+    if unsure:
+        return None, (f'{depot} 倉庫有 {len(named)} 張 {t.get("name") or fmt_target(t)}，其中 {len(unsure)} 張（格 {[c + 1 for c in unsure]}）'
+                      f'卡片等級讀不確定、沒有一張確定是 Lv{t["level"]}（讀到 {seen}），不取')
     return None, f'{depot} 倉庫裡逐張看不到 {fmt_target(t)}（讀到 {seen}）'
 
 
@@ -1895,9 +1989,11 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
         return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格是 {nm}，不是 {fmt_target(t)}；沒取出（格子可能遞補了，重讀倉庫或改用 --pet 找）')
     if t.get('level') is not None and info.get('pre_level') is None and not info.get('level_unverified'):
         lv = card_level_now(idx)
-        if lv is not None and lv != t['level']:
+        if lv != t['level'] and lv is not None:
+            lv = card_level_now(idx, extra=True)                            # 讀到別的等級：加讀確認（2026-10-14 Lv123 讀成 23 → 拒絕了正確的那張）
+        if lv is not None and lv != t['level'] and not level_uncertain(lv, t['level']):
             return bad(EXIT_NAME, f'倉庫第 {idx + 1} 格 {nm} 卡片等級是 {lv}，不是 {t["level"]}；沒取出')
-        info['pre_level'] = lv
+        info['pre_level'] = lv if lv == t['level'] else None              # 讀不到 / 只讀到尾巴（23 vs 123）→ 取出後切寵物分頁驗等級
     ok, why = btn_ready('take')
     if not ok:
         uikit.snap('pet-take-btn')
@@ -2120,6 +2216,9 @@ def card_ident(k: int, idn: dict, ctx: dict) -> dict:
         d['species'], d['src'] = d['name'], 'name'
     elif d['growth'] and reg.get(d['growth']):
         d['species'], d['src'] = reg[d['growth']], 'reg'
+    elif d['growth'] and len(petmatch.growth_species(species_reg(ctx), d['growth'])) >= 2:   # 撞號：只在候選物種之間比縮圖，沒把握 = None
+        d['species'] = ambiguous_img('card', k, d['growth'], ctx)[1]
+        d['src'] = 'reg-multi+img' if d['species'] else 'ambiguous'
     elif (us := unreadable_species(idn, 'card', k, ctx)):               # 讀不出：候選字串登錄 + 縮圖一致（共用規則）
         d['species'], d['src'] = us, 'reg+img'
     else:

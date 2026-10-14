@@ -56,7 +56,7 @@
   161 接取失敗（questrun 非預期退出碼）/ 猜謎步 1 沒拿到金布伊
   162 準備失敗（關遇敵、解散、讀寵物欄、取消鎖定、存原戰寵、金布伊出戰 / 鎖定）
   163 誘餌不夠且沒給 --confirm-buy-bait / 買可抓捕數失敗（石幣讀不到 / 不夠、「+」按了可抓捕數沒變、扣款不是 50,000、鑽石有變）
-  164 抓寵失敗（pet_catch 非 0：14 系別物種選不到、15 register 縮圖矛盾、103 取誘餌 / 設定 / 逾時…）
+  164 抓寵失敗（pet_catch 非 0：14 系別物種選不到、15 register 縮圖矛盾、16 新寵物名字讀不出、17 新寵物沒登錄（撞號 / 同人兩格同字串）、103 取誘餌 / 設定 / 逾時…）
   165 分配失敗（store-many / take-many 非 0、數量驗不過）
   166 練寵失敗（自動轉換戰寵、出戰、verify-battle、grind、等級逾時、petwatch、rest-all）
   167 交寵物失敗（questrun 非預期退出碼、卡坦第 1 輪交完步號不是 2）
@@ -680,7 +680,7 @@ class Run:
             reuse = ['--reuse-setup'] if bi > 0 else []                 # 第 2 批起沿用第 1 批的捉寵設置（讀回驗證照舊，review 1013b §2.5-A）
             rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', k, '--stages', 'setup,wait,register'] + reuse, 3600)
             if rc:                                                      # pet_catch 失敗時自己會取消自動抓寵（9 / 10 除外）；續跑會先數實際數量
-                return self.pass_or(rc, EXIT_CATCH, f'抓寵失敗 pet_catch rc={rc}（14 系別 / 物種選不到、15 縮圖矛盾、16 新寵物名字讀不出、103 設定 / 逾時）；'
+                return self.pass_or(rc, EXIT_CATCH, f'抓寵失敗 pet_catch rc={rc}（14 系別 / 物種選不到、15 縮圖矛盾、16 新寵物名字讀不出、17 新寵物沒登錄、103 設定 / 逾時）；'
                                     f'已取消自動抓寵，重跑會先數實際已抓（含倉庫）再補',
                                     f'uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}（或 pet_catch.py --catch-off 後手動）'), rs
             n_store = store_after_batch(k, last)

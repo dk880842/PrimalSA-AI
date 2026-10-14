@@ -9,12 +9,15 @@
 
 流程（每人）：char.ensure（切換面板換成該角色；--no-switch 不切，當前角色就是要交的人）→ 點追蹤列表「恐龍博士」（自動走到 NPC 開對話）→
   對話框左鈕（「恐龍博士」→「完成」；步 2 直接是「完成」）→「選擇」視窗：OCR 讀每張寵物卡的名字，**依名字**點卡（順序每人不同），
-  卡片變黃底才按「確定」706,614；視窗消失 = 交出。寵物被收走由呼叫端 pet.py list 驗。
+  卡片變黃底才按「確定」706,614 → 視窗消失 → **交後驗證**（2026-10-14 恐龍博士：DKBO 交魯尼帖斯按確定、視窗消失就判 step1 True，
+  實際伺服器沒收走，下一步才 125）：每 VERIFY_POLL_S 秒唯讀讀追蹤列表步號（quest.read_step_no，最多 VERIFY_WAIT_S 秒）——
+  步號 > 交的那步、或最後一步交完任務從追蹤列表消失 = 交出；步號一直等於交的那步 = 沒交到 126；
+  步號讀不到 → 開寵物面板讀該角色寵物欄（pet.list_role），交的寵物已不在 = 交出，還在 / 有格認不出 = 126（不猜）。
 前提（呼叫端負責）：隊伍已解散（逐人交）、任務寵都在寵物欄、等級夠（魯尼帖斯 ≥18、貝魯卡 ≥30）、任務寵都已「等待」（pet.py rest-all）、
   已接任務（questrun run 2016 步 1、2 是 manual 會停下）。
 **不切回 DKBO**：全部交完由呼叫端 char.py ensure DKBO。
 
-退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；自己 120～125）：
+退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；自己 120～126）：
   120 切換角色失敗（char 的退出碼在 roles[角色].char_rc）
   121 追蹤列表找不到「恐龍博士」（任務已完成 / 沒接 / 被擋）。2026-10-13 起：剛切換角色時追蹤列表還沒載入（讀到 0 列）不算沒找到，
       等 TRACK_RETRY_S 秒重掃、最多等 TRACK_LOAD_MAX_S 秒；列表有內容但沒有該任務要連續 TRACK_MISS_MAX 次才判 121
@@ -23,6 +26,7 @@
   123 選擇視窗裡找不到指定名字的寵物卡（OCR 讀不到 / 寵物不在寵物欄）→ 零點擊確定
   124 點了卡片但沒變黃底（不按確定）
   125 按了確定後視窗沒消失
+  126 按了確定、視窗也消失了，但驗不到交出（步號沒前進 / 寵物還在寵物欄 / 兩者都讀不到）→ 停手，不重交
 """
 import argparse
 import difflib
@@ -40,7 +44,7 @@ import charname  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'pet_turnin'
-EXIT_CHAR, EXIT_TRACK, EXIT_WAIT, EXIT_CARD, EXIT_SELECT, EXIT_CONFIRM = 120, 121, 122, 123, 124, 125
+EXIT_CHAR, EXIT_TRACK, EXIT_WAIT, EXIT_CARD, EXIT_SELECT, EXIT_CONFIRM, EXIT_NOT_TAKEN = 120, 121, 122, 123, 124, 125, 126
 
 TASK_TITLE = '恐龍博士'
 STEPS = {1: '魯尼帖斯', 2: '貝魯卡'}
@@ -58,6 +62,8 @@ RECOGNIZE_CUTOFF = 0.6
 TRACK_RETRY_S = 4.0                     # 追蹤列表沒找到 → 隔這麼久重掃（舊版 12 秒才掃一次、第一次沒找到就 121）
 TRACK_MISS_MAX = 3                      # 列表有內容但沒有該任務：連續這麼多次才判 121
 TRACK_LOAD_MAX_S = 40.0                 # 列表一直讀到 0 列（還沒載入）最多等這麼久，之後也判 121
+VERIFY_WAIT_S = 12.0                    # 交後驗證：追蹤步號最多等這麼久前進（伺服器回應 / 列表刷新）
+VERIFY_POLL_S = 2.0
 
 
 def norm(t: str) -> str:
@@ -207,6 +213,61 @@ def turnin_step(want: str, dry_run: bool = False) -> int:
     return EXIT_WAIT
 
 
+def judge_taken(step: int, after, last_step: int = max(STEPS)) -> str:
+    """純函式：交完第 step 步後讀到的追蹤步號 after → 'ok'（前進了 / 最後一步交完任務消失）/ 'same'（還停在這步 = 沒交到）/
+    'unknown'（讀不到；非最後一步卻消失也算讀不準）"""
+    if after == 'GONE':
+        return 'ok' if step >= last_step else 'unknown'
+    if isinstance(after, int):
+        return 'ok' if after > step else 'same'
+    return 'unknown'
+
+
+def pet_still_there(role: str, want: str):
+    """唯讀：開寵物面板讀 role 的寵物欄 → True（want 還在）/ False（不在，且每格都認得）/ None（讀不到 / 有格認不出，不猜）"""
+    import pet
+    ctx = pet.load_ctx(True, list(STEPS.values()))
+    with pet.Session(False, False) as ss:
+        if ss.rc:
+            return None
+        rc, slots = pet.list_role(charname.canon(role), ctx)
+    pet.save_ctx(ctx)
+    if rc:
+        return None
+    ids = [pet.slot_ident(x) for x in slots if not x.get('empty')]
+    if want in ids:
+        return True
+    return None if any(i is None for i in ids) else False
+
+
+def verify_taken(role: str, want: str, step: int) -> int:
+    """按確定、視窗消失之後：確認伺服器真的收走了（見檔頭）。0 = 交出；126 = 沒交到 / 驗不到"""
+    import quest
+    end = time.time() + VERIFY_WAIT_S
+    seen = []
+    while True:
+        after = quest.read_step_no(TASK_TITLE, reveal=False)
+        seen.append(after)
+        j = judge_taken(step, after)
+        if j == 'ok':
+            log(f'{role} 步 {step} 交 {want}：追蹤步號 {after} → 已交出')
+            return 0
+        if time.time() >= end:
+            break
+        uikit.sleep(VERIFY_POLL_S)
+    if judge_taken(step, seen[-1]) == 'same':                         # 最後一次讀得到、而且還停在這步
+        log(f'{role} 步 {step} 交 {want}：按了確定、視窗消失，但追蹤步號一直是 {step}（讀到 {seen}）→ 伺服器沒收走，停手')
+        uikit.snap('pet-turnin-not-taken')
+        return EXIT_NOT_TAKEN
+    there = pet_still_there(role, want)
+    if there is False:
+        log(f'{role} 步 {step} 交 {want}：步號讀不到（{seen}），寵物欄已沒有 {want} → 已交出')
+        return 0
+    log(f'{role} 步 {step} 交 {want}：步號讀不到（{seen}），寵物欄' + ('還有' if there else '讀不出 / 有格認不出，驗不到') + f' {want} → 停手')
+    uikit.snap('pet-turnin-not-taken')
+    return EXIT_NOT_TAKEN
+
+
 def run(roles: list, steps=(1, 2), switch: bool = True, dry_run: bool = False) -> tuple:
     rc0 = uikit.preflight(SRC)
     if rc0:
@@ -224,6 +285,8 @@ def run(roles: list, steps=(1, 2), switch: bool = True, dry_run: bool = False) -
         for s in steps:
             log(f'{canon} 步 {s}：交 {STEPS[s]}')
             rc = turnin_step(STEPS[s], dry_run)
+            if rc == 0 and not dry_run:
+                rc = verify_taken(canon, STEPS[s], s)
             res[canon][f'step{s}'] = rc == 0
             if rc:
                 return rc, res

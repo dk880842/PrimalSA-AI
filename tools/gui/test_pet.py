@@ -984,6 +984,54 @@ g = new(pets=mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 
 g.card_lvl_ocr = True
 rc, out, err = run(pet.take, 'DKBO', 'personal', 1, '朵拉比斯', False, True, None, None, 1)
 check('B：--index 1 --expect 朵拉比斯 --expect-level 1，第 1 格是 Lv126 → 取前就擋 72', rc == 72 and depot_free(g) == 0, f'rc={rc}')
+
+# ---- 2026-10-14 卡坦 restore：個人倉庫朵拉比斯 Lv123 卡讀成 23（掉百位）被排除、Lv130 讀不出 → 只剩它被取出（76）----
+P = pet.parse_card_level
+check('parse_card_level：掉百位的尾巴併成最長值（129×2 + 29 → 129）', P(['0轉129級', '0轉129級', '0轉29級']) == 129)
+check('parse_card_level：只讀到尾巴 → 回尾巴（由 level_uncertain 當不確定）', P(['0轉26級', '0轉26級', '0轉6']) == 26)
+check('parse_card_level：最長值只有 1 行 → 不採用（1 讀成 11 不能變 11）', P(['0轉1級', '0轉11級']) is None)
+check('parse_card_level：l / I 當 1、超出 140 丟掉', P(['0轉l23級', '0轉123級']) == 123 and P(['0轉199級']) is None and P(['0轉0級']) is None)
+U = pet.level_uncertain
+check('level_uncertain：讀不到 / 尾巴（23、3 vs 123）不確定；130、1 vs 123 確定不是；相等不是不確定',
+      U(None, 123) and U(23, 123) and U(3, 123) and not U(130, 123) and not U(1, 123) and not U(123, 123) and not U(12, 123) and not U(5, None))
+twin2 = {'DKBO': {'personal': [{'name': '朵拉比斯', 'level': 130}, {'name': '朵拉比斯', 'level': 123}]}}
+mount_only = mk_pets(DKBO=[{'name': '瑪斯貝卡', 'state': '騎乘', 'level': 1}, None, None, None, None])
+
+
+def bad_lvl(idx, c, opts):
+    """實機重現：Lv130 讀不出、Lv123 每組都讀成 23"""
+    return [] if c['level'] == 130 else ['0轉23級', '0轉23級']
+
+
+g = new(pets=mount_only, depot=fake_pet.mk_depot(**twin2))
+g.card_lvl_fn = bad_lvl
+rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯', None, 123)
+check('卡坦 restore 重現：Lv130 讀不出、Lv123 讀成 23 → 兩張都不確定 → 72 不取（舊版取到 Lv130）', rc == 72 and depot_free(g) == 0, f'rc={rc} {err[-200:]}')
+
+
+def extra_ok(idx, c, opts):
+    """第一組讀成 23、加讀（CARD_LVL_EXTRA）讀對"""
+    if tuple(opts) in [tuple(o) for o in pet.CARD_LVL_EXTRA]:
+        return [f'0轉{c["level"]}級'] * 2
+    return [] if c['level'] == 130 else ['0轉23級', '0轉23級']
+
+
+g = new(pets=mount_only, depot=fake_pet.mk_depot(**twin2))
+g.card_lvl_fn = extra_ok
+rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯', None, 123)
+check('不確定的卡逐張加讀 → 讀到 123 那張就取它（不是 Lv130）', rc == 0 and g.pets['DKBO'][1]['level'] == 123 and g.depot['DKBO']['personal'][0]['level'] == 130, f'rc={rc} {err[-200:]}')
+g = new(pets=mount_only, depot=fake_pet.mk_depot(**{'DKBO': {'personal': [{'name': '朵拉比斯', 'level': 123}]}}))
+g.card_lvl_fn = bad_lvl
+rc, out, err = run(pet.take, 'DKBO', 'personal', None, None, False, True, '朵拉比斯', None, 123)
+check('同名只有 1 張、等級讀成 23 → 取它，取出後讀等級驗過', rc == 0 and g.pets['DKBO'][1]['level'] == 123, f'rc={rc} {err[-200:]}')
+g = new(pets=mount_only, depot=fake_pet.mk_depot(**twin2))
+g.card_lvl_fn = bad_lvl
+rc, out, err = run(pet.take, 'DKBO', 'personal', 2, '朵拉比斯', False, True, None, None, 123)
+check('--index 2 --expect-level 123：卡片讀成 23 不再當「不是」擋掉（取出後驗等級）', rc == 0 and g.pets['DKBO'][1]['level'] == 123, f'rc={rc} {err[-200:]}')
+g = new(pets=mount_only, depot=fake_pet.mk_depot(**{'DKBO': {'personal': [{'name': '朵拉比斯', 'level': 130}, {'name': '朵拉比斯', 'level': 123}]}}))
+g.card_lvl_ocr = True
+rc, out, err = run(pet.take_plan, pet.parse_plan('DKBO:朵拉比斯@123'), 'personal')
+check('take-many --plan DKBO:朵拉比斯@123：同名多隻依卡片等級選 123', rc == 0 and g.pets['DKBO'][1]['level'] == 123, f'rc={rc} {err[-200:]}')
 # set-state-many
 g = new()
 rc, out, err = run(pet.set_state_many, 'all', '迪基格斯', '等待')
@@ -1234,6 +1282,85 @@ check('rebirth_pets.pick_row：下拉「姍/9/5/6」用同一套容錯認成 40/
       _rp.pick_row([('姍/9/5/6', 10, 100)], ('growth', '40/9/5/6'))[0] is not None
       and _rp.pick_row([('姍/9/5/6', 10, 100)], ('growth', '40/9/5/6', ['41/9/5/6']))[0] is None
       and _rp.parse_growth_line("40/9/5/'6") == '40/9/5/6')
+
+# ---- 2026-10-14 登錄檔 v2：成長字串可對多個物種（卡坦 distribute1 rc 76：50/10/6/3 加格 / 邦恩吉同字串、49/10/6/3 後登覆蓋前登）----
+import json as _json  # noqa: E402
+_d2 = Path(tempfile.mkdtemp())
+petmatch.TPL_DIR = _d2
+(_d2 / 'species.json').write_text(_json.dumps({'thumb': {}, 'growth': {'49/10/6/3': '克邦凱斯', '47/11/5/3': '加格'}}, ensure_ascii=False), encoding='utf-8')
+r2 = petmatch.load_species()
+check('舊格式 species.json 讀檔自動遷移（src legacy）、growth 推導不變',
+      r2['growth'] == {'49/10/6/3': '克邦凱斯', '47/11/5/3': '加格'} and r2['growth_src']['49/10/6/3'] == [{'species': '克邦凱斯', 'src': 'legacy'}])
+petmatch.learn_species(r2, '邦恩吉', None, '49/10/6/3')
+petmatch.learn_species(r2, '克邦凱斯', None, '49/10/6/3')
+check('learn_species 撞號：兩種都記著、不互蓋（舊版刪掉後又被另一種登回去）；唯一對照拿掉',
+      petmatch.growth_species(r2, '49/10/6/3') == ['克邦凱斯', '邦恩吉'] and '49/10/6/3' not in r2['growth'])
+petmatch.growth_add(r2, '50/10/6/3', '加格', catcher='DKBO4', score=0.91)
+petmatch.save_species(r2)
+raw = _json.loads((_d2 / 'species.json').read_text(encoding='utf-8'))
+r3 = petmatch.load_species()
+check('存檔寫 v2（ver 2 + growth_src 附抓寵者 / 分數）、重讀一致',
+      raw['ver'] == 2 and raw['growth_src']['50/10/6/3'][0]['catcher'] == 'DKBO4' and raw['growth_src']['50/10/6/3'][0]['score'] == 0.91
+      and petmatch.growth_species(r3, '49/10/6/3') == ['克邦凱斯', '邦恩吉'] and r3['growth'] == {'47/11/5/3': '加格', '50/10/6/3': '加格'})
+check('identify_species 撞號：沒縮圖 → None；縮圖不在候選 → None',
+      petmatch.identify_species(None, '49/10/6/3', r3) is None and petmatch.identify_species(None, '47/11/5/3', r3) == '加格')
+check('candidate_species 撞號：縮圖（有把握）在候選裡才給，沒把握 None',
+      pet.candidate_species(None, ['49/10/6/3'], '邦恩吉', r3) == '邦恩吉' and pet.candidate_species(None, ['49/10/6/3'], None, r3) is None
+      and pet.candidate_species(None, ['49/10/6/3'], '加格', r3) is None)
+_sv = pet.img_ident
+_seen_only = []
+
+
+def _fake_img(kind, idx, ctx, sp=None):
+    _seen_only.append(list(ctx.get('img_only') or []))
+    return {'img_species': sp, 'img_score': 0.94}
+
+
+ctx2 = {'reg': r3, 'img_only': ['克邦凱斯', '加克拉', '加格', '邦恩吉']}
+pet.img_ident = lambda kind, idx, ctx: _fake_img(kind, idx, ctx, None)
+check('ident_species 撞號（49/10/6/3 克邦凱斯 / 邦恩吉）縮圖沒把握 → None（不准存取）', pet.ident_species(1, '49/10/6/3', ctx2) is None and _seen_only[-1] == ['克邦凱斯', '邦恩吉'])
+pet.img_ident = lambda kind, idx, ctx: _fake_img(kind, idx, ctx, '邦恩吉')
+check('ident_species 撞號：只在撞號的物種之間比縮圖、有把握 → 該物種', pet.ident_species(1, '49/10/6/3', ctx2) == '邦恩吉')
+pet.img_ident = lambda kind, idx, ctx: _fake_img(kind, idx, ctx, '邦恩吉')
+check('ident_species 唯一字串：縮圖相同 → 採用；縮圖有把握但不在字串候選 → None',
+      pet.ident_species(1, '47/11/5/3', dict(ctx2)) is None and pet.ident_species(1, '9/9/9/9', dict(ctx2)) == '邦恩吉')
+check('img_target 撞號：目標在候選且縮圖認成目標才 True', pet.img_target('card', 0, {'growth': '49/10/6/3'}, {'name': '邦恩吉'}, ctx2)
+      and not pet.img_target('card', 0, {'growth': '49/10/6/3'}, {'name': '克邦凱斯'}, ctx2)
+      and not pet.img_target('card', 0, {'growth': '49/10/6/3'}, {'name': '加格'}, ctx2))
+pet.img_ident = _sv
+
+# ---- 2026-10-14 卡坦 register 漏登：選格後名字框還是上一格的字（殘影）→ list_role 重讀 ----
+check('stale_suspect：跟上一格點陣相同才懷疑；上一格空 / 沒 nh 不懷疑',
+      pet.stale_suspect({'nh': 'a'}, {'nh': 'a'}) and not pet.stale_suspect({'nh': 'a'}, {'nh': 'b'})
+      and not pet.stale_suspect(None, {'nh': 'a'}) and not pet.stale_suspect({'nh': None}, {'nh': None}))
+
+
+def _list_with(reads):
+    """假 select_role / scan_frames / select_slot / read_slot：reads[格] = 依序讀到的 nh（第一次可能是殘影）"""
+    sv = (pet.select_role, pet.scan_frames, pet.select_slot, pet.read_slot, uikit.sleep, uikit.mark)
+    cnt = {}
+
+    def rs(i, ctx):
+        k = cnt.get(i, 0)
+        cnt[i] = k + 1
+        seq = reads[i]
+        return {'slot': i + 1, 'empty': False, 'nh': seq[min(k, len(seq) - 1)]}
+    pet.select_role = lambda role, ctx: 0
+    pet.scan_frames = lambda: {'empty': [False] * len(reads) + [True] * (5 - len(reads)), 'sel': [False] * 5}
+    pet.select_slot = lambda i, f: 0
+    pet.read_slot = rs
+    uikit.sleep = lambda s: None
+    uikit.mark = lambda *a, **k: None
+    try:
+        return pet.list_role('DKBO2', {}), cnt
+    finally:
+        pet.select_role, pet.scan_frames, pet.select_slot, pet.read_slot, uikit.sleep, uikit.mark = sv
+
+
+(rc, sl), cnt = _list_with([['m'], ['p'], ['p', 'q']])
+check('list_role：第 3 格第一次讀到第 2 格殘影 → 重讀拿到自己的', rc == 0 and [s['nh'] for s in sl[:3]] == ['m', 'p', 'q'] and cnt[2] == 2 and sl[2].get('stale_retry'), str(sl))
+(rc, sl), cnt = _list_with([['m'], ['z'], ['z']])
+check('list_role：真的同字串（重讀仍相同）→ 照收、最多重讀 STALE_RETRIES 次', rc == 0 and sl[2]['nh'] == 'z' and cnt[2] == 1 + pet.STALE_RETRIES)
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

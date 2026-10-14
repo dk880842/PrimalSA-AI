@@ -103,6 +103,63 @@ check('列表一直 0 列 → 等到 TRACK_LOAD_MAX_S 才 121（不無限等）'
 rc, n, el = turnin_with([True], [4])
 check('第一次就找到 → 不多掃', rc == 0 and n == 1)
 
+# ---- 2026-10-14 恐龍博士：DKBO 交魯尼帖斯按確定、視窗消失就判 step1 True，伺服器其實沒收走 → 交後驗證 ----
+J = pt.judge_taken
+check('judge_taken：步號前進 ok、停在原步 same、讀不到 unknown', J(1, 2) == 'ok' and J(1, 1) == 'same' and J(1, None) == 'unknown' and J(2, 2) == 'same')
+check('judge_taken：最後一步交完任務消失 = ok；非最後一步消失 = unknown（讀不準）', J(2, 'GONE') == 'ok' and J(1, 'GONE') == 'unknown')
+
+
+def verify_with(step_seq, there=None):
+    """假 quest.read_step_no 依序回 step_seq；假 pet_still_there 回 there（呼叫次數記在 calls）"""
+    clk = Clock()
+    q = types.SimpleNamespace(k=0)
+
+    def rsn(task, cur_map_fn=None, reveal=True):
+        v = step_seq[min(q.k, len(step_seq) - 1)]
+        q.k += 1
+        clk.t += 1
+        return v
+    q.read_step_no = rsn
+    calls = []
+    saved = (sys.modules.get('quest'), pt.time, pt.uikit.sleep, pt.uikit.snap, pt.pet_still_there, pt.log)
+    sys.modules['quest'] = q
+    pt.time, pt.uikit.sleep, pt.uikit.snap = clk, clk.sleep, lambda *a, **k: None
+    pt.pet_still_there = lambda role, want: calls.append((role, want)) or there
+    pt.log = lambda *a, **k: None
+    try:
+        return pt.verify_taken('DKBO', '魯尼帖斯', 1), q.k, calls
+    finally:
+        q0, pt.time, pt.uikit.sleep, pt.uikit.snap, pt.pet_still_there, pt.log = saved
+        if q0 is not None:
+            sys.modules['quest'] = q0
+        else:
+            sys.modules.pop('quest', None)
+
+
+rc, n, calls = verify_with([2])
+check('verify_taken：第一次就讀到步 2 → 0、不開寵物面板', rc == 0 and n == 1 and calls == [])
+rc, n, calls = verify_with([1, 1, 2])
+check('verify_taken：伺服器 / 列表慢一點（1、1、2）→ 等到前進 → 0', rc == 0 and n == 3)
+rc, n, calls = verify_with([1])
+check('verify_taken：步號一直是 1（實機情況）→ 126、不開寵物面板', rc == pt.EXIT_NOT_TAKEN and calls == [] and n >= 2)
+rc, n, calls = verify_with([None], there=False)
+check('verify_taken：步號讀不到 → 讀寵物欄，魯尼帖斯已不在 → 0', rc == 0 and calls == [('DKBO', '魯尼帖斯')])
+rc, n, calls = verify_with([None], there=True)
+check('verify_taken：步號讀不到、寵物還在 → 126', rc == pt.EXIT_NOT_TAKEN)
+rc, n, calls = verify_with([None], there=None)
+check('verify_taken：步號、寵物欄都驗不到 → 126（不猜）', rc == pt.EXIT_NOT_TAKEN)
+
+saved = (pt.uikit.preflight, pt.turnin_step, pt.verify_taken)
+pt.uikit.preflight = lambda src: 0
+pt.turnin_step = lambda want, dry_run=False: 0
+pt.verify_taken = lambda role, want, step: pt.EXIT_NOT_TAKEN if step == 1 else 0
+rc, res = pt.run(['DKBO'], (1, 2), switch=False)
+check('run：確定後驗不到交出 → step1 False、rc 126、不接著交步 2', rc == pt.EXIT_NOT_TAKEN and res == {pt.charname.canon('DKBO'): {'step1': False}}, str(res))
+pt.verify_taken = lambda role, want, step: 0
+rc, res = pt.run(['DKBO'], (1, 2), switch=False)
+check('run：兩步都驗到 → 0', rc == 0 and res == {pt.charname.canon('DKBO'): {'step1': True, 'step2': True}}, str(res))
+pt.uikit.preflight, pt.turnin_step, pt.verify_taken = saved
+
 # questrun.special_step：全 manual 任務步號讀不到 → manual（2026-10-12 恐龍博士 117 的根因）
 import questrun  # noqa: E402
 

@@ -464,22 +464,104 @@ def species_path() -> Path:
     return TPL_DIR / 'species.json'
 
 
+# ---- 成長字串 → 物種 登錄檔（2026-10-14 v2：一個字串可對多個物種）----
+# 舊版 'growth' = {字串: 物種} 單值：撞號時 learn_species 刪掉、下一次又被另一種登回去 →「後登覆蓋前登」（卡坦 distribute1 rc 76：
+# 49/10/6/3 登錄成克邦凱斯，DKBO5 同字串的寵物縮圖是邦恩吉 0.94；50/10/6/3 加格 / 邦恩吉同字串）。
+# v2：'growth_src' = {字串: [{species, catcher, ts, score, src}…]}（每個物種一筆，附來源），撞號永遠記得；
+# 'growth' 改成**推導出來的唯一對照**（只放只對到 1 個物種的字串），舊讀者（.get('growth')）看到撞號字串 = 沒登錄 → 退回縮圖 / 不確定。
+# 判定一律：字串只當「候選過濾」（growth_species），候選 ≥ 2 種 → 只有縮圖在這幾種之間有把握（rank_among：inlier + 主色都過分差）才算，否則 None（不准存取）。
+# 舊格式（沒有 growth_src）讀檔時自動遷移（src = 'legacy'），存檔寫 v2。
+SPECIES_VER = 2
+
+
+def _ensure_src(reg: dict) -> dict:
+    """reg 沒有 growth_src（舊格式 / 測試直接給的 dict）→ 由 growth 遷移；回 growth_src"""
+    src = reg.get('growth_src')
+    if not isinstance(src, dict):
+        src = {g: [{'species': sp, 'src': 'legacy'}] for g, sp in (reg.get('growth') or {}).items() if sp}
+        reg['growth_src'] = src
+    return src
+
+
+def _derive(reg: dict) -> None:
+    """growth_src → growth（只留唯一物種的字串）。直接寫進 reg['growth'] 但 growth_src 沒有的（舊程式路徑）先補進來"""
+    src = _ensure_src(reg)
+    for g, sp in list((reg.get('growth') or {}).items()):
+        if sp and g not in src:
+            src[g] = [{'species': sp, 'src': 'direct'}]
+    reg['growth'] = {g: es[0]['species'] for g, es in src.items() if len({e['species'] for e in es}) == 1}
+
+
+def growth_species(reg: dict, growth: str | None) -> list:
+    """成長字串的所有候選物種（登錄順序；沒登錄 → []）。≥ 2 個 = 撞號，要靠縮圖決勝"""
+    if not growth:
+        return []
+    src = reg.get('growth_src')
+    if not isinstance(src, dict):
+        sp = (reg.get('growth') or {}).get(growth)
+        return [sp] if sp else []
+    return list(dict.fromkeys(e['species'] for e in src.get(growth) or []))
+
+
+def growth_add(reg: dict, growth: str, species: str, catcher=None, score=None, src: str | None = None, ts: str | None = None) -> bool:
+    """登錄「growth 這個字串有一隻是 species」（附來源）。同物種已有 → 只更新來源；新物種 → 追加（撞號，不刪、不覆蓋）。回是否新增了物種"""
+    import time as _t
+    gs = _ensure_src(reg)
+    es = gs.setdefault(growth, [])
+    e = {'species': species, 'ts': ts or _t.strftime('%Y-%m-%d %H:%M:%S')}
+    if catcher:
+        e['catcher'] = catcher
+    if score is not None:
+        e['score'] = score
+    if src:
+        e['src'] = src
+    old = next((x for x in es if x['species'] == species), None)
+    if old is not None:
+        old.update(e)
+        _derive(reg)
+        return False
+    es.append(e)
+    _derive(reg)
+    return True
+
+
 def load_species() -> dict:
-    """{'thumb': {物種: [[(r,g,b)×16]...]}, 'growth': {成長字串: 物種}}；沒檔 / 壞檔 → 空"""
+    """{'thumb': {物種: [[(r,g,b)×16]...]}, 'growth': {成長字串: 物種}（推導：只放唯一物種）, 'growth_src': {成長字串: [來源…]}}；
+    沒檔 / 壞檔 → 空；舊格式（只有 growth）自動遷移"""
     try:
         d = json.loads(species_path().read_text(encoding='utf-8'))
     except (OSError, ValueError):
         d = {}
     th = d.get('thumb') if isinstance(d.get('thumb'), dict) else {}
-    return {'thumb': {k: [[tuple(c) for c in v] for v in vs] for k, vs in th.items()},
-            'growth': d.get('growth') if isinstance(d.get('growth'), dict) else {}}
+    reg = {'thumb': {k: [[tuple(c) for c in v] for v in vs] for k, vs in th.items()},
+           'growth': d.get('growth') if isinstance(d.get('growth'), dict) else {}}
+    if isinstance(d.get('growth_src'), dict):
+        reg['growth_src'] = {g: [e for e in es if isinstance(e, dict) and e.get('species')] for g, es in d['growth_src'].items() if isinstance(es, list)}
+        reg['growth'] = {}                                  # v2：growth 一律由 growth_src 推導（檔案裡的 growth 只是給人看）
+        _derive(reg)
+        return reg
+    _derive(reg)                                            # 舊格式遷移：legacy 單值 + 抓寵來源檔（catch-src.json，pet_catch register 寫的「誰抓的」）補回撞號
+    try:
+        cs = json.loads((TPL_DIR / 'catch-src.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        cs = {}
+    for g, es in (cs if isinstance(cs, dict) else {}).items():
+        for e in es if isinstance(es, list) else [es]:
+            have = growth_species(reg, g)
+            if any(x in uikit.MOUNTS for x in have):          # 舊 register 把第 1 格騎寵 51/9/8/1 登錄成魯尼帖斯（10-14 已修）→ 騎寵字串不吃 catch-src
+                continue
+            if isinstance(e, dict) and e.get('species') and e['species'] not in have:
+                growth_add(reg, g, e['species'], catcher=e.get('catcher'), src='catch-src', ts=e.get('ts'))
+    return reg
 
 
 def save_species(reg: dict) -> None:
+    _derive(reg)
     TPL_DIR.mkdir(parents=True, exist_ok=True)
     p = species_path()
     tmp = p.with_suffix('.tmp')
-    tmp.write_text(json.dumps(reg, ensure_ascii=False), encoding='utf-8')
+    out = {'ver': SPECIES_VER, 'thumb': reg.get('thumb') or {}, 'growth': reg['growth'], 'growth_src': reg['growth_src']}
+    tmp.write_text(json.dumps(out, ensure_ascii=False), encoding='utf-8')
     tmp.replace(p)
 
 
@@ -490,13 +572,13 @@ def species_by_thumb(cols, reg: dict) -> str | None:
 
 
 def identify_species(cols, growth: str | None, reg: dict) -> str | None:
-    """多重確認：縮圖樣板命中（有縮圖時必要）；成長字串已登錄時兩者必須同物種（矛盾 → None）；
-    沒縮圖（倉庫卡，縮圖版面沒量過）時只接受「成長字串已登錄」。兩者都沒有 → None"""
-    sg = (reg.get('growth') or {}).get(growth) if growth else None
+    """多重確認：縮圖樣板命中（有縮圖時必要）；成長字串已登錄時縮圖必須是字串的候選物種之一（矛盾 → None）；
+    沒縮圖（倉庫卡，縮圖版面沒量過）時只接受「成長字串只對到 1 種」。撞號（≥ 2 種）又沒縮圖 → None"""
+    cands = growth_species(reg, growth)
     if cols is None:
-        return sg
+        return cands[0] if len(cands) == 1 else None
     st = species_by_thumb(cols, reg)
-    if st and sg and st != sg:
+    if st and cands and st not in cands:
         return None
     return st
 
@@ -512,12 +594,7 @@ def learn_species(reg: dict, species: str, cols, growth: str | None = None, max_
         if not any(inner_same(cols, v) for v in vs) and len(vs) < max_variants:
             vs.append([tuple(c) for c in cols])
             changed = True
-    if growth:
-        g = reg.setdefault('growth', {})
-        if g.get(growth) not in (None, species):
-            del g[growth]                                  # 成長字串撞到別的物種（不同物種可能剛好同字串，2026-10-12 實機 48/9/5/3）→ 這個字串不可靠，刪掉只靠縮圖
-            return True
-        if g.get(growth) != species:
-            g[growth] = species
-            changed = True
+    if growth and species not in growth_species(reg, growth):
+        growth_add(reg, growth, species, src='learn')      # 撞號（2026-10-12 實機 48/9/5/3）→ 兩種都記著，判定時靠縮圖（舊版刪掉、下次又被登回 = 互蓋）
+        changed = True
     return changed

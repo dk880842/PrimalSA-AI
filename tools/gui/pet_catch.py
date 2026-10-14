@@ -9,7 +9,7 @@
                                register（抓完登錄來源：見下）；預設全做
   uv run --no-project python tools/gui/pet_catch.py --assign "..." --stages register     # 只登錄來源（抓完後補做 / 重做）
   register（2026-10-13 卡坦 4 鯊 / 4 雞物種靠縮圖會混、只好人工比腹部顏色）：「誰抓的」是主鍵 —— 每人只抓 --assign 指定的一種，
-    所以抓寵者寵物欄裡沒名字、物種登錄檔還不認得的寵物 = 他抓的那種；寫進「成長字串 → 物種」登錄檔（register_growths，撞別種就刪）
+    所以抓寵者寵物欄裡沒名字、物種登錄檔還不認得的寵物 = 他抓的那種；寫進「成長字串 → 物種」登錄檔 v2（register_growths，撞別種兩種都記、不刪）
     與來源檔 tools/.cache/pet-tpl/catch-src.json（成長字串 → 物種 / 抓寵者 / 時間；倉庫存入後會重排，所以不記格位）。
     交叉驗證：縮圖只在本次 --assign 的物種之間相對比較（petimg_match.rank_among，inlier + 主色都同意才算有把握）：
     有把握且是別的物種 → 矛盾，不登錄這隻、退出碼 15（EXIT_CATCH_SPECIES，印出哪人哪格）；沒把握 → 照來源登錄。
@@ -21,13 +21,19 @@
     抓寵前就在寵物欄的寵物一律不登錄。「抓寵前」= 抓寵前寵物欄快照 tools/.cache/pet-tpl/catch-pre.json（setup 階段前寫：petquest 用它抓前讀好的
     pet.py list 直接存〔save_pre〕，沒有 / 超過 PRE_MAX_S 才自己讀一次）；比對用名字框點陣指紋 nh（同一隻固定），再退回成長字串，依張數扣（同字串多隻也對）。
     快照沒有該角色 → 只排除第 1 格 / 騎寵並印警告。非空、不是騎寵、名字和成長字串都讀不出的新寵物 → 不登錄並報錯（退出碼 16，其餘照登錄），不沉默略過。
+  每隻新寵物都要有交代（2026-10-14 卡坦：DKBO2 抓 4 隻克邦凱斯 register 印完成，第 4 格 49/10/6/3 沒登錄 → store-many 72；distribute1 取出後身分不符 76）：
+    登錄檔 v2（petmatch.growth_add / growth_species）一個成長字串可對多個物種（附抓寵者 / 時間 / 縮圖分數）：有快照的角色新寵物一律登錄，
+    撞號（字串已登錄成別種 / 兩個抓寵者同字串）兩種都記著，之後判定只當候選、靠縮圖在撞號物種之間決勝（舊版沉默略過 / 刪掉又被登回）。
+    同一人兩格讀成同字串但名字框點陣不同、新寵物讀成別的正式名字 → 漏登，退出碼 17（EXIT_CATCH_MISSED，其他照登錄、errlog）。--count 跟新寵物數不同 → 印警告。
+    讀殘影：pet.list_role 選格後名字框跟上一格點陣完全相同 → 等 0.6 秒重讀（最多 2 次），兩格被讀成同一字串合併的情況（推定是 49/10/6/3 的根因）。
   setup / wait 失敗（設置選不到、逾時…；驗證視窗 9 / 斷線 10 除外）→ 收尾把這批抓寵者的「自動抓寵」勾掉（catch_off；已設好的人不會繼續抓）。
   uv run --no-project python tools/gui/pet_catch.py --catch-off [--roles DKBO2,DKBO3]     # 改做：外掛捉寵設置「自動抓寵」取消勾選（讀回）
   uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）
   uv run --no-project python tools/gui/pet_catch.py --autoswap on|off [--roles ...]                 # 自動轉換戰寵
   批次（2026-10-12）：背包（取誘餌）/ 外掛（捉寵設置、輪詢、自動轉換、鎖定）面板都只開一次，逐人切頭像做完再關。
 退出碼：0 全部抓完；16 register：有新寵物名字框讀不出（EXIT_CATCH_UNREAD，那隻沒登錄，其他照登錄）；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；14 捉寵設置系別 / 物種選不到或讀回對不上（EXIT_CATCH_PICK，已重試、已收下拉、沒勾自動抓寵）；
-  15 register：抓寵者欄裡有寵物縮圖有把握認成別的物種（EXIT_CATCH_SPECIES，那隻沒登錄，其他照登錄）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
+  15 register：抓寵者欄裡有寵物縮圖有把握認成別的物種（EXIT_CATCH_SPECIES，那隻沒登錄，其他照登錄）；
+  17 register：有新寵物沒登錄（EXIT_CATCH_MISSED：同人兩格同字串點陣不同 / 名字不對；優先序 15 > 17 > 16）；其餘沿用 uikit（8 佔用 / 9 驗證視窗 / 10 斷線）。
 安全：不點「+」（花石幣）、不碰丟棄區；沿用 rebirth_pets.Tools 的讀字驗證（讀不到 / 對不上就停，不盲點）。
 抓完後新寵物沒名字（成長字串），分配前要 `pet.py learn-species`，見 psa-pet-quest SKILL.md。
 """
@@ -55,6 +61,7 @@ def parse_assign(s: str) -> list:
 
 EXIT_CATCH_SPECIES = 15
 EXIT_CATCH_UNREAD = 16
+EXIT_CATCH_MISSED = 17                     # register：有新寵物沒登錄（同人兩格同字串點陣不同 / 名字不對），見 plan_register
 SRC_FILE = 'catch-src.json'                # 抓寵來源檔（petmatch.TPL_DIR 底下）
 PRE_FILE = 'catch-pre.json'                # 抓寵前寵物欄快照（register 排除舊寵物用）
 PRE_MAX_S = 30 * 60                        # 快照超過這麼久就不信（自己重讀）
@@ -142,18 +149,30 @@ def new_slots(pre: list, cur: list) -> list:
 
 
 def plan_register(assign: list, pets: dict, reg_growth: dict, pre: dict | None = None) -> tuple:
-    """純函式：抓寵者寵物欄 → (登錄 {成長字串: (物種, 抓寵者)}, 矛盾 [(角色, 格, 成長字串, 縮圖物種, 應是)], 讀不出 [(角色, 格, OCR 行)])。
-    只看「沒名字、成長字串還沒登錄成別的物種」的格（已登錄成別種 = 以前分來的，不是這次抓的）；
-    一律不看：第 1 格、騎乘中 / 騎寵、抓寵前快照 pre[角色] 裡就有的（pre 沒有該角色 → 只靠前兩條）；
+    """純函式：抓寵者寵物欄 → (登錄 [(成長字串, 物種, 抓寵者, 縮圖分數)], 矛盾 [(角色, 格, 成長字串, 縮圖物種, 應是)], 讀不出 [(角色, 格, OCR 行)],
+    漏登 [(角色, 格, 成長字串, 原因, 種類)])。reg_growth = 登錄檔推導出的唯一對照（{字串: 物種}；撞號字串不在裡面）。
+    只看「沒名字」的格；一律不看：第 1 格、騎乘中 / 騎寵、抓寵前快照 pre[角色] 裡就有的（pre 沒有該角色 → 只靠前兩條）；
     縮圖（rank_among 結果放在 img_species / species）有把握且 ≠ 指定物種 → 矛盾（不登錄）；沒把握 / 相同 → 依來源登錄；
-    非空、沒名字、成長字串讀不出 → 讀不出清單（不登錄、呼叫端要報錯）"""
+    非空、沒名字、成長字串讀不出 → 讀不出清單（不登錄、呼叫端要報錯）。
+    2026-10-14 卡坦（DKBO2 抓 4 隻只登錄 3 隻、沒報錯；distribute 取出後身分不符 76）起：登錄檔 v2 一個字串可對多個物種（petmatch.growth_add），
+    有抓寵前快照的角色「新寵物 = 這次抓的」，每隻都要有交代 ——
+      字串已登錄成別種 / 兩個抓寵者抓到同字串不同種 → 照登錄（撞號，判定時字串只當候選、靠縮圖決勝；舊版沉默略過或兩邊都不登錄）；
+      同一角色兩格讀成同一字串但名字框點陣不同 → 其中一格讀錯 / 讀到上一格殘影 → 第二格漏登（dup）；
+      新寵物名字框讀成正式名字但不是指定物種 → 漏登（name）。沒快照的角色：字串已登錄成別種照舊略過（可能是以前分來的）"""
     want = {r: sp for r, _, sp in assign}
-    todo, bad, unread = {}, [], []
+    todo, bad, unread, missed = [], [], [], []
+    have = set()
     for role, sp in want.items():
         slots = pets.get(role) or []
-        fresh = new_slots(pre[role], slots) if pre and role in pre else [s for s in slots if not s.get('empty')]
+        strict = bool(pre and role in pre)
+        fresh = new_slots(pre[role], slots) if strict else [s for s in slots if not s.get('empty')]
+        seen_nh = {}
         for s in fresh:
-            if s.get('slot') == 1 or _is_mountish(s) or s.get('name'):
+            if s.get('slot') == 1 or _is_mountish(s):
+                continue
+            if s.get('name'):
+                if strict and s['name'] != sp:
+                    missed.append((role, s.get('slot'), None, f'新寵物名字框讀成「{s["name"]}」，不是他抓的 {sp}', 'name'))
                 continue
             g = s.get('unnamed')
             if s.get('guess') and g == s.get('guess') and s.get('unreadable'):     # 讀不出、靠候選字串認的：已登錄成這種 = 沒事要做；否則不拿來登錄（不確定的字串不進登錄檔）
@@ -163,23 +182,27 @@ def plan_register(assign: list, pets: dict, reg_growth: dict, pre: dict | None =
             if not g:
                 unread.append((role, s.get('slot'), s.get('ocr')))
                 continue
+            if strict and s.get('nh'):
+                if seen_nh.setdefault(g, s['nh']) != s['nh']:
+                    missed.append((role, s.get('slot'), g, f'跟同一人另一格新寵物讀成同一字串 {g}，但名字框點陣不同（讀錯 / 讀到上一格殘影）', 'dup'))
+                    continue
             known = reg_growth.get(g)
-            if known and known != sp:
-                continue
+            if known and known != sp and not strict:
+                continue                                        # 沒快照：當成以前分來的（舊規則）
             seen = s.get('img_species') or (s.get('species') if s.get('species_src', '').startswith('img') else None)
             if seen and seen != sp:
                 bad.append((role, s['slot'], g, seen, sp))
                 continue
-            if g in todo and todo[g][0] != sp:                  # 同一字串兩個抓寵者（不同物種）→ 不可靠，兩邊都不登錄
-                bad.append((role, s['slot'], g, f'字串也在 {todo[g][1]}（{todo[g][0]}）', sp))
-                todo[g] = (None, todo[g][1])
-                continue
-            todo[g] = (sp, role)
-    return {g: v for g, v in todo.items() if v[0]}, bad, unread
+            if (g, sp) not in have:
+                have.add((g, sp))
+                todo.append((g, sp, role, s.get('img_score')))
+    return todo, bad, unread, missed
 
 
-def register_catches(assign: list, tools=None) -> int:
-    """抓完登錄來源（見檔頭 register）：寵物面板只開一次讀抓寵者 → plan_register → register_growths + catch-src.json。→ 0 / 15 / 讀取失敗退出碼"""
+def register_catches(assign: list, tools=None, expect: int | None = None) -> int:
+    """抓完登錄來源（見檔頭 register）：寵物面板只開一次讀抓寵者 → plan_register → 登錄檔 v2（growth_add，附抓寵者 / 時間 / 縮圖分數）+ catch-src.json。
+    每隻新寵物都要有交代：登錄、或列進矛盾 / 讀不出 / 漏登並回非 0（不能印完成卻漏）。expect = 每人這批抓幾隻（有快照時核對新寵物數，只警告）。
+    → 0 / 15 / 17 / 16 / 讀取失敗退出碼"""
     import petmatch
     T = tools or rp.Tools()
     species = list(dict.fromkeys(sp for _, _, sp in assign))
@@ -192,34 +215,44 @@ def register_catches(assign: list, tools=None) -> int:
     miss = [r for r, _, _ in assign if r not in pre]
     if miss:
         print(f'pet_catch：register 沒有 {miss} 的抓寵前快照（{PRE_FILE}）→ 只排除第 1 格 / 騎寵，抓寵前就在的寵物可能被誤登錄，請人看結果')
-    todo, bad, unread = plan_register(assign, pets, reg.get('growth') or {}, pre)
-    dropped = register_growths({g: sp for g, (sp, _) in todo.items()})
+    todo, bad, unread, missed = plan_register(assign, pets, reg.get('growth') or {}, pre)
+    multi = register_growths(todo)
     src = load_src()
     now = time.strftime('%Y-%m-%d %H:%M:%S')
-    for g, (sp, role) in todo.items():
+    for g, sp, role, _ in todo:                                 # 來源檔：同字串多種時記成清單（給人看）
         old = src.get(g)
-        if old and old.get('species') != sp:
-            src[g] = {'species': None, 'catcher': None, 'ts': now, 'note': f'撞號：{old.get("species")} / {sp}'}
-        else:
-            src[g] = {'species': sp, 'catcher': role, 'ts': now}
+        e = {'species': sp, 'catcher': role, 'ts': now}
+        olds = old if isinstance(old, list) else ([old] if isinstance(old, dict) and old.get('species') else [])
+        src[g] = [x for x in olds if x.get('species') != sp] + [e] if olds and any(x.get('species') != sp for x in olds) else e
     save_src(src)
     for role, _, sp in assign:
-        gs = [g for g, (s2, r2) in todo.items() if r2 == role]
+        gs = [g for g, s2, r2, _ in todo if r2 == role]
         print(f'pet_catch：register {role} 抓的 {sp}：登錄 {len(gs)} 隻 {gs}')
-    if dropped:
-        print(f'pet_catch：register 有 {dropped} 個成長字串撞到別的物種，已從登錄檔刪掉（這些只能靠縮圖）')
+        if expect is not None and role in pre:
+            n = len([s for s in new_slots(pre[role], pets.get(role) or []) if s.get('slot') != 1 and not _is_mountish(s)])
+            if n != expect:
+                print(f'pet_catch：register {role} 寵物欄新寵物 {n} 隻，這批應抓 {expect} 隻（可能進了倉庫 / 快照不準，請人看）')
+    for g, sps in multi.items():
+        print(f'pet_catch：register 成長字串 {g} 撞號：{sps}（都記著；判定時只當候選，靠縮圖決勝，沒把握就不存取）')
     for role, slot, ocr in unread:
         print(f'pet_catch：register {role} 第 {slot} 格名字框讀不出成長字串（OCR {ocr}）→ 不登錄；用 pet.py list 看，必要時 learn-species --confirm-growth')
-    if unread:
+    for role, slot, g, why, _ in missed:
+        print(f'pet_catch：register {role} 第 {slot} 格 {g or "?"} 沒登錄：{why}')
+    if unread or missed:
         try:
             import errlog
-            errlog.add(f'pet_catch register：新寵物名字框讀不出成長字串 {[(r, s) for r, s, _ in unread]}（OCR {[o for _, _, o in unread]}）', source='pet_catch')
+            if unread:
+                errlog.add(f'pet_catch register：新寵物名字框讀不出成長字串 {[(r, s) for r, s, _ in unread]}（OCR {[o for _, _, o in unread]}）', source='pet_catch')
+            if missed:
+                errlog.add(f'pet_catch register：新寵物沒登錄 {[(r, s, g, k) for r, s, g, _, k in missed]}', source='pet_catch')
         except Exception:                                              # noqa: BLE001
             pass
     if bad:
         for role, slot, g, seen, sp in bad:
             print(f'pet_catch：register {role} 第 {slot} 格 {g}：縮圖認成 {seen}，但他抓的是 {sp} → 不登錄（請人看）')
         return EXIT_CATCH_SPECIES
+    if missed:
+        return EXIT_CATCH_MISSED
     return EXIT_CATCH_UNREAD if unread else 0
 
 
@@ -310,7 +343,7 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'register
                 catch_off(sorted(pending), T)
                 return rp.EXIT_CATCH
     if 'register' in stages:
-        return register_catches(assign, T)
+        return register_catches(assign, T, count if 'wait' in stages else None)
     return 0
 
 
@@ -383,21 +416,18 @@ def verify_battle(roles: list, tools=None) -> int:
     return 0
 
 
-def register_growths(mapping: dict) -> int:
-    """成長字串 → 物種 直接寫進登錄檔（倉庫卡沒縮圖，take-many 只能靠字串找）。字串已屬別的物種 = 不可靠，刪掉（回傳刪了幾個）。
-    mapping 來源：抓寵時每人只抓一種，所以「該人名下抓到的寵物成長字串」就是該物種的字串（呼叫端自己從 pet.py list 讀）"""
+def register_growths(entries) -> dict:
+    """抓寵登錄寫進登錄檔 v2（petmatch.growth_add：一個字串可對多個物種，附抓寵者 / 時間 / 縮圖分數；撞號不刪、不覆蓋）。
+    entries = [(成長字串, 物種, 抓寵者, 縮圖分數)]（plan_register）或 {成長字串: 物種}（舊呼叫法）。
+    → {撞號字串: [物種…]}（這次登錄後對到 ≥ 2 種的；判定時只當候選、靠縮圖決勝）"""
     import petmatch
+    if isinstance(entries, dict):
+        entries = [(g, sp, None, None) for g, sp in entries.items()]
     reg = petmatch.load_species()
-    g = reg.setdefault('growth', {})
-    dropped = 0
-    for gr, sp in mapping.items():
-        if g.get(gr) not in (None, sp):
-            del g[gr]
-            dropped += 1
-        elif g.get(gr) is None and gr not in g:
-            g[gr] = sp
+    for g, sp, who, score in entries:
+        petmatch.growth_add(reg, g, sp, catcher=who, score=score, src='catch')
     petmatch.save_species(reg)
-    return dropped
+    return {g: petmatch.growth_species(reg, g) for g in dict.fromkeys(e[0] for e in entries) if len(petmatch.growth_species(reg, g)) >= 2}
 
 
 def main(argv=None) -> int:

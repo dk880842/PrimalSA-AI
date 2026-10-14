@@ -10,6 +10,7 @@ import pet_catch  # noqa: E402
 import rebirth_pets as rp  # noqa: E402
 import petmatch  # noqa: E402
 import tempfile  # noqa: E402
+import time  # noqa: E402
 
 petmatch.TPL_DIR = Path(tempfile.mkdtemp())            # 抓寵前快照 / 來源檔都寫暫存（不碰 tools/.cache）
 fails = 0
@@ -99,13 +100,14 @@ check('bait 失敗 → rc、不繼續', pet_catch.run(A, stages=('bait',), tools
 f = FakeT()
 check('bait：一次 bait_take_many 帶全部人（背包只開一次）', pet_catch.run(A, stages=('bait',), tools=f) == 0 and f.calls[0] == ('bait_many', ('DKBO2', 'DKBO3')))
 
-# register_growths：撞到別的物種 → 刪除（只靠縮圖）
+# register_growths：撞到別的物種 → 兩種都記著（登錄檔 v2），推導的唯一對照拿掉
 import tempfile
 reg = {'thumb': {}, 'growth': {'1/1/1/1': '甲'}}
 petmatch.load_species = lambda: reg
 petmatch.save_species = lambda r: None
 dropped = pet_catch.register_growths({'1/1/1/1': '乙', '2/2/2/2': '乙'})
-check('register_growths：新字串登錄、撞別種的刪掉並計數', dropped == 1 and reg['growth'] == {'2/2/2/2': '乙'})
+check('register_growths：新字串登錄、撞別種的兩種都記（回撞號清單）、唯一對照只剩不撞的',
+      dropped == {'1/1/1/1': ['甲', '乙']} and reg['growth'] == {'2/2/2/2': '乙'} and [e['species'] for e in reg['growth_src']['1/1/1/1']] == ['甲', '乙'])
 
 # rebirth_pets 純函式：系別清單鄰居備援表、物種列順序
 check('FAMILY_NEIGHBORS / SPECIES_ORDER 有鯊魚系與火雞系', '鯊魚系' in rp.FAMILY_NEIGHBORS and rp.SPECIES_ORDER['鯊魚系'][0] == '克邦凱斯' and rp.SPECIES_ORDER['火雞系'][3] == '奇寶')
@@ -317,6 +319,7 @@ check('select_role：頭像已選著 → 不點頭像、回 0', bag.select_role(
 bag._avatar_sel, bag._click, bag._ocr_join = sv2
 
 # ---- 2026-10-13 register：抓寵來源當主鍵（卡坦 4 鯊 / 4 雞縮圖會混）----
+D = lambda todo: {g: (sp, r) for g, sp, r, _ in todo}    # noqa: E731  plan_register 登錄清單 → {字串: (物種, 抓寵者)}（沒撞號時）
 SH = [('DKBO2', '鯊魚系', '克邦凱斯'), ('DKBO3', '鯊魚系', '加克拉'), ('DKBO4', '鯊魚系', '加格'), ('DKBO5', '鯊魚系', '邦恩吉')]
 u = lambda n, g, **k: dict({'slot': n, 'empty': False, 'name': None, 'unnamed': g, 'state': '等待'}, **k)    # noqa: E731
 mount = {'slot': 1, 'empty': False, 'name': None, 'unnamed': '49/9/8/2', 'species': '布拉奇多斯', 'species_src': 'reg', 'state': '騎乘'}
@@ -324,35 +327,35 @@ pets = {'DKBO2': [mount, u(2, '35/7/3/8'), u(3, '36/7/3/8', img_species='克邦�
         'DKBO3': [mount, u(2, '33/7/3/8'), u(3, '32/7/3/8', img_species='邦恩吉')],            # 縮圖有把握認成別的 → 矛盾
         'DKBO4': [mount, u(2, '30/8/3/8', species='加格', species_src='img')],
         'DKBO5': [mount, u(2, '35/7/3/8'), u(3, '31/8/2/8')]}                                   # 35/7/3/8 跟 DKBO2 撞號
-todo, bad, unread = pet_catch.plan_register(SH, pets, {'49/9/8/2': '布拉奇多斯'})
-check('plan_register：依抓寵者登錄（騎寵已登錄別種略過）',
-      todo == {'36/7/3/8': ('克邦凱斯', 'DKBO2'), '34/7/4/8': ('克邦凱斯', 'DKBO2'), '33/7/3/8': ('加克拉', 'DKBO3'),
-               '30/8/3/8': ('加格', 'DKBO4'), '31/8/2/8': ('邦恩吉', 'DKBO5')}, str(todo))
-check('plan_register：縮圖有把握是別種 → 矛盾不登錄；兩人同字串不同種 → 都不登錄',
-      ('DKBO3', 3, '32/7/3/8', '邦恩吉', '加克拉') in bad and any(b[0] == 'DKBO5' and b[2] == '35/7/3/8' for b in bad) and '35/7/3/8' not in todo, str(bad))
-todo, bad, unread = pet_catch.plan_register(SH[:1], {'DKBO2': [u(2, '1/2/3/4')]}, {'1/2/3/4': '加格'})
-check('plan_register：字串已登錄成別種（以前分來的）→ 不是這次抓的，略過', todo == {} and bad == [])
+todo, bad, unread, missed = pet_catch.plan_register(SH, pets, {'49/9/8/2': '布拉奇多斯'})
+check('plan_register：依抓寵者登錄（騎寵已登錄別種略過）；兩人同字串不同種 → 兩種都登錄（登錄檔 v2 撞號）',
+      sorted((g, sp, r) for g, sp, r, _ in todo) == sorted([('35/7/3/8', '克邦凱斯', 'DKBO2'), ('36/7/3/8', '克邦凱斯', 'DKBO2'), ('34/7/4/8', '克邦凱斯', 'DKBO2'),
+                                                             ('33/7/3/8', '加克拉', 'DKBO3'), ('30/8/3/8', '加格', 'DKBO4'), ('35/7/3/8', '邦恩吉', 'DKBO5'),
+                                                             ('31/8/2/8', '邦恩吉', 'DKBO5')]), str(todo))
+check('plan_register：縮圖有把握是別種 → 矛盾不登錄', bad == [('DKBO3', 3, '32/7/3/8', '邦恩吉', '加克拉')], str(bad))
+todo, bad, unread, missed = pet_catch.plan_register(SH[:1], {'DKBO2': [u(2, '1/2/3/4')]}, {'1/2/3/4': '加格'})
+check('plan_register：沒快照、字串已登錄成別種（以前分來的）→ 不是這次抓的，略過', todo == [] and bad == [])
 
 
 # ---- 2026-10-14 恐龍博士：第 1 格騎寵 51/9/8/1 被登錄成魯尼帖斯；40/9/6/5 讀不出被沉默略過 ----
 DINO = [('DKBO2', '呼拔拔系', '魯尼帖斯')]
 mount1 = {'slot': 1, 'empty': False, 'name': None, 'unnamed': '51/9/8/1', 'state': '騎乘', 'img_species': '魯尼帖斯', 'species_src': 'img', 'nh': 'M'}
 unr = lambda n, **k: dict({'slot': n, 'empty': False, 'name': None, 'unreadable': True, 'state': '等待', 'ocr': ['姍/9/6/5'], 'nh': 'X'}, **k)    # noqa: E731
-todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [mount1, unr(2), unr(3), u(4, '43/9/6/5', nh='Y')]}, {})
-check('plan_register：第 1 格騎乘中的騎寵（縮圖被候選誤認成任務寵）絕不登錄', '51/9/8/1' not in todo and todo == {'43/9/6/5': ('魯尼帖斯', 'DKBO2')}, str(todo))
+todo, bad, unread, missed = pet_catch.plan_register(DINO, {'DKBO2': [mount1, unr(2), unr(3), u(4, '43/9/6/5', nh='Y')]}, {})
+check('plan_register：第 1 格騎乘中的騎寵（縮圖被候選誤認成任務寵）絕不登錄', D(todo) == {'43/9/6/5': ('魯尼帖斯', 'DKBO2')}, str(todo))
 check('plan_register：名字框讀不出的新寵物 → 讀不出清單（不沉默）', [x[:2] for x in unread] == [('DKBO2', 2), ('DKBO2', 3)] and unread[0][2] == ['姍/9/6/5'], str(unread))
 m2 = dict(mount1, slot=2, state='等待', unnamed='51/9/8/2', img_species=None, species='布拉奇多斯', species_src='reg')
-todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [m2]}, {})
-check('plan_register：非第 1 格但物種是騎寵 → 不登錄', todo == {} and unread == [], str(todo))
+todo, bad, unread, missed = pet_catch.plan_register(DINO, {'DKBO2': [m2]}, {})
+check('plan_register：非第 1 格但物種是騎寵 → 不登錄', todo == [] and unread == [], str(todo))
 pre = {'DKBO2': [{'slot': 1, 'empty': False, 'nh': 'M', 'unnamed': '51/9/8/1'}, {'slot': 2, 'empty': False, 'nh': 'Z', 'unnamed': '43/9/6/5'}]}
 cur = [mount1, u(2, '43/9/6/5', nh='Z'), u(3, '43/9/6/5', nh='Z'), u(4, '41/9/6/5', nh='W')]
 check('new_slots：nh 依張數扣（抓前 1 隻同字串 → 現在 2 隻只算 1 隻新）', [x['slot'] for x in pet_catch.new_slots(pre['DKBO2'], cur)] == [3, 4])
-todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': cur}, {}, pre)
-check('plan_register + 抓寵前快照：抓前就在的不算這次抓的（同字串第 2 隻照登錄）', todo == {'43/9/6/5': ('魯尼帖斯', 'DKBO2'), '41/9/6/5': ('魯尼帖斯', 'DKBO2')}, str(todo))
-todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [dict(unr(2), guess='40/9/6/5', unnamed='40/9/6/5', species='魯尼帖斯')]}, {'40/9/6/5': '魯尼帖斯'})
-check('plan_register：讀不出但候選字串已登錄成同種（三重確認認得）→ 沒事做、不報讀不出', todo == {} and unread == [] and bad == [])
-todo, bad, unread = pet_catch.plan_register(DINO, {'DKBO2': [dict(unr(2), guess='40/9/6/5', unnamed='40/9/6/5')]}, {})
-check('plan_register：候選字串沒登錄 → 不拿不確定的字串登錄，報讀不出', todo == {} and len(unread) == 1)
+todo, bad, unread, missed = pet_catch.plan_register(DINO, {'DKBO2': cur}, {}, pre)
+check('plan_register + 抓寵前快照：抓前就在的不算這次抓的（同字串第 2 隻照登錄）', D(todo) == {'43/9/6/5': ('魯尼帖斯', 'DKBO2'), '41/9/6/5': ('魯尼帖斯', 'DKBO2')}, str(todo))
+todo, bad, unread, missed = pet_catch.plan_register(DINO, {'DKBO2': [dict(unr(2), guess='40/9/6/5', unnamed='40/9/6/5', species='魯尼帖斯')]}, {'40/9/6/5': '魯尼帖斯'})
+check('plan_register：讀不出但候選字串已登錄成同種（三重確認認得）→ 沒事做、不報讀不出', todo == [] and unread == [] and bad == [])
+todo, bad, unread, missed = pet_catch.plan_register(DINO, {'DKBO2': [dict(unr(2), guess='40/9/6/5', unnamed='40/9/6/5')]}, {})
+check('plan_register：候選字串沒登錄 → 不拿不確定的字串登錄，報讀不出', todo == [] and len(unread) == 1)
 pet_catch.save_pre({'DKBO2': cur}, now=1000.0)
 check('save_pre / load_pre：只留比對欄位、過期不信', pet_catch.load_pre(now=1000.0 + 10)['DKBO2'][1] == {'slot': 2, 'empty': False, 'name': None, 'unnamed': '43/9/6/5', 'nh': 'Z', 'state': '等待'}
       and pet_catch.load_pre(now=1000.0 + pet_catch.PRE_MAX_S + 1) == {})
@@ -387,6 +390,37 @@ pet_catch.save_pre({'DKBO2': [mount1]})
 rc = pet_catch.register_catches(DINO, fr)
 check('register_catches：有讀不出的新寵物 → 16，其餘照登錄；騎寵沒被登錄', rc == pet_catch.EXIT_CATCH_UNREAD and reg['growth'].get('42/9/6/5') == '魯尼帖斯'
       and '51/9/8/1' not in reg['growth'], str(rc))
+# ---- 2026-10-14 卡坦：DKBO2 抓 4 隻克邦凱斯 register 說完成，第 4 格 49/10/6/3 沒登錄（store-many 72）；distribute1 取出後身分不符 76 ----
+# 根因 1：登錄檔單值，字串已登錄成別種（48/10/5/3 = 邦恩吉、50/10/6/3 = 克邦凱斯、47/10/5/4 = 加格）的新寵物被當成「以前分來的」沉默略過；
+#         learn_species 撞號就刪、下次又被另一種登回去（後登覆蓋前登）→ 登錄檔 v2 一個字串對多種
+# 根因 2（推定）：選格後名字框還是上一格的字（殘影）→ 兩格讀成同一字串 → pet.list_role 重讀（test_pet）；點陣不同才算 dup
+pre4 = {r: [{'slot': 1, 'empty': False, 'nh': 'M', 'unnamed': '51/9/8/1'}] for r, _, _ in SH}
+m1 = {'slot': 1, 'empty': False, 'name': None, 'unnamed': '51/9/8/1', 'state': '騎乘', 'nh': 'M'}
+cur4 = {'DKBO4': [m1, u(2, '47/11/5/3', nh='a'), u(3, '48/10/5/3', nh='b')],
+        'DKBO5': [m1, u(2, '50/10/6/3', nh='c')]}
+oldreg = {'48/10/5/3': '邦恩吉', '50/10/6/3': '克邦凱斯'}
+todo, bad, unread, missed = pet_catch.plan_register(SH, cur4, oldreg, pre4)
+check('plan_register 有快照：字串已登錄成別種 → 照登錄（撞號），不沉默略過',
+      D(todo) == {'47/11/5/3': ('加格', 'DKBO4'), '48/10/5/3': ('加格', 'DKBO4'), '50/10/6/3': ('邦恩吉', 'DKBO5')} and missed == [], str((todo, missed)))
+stale = {'DKBO2': [m1, u(2, '45/10/5/2', nh='p'), u(3, '50/9/6/3', nh='q'), u(4, '50/9/6/3', nh='r'), u(5, '48/10/6/2', nh='s')]}
+todo, bad, unread, missed = pet_catch.plan_register(SH[:1], stale, {}, pre4)
+check('plan_register：同一人兩格同字串但名字框點陣不同（殘影 / 讀錯）→ 第二格漏登 dup',
+      len(todo) == 3 and [(m[1], m[4]) for m in missed] == [(4, 'dup')], str(missed))
+same = {'DKBO2': [m1, u(2, '43/9/6/5', nh='z'), u(3, '43/9/6/5', nh='z')]}
+check('plan_register：同字串且點陣相同（真的同字串）→ 不算漏登', pet_catch.plan_register(SH[:1], same, {}, pre4)[3] == [])
+named = {'DKBO2': [m1, u(2, None, name='加格')]}
+check('plan_register：新寵物讀成別的正式名字 → 漏登 name', [m[4] for m in pet_catch.plan_register(SH[:1], named, {}, pre4)[3]] == ['name'])
+reg.clear()
+reg.update({'thumb': {}, 'growth': {'48/10/5/3': '邦恩吉', '50/10/6/3': '克邦凱斯'}})
+pet_catch.save_pre(pre4)
+fr = FR(cur4)
+rc = pet_catch.register_catches(SH, fr, expect=2)
+check('register_catches：撞號兩種都記著（推導的唯一對照拿掉）、沒漏 → 0',
+      rc == 0 and petmatch.growth_species(reg, '48/10/5/3') == ['邦恩吉', '加格'] and petmatch.growth_species(reg, '50/10/6/3') == ['克邦凱斯', '邦恩吉']
+      and '48/10/5/3' not in reg['growth'] and reg['growth'].get('47/11/5/3') == '加格'
+      and reg['growth_src']['47/11/5/3'][0]['catcher'] == 'DKBO4', f'{rc} {reg}')
+fr = FR({'DKBO2': [m1, u(2, '45/10/5/2', nh='p'), u(3, '50/9/6/3', nh='q'), u(4, '50/9/6/3', nh='r')]})
+check('register_catches：有漏登（dup）→ 17，不能回 0', pet_catch.register_catches(SH[:1], fr) == pet_catch.EXIT_CATCH_MISSED)
 f4 = FakeT()
 check('catch_off：外掛逐人取消自動抓寵', pet_catch.catch_off(['DKBO2', 'DKBO3'], f4) == 0 and f4.calls == [('off', 'DKBO2'), ('off', 'DKBO3')])
 f5 = FakeT()
