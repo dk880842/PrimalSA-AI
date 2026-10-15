@@ -41,6 +41,7 @@ sys.path.insert(0, str(HERE))
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 import charname  # noqa: E402
+import charstate  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'pet_turnin'
@@ -230,7 +231,7 @@ def pet_still_there(role: str, want: str):
     with pet.Session(False, False) as ss:
         if ss.rc:
             return None
-        rc, slots = pet.list_role(charname.canon(role), ctx)
+        rc, slots = pet.list_role(charstate.display(role), ctx)
     pet.save_ctx(ctx)
     if rc:
         return None
