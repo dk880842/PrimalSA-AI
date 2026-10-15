@@ -4,6 +4,7 @@
 #   3) 點擊鎖：取放、另一個行程持有時逾時、持有者沒放就結束（Abandoned → 視為取得）、兩個行程各 15 次取放區間不重疊
 #   4) gui.ps1 在 PSA_CLIENT 指向不存在 / 同名多個（svchost）/ 不合法名稱時：不點、exit 1 / 6（這些情況在找視窗那步就結束，碰不到遊戲）
 #   5) 改過的 .ps1 都能解析（只 parse 不執行）
+#   2c) 每視窗驗證停手旗標 Get-PsaVerifyHalt（暫存資料夾；本視窗 / 別的視窗 / 舊共用旗標歸屬 / 壞檔）
 # 鎖測試用自己的 Mutex 名稱，不影響正在跑的 gui.ps1。
 # 用法：powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\gui\test_psawin.ps1
 $ErrorActionPreference = 'Continue'
@@ -46,6 +47,31 @@ Check '不合法字元換 _、全是點加 _（不跳出 clients\）' ((Get-PsaC
 Remove-Item Env:PSA_CLIENT
 Check '不給參數 = 目前 PSA_CLIENT（沒設 = 主視窗）' ((Get-PsaCacheDir) -eq $shared)
 Check 'Test-PsaVerifyHalt 回布林' ((Test-PsaVerifyHalt) -is [bool])
+
+# ---- 2c) 每視窗驗證停手旗標（Get-PsaVerifyHalt；$PsaSharedCache 暫時指到暫存資料夾，不碰真的 tools\.cache）----
+$saveShared = $PsaSharedCache
+$PsaSharedCache = Join-Path $env:TEMP ('psawin-vh-' + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path (Join-Path $PsaSharedCache 'clients\PrimalSA2') -Force | Out-Null
+$vMain = Join-Path $PsaSharedCache 'verify-halt.json'; $vP2 = Join-Path $PsaSharedCache 'clients\PrimalSA2\verify-halt.json'
+Check '都沒有旗標 → 兩個視窗都不停' ((-not (Test-PsaVerifyHalt 'PrimalSA')) -and (-not (Test-PsaVerifyHalt 'PrimalSA2')))
+Set-Content -LiteralPath $vP2 -Value '{"client":"PrimalSA2","src":"watch","reason":"x"}' -Encoding UTF8
+Check 'PrimalSA2 自己的旗標 → 只停 PrimalSA2，主視窗照常' ((Test-PsaVerifyHalt 'PrimalSA2') -and (-not (Test-PsaVerifyHalt 'PrimalSA')) -and (Get-PsaVerifyHalt 'PrimalSA2') -eq $vP2)
+$env:PSA_CLIENT = 'PrimalSA2'
+Check '不給參數 = 目前 PSA_CLIENT（serve.ps1 每請求設）' (Test-PsaVerifyHalt)
+Remove-Item Env:PSA_CLIENT
+Check '不給參數、沒設 PSA_CLIENT = 主視窗 → 不停' (-not (Test-PsaVerifyHalt))
+Remove-Item -LiteralPath $vP2
+Set-Content -LiteralPath $vMain -Value '{"client":"PrimalSA","src":"uikit","reason":"y"}' -Encoding UTF8
+Check '主視窗自己的旗標 → 只停主視窗' ((Test-PsaVerifyHalt 'PrimalSA') -and (-not (Test-PsaVerifyHalt 'PrimalSA2')))
+Set-Content -LiteralPath $vMain -Value '{"client":"PrimalSA2","src":"watch","reason":"舊共用"}' -Encoding UTF8
+Check '舊共用旗標（client=PrimalSA2）→ 歸屬 PrimalSA2，主視窗不停' ((Test-PsaVerifyHalt 'PrimalSA2') -and (-not (Test-PsaVerifyHalt 'PrimalSA')) -and (Get-PsaVerifyHalt 'PrimalSA2') -eq $vMain)
+Check '舊共用旗標不影響第三個視窗' (-not (Test-PsaVerifyHalt 'PrimalSA3'))
+Set-Content -LiteralPath $vMain -Value 'not json' -Encoding UTF8
+Check '壞檔 → 算主視窗的（保守停手），其他視窗照常' ((Test-PsaVerifyHalt 'PrimalSA') -and (-not (Test-PsaVerifyHalt 'PrimalSA2')))
+Set-Content -LiteralPath $vMain -Value '{"src":"manual","reason":"沒有 client 欄"}' -Encoding UTF8
+Check '沒有 client 欄 → 算主視窗的' ((Test-PsaVerifyHalt 'PrimalSA') -and (-not (Test-PsaVerifyHalt 'PrimalSA2')))
+Remove-Item -LiteralPath $PsaSharedCache -Recurse -Force
+$PsaSharedCache = $saveShared
 
 # ---- 3) 點擊鎖 ----
 $mx = 'Local\PrimalSA-AI-Input-test-' + [Guid]::NewGuid().ToString('N')

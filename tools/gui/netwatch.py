@@ -13,17 +13,17 @@
 ≠（帳號記憶共用，常態）→ 拿全視窗共用的登入輸入鎖 login-input.lock → 點帳號欄 → 清空 → 確認空 → 只打帳號（gui typeq，PostMessage 到本視窗 hwnd、
 log 只記字數）→ 再讀一次 = 本視窗帳號才按登錄、放鎖；重打後仍不符 / 讀不出 / 清不掉 / 密碼欄變空 / 畫面不是登入畫面 → halt。密碼欄絕對不碰。
 沒設定檔 / 本視窗不在對照表 / 設定檔格式錯 → 上面的舊行為逐字不變。log / errlog 只寫「帳號欄核對：符合 / 不符 / 讀不出」，不寫帳號名。
-全視窗驗證停手旗標（verifyhalt.py）存在 → check_and_reconnect 回 status 'verify'、guard sys.exit(9)，什麼都不點。
+本視窗驗證停手旗標（verifyhalt.py，每視窗一份）存在 → check_and_reconnect 回 status 'verify'、guard sys.exit(9)，什麼都不點。
 
   import netwatch
   r = netwatch.guard('quest')            # 腳本迴圈每輪呼叫；要停手時直接 sys.exit(10 / 11)，否則回傳 dict
   r = netwatch.check_and_reconnect()     # 不 exit 的版本，回傳 {'status': ...}
-status：ok（沒事）/ reconnected（重連 / 重新登錄成功，已恢復）/ halt（要人類）/ fatal（連續失敗 3 次）/ verify（全視窗驗證停手旗標）
+status：ok（沒事）/ reconnected（重連 / 重新登錄成功，已恢復）/ halt（要人類）/ fatal（連續失敗 3 次）/ verify（本視窗驗證停手旗標）
 命令列：
   python tools/gui/netwatch.py --once                 檢查一次
   python tools/gui/netwatch.py --watch [--interval 10]  常駐（沒有其他腳本在跑、只是掛機時用）
   python tools/gui/netwatch.py --status                印目前 halt / 失敗計數
-退出碼：0 正常、9 全視窗驗證停手旗標、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援。
+退出碼：0 正常、9 本視窗驗證停手旗標、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援。
 狀態檔（tools/.cache/，非主視窗在 tools/.cache/clients/<程序名>/；不進 git）：netwatch.halt（存在 = 已停手，等人類登入；HUD 回來後自動刪除）、
 netwatch.json（連續失敗計數）、netwatch.act.lock（動作鎖：同時只有一支腳本在處理重連，不會互相亂點）、netwatch.lock（--watch 單例）。
 """
@@ -56,7 +56,7 @@ WATCH_LOCK = CACHE / 'netwatch.lock'
 
 EXIT_HALT = 10
 EXIT_FATAL = 11
-EXIT_VERIFY = 9                      # 全視窗驗證停手旗標（verifyhalt.py）= uikit.EXIT_UNKNOWN_SCREEN
+EXIT_VERIFY = 9                      # 本視窗驗證停手旗標（verifyhalt.py）= uikit.EXIT_UNKNOWN_SCREEN
 MAX_FAILS = 3
 TOL = screen_sigs.NET_TOL
 
@@ -597,7 +597,7 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
 def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True, team: bool = True, grind_ensure: bool = True) -> dict:
     """檢查「網路異常」提示 / 登入畫面；有就處理。shot 參數保留相容（目前自己取樣，不用外部截圖）。
     回傳 {'status': 'ok'|'reconnected'|'halt'|'fatal'|'verify', ...}；status 為 halt / fatal / verify 時呼叫端必須停手。
-    verify = 全視窗驗證停手旗標（verifyhalt.py，多視窗時任一視窗出現驗證視窗）：什麼都不點，連重連都不做"""
+    verify = 本視窗驗證停手旗標（verifyhalt.py，多視窗時這個視窗出現驗證視窗；別的視窗的旗標不影響）：什麼都不點，連重連都不做"""
     import verifyhalt
     vh = verifyhalt.active()
     if vh:

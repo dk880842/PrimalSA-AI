@@ -712,7 +712,7 @@ async function paneTexts($: Parameters<Extract<Parameters<typeof test>[1], (...a
 }
 
 import {
-  MAIN_CLIENT, actionsFor, bannerLines, clientEnv, diffClients, hudCfgFromCwd, isMainClient, parseRunning, pickTargets,
+  MAIN_CLIENT, actionsFor, bannerLines, haltFor, haltLines, haltOwner, clientEnv, diffClients, hudCfgFromCwd, isMainClient, parseRunning, pickTargets,
   questLogFromCwd, stateFileFromCwd, verifyHaltFromCwd, winSuffix,
 } from './register'
 
@@ -776,8 +776,11 @@ test('多視窗：偵測到 PrimalSA2 → 第二支 watch 帶 PSA_CLIENT；pane 
   ])
   expect(st.text).toBe(`[PrimalSA] ${RO3}\n[PrimalSA2] ${RO3}`)
   const t = await paneTexts($)
-  expect(t[0]).toBe('[PrimalSA] 疑似答題 / 驗證視窗，請人工處理（全部視窗停手）')
-  expect(t).toContain('[PrimalSA] 戰鬥中（完整・演出中）')
+  // 各自視窗停手（2026-10-15）：verify_suspect 紅字放在自己的段落（狀態行下一行），不在最上面、不寫「全部視窗停手」
+  const i0 = t.indexOf('[PrimalSA] 戰鬥中（完整・演出中）')
+  expect(i0).toBe(0)
+  expect(t[1]).toBe('  疑似答題 / 驗證視窗，請人工處理（只停這個視窗）')
+  expect(t.some(x => x.includes('全部視窗停手'))).toBe(false)
   expect(t).toContain('[PrimalSA2] 主畫面')
   expect(t).toContain('  DKBO6  1轉60級  HP 300  MP 50  |  庫塔伊洞窟地下一樓 60049:30,25  |  EXP×2')
   expect(t).toContain('  遇敵中')
@@ -803,14 +806,38 @@ test('多視窗：偵測到 PrimalSA2 → 第二支 watch 帶 PSA_CLIENT；pane 
 })
 
 test('verify-halt.json 存在：單視窗也在最上面紅字警示（沒有檔案時畫面不變）', async ($, on) => {
-  scenarioHost(on, { running: 'PrimalSA\n', files: { ...SINGLE_FILES, 'tools/.cache/verify-halt.json': JSON.stringify({ ts: NOW_S - 60, client: 'PrimalSA2', src: 'uikit', reason: '連 3 次不認得' }) } })
+  scenarioHost(on, { running: 'PrimalSA\n', files: { ...SINGLE_FILES, 'tools/.cache/verify-halt.json': JSON.stringify({ ts: NOW_S - 60, client: 'PrimalSA', src: 'uikit', reason: '連 3 次不認得' }) } })
   await $.command.run({ command: 'psa-hud', args: 'on' } as never)
   await flush()
   await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
   const t = await paneTexts($)
-  expect(t[0]).toBe(`全部視窗停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} PrimalSA2 uikit：連 3 次不認得`)
-  expect(t[1]).toContain('verifyhalt.py clear')
+  expect(t[0]).toBe(`PrimalSA 停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} uikit：連 3 次不認得`)
+  expect(t[1]).toBe('人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA')
   expect(t.slice(2)).toEqual(SINGLE_TEXTS())
+})
+
+test('舊共用旗標（client=PrimalSA2）+ 只有主視窗：主視窗不紅，只一行黃字提示怎麼清', async ($, on) => {
+  scenarioHost(on, { running: 'PrimalSA\n', files: { ...SINGLE_FILES, 'tools/.cache/verify-halt.json': JSON.stringify({ ts: NOW_S - 60, client: 'PrimalSA2', src: 'watch', reason: '舊' }) } })
+  await $.command.run({ command: 'psa-hud', args: 'on' } as never)
+  await flush()
+  await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
+  const t = await paneTexts($)
+  expect(t[0]).toBe('舊共用驗證旗標屬 PrimalSA2（主視窗不受影響）；清：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2')
+  expect(t.slice(1)).toEqual(SINGLE_TEXTS())
+})
+
+test('多視窗：PrimalSA2 自己的 verify-halt.json → 只在 PrimalSA2 段落紅字，主視窗段落沒有停手字', async ($, on) => {
+  scenarioHost(on, { running: 'PrimalSA\nPrimalSA2\n', files: { ...MULTI_FILES, 'tools/.cache/clients/PrimalSA2/verify-halt.json': JSON.stringify({ ts: NOW_S - 60, client: 'PrimalSA2', src: 'watch', reason: '不認得 10 秒' }) } })
+  await $.command.run({ command: 'psa-hud', args: 'on' } as never)
+  await flush()
+  await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
+  await flush()
+  const t = await paneTexts($)
+  const i2 = t.indexOf('[PrimalSA2] 主畫面')
+  expect(i2).toBeGreaterThan(0)
+  expect(t[i2 + 1]).toBe(`  停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} watch：不認得 10 秒`)
+  expect(t[i2 + 2]).toBe('  人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2')
+  expect(t.slice(0, i2).some(x => x.includes('停手：驗證旗標'))).toBe(false)
 })
 
 test('路徑函式：主視窗 = 舊路徑；其他視窗在 clients/<程序名>', () => {
@@ -822,6 +849,7 @@ test('路徑函式：主視窗 = 舊路徑；其他視窗在 clients/<程序名>
   expect(questLogFromCwd(ROOT)).toBe(`${ROOT}/notes/quest-events.log`)
   expect(questLogFromCwd(ROOT, 'PrimalSA2')).toBe(`${ROOT}/notes/clients/PrimalSA2/quest-events.log`)
   expect(verifyHaltFromCwd('C:\\games\\PrimalSA-AI\\tools')).toBe('C:\\games\\PrimalSA-AI/tools/.cache/verify-halt.json')
+  expect(verifyHaltFromCwd(ROOT, 'PrimalSA2')).toBe(`${ROOT}/tools/.cache/clients/PrimalSA2/verify-halt.json`)
   expect([isMainClient(undefined), isMainClient('primalsa'), isMainClient('PrimalSA2')]).toEqual([true, true, false])
   expect(MAIN_CLIENT).toBe('PrimalSA')
 })
@@ -861,8 +889,20 @@ test('pickTargets / clientEnv / winSuffix / bannerLines', () => {
   expect([winSuffix(1), winSuffix(2), winSuffix(3)]).toEqual(['', '（2 視窗）', '（3 視窗）'])
   const vs = { v: 1, flags: { verify_suspect: true } } as never
   expect(bannerLines(undefined, [{ client: 'PrimalSA', state: vs }])).toEqual([])          // 單視窗：verify_suspect 已在提示行，不重複
-  expect(bannerLines(undefined, [{ client: 'PrimalSA', state: null }, { client: 'PrimalSA2', state: vs }])).toEqual([{ text: '[PrimalSA2] 疑似答題 / 驗證視窗，請人工處理（全部視窗停手）', tone: 'red' }])
-  expect(bannerLines('not json', [])[0]?.text).toBe('全部視窗停手：驗證旗標 ? ：')
+  expect(bannerLines(undefined, [{ client: 'PrimalSA', state: null }, { client: 'PrimalSA2', state: vs }])).toEqual([])   // 多視窗：紅字在各視窗段落
+  expect(haltLines('PrimalSA2', undefined, vs, true)).toEqual([{ text: '疑似答題 / 驗證視窗，請人工處理（只停這個視窗）', tone: 'red' }])
+  expect(haltLines('PrimalSA2', undefined, vs, false)).toEqual([])
+  expect(bannerLines('not json', [])[0]?.text).toBe('PrimalSA 停手：驗證旗標 ：')                // 壞檔 = 主視窗的（保守）
+  // 歸屬：主視窗自己的 / 舊共用（client 欄是別的視窗）/ 每視窗自己的檔
+  const m1 = JSON.stringify({ client: 'PrimalSA', reason: 'a' }), m2 = JSON.stringify({ client: 'PrimalSA2.exe', reason: 'b' })
+  expect([haltOwner(undefined), haltOwner(m1), haltOwner(m2), haltOwner('bad'), haltOwner('{}')]).toEqual([undefined, 'PrimalSA', 'PrimalSA2', 'PrimalSA', 'PrimalSA'])
+  expect(haltFor('PrimalSA', m1, m1)).toEqual({ text: m1, legacy: false })
+  expect(haltFor('PrimalSA2', undefined, m1)).toBeUndefined()
+  expect(haltFor('PrimalSA', m2, m2)).toBeUndefined()
+  expect(haltFor('primalsa2', undefined, m2)).toEqual({ text: m2, legacy: true })
+  expect(haltFor('PrimalSA3', undefined, m2)).toBeUndefined()
+  expect(haltFor('PrimalSA2', 'own', undefined)).toEqual({ text: 'own', legacy: false })
+  expect(haltLines('PrimalSA2', { text: m2, legacy: true }, null, true)[0]?.text).toBe('停手：驗證旗標 ：b（舊共用旗標檔）')
 })
 
 test('autoTitle：多視窗加「（N 視窗）」；練功判斷只看主視窗沒標籤的行', async () => {

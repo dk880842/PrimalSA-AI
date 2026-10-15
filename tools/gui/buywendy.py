@@ -7,7 +7,7 @@
 穿戴手動點 618,662（金幣進左上飾品格 234,210）；之後 `buywendy.py run --confirm-buy` 實跑：check（已穿 + 石幣 149500 OCR 正確）、first（已是風的精靈、已勾，不點）、
 back（傳村 → team.form 5 人 → 傳柯奧4F）都過，grind.go 被工具逾時殺掉，補跑 `grind.py start` 掛機確認。**未實機**：買前核對（title_ok / 價格 OCR）、腳本內走嚮導 / 道具屋、
 bag.wear_item 在樂器彈窗（手動穿過；腳本版那次被 verify-halt 擋）、_visit_first 實際改下拉。
-便利店面板與背包裝備彈窗不在 screen_sigs，開著超過約 10 秒 watch 會寫全視窗 verify-halt.json（2026-10-15 兩次誤報）。
+便利店面板與背包裝備彈窗不在 screen_sigs，開著超過約 10 秒 watch 會寫本視窗 verify-halt.json（2026-10-15 兩次誤報；當時是全視窗共用，之後改成只停該視窗）。
 
 用法（專案根目錄；WSL / Windows 原生指令相同；PSA_CLIENT=PrimalSA2 → 隊長 DKBO6）：
   uv run --no-project python tools/gui/buywendy.py plan                       # 只讀（開一次背包看裝備 / 背包、不點購買）：已有金幣 → 買 / 穿都跳過

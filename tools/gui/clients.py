@@ -21,7 +21,7 @@ PowerShell 端的同一套規則在 psawin.ps1（Get-PsaClient / Find-PsaProcess
   clients.cpath('grind.lock')          # cache_dir() / 檔名
   clients.notes_dir()     # 主視窗 = notes；其他 = notes/clients/<程序名>/（quest-events.log、quest-log.md）
   clients.npath('quest-events.log')
-  clients.SHARED_CACHE    # 全部視窗共用的 tools/.cache（樣板、圖庫、errlog、actions.log、verify-halt.json…）
+  clients.SHARED_CACHE    # 全部視窗共用的 tools/.cache（樣板、圖庫、errlog、actions.log…；verify-halt.json 改成每視窗一份）
   clients.running()       # 正在執行的遊戲程序名稱（PrimalSA、PrimalSA2…；查不到 None）
   clients.multi_window()  # 這個程序是不是「多視窗」情境（非主視窗，或還有別的 PrimalSA* 在跑；查不到當作是）
 路徑在 import 時依 PSA_CLIENT 決定（一個程序只操作一個視窗）；沒設 PSA_CLIENT 時所有路徑與改版前逐字相同。

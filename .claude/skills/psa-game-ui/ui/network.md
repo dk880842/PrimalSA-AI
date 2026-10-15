@@ -40,10 +40,12 @@
 - **未實機的地方**：點帳號欄後 Unity 輸入框的游標位置 / 是否全選、`{END}` / `{HOME}` / `{DEL}` 在背景 PostMessage 下是否有效（`{BS}` 已實測一次刪一字）、點欄位會不會跳出帳號下拉清單、背景視窗的 InputField 收不收 WM_CHAR。這些不符時都會停在「清不掉」或「重打後核對不符」而 halt，不會按登錄。
 - **安全實測法（不用真的斷線）**：①人在某個視窗自己登出到登入畫面（或剛開的遊戲停在登入畫面），跑 `PSA_CLIENT=<程序名> uv run --no-project python -c "import sys; sys.path.insert(0,'tools/gui'); import netwatch, accounts; print(netwatch.read_account(accounts.for_client()[1]))"`（唯讀，只印 self / other / unreadable）；②人把帳號欄改成另一個帳號再跑一次應得 other；③在 ② 的狀態下改呼叫 `netwatch.retype_account(...)`（會點帳號欄 / 清空 / 打字，不按登錄），回空字串 = 重打成功，人看畫面確認；④最後才 `netwatch.py --once` 整套（會按登錄）。
 
-## 全視窗驗證停手旗標（verifyhalt.py，2026-10-15）
-任一視窗疑似驗證 / 答題視窗（`uikit.preflight` / `uikit.fail` 回 9、watch 的 unknown_long / quest 警報轉述、quest.py 連 3 次不認得、follow 不認得超過 10 分鐘）時，**多視窗情境**（同上判斷）會寫 `tools/.cache/verify-halt.json`（全部視窗共用一份）。
-存在時：`netwatch.check_and_reconnect` 回 `verify`、`netwatch.guard` → `sys.exit(9)`（quest / follow / heal --watch / petwatch / grind 迴圈每輪都會呼叫）；`uikit.preflight` 一開始就 9；`VerifyGuard` 停止；`gui.ps1` 的 click / dclick / drag / key 不送、exit 9（最後一道保險）；watch 照常監看，`state.flags.verify_halt = true`。
-旗標**不會自己消失**：人處理完驗證視窗後 `uv run --no-project python tools/gui/verifyhalt.py clear`（`status` 看內容，退出碼 9 = 有旗標）。單一視窗不寫旗標，行為與以前相同。
+## 每視窗驗證停手旗標（verifyhalt.py，2026-10-15；同日下午改成各自視窗停手）
+某個視窗疑似驗證 / 答題視窗（`uikit.preflight` / `uikit.fail` 回 9、watch 的 unknown_long / quest 警報轉述、quest.py 連 3 次不認得、follow 不認得超過 10 分鐘）時，**多視窗情境**（同上判斷）會寫**那個視窗自己的**旗標：
+主視窗 `tools/.cache/verify-halt.json`（原路徑）、其他 `tools/.cache/clients/<程序名>/verify-halt.json`（= `clients.cache_dir()`）。只停出事的視窗，其他視窗照常（13:48 p2 把便利店畫面當不認得 → 舊版全部視窗一起停的誤報，使用者因此改規則）。
+存在時（只看本視窗 = PSA_CLIENT）：`netwatch.check_and_reconnect` 回 `verify`、`netwatch.guard` → `sys.exit(9)`（quest / follow / heal --watch / petwatch / grind 迴圈每輪都會呼叫）；`uikit.preflight` 一開始就 9；`VerifyGuard` 停止；`gui.ps1` 的 click / dclick / drag / key / typeq 不送、exit 9（最後一道保險；`psawin.ps1 Get-PsaVerifyHalt` 依這個請求的 client 算路徑，常駐 serve.ps1 每請求設 PSA_CLIENT）；watch 照常監看，`state.flags.verify_halt = true`；psa-hud 在該視窗段落紅字。
+旗標**不會自己消失**：人處理完驗證視窗後 `uv run --no-project python tools/gui/verifyhalt.py clear <程序名>`（不給 = 本視窗 PSA_CLIENT、`all` = 全清）；`status [程序名|all]` 列各視窗（不給 = all，退出碼 9 = 有任一個）。單一視窗不寫旗標，行為與以前相同（只有自己 = 各自停手）。
+**舊格式**（改版前全部視窗共用 `tools/.cache/verify-halt.json`，非主視窗寫的內含 `client` 欄）：client 不是主視窗 → 歸屬那個視窗（那個視窗照樣停，主視窗不受影響；Python 與 gui.ps1 同規則），`status` 會註明；`clear <那個程序名>` 清掉，或主視窗之後要寫自己的旗標時自動搬到該視窗資料夾。壞檔 / 沒有 client 欄 = 主視窗的（保守停手）。
 
 ## 偵測特徵（2880×1659 截圖座標，容差 25）
 - 提示視窗：`520,570` `880,570` `600,300` `600,557` `830,557` 米色（243,215,175 上下）+ `640,557` 藍（61,106,167）；兩側米色確保是「單鈕」提示。再用 ocr.ps1 讀訊息 `585,370,260,40`（`-Light 200`）：讀到文字卻不含 網/路/異/重/連 就當別種提示不點（OCR 讀不到則信任像素；OCR 未實測）。
@@ -55,7 +57,7 @@
 - 「帳密欄非空」= 在帳號框 700-900,400-425、密碼框 690-880,484-502 數深棕色像素（≥10 個），**只判斷有沒有字，不讀內容**。
 - **讀取失敗三態（2026-10-10）**：`_match` 回 True / False / None（`gui.ps1` 失敗、空輸出、`pwfail` 重試一次仍失敗 = None；waitpix / waitstill 的 PrintWindow 失敗會印 `pwfail`）。None = 「不確定」：不點、不宣告重連 / 登錄成功（`hud_ok()` 只在確定不是登入畫面時才 True）。`login_fields_filled()` 讀不到回 None，**不當成「欄位空」halt**：本輪不點登錄、回 `{'status':'ok','failed':True}`，連續 5 輪（`netwatch.json` 的 `read_fails`）讀不到才 halt（理由「讀不到帳密欄 / 遊戲畫面」）。errlog 限頻：同一段連續失敗只記一筆，恢復後補一筆「已恢復」。測試：`tools/gui/test_netwatch.py`（mock，不碰遊戲）。
 - 單獨掛機：`uv run --no-project python tools/gui/netwatch.py --watch --interval 10`（`--once` 只查一次、`--status` 看 halt 狀態）。與其他腳本共用 `netwatch.act.lock`，同時只有一方處理；`--watch` 有單例鎖 `netwatch.lock`。
-- 退出碼：10 = halt（要使用者處理）、11 = 連續失敗、9 = 全視窗驗證停手旗標、2 = 版面不支援。
+- 退出碼：10 = halt（要使用者處理）、11 = 連續失敗、9 = 本視窗驗證停手旗標、2 = 版面不支援。
 - halt 檔 `tools/.cache/netwatch.halt`：halt 時寫入，之後所有腳本一啟動就退出 10，**不會自己再按登錄**（避免錯誤提示被重試）。使用者處理完 / 人類自己登入後，再跑任何腳本（或 `netwatch.py --once`）偵測到 HUD 回來會自動清除 halt；也可手動刪檔。
 - `recover()`（P8 起）：`team_report()` 逐張卡片 OCR（整塊一起讀不準；單張標籤 450/730,272/357/442 寬 70 高 32，缺字會算 unknown）→ 有「單人」才 `fix_team()`（全部登錄 → 全員單人才 `team.form()`）→ **重登 / 人類登入回來時自動跑 `grind.py ensure` 一次**（`grind.run('ensure', ignore_watchers=True)`：當前角色 → 隊長、5 人快速 + 自動戰鬥只補不對的、開遇敵、確認 2 次 EXP 橫幅；約 25 秒）→ ensure 失敗才退回舊的「原地遇敵沒開就開」。ensure 失敗（退出碼非 0）只記 errlog + 印警告、**不重試、不 halt**；quest 的 battle.lock 有效時 grind 回 8（不搶畫面）；grind 已在執行（巢狀）時略過；SystemExit（停手）照常往外丟。純網路異常確定後 HUD 就回來（沒經過登入畫面）的重連不跑 ensure。`netwatch.py --no-grind` 關掉自動 ensure。
 - 重登（relogin 成功 / 人類登入回來）時一律先 `charstate.clear()`（重登後當前角色會變 DKBO5，旁路檔舊值作廢；之後 char.ensure 現場讀切換面板）。

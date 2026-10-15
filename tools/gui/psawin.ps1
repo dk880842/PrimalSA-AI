@@ -37,8 +37,31 @@ function Get-PsaCacheDir([string]$Name = (Get-PsaClient)) {
   return (Join-Path (Join-Path $PsaSharedCache 'clients') $d)
 }
 
-# 全視窗驗證停手旗標（verifyhalt.py 寫；多視窗時任一視窗出現驗證視窗）：存在 → gui.ps1 不送 click / dclick / drag / key（exit 9）
-function Test-PsaVerifyHalt { return (Test-Path -LiteralPath (Join-Path $PsaSharedCache 'verify-halt.json')) }
+# 每視窗驗證停手旗標（verifyhalt.py 寫；多視窗時這個視窗出現驗證視窗才設，只停這個視窗）：存在 → gui.ps1 不送 click / dclick / drag / key / typeq（exit 9）。
+# 路徑與 verifyhalt.path 同規則：Get-PsaCacheDir <程序名> / verify-halt.json（主視窗 = tools/.cache/verify-halt.json）。
+# 舊格式（改版前全部視窗共用 tools/.cache/verify-halt.json，非主視窗寫的內含 client 欄）：client 不是主視窗 → 算那個視窗的，主視窗不受影響。
+# 回傳本視窗命中的旗標檔路徑；沒有 = $null。常駐 serve.ps1 每請求設 PSA_CLIENT，gui.ps1 傳 $Client 進來
+function Get-PsaVerifyHalt([string]$Name = (Get-PsaClient)) {
+  $main = Join-Path $PsaSharedCache 'verify-halt.json'
+  $owner = $null
+  if (Test-Path -LiteralPath $main) {
+    $owner = $PsaDefaultClient
+    try {
+      $c = ([string]((Get-Content -LiteralPath $main -Raw -Encoding UTF8 | ConvertFrom-Json).client)).Trim()
+      if ($c -match '(?i)\.exe$') { $c = $c.Substring(0, $c.Length - 4) }
+      if ($c) { $owner = $c }
+    } catch { }                                    # 壞檔：當作主視窗自己的（與 verifyhalt._read 一致：壞檔也算存在）
+  }
+  if (Test-PsaDefaultClient $Name) {
+    if ($owner -and (Test-PsaDefaultClient $owner)) { return $main }
+    return $null
+  }
+  $own = Join-Path (Get-PsaCacheDir $Name) 'verify-halt.json'
+  if (Test-Path -LiteralPath $own) { return $own }
+  if ($owner -and [string]::Equals($owner, $Name, [StringComparison]::OrdinalIgnoreCase)) { return $main }
+  return $null
+}
+function Test-PsaVerifyHalt([string]$Name = (Get-PsaClient)) { return ($null -ne (Get-PsaVerifyHalt $Name)) }
 
 # 找 PSA_CLIENT 指定的遊戲程序。回傳 hashtable：
 #   ok=$true  → name、proc（唯一一個 Process）
