@@ -1118,6 +1118,21 @@ rc, out, err = run(pet.set_state_many, 'all', '迪基格斯', '等待')
 check('  再跑一次：已是目標 → 0 次狀態鈕', rc == 0 and len(g.state_clicks) == 5)
 rc, out, err = run(pet.set_state_many, 'DKBO,DKBO2', '瑪斯貝卡', '等待')
 check('set-state-many 騎寵沒 --allow-mount → 73、不點', rc == 73 and len(g.state_clicks) == 5, f'rc={rc}')
+# set-state-slot（2026-10-16：依格號、不認物種）
+g = new()
+rc, out, err = run(pet.set_state_slot, 'all', [2], '等待')
+check('set-state-slot --slots 2 等待：5 人各點 1 次、騎寵沒動、不讀名字', rc == 0 and len(g.state_clicks) == 5
+      and all(g.pets[r][1]['state'] == '等待' and g.pets[r][0]['state'] == '騎乘' for r in fake_pet.ROLES), f'rc={rc} {g.state_clicks} {err[-200:]}')
+rc, out, err = run(pet.set_state_slot, 'all', [2], '等待')
+check('  再跑一次：已是目標 → 0 次狀態鈕', rc == 0 and len(g.state_clicks) == 5)
+rc, out, err = run(pet.set_state_slot, 'DKBO,DKBO2', [2], '出戰')
+check('  --slots 2 出戰：2 人各點 1 次', rc == 0 and len(g.state_clicks) == 7 and g.pets['DKBO'][1]['state'] == '出戰', f'rc={rc}')
+rc, out, err = run(pet.set_state_slot, 'DKBO', [1], '等待')
+check('  第 1 格（騎寵位置）→ 參數拒絕 EXIT_USAGE、不點', rc == uikit.EXIT_USAGE and len(g.state_clicks) == 7, f'rc={rc}')
+g = new(pets=mk_pets(DKBO=[unn(0, '騎乘'), unn(1, '騎乘'), None, None, None]))
+rc, out, err = run(pet.set_state_slot, 'DKBO', [2], '出戰')
+check('  第 2 格是騎乘中 → 73、不點', rc == 73 and len(g.state_clicks) == 0, f'rc={rc}')
+
 # store-many：每人只完整讀一次寵物欄
 fresh_tpl()
 g = new(pets=mk(), depot=mkdp())

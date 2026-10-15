@@ -310,6 +310,16 @@ class Sim:
                     if p['name'] == name:
                         p['state'] = st
             return self.out(0)
+        if cmd == 'set-state-slot':
+            nums = [int(x) for x in args[args.index('--slots') + 1].split(',')]
+            st = args[-1]
+            for r in ROLES:
+                for n in nums:
+                    if n <= len(self.bar[r]):
+                        if self.bar[r][n - 1]['state'] == '騎乘':
+                            return self.out(73)
+                        self.bar[r][n - 1]['state'] = st
+            return self.out(0)
         if cmd == 'rest-all':
             for r in ROLES:
                 for p in self.bar[r]:
@@ -374,8 +384,12 @@ check('交寵物用 questrun --pet-turnin --rested（train 段剛 rest-all 過�
 check('恐龍博士練寵固定 80 級練功區：grind.py start --spot 波拉島（使用者 2026-10-15 指定）', pq.TRAIN_SPOT == '波拉島' and ('start', '--spot', '波拉島') in names(s, 'grind.py'), str(names(s, 'grind.py')))
 pa = [a for a in names(s, 'pet.py') if a[0] in ('list', 'levels')]
 tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
-in_train = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels', 'rest-all')]
-in_train = in_train[:in_train.index('rest-all')]
+in_train = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels', 'set-state-slot')]
+in_train = in_train[:in_train.index('set-state-slot')]
+ss = [a for a in names(s, 'pet.py') if a[0] == 'set-state-slot']
+check('練寵不認物種：出戰 = set-state-slot --slots 2 出戰（不帶物種 / --candidates）、rest = --slots 2,3,4,5 等待；train 不再呼叫 set-state-many / rest-all',
+      ss[0][ss[0].index('--slots') + 1] == '2' and ss[0][-1] == '出戰' and ss[-1][ss[-1].index('--slots') + 1] == '2,3,4,5' and ss[-1][-1] == '等待'
+      and all('--candidates' not in a for a in ss) and not any(a[0] == 'rest-all' for a in names(s, 'pet.py')), str(ss))
 check('練寵輪詢：第一次 list（身分）、之後只 levels --slots 任務寵格', in_train[0] == 'list' and in_train[1:] and set(in_train[1:]) == {'levels'}
       and all('--slots' in a for a in names(s, 'pet.py') if a[0] == 'levels'), str(in_train))
 pc = [a for a in names(s, 'pet_catch.py') if '--stages' in a and 'setup' in a[a.index('--stages') + 1]]
@@ -461,7 +475,7 @@ s = grow(Sim(2019))
 rc = go(2019, s, confirm_drop=True)
 seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'pet_catch.py')]
 i_acc = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' not in a]
-i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'rest-all']
+i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'set-state-slot' and a[-1] == '等待']
 i_shark = [i for i, (sc, a) in enumerate(seq) if sc == 'pet_catch.py' and '鯊魚系' in ' '.join(a)]
 i_bird = [i for i, (sc, a) in enumerate(seq) if sc == 'pet_catch.py' and '火雞系' in ' '.join(a)]
 i_t1 = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' in a]
@@ -511,7 +525,7 @@ s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
 seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'team.py')]
 i_acc = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' not in a]
-i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'rest-all']
+i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'set-state-slot' and a[-1] == '等待']
 i_store = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'store-many' and '--depot' in a and a[a.index('--depot') + 1] == 'personal']
 i_dis = [i for i, (sc, a) in enumerate(seq) if sc == 'team.py']
 check('恐龍新順序：解散 → 存第 2 格（個人倉庫）在最前、接任務在 rest-all 之後', rc == 0 and i_dis[0] < i_store[0] < i_rest[0] < i_acc[0] and seq[0][0] == 'team.py',
@@ -620,7 +634,7 @@ def _pet(a):
 s.pet = _pet
 rc = go(2016, s, confirm_drop=True)
 tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
-ra = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'rest-all'][0]
+ra = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'set-state-slot' and c[1][-1] == '等待'][0]
 seq = [c[1][0] for c in s.calls[tr[0]:ra] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels')]
 check('練寵讀等級：第一次 list、之後只 levels（讀失敗下一輪再讀 levels，不改讀 list），仍練完', rc == 0 and seq[0] == 'list' and set(seq[1:]) == {'levels'} and len(seq) >= 4, f'rc={rc} {seq[:8]}')
 pc = names(s, 'pet_catch.py')
@@ -860,7 +874,7 @@ s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True, keep_autoswap=True)
 off = [a for a in names(s, 'pet_catch.py') if a[:2] == ('--autoswap', 'off')]
 on = [a for a in names(s, 'pet_catch.py') if a[:2] == ('--autoswap', 'on')]
-check('--keep-autoswap：train 開了自動轉換、結束不關；rest-all 照做', rc == 0 and len(on) == 1 and not off and any(a[0] == 'rest-all' for a in names(s, 'pet.py')), f'rc={rc} {on} {off}')
+check('--keep-autoswap：train 開了自動轉換、結束不關；rest-all 照做', rc == 0 and len(on) == 1 and not off and any(a[0] == 'set-state-slot' and a[-1] == '等待' for a in names(s, 'pet.py')), f'rc={rc} {on} {off}')
 check('--keep-autoswap：restore 跳過（不取回朵拉比斯、不鎖定、不改一般動作）',
       not any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
       and not [a for a in names(s, 'pet_catch.py') if '--lock' in a] and not names(s, 'ass.py'), str(names(s, 'pet_catch.py')))

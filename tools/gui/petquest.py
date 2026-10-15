@@ -44,11 +44,11 @@
     distribute[N]  其他人從公共倉庫取自己缺的種類：pet.py take-many --depot public --plan "角色:物種,…"（take_plan：每人每種 1 隻，抓寵者自己那種不取）→ [distributed_taken]
                 → **只驗**：pet.py list，每人寵物欄有寵物的格數 = 1 + 本輪種類數（恐龍博士 2 種 → 3 格：騎寵 + 魯尼帖斯 + 貝魯卡；卡坦每輪 4 種 → 5 格）→ [distributed]；
                 不比名字 / 縮圖 / 成長字串、不數倉庫。take-many 中途失敗：進度檔記已取到的，重跑只補沒取到的（165）。
-    train[N]    （2026-10-16 精簡）自動轉換戰寵 on（轉換級數使用者設 30；**整個任務只勾一次**：進度檔頂層 autoswap_on 已有就不跑）→ 第一種任務寵 set-state-many 5 人出戰（本身已驗證，失敗就停；不跑 verify-battle）
+    train[N]    （2026-10-16 精簡）自動轉換戰寵 on（轉換級數使用者設 30；**整個任務只勾一次**：進度檔頂層 autoswap_on 已有就不跑）→ 5 人第 2 格 set-state-slot 出戰（不認物種）（本身已驗證，失敗就停；不跑 verify-battle）
                 → grind.py start --spot 波拉島（使用者 2026-10-15 指定：恐龍博士 / 卡坦練寵固定 80 級練功區「波拉島」，固定點、不起 follow）
                 → 每 POLL_S（10）秒讀等級：第一次 pet.py list 一次（只為知道任務寵在哪幾格、哪格是哪種），之後只 pet.py levels --slots <任務寵格>；讀取失敗下一輪再讀（不改讀 list）；
                   每隻（角色 + 物種）連兩次 ≥ 門檻就鎖定（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25），全部鎖定結束，最多 45 分
-                → 關遇敵 → pet.py rest-all（任務寵改等待；成功記進度檔 rested）→ 自動轉換戰寵 off **只在整個任務最後**（卡坦第 2 輪 train 結束 / 恐龍博士沒帶 --keep-autoswap 的 train 結束；卡坦第 1 輪不關）
+                → 關遇敵 → pet.py set-state-slot --slots 2,3,4,5 等待（任務寵改等待，不認物種；成功記進度檔 rested）→ 自動轉換戰寵 off **只在整個任務最後**（卡坦第 2 輪 train 結束 / 恐龍博士沒帶 --keep-autoswap 的 train 結束；卡坦第 1 輪不關）
     accept      （第 1 輪 train 的 rest-all 之後）questrun.py run <ID> --after none：接取後停在寵物步（115 manual / 155 / 117 對話 ↔ 選擇循環）；不讀追蹤步號（2026-10-16 起）；
                 0 = 任務已完成 → 其餘段跳過，只做 restore（第 2 格照樣取回、出戰、鎖定；練好的任務寵留在寵物欄）
     turnin[N]   questrun.py run <ID> --after none --pet-turnin [--rested]（train 段 30 分內 rest-all 成功才帶：questrun 交件前不重做 rest-all）
@@ -846,7 +846,7 @@ class Run:
         rd = self.round_conf(stage)
         cand = species_csv(rd['assign'])
         first = rd['assign'][0][2]
-        steps = [('pet.py', ['set-state-many', '--role', 'all', first, '出戰', '--candidates', cand], f'{first} 5 人出戰'),   # 出戰本身已驗證，失敗就停
+        steps = [('pet.py', ['set-state-slot', '--role', 'all', '--slots', str(BATTLE_SLOT), '出戰'], f'5 人第 {BATTLE_SLOT} 格出戰'),   # 不認物種（2026-10-16）：第 1 格騎寵、分配後第 2 格必是任務寵；出戰本身已驗證，失敗就停
                  ('grind.py', ['start', '--spot', TRAIN_SPOT], f'grind start {TRAIN_SPOT}')]
         if not self.autoswap_is_on():                                # 自動轉換戰寵整個任務只勾一次（卡坦第 2 輪 / 恐龍博士帶 --keep-autoswap 接過來都已勾）
             steps.insert(0, ('pet_catch.py', ['--autoswap', 'on'], '自動轉換戰寵 on'))
@@ -886,7 +886,7 @@ class Run:
         rc = self.encounter_off()
         if rc:
             return rc
-        offs = [('pet.py', ['rest-all', '--candidates', cand], '任務寵改等待（rest-all）')]
+        offs = [('pet.py', ['set-state-slot', '--role', 'all', '--slots', '2,3,4,5', '等待'], '任務寵改等待（第 2～5 格，不認物種）')]
         last_round = stage_round(stage) >= len(self.q['rounds'])
         if last_round and not self.o.get('keep_autoswap'):           # 整個任務最後才關：卡坦第 2 輪 / 恐龍博士沒帶 --keep-autoswap
             offs.insert(0, ('pet_catch.py', ['--autoswap', 'off'], '自動轉換戰寵 off'))
@@ -1094,8 +1094,8 @@ def print_plan(qid: int, o: dict) -> None:
             print(f'            → pet.py reset-name --role {",".join(r for r, _, _ in a)} → 一次 store-many --plan "角色:物種×在欄隻數,…" --depot public --pick last'
                   f' → 溢出的 take-many --depot personal（--candidates {species_csv(a)}）+ reset-name（溢出 > 1 才再存多的）')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" → pet.py list 只驗每人寵物欄 {1 + len({sp for _, _, sp in a})} 格有寵物（騎寵 + {len({sp for _, _, sp in a})} 種）')
-            print(f'  train{sfx}   autoswap on（整個任務只勾一次）→ set-state-many {a[0][2]} 出戰 → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
-                  f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；每隻連兩次 ≥ 門檻 {rd["need"]}）→ 關遇敵 → rest-all'
+            print(f'  train{sfx}   autoswap on（整個任務只勾一次）→ set-state-slot 第 2 格出戰（不認物種） → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
+                  f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；每隻連兩次 ≥ 門檻 {rd["need"]}）→ 關遇敵 → set-state-slot 2～5 格等待'
                   f'{"" if (i < len(q["rounds"]) or o.get("keep_autoswap")) else " → autoswap off（整個任務最後）"}')
             if i == 1:
                 print(f'  accept   questrun.py run {qid} --after none（練完 rest-all 之後才接；115 / 155 / 117；0 = 已完成 → 只做 restore；不讀步號）')

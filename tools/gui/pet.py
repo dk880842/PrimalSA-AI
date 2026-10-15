@@ -5,6 +5,7 @@
   uv run --no-project python tools/gui/pet.py list [--role DKBO|DKBO,DKBO3|all] [--json]   # 唯讀：每格 名字 / 狀態 / 等級（逗號清單照名單順序）
   uv run --no-project python tools/gui/pet.py levels [--role all] [--slots 2,3,4,5] [--json]   # 唯讀：只讀等級 + 名字框點陣指紋 nh（練寵輪詢；不認名字）
   uv run --no-project python tools/gui/pet.py set-state DKBO 迪基格斯 出戰|等待|騎乘 [--slot N] [--allow-mount]
+  uv run --no-project python tools/gui/pet.py set-state-slot --role all --slots 2 出戰|等待   # 依格號（2～5）改狀態、不認物種；騎乘中拒絕、空格 出戰 拒絕 / 等待 略過
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
   uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1] [--allow-mount-store 名字]
   uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N --expect 迪基格斯|--expect-growth 35/7/3/8|--expect-level 126   # --index 一定要配 --expect-*（不准盲取）
@@ -1396,6 +1397,71 @@ def set_state_many(role_arg: str, pet_text: str, state_text: str, allow_mount: b
                                 print(f'pet：{r} 的 {want}（第 {sl["slot"]} 格）{sl.get("state")} → {target}')
                         else:
                             print(f'pet：{r} 的 {want} 本來就是「{target}」，沒有點擊')
+                op['rc'] = rc
+                if rc:
+                    final = rc
+                    break
+        finally:
+            save_ctx(ctx)
+    return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
+
+
+def read_state_only(i: int) -> str | None:
+    """目前選中的第 i 格（已確認）只讀狀態鈕（出戰 / 等待 / 騎乘），不讀名字 / 縮圖（set-state-slot 用）"""
+    probes = [p for s in STATES for p in BTN_PROBES[s]]
+    _, extra = petmatch.grab([], extra=probes)
+    if extra is None:
+        return None
+    return btn_state({s: extra[2 * k:2 * k + 2] for k, s in enumerate(STATES)})
+
+
+def set_state_slot(role_arg: str, slots: list, state_text: str, pause: bool = False, learn: bool = True) -> int:
+    """依格號改狀態、不認物種（使用者 2026-10-16：練寵直接用第 2 格出戰；rest-all 也只動 2～5 格）。
+    面板開一次、左欄頭像逐人切 → 逐格選取 → 只讀狀態鈕：已是目標不點；狀態 = 騎乘 → 拒絕（EXIT_FORBID，不動騎寵）；
+    第 1 格（騎寵位置）一律不准；空格：目標 = 出戰 時拒絕（EXIT_NAME，沒寵物可出戰），目標 = 等待 時略過。點完讀回確認，某人失敗立即停"""
+    t0 = time.time()
+    roles = roles_multi(role_arg)
+    target = norm_state(state_text)
+    info = {'cmd': 'set-state-slot', 'slots': slots, 'target': target, 'ops': []}
+    if not roles or target not in ('出戰', '等待') or not slots or not all(2 <= x <= 5 for x in slots):
+        print(f'pet：set-state-slot 參數不對（角色 {role_arg!r}、格 {slots}（要 2～5）、狀態 {state_text!r}（出戰 / 等待））', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    ctx = load_ctx(learn, use_icache=True)
+    final = 0
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            for r in roles:
+                op = {'role': r, 'changed': [], 'rc': 0}
+                info['ops'].append(op)
+                rc = select_role(r, ctx)
+                f = scan_frames() if not rc else None
+                if not rc and f is None:
+                    rc = uikit_fail(EXIT_PANEL, '讀不到面板像素')
+                for n in slots if not rc else []:
+                    if f['empty'][n - 1]:
+                        if target == '出戰':
+                            rc = uikit_fail(EXIT_NAME, f'{r} 第 {n} 格是空的，沒寵物可出戰')
+                            break
+                        continue
+                    rc = select_slot(n - 1, f)
+                    if rc:
+                        break
+                    cur = read_state_only(n - 1)
+                    if cur == '騎乘':
+                        rc = uikit_fail(EXIT_FORBID, f'{r} 第 {n} 格正在騎乘中（騎寵），拒絕改狀態')
+                        break
+                    if cur == target:
+                        print(f'pet：{r} 第 {n} 格本來就是「{target}」，沒有點擊')
+                    else:
+                        rc, msg = apply_state(r, {'slot': n}, target, ctx)
+                        if rc:
+                            op['msg'] = msg
+                            break
+                        op['changed'].append(n)
+                        print(f'pet：{r} 第 {n} 格 {cur} → {target}')
+                    f = scan_frames() or f
                 op['rc'] = rc
                 if rc:
                     final = rc
@@ -3545,6 +3611,10 @@ def main() -> int:
     p.add_argument('pet')
     p.add_argument('state')
     p.add_argument('--allow-mount', action='store_true', help='允許動騎寵 / 設定騎乘（預設拒絕）')
+    p = sub.add_parser('set-state-slot', help='多角色依格號改狀態（不認物種；練寵第 2 格出戰、rest 2～5 格等待；騎乘中拒絕）', parents=[cp])
+    p.add_argument('--role', default='all')
+    p.add_argument('--slots', required=True, help='格號 2～5，逗號分隔（例 2 或 2,3,4,5）')
+    p.add_argument('state', help='出戰 / 等待')
     p = sub.add_parser('rest-all', help='交寵物任務前：除騎寵外「出戰」全改等待', parents=[cp])
     p.add_argument('--role', default='all')
     p.add_argument('--keep', default=None, help='不動的寵物名（逗號分隔；預設 瑪斯貝卡）')
@@ -3662,6 +3732,12 @@ def main() -> int:
         return take_many(a.role, csv(a.pets), a.depot, a.skip_missing, a.pause_encounter, learn)
     if a.cmd == 'set-state-many':
         return set_state_many(a.role, a.pet, a.state, a.allow_mount, a.pause_encounter, learn)
+    if a.cmd == 'set-state-slot':
+        try:
+            slots = [int(x) for x in a.slots.split(',') if x.strip()]
+        except ValueError:
+            slots = []
+        return set_state_slot(a.role, slots, a.state, a.pause_encounter, learn)
     if a.cmd == 'depot-list':
         return depot_list(a.role, [x.strip() for x in a.depot.split(',') if x.strip()], a.pause_encounter, learn)
     if a.cmd == 'reset-name':
