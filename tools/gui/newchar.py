@@ -10,7 +10,7 @@ ass.py set_many（實機過）/ points（同日新增、未實機）、team.py f
   uv run --no-project python tools/gui/newchar.py run [--from 步驟] [--to 步驟] [--fresh] [--confirm-buy] [--no-grind] [--skip 步驟,...] [--dry-run]
     --from / --to    只做這段（中斷後接著做；已完成的步驟記在進度檔 newchar.json〔12 小時內有效〕，重跑自動跳過；--from 指定的那步一定重做）
     --fresh          不看進度檔，從頭（每步本身也會先看狀態：已開的禮盒 / 已穿的裝備 / 已存的道具 / 已是目標的寵物與勾選都不重做）
-    --confirm-buy    花石幣買溫蒂妮Lv5的金幣 + 隊長人物首次動作 風的精靈：**目前未支援**（shopbuy 只會買耐久力回複藥）→ 該步記「未支援」跳過、最後回 199
+    --confirm-buy    花 500 石幣買溫蒂妮Lv5的金幣 + 穿 + 隊長外掛人物首次動作 風的精靈Lv.5（buywendy.py，2026-10-15；**未實機**）；失敗 → 該步記待手動、最後回 199
     --no-grind       最後不去練功
     --skip 步驟[,步驟]  被 skip 的步驟完全不執行（不開任何面板），記為「略過（--skip）」；視為滿足 --from 的前置檢查；
                      不影響退出碼（199 只給待手動 / 未支援）；plan 也標出（例：--skip points = 自動加點這次不做）
@@ -31,8 +31,9 @@ ass.py set_many（實機過）/ points（同日新增、未實機）、team.py f
   team       team.form（隊長 = 名單第 1 個、人數 = 名單人數）
   quest      初入石器（任務 1000，2 步都在 薩姆吉爾的村長家 1006:18,22 老村長）：quest.py --task 初入石器 → --task 覲見村長
              （組隊預設模式，隊長對話、5 人都拿獎勵；quest.py 回 5 = 追蹤欄沒有該卡 = 已做完，跳過）
-  buy        溫蒂妮Lv5的金幣（競技場道具屋 500 石幣）+ 隊長外掛人物首次動作 = 風的精靈Lv.5：**未支援**；沒給 --confirm-buy = 不做；
-             給了 = 記「未支援」跳過（最後 199），要人手動（notes/leveling.md 2026-10-09 03:11）
+  buy        溫蒂妮Lv5的金幣（競技場道具屋 500 石幣）+ 穿 + 隊長外掛人物首次動作 = 風的精靈Lv.5：呼叫 buywendy.run(confirm_buy=True, form=True, grind=False)
+             （停 follow → 解散 → 競技場買 → 穿 → 首次動作 → 回村組隊；已有金幣就不買）；沒給 --confirm-buy = 不做；
+             buywendy 失敗（退出碼 200～209）= 記「待手動」跳過（最後 199，info.pending 有原因），8 / 9 / 10 原碼停手（**未實機**，見 buywendy.py 檔頭）
   grind      grind.go：依當下等級選點（不寫死地點；新角色 3 級 → 柯奧龜洞一帶）、5 人快速 + 自動戰鬥、開遇敵、未滿地雷區背景起 follow
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～184；本檔 190～199，2026-10-15 grep 過沒人用）：
@@ -45,7 +46,7 @@ ass.py set_many（實機過）/ points（同日新增、未實機）、team.py f
   196 team 失敗（info.team_rc：40～47）
   197 quest 失敗（info.quest_rc；quest.py 2 = 不認得的畫面 → 改回 9 停手）
   198 grind 失敗（info.grind_rc：50～59）
-  199 其他步驟都完成，但有「待手動 / 未支援」被跳過（points 座標待量測、--confirm-buy 未支援；清單在 info.pending）
+  199 其他步驟都完成，但有「待手動 / 未支援」被跳過（points 座標待量測、buy 買 / 穿 / 首次動作失敗；清單在 info.pending）
   8 / 9 / 10：任何一步的工具回這三個 → 原碼停手（佔用 / 疑似驗證視窗 / 斷線，鐵則 5）
 """
 import argparse
@@ -89,7 +90,7 @@ LAST: dict = {}
 STATUS = {   # 步驟實作狀態（plan 顯示）
     'preflight': '完成', 'boxes': '完成（bag.wear 未實機）', 'pets': '完成', 'store': '完成（bag.store-items 未實機）', 'battle': '完成',
     'heal': '未實機（ass.heal 同日新增）',
-    'points': '座標待量測', 'team': '完成', 'quest': '完成', 'buy': '未支援', 'grind': '完成',
+    'points': '座標待量測', 'team': '完成', 'quest': '完成', 'buy': '完成（buywendy.py 未實機）', 'grind': '完成',
 }
 
 
@@ -118,8 +119,8 @@ def plan(o: dict) -> list:
                                      '方案目標值輸入流程未實測 → 方案不是這套就不改不勾（ass 15）、讀不到（ass 16）→ 記待手動、跳過、最後 199']),
         ('team', STATUS['team'], [f'team.form（隊長 {LEADER}、{n} 人）']),
         ('quest', STATUS['quest'], [f'quest.py --task {t}（回 5 = 已做完）' for t in QUEST_TASKS]),
-        ('buy', STATUS['buy'], ['溫蒂妮Lv5的金幣（競技場道具屋 500 石幣）+ 隊長人物首次動作 風的精靈Lv.5：未支援（shopbuy 只會買耐久力回複藥）',
-                               '給了 --confirm-buy → 記未支援跳過、最後 199' if o.get('confirm_buy') else '沒給 --confirm-buy → 不做']),
+        ('buy', STATUS['buy'], ['溫蒂妮Lv5的金幣（競技場道具屋 500 石幣）+ 穿 + 隊長人物首次動作 風的精靈Lv.5（buywendy.run；已有金幣不買；停 follow → 解散 → 競技場 → 買 → 穿 → 外掛 → 回村組隊）',
+                               '失敗（buywendy 200～209）→ 記待手動跳過、最後 199；8 / 9 / 10 原碼停手' if o.get('confirm_buy') else '沒給 --confirm-buy → 不做']),
         ('grind', STATUS['grind'], ['（--no-grind 跳過）'] if o.get('no_grind') else ['grind.go：依等級選點傳送、5 人快速 + 自動戰鬥、開遇敵、未滿地雷區起 follow']),
     ]
 
@@ -233,6 +234,10 @@ class Tools:
     def grind_go(self):
         import grind
         return grind.go()
+
+    def buy_wendy(self):
+        import buywendy                                      # 買 + 穿 + 首次動作 + 回村組隊（不練功：接著是 grind 步驟）
+        return buywendy.run(confirm_buy=True, form=True, grind=False)
 
 
 ITEM_MISSING, ITEM_VERIFY = 92, 95                            # bag.EXIT_ITEM / EXIT_VERIFY（不 import bag：測試不載入）
@@ -414,7 +419,13 @@ class Run:
         if not self.o.get('confirm_buy'):
             event('buy：沒給 --confirm-buy → 不買（溫蒂妮Lv5的金幣 / 風的精靈）')
             return self.done('buy', buy='skipped')
-        return self.pending('buy', '未支援：溫蒂妮Lv5的金幣（競技場道具屋 500 石幣）+ 隊長外掛人物首次動作 風的精靈Lv.5 請手動（shopbuy 只會買耐久力回複藥）')
+        rc = self.T.buy_wendy()
+        if rc in PASS:
+            return self.stop(rc, f'buy：buywendy 回 {rc}（佔用 / 疑似驗證視窗 / 斷線）→ 原碼停手', buywendy_rc=rc)
+        if rc:
+            self.info['buywendy_rc'] = rc
+            return self.pending('buy', f'溫蒂妮Lv5的金幣 / 首次動作沒做完（buywendy rc {rc}，見 buywendy.py 檔頭退出碼）：手動或重跑 buywendy.py run --confirm-buy', buywendy_rc=rc)
+        return self.done('buy')
 
     def grind(self):
         if self.o.get('no_grind'):
@@ -482,7 +493,7 @@ def main(argv=None) -> int:
     ap.add_argument('--from', dest='from_stage', default='preflight', choices=STAGES)
     ap.add_argument('--to', dest='to_stage', default='grind', choices=STAGES)
     ap.add_argument('--fresh', action='store_true', help='不看進度檔，從頭（每步仍會先看狀態、已完成的不重做）')
-    ap.add_argument('--confirm-buy', action='store_true', help='花石幣買溫蒂妮Lv5的金幣 + 風的精靈（目前未支援 → 記未支援、最後 199）')
+    ap.add_argument('--confirm-buy', action='store_true', help='花 500 石幣買溫蒂妮Lv5的金幣 + 穿 + 風的精靈首次動作（buywendy.py；失敗記待手動、最後 199）')
     ap.add_argument('--no-grind', action='store_true', help='最後不去練功')
     ap.add_argument('--skip', default='', help='略過的步驟（逗號分隔，例 points）：完全不執行、不開面板，不影響退出碼')
     ap.add_argument('--dry-run', action='store_true', help='同 plan：只印步驟，不碰遊戲')
