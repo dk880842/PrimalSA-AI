@@ -32,7 +32,7 @@
                 外掛捉寵設置已勾「自動存倉庫」，寵物欄滿了多抓的自動進抓寵者個人寵物倉庫（在欄 = min(N, 空格)、其餘溢出；抓前讀一次寵物欄算出，抓完不再讀）。
                 小步（進度檔 sub_r<輪>.step，中斷從下一小步接，不重新盤點）：
                   抓前  solo（關遇敵 + 解散）→ pet.py list（唯一一次讀）→ pet_catch.py --stages bait（每輪每人只取 / 拆一次；不夠 → 現有照用、外掛「+」只買缺額，
-                        不讀石幣、鑽石前後不變，不夠 163）→ pet_catch.py --stages setup,wait（wait 第一次輪詢 N×20+20 秒、之後 60 秒）→ [caught] → --stages baitback
+                        不讀石幣、鑽石前後不變，不夠 163）→ pet_catch.py --stages setup,wait（wait 第一次輪詢 N×20+20 秒、之後 60 秒）→ [caught]（不存回誘餌：只取 / 買剛好 N，使用者 2026-10-16）
                   1.    pet.py reset-name --role 抓寵者（寵物欄成長字串名字 → 物種名；費用字樣 67 → 165 停手）→ [renamed]
                   2.    每個抓寵者 pet.py store-many --role r --pets 物種×在欄隻數 --depot public --pick last（騎寵不碰）→ [stored]
                   3.    溢出的（N − 在欄）：pet.py take-many --depot personal --plan r:物種 --candidates 本輪物種（溢出的牌沒名字，靠縮圖候選）→ reset-name 取回者
@@ -784,9 +784,7 @@ class Run:
             st = {'step': 'caught', 'in_bar': in_bar}
             self.p[key] = st
             self.save()
-            rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', count, '--stages', 'baitback'], 1800)   # 背包剩的誘餌存回公共
-            if rc in PASS:
-                return rc
+            # 不做 baitback（使用者 2026-10-16：誘餌只取 / 買剛好 N，抓完不會剩，不用存回）
         in_bar = st.get('in_bar') or {}
         if not sub_at(st, 'renamed'):                                    # 1. 欄內數字名（成長字串）全改回物種名
             rc = self.reset_names(catchers)
@@ -1147,7 +1145,7 @@ def print_plan(qid: int, o: dict) -> None:
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
             print(f'  catch{sfx}   一次抓滿 {q.get("count", 5)} 隻（不分批）：pet.py list（抓前唯一一次）→ pet_catch.py --assign "{csv_assign(a)}" --count {q.get("count", 5)} --stages bait'
-                  f'（每人取 / 拆一次；不夠現有照用、外掛「+」只買缺額，不讀石幣，鑽石不變）→ --stages setup,wait → baitback')
+                  f'（每人取 / 拆一次；不夠現有照用、外掛「+」只買缺額，不讀石幣，鑽石不變）→ --stages setup,wait（不 baitback）')
             print(f'            → pet.py reset-name --role {",".join(r for r, _, _ in a)} → 每人 store-many --pets 物種×在欄隻數 --depot public --pick last'
                   f' → 溢出的 take-many --depot personal（--candidates {species_csv(a)}）+ reset-name（溢出 > 1 才再存多的）')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" → pet.py list 只驗每人寵物欄 {1 + len({sp for _, _, sp in a})} 格有寵物（騎寵 + {len({sp for _, _, sp in a})} 種）')

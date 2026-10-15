@@ -344,8 +344,8 @@ rc = go(2016, s, confirm_drop=True)
 check('恐龍博士 happy：rc 0', rc == 0, f'rc={rc} {pq.LAST.get("info")}')
 check('每人寵物欄 = 騎寵 + 原朵拉比斯出戰（等級 = 原等級）、布克布克已丟', all([p['name'] for p in s.bar[r]] == ['布拉奇多斯', '朵拉比斯'] and s.bar[r][1]['state'] == '出戰'
       and s.bar[r][1]['level'] == 125 + i for i, r in enumerate(ROLES)), str(s.bar))
-check('一次抓滿 5（不分批）：bait 只取 / 拆一次（count 5，每人一次）、setup 一次、最後 baitback 一次；誘餌 50 → 40', [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait'] == ['5']
-      and getattr(s, 'bait_takes', 0) == len(pq.ALL_ROLES[1:5]) * 0 + getattr(s, 'bait_takes', 0) and s.bait == 40 and getattr(s, 'baitback', 0) == 1, f'{s.bait} {getattr(s, "bait_takes", 0)}')
+check('一次抓滿 5（不分批）：bait 只取 / 拆一次（count 5，每人一次）、setup 一次、不 baitback；誘餌 50 → 40', [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait'] == ['5']
+      and getattr(s, 'bait_takes', 0) == len(pq.ALL_ROLES[1:5]) * 0 + getattr(s, 'bait_takes', 0) and s.bait == 40 and getattr(s, 'baitback', 0) == 0, f'{s.bait} {getattr(s, "bait_takes", 0)}')
 check('抓前關遇敵 + 解散；收尾鎖定戰寵 + 一般動作攻擊', ('enc_off',) in s.calls and ('team.py', ('disband',)) in s.calls
       and any(a[:2] == ('--lock', '戰寵') for a in names(s, 'pet_catch.py')) and ('pet', 'all', 'normal', '攻擊', '--no-resume') in names(s, 'ass.py'))
 check('交寵物用 questrun --pet-turnin --rested（train 段剛 rest-all 過，questrun 不重做）', ('run', '2016', '--after', 'none', '--pet-turnin', '--rested') in names(s, 'questrun.py'), str(names(s, 'questrun.py')))
@@ -632,8 +632,8 @@ check('sub_at / bar_count_bad 純函式', pq.sub_at({'step': 'stored'}, 'renamed
 s = grow(Sim(2016))
 rc = go(2016, s, to_stage='distribute')
 cn = [x for x in seq_of(s) if x.startswith(('catch', 'reset', 'store', 'take')) and not x.endswith('personal') or x == 'take-many-personal']
-check('恐龍博士 catch+distribute（空格 4、溢出 1）子指令：bait → setup,wait → baitback → reset-name(2 抓寵者) → store-many 公共 ×2 → take-many 個人 ×1 → reset-name(取回者) → take-many 公共 ×1',
-      rc == 0 and cn == ['catch:bait', 'catch:setup,wait', 'catch:baitback', 'reset-name', 'store-many-public', 'store-many-public', 'take-many-personal', 'reset-name', 'take-many-public'], f'rc={rc} {cn}')
+check('恐龍博士 catch+distribute（空格 4、溢出 1）子指令：bait → setup,wait → reset-name(2 抓寵者) → store-many 公共 ×2 → take-many 個人 ×1 → reset-name(取回者) → take-many 公共 ×1',
+      rc == 0 and cn == ['catch:bait', 'catch:setup,wait', 'reset-name', 'store-many-public', 'store-many-public', 'take-many-personal', 'reset-name', 'take-many-public'], f'rc={rc} {cn}')
 check('抓寵者各 5 隻：公共每種 4 隻、抓寵者個人倉庫的溢出取回（只剩原戰寵）、每人寵物欄 = 騎寵 + 魯尼帖斯 + 貝魯卡 剛好 3 格',
       not s.public and all(len(pets_of(s, r)) == 3 and pets_of(s, r, '魯尼帖斯') and pets_of(s, r, '貝魯卡') for r in ROLES)
       and all(p['name'] != '35/7/3/8' for r in ROLES for p in s.bar[r]) and all(p['name'] == '朵拉比斯' for r in ROLES[1:3] for p in s.personal[r]), f'{[len(s.bar[r]) for r in ROLES]} {len(s.public)}')
