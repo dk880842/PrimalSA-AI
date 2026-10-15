@@ -2,7 +2,7 @@
 """多視窗第 3c 步離線測試：任務 / 轉生腳本改用 PSA_CLIENT 視窗名單（clients.roster()）。不碰遊戲、不呼叫真的 powershell.exe。
   - 沒設 PSA_CLIENT：各腳本的名單常數、隊長、抓寵分配、切換面板卡位、預設值與改版前逐字相同（快照）
   - PSA_CLIENT=PrimalSA2：全部換成 DKBO6～DKBO10（隊長 DKBO6、抓寵者 DKBO7），角色參數只認自己名單（DKBO2 不認）
-  - 名單沒登錄的視窗（PrimalSA3）：CLI 拒跑、不點任何東西
+  - 名單沒登錄的視窗（PrimalSA9）：CLI 拒跑、不點任何東西
 名單常數在 import 時決定，所以每個情境開子程序（--child <情境>）算，母程序比對。
 整支測試 PATH 最前面放假的 powershell.exe（記錄每次呼叫），最後確認沒有任何呼叫。
   uv run --no-project python tools/gui/test_roster_quest.py
@@ -218,13 +218,13 @@ if d:
           and 'DKBO2' not in d['plan'] and '完成後 DKBO6 戰寵改回' in d['plan'], d['plan'][-800:])
 
 # ---- 3) 名單沒登錄的視窗 ----
-d = run_case('unknown', 'PrimalSA3')
-check('PrimalSA3：子程序跑完', d is not None)
+d = run_case('unknown', 'PrimalSA9')
+check('PrimalSA9：子程序跑完', d is not None)
 if d:
-    check('PrimalSA3：名單空、隊長空', all(v == [] for v in d['roles'].values()) and set(d['leader'].values()) == {''}, str(d['roles']))
-    check('PrimalSA3：CLI 全部拒跑（非 0）', all(v not in (0, None) for v in d['main_rc'].values()), str(d['main_rc']))
-    check('PrimalSA3：訊息說沒有登錄名單', '沒有登錄角色名單' in d['stderr'], d['stderr'])
-    check('PrimalSA3：TEAM_CARDS 用 #1～#5', list(d['cards']) == ['#1', '#2', '#3', '#4', '#5'])
+    check('PrimalSA9：名單空、隊長空', all(v == [] for v in d['roles'].values()) and set(d['leader'].values()) == {''}, str(d['roles']))
+    check('PrimalSA9：CLI 全部拒跑（非 0）', all(v not in (0, None) for v in d['main_rc'].values()), str(d['main_rc']))
+    check('PrimalSA9：訊息說沒有登錄名單', '沒有登錄角色名單' in d['stderr'], d['stderr'])
+    check('PrimalSA9：TEAM_CARDS 用 #1～#5', list(d['cards']) == ['#1', '#2', '#3', '#4', '#5'])
 
 # ---- 守門 ----
 n = len(calls.read_text(encoding='utf-8').splitlines()) if calls.exists() else 0

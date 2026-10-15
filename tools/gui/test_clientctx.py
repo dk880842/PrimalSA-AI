@@ -65,8 +65,8 @@ check('名單裡的大小寫統一（primalsa2 → PrimalSA2 同一資料夾）'
 check('notes：PrimalSA2 → notes/clients/PrimalSA2', clients.npath('quest-events.log', 'PrimalSA2') == ROOT / 'notes' / 'clients' / 'PrimalSA2' / 'quest-events.log')
 check('不合法名稱不會跳出 clients/', clients.dir_name('../x') == '.._x' and clients.dir_name('..') == '_..' and clients.dir_name('a b') == 'a_b'
       and clients.cache_dir('..').parent == SH / 'clients')
-check('cpath = cache_dir / 檔名', clients.cpath('grind.lock', 'PrimalSA3') == SH / 'clients' / 'PrimalSA3' / 'grind.lock')
-check('問別的視窗（給 n）不建資料夾', not (SH / 'clients' / 'PrimalSA3').exists())
+check('cpath = cache_dir / 檔名', clients.cpath('grind.lock', 'PrimalSA9') == SH / 'clients' / 'PrimalSA9' / 'grind.lock')
+check('問別的視窗（給 n）不建資料夾', not (SH / 'clients' / 'PrimalSA9').exists())
 
 # running / multi_window（PSA_TEST_PROCS，不呼叫 powershell）
 os.environ['PSA_TEST_PROCS'] = 'PrimalSA'
@@ -79,13 +79,13 @@ clients.running = lambda timeout=15.0: None
 check('查不到程序清單 → others None、主視窗當作多視窗（保守）', clients.others_running('PrimalSA') is None and clients.multi_window('PrimalSA'))
 clients.running = _run
 # rostered_running（psa-hud 多視窗偵測，第 3d 步）：只列 ROSTERS 有登錄的、資料夾名寫法、照 ROSTERS 順序
-check('rostered_running：PrimalSA3 / notepad 不列、大小寫換成名單寫法', clients.rostered_running(['primalsa2', 'PrimalSA3', 'PrimalSA']) == ['PrimalSA', 'PrimalSA2'])
+check('rostered_running：PrimalSA9 / notepad 不列、大小寫換成名單寫法', clients.rostered_running(['primalsa2', 'PrimalSA9', 'PrimalSA']) == ['PrimalSA', 'PrimalSA2'])
 clients.running = lambda timeout=15.0: None
 check('rostered_running：查不到程序清單 → None', clients.rostered_running() is None)
 clients.running = _run
 import subprocess as _sp  # noqa: E402
 _cli = _sp.run([sys.executable, str(GUI / 'clients.py'), 'running', '--rostered'], capture_output=True, text=True, encoding='utf-8',
-               env={**os.environ, 'PSA_TEST_PROCS': 'PrimalSA2,PrimalSA3,PrimalSA'})
+               env={**os.environ, 'PSA_TEST_PROCS': 'PrimalSA2,PrimalSA9,PrimalSA'})
 check('clients.py running --rostered（CLI）：一行一個、退出碼 0', _cli.returncode == 0 and _cli.stdout.split() == ['PrimalSA', 'PrimalSA2'], repr(_cli.stdout))
 os.environ['PSA_TEST_PROCS'] = 'PrimalSA'
 check('proc_client：自己的程序沒設 PSA_CLIENT = PrimalSA', sys.platform != 'linux' or clients.proc_client(os.getpid()) == 'PrimalSA')
@@ -277,7 +277,7 @@ VH.write_text(json.dumps({'ts': 1, 'client': 'PrimalSA2', 'src': 'watch', 'reaso
 check('舊共用旗標：主視窗不停', verifyhalt.active() is None and verifyhalt.trip('x', 'y', multi=False) is False)
 d2 = verifyhalt.active(client='PrimalSA2')
 check('舊共用旗標：歸屬 PrimalSA2（legacy=True）', d2 is not None and d2.get('legacy') is True and '舊共用旗標檔' in verifyhalt.describe(d2))
-check('舊共用旗標：PrimalSA3 不受影響', verifyhalt.active(client='PrimalSA3') is None)
+check('舊共用旗標：PrimalSA9 不受影響', verifyhalt.active(client='PrimalSA9') is None)
 check('status 列出歸屬 PrimalSA2 → 9', verifyhalt.main(['status']) == 9 and 'PrimalSA2' in verifyhalt.known_clients())
 check('主視窗 clear 不刪別人的舊旗標', verifyhalt.clear() is False and VH.exists())
 check('主視窗 write：先把舊旗標搬給 PrimalSA2，再寫自己的', verifyhalt.write('主視窗新', 'z') and P2.exists()
