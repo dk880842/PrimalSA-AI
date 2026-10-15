@@ -27,24 +27,21 @@
                 保險：第 2 格空 / 名字讀不出 / 等級讀不到 / 是騎寵（騎乘中、名字像騎寵）→ 162 停手、一隻都不存
                 → 取消鎖定戰寵 → 第 2 格的寵物存個人倉庫（同名的人一組 store-many；不碰騎寵）→ 寵物欄只剩騎寵 + 4 空格（不是 4 只記事件，抓寵溢出的自動進個人倉庫）
                 卡坦：prep 開頭（解散後）先讀一次追蹤步號，= 2（第 1 輪早已交）→ 第 1 輪各段跳過，不白抓鯊、也不讓鯊佔滿寵物欄
-    catch[N]    **一次抓滿本輪總隻數 N（正常 5，不分批；使用者 2026-10-15）**：外掛捉寵設置已勾「自動存倉庫」，寵物欄滿了多抓的自動進抓寵者個人寵物倉庫，
-                所以可抓捕數 = N、背包誘餌 N 個，一次抓完（舊版依空格分批 [4, 1]，理由「進個人倉庫沒縮圖取不出來」已過時：2026-10-14 起名字為主、reset-name 還原物種名，
-                且實跑 notes/quest-log.md 339 行：欄只有 3 空格各抓 5 隻、2 隻自動進個人倉庫 → 取回成功）：
-                pet_catch.py --count N --stages bait --keep-short-bait（**每輪每人只取 / 拆一次**：公共倉庫取整疊拆出 N 個、其餘存回；背包已剛好 N 個就不取不拆）→ 有人誘餌不夠（92）→ 現有誘餌留背包照用、外掛「+」只買缺額 N − 現有（不需旗標；buy_to 按到可抓捕數 = N；按前讀到的數字 < 現有誘餌 = 外掛沒相加 → 不按停手；按前讀不到鑽石 → 不按停手）→
-                pet_catch.py --stages setup,wait,rename,register --count N --expect-bar 角色:min(N, 空格)（wait 第一次輪詢 N×20+20 秒、之後 60 秒；register 只核對「在欄新增」隻數，溢出的在個人倉庫不算）；
-                名字為主（2026-10-14 晚）：rename = pet.reset_soft 還原抓寵者寵物欄的成長字串名字（鉛筆 → 確認，免費）→ register = 名字驗證：
-                比抓寵前快照 catch-pre.json，新多出來的寵物名字 = 該抓寵者 --assign 的物種；名字是別的物種 → 15、在欄隻數不對 → 17；
-                只有還原失敗 / 名字讀不出的那隻才走舊的成長字串登錄（備援，16 / 17 / 15 照舊）。還原讀到費用字樣（pet_catch 67）→ 165 停手（鐵則 3）；9 / 10 透傳。
-                整理（recount，同續跑）：pet.py depot-list 數實際（寵物欄 + 公共 + 個人倉庫）→ 欄放不下的先存公共騰位（pre_store）→ pet.py take-many --depot personal 取回溢出的
-                → 欄只留 1 隻、其餘存公共（pet.py store-many --pick last）→ 取回的 pet.py reset-name → pet.py list 名字驗證（每人欄內任務寵剛好 1 隻、名字不是成長字串）、總隻數 = N →
-                pet_catch.py --stages baitback（背包剩的誘餌存回公共）
-                中途失敗（2026-10-14 恐龍博士：DKBO3 物種選不到、DKBO2 已勾自動抓寵照抓）：pet_catch 失敗時自己把自動抓寵勾掉；
-                續跑（進度檔 catch_started / 抓寵者寵物欄已有任務寵）→ pet.py depot-list 數實際已抓（寵物欄 + 公共 + 抓寵者個人倉庫，recount_plan）→
-                個人倉庫溢出的取回、寵物欄的存公共（夠了就留 1 隻）→ 只補剩餘隻數（剩餘相同的抓寵者一組），進度檔 got_<段> = 每人已抓
-    distribute[N]  冪等（2026-10-14 恐龍博士：重跑重複取、DKBO5 取不到 72）：先 pet.py list 讀 5 人寵物欄，用嚴格身分（名字 / 登錄成長字串 + 縮圖一致；只有縮圖不算）數每人每物種已持有 →
-                多的先 store-many --pick last 存回公共 → pet.py take-many --depot public --plan 只放還缺的（抓寵者自己留的那隻不取；都齊了不取）→ list 驗每人每物種 1 隻
-                → 還有名字框是成長字串的任務寵（備援取出的）→ pet.py reset-name --role 那些人（交寵物「選擇」視窗依名字點卡；67 → 165、其他失敗只記事件）
-                take-many 中途失敗：訊息帶已取到的；重跑自動只補缺的（卡坦兩輪同樣套用）
+    catch[N]    **一次抓滿本輪總隻數 N（正常 5，不分批）→ 改名 → 存公共 → 取個人倉庫溢出的改名**（使用者 2026-10-16 最簡流程：
+                「抓完先把各角色的數字寵都改完名、馬上存入公倉，之後再把個人倉庫的拿出來改名，這樣抓的那隻人物就有自己需要的寵物」）。
+                外掛捉寵設置已勾「自動存倉庫」，寵物欄滿了多抓的自動進抓寵者個人寵物倉庫（在欄 = min(N, 空格)、其餘溢出；抓前讀一次寵物欄算出，抓完不再讀）。
+                小步（進度檔 sub_r<輪>.step，中斷從下一小步接，不重新盤點）：
+                  抓前  solo（關遇敵 + 解散）→ pet.py list（唯一一次讀）→ pet_catch.py --stages bait（每輪每人只取 / 拆一次；不夠 → 現有照用、外掛「+」只買缺額，
+                        不讀石幣、鑽石前後不變，不夠 163）→ pet_catch.py --stages setup,wait（wait 第一次輪詢 N×20+20 秒、之後 60 秒）→ [caught] → --stages baitback
+                  1.    pet.py reset-name --role 抓寵者（寵物欄成長字串名字 → 物種名；費用字樣 67 → 165 停手）→ [renamed]
+                  2.    每個抓寵者 pet.py store-many --role r --pets 物種×在欄隻數 --depot public --pick last（騎寵不碰）→ [stored]
+                  3.    溢出的（N − 在欄）：pet.py take-many --depot personal --plan r:物種 --candidates 本輪物種（溢出的牌沒名字，靠縮圖候選）→ reset-name 取回者
+                        （溢出 > 1 才再 store-many 多的進公共，欄只留 1 隻自用）→ [taken_personal]
+                抓寵者寵物欄剩自己要的 1 隻。**拿掉**（舊版）：catch-pre 快照、register 名字驗證 / 成長字串登錄備援、recount（depot-list 三處清點 / pre_store / 冪等重算）。
+                中斷後重跑：已抓完（caught 之後）直接從下一小步接；抓到一半失敗（沒有 caught）且抓寵者寵物欄已有任務寵 → 164 請人處理（不自動盤點）、沒有任務寵就從頭抓。
+    distribute[N]  其他人從公共倉庫取自己缺的種類：pet.py take-many --depot public --plan "角色:物種,…"（take_plan：每人每種 1 隻，抓寵者自己那種不取）→ [distributed_taken]
+                → **只驗**：pet.py list，每人寵物欄有寵物的格數 = 1 + 本輪種類數（恐龍博士 2 種 → 3 格：騎寵 + 魯尼帖斯 + 貝魯卡；卡坦每輪 4 種 → 5 格）→ [distributed]；
+                不比名字 / 縮圖 / 成長字串、不數倉庫。take-many 中途失敗：進度檔記已取到的，重跑只補沒取到的（165）。
     train[N]    自動轉換戰寵 on（轉換級數使用者設 30）→ 第一種任務寵 5 人出戰 → pet_catch.py --verify-battle → grind.py start --spot 波拉島
                 （使用者 2026-10-15 指定：恐龍博士 / 卡坦練寵固定 80 級練功區「波拉島」，固定點、不起 follow；舊版柯奧4F龜洞）
                 → 每 POLL_S（10）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
@@ -80,8 +77,8 @@
   161 接取失敗（questrun 非預期退出碼）/ 猜謎步 1 沒拿到金布伊
   162 準備失敗（關遇敵、解散、讀寵物欄、第 2 格空 / 名字讀不出 / 等級讀不到 / 是騎寵〔恐龍 / 卡坦〕、讀不到出戰寵名字〔猜謎〕、取消鎖定、存第 2 格、金布伊出戰 / 鎖定）
   163 買可抓捕數失敗（按前讀不到鑽石 → 沒按；「+」按了可抓捕數沒 +1；按後鑽石讀不到 / 有變；外掛數 < 背包誘餌）
-  164 抓寵失敗（pet_catch 非 0：14 系別物種選不到、15 新寵物名字 / 縮圖是別的物種、16 名字讀不出（還原失敗、成長字串也讀不出）、17 新寵物隻數不對 / 沒登錄、103 取誘餌 / 設定 / 逾時…）
-  165 分配失敗（store-many / take-many 非 0、數量驗不過）/ 還原名字讀到費用字樣（pet_catch / pet 67，鐵則 3）
+  164 抓寵失敗（pet_catch 非 0：14 系別物種選不到、103 取誘餌 / 設定 / 逾時…；抓前寵物欄空格不夠；上次中斷且寵物欄已有任務寵）
+  165 分配失敗（reset-name / store-many / take-many 非 0；分配後每人寵物欄格數不是 1 + 本輪種類數）/ 還原名字讀到費用字樣（pet 67，鐵則 3）
   166 練寵失敗（自動轉換戰寵、出戰、verify-battle、grind、等級逾時、petwatch、rest-all）
   167 交寵物失敗（questrun 非預期退出碼、卡坦第 1 輪交完步號不是 2）
   168 丟獎勵寵失敗 / 沒給 --confirm-drop
@@ -207,41 +204,29 @@ def strict_species(sl: dict) -> str | None:
     return sl.get('name') or (sl.get('species') if sl.get('unnamed') else None)
 
 
-def held_counts(slots, species) -> dict:
-    """寵物欄 → {物種: 嚴格身分隻數}（只列 species）"""
-    ids = [strict_species(s) for s in slots or []]
-    return {sp: sum(1 for i in ids if i == sp) for sp in species}
+SUB_STEPS = ('caught', 'renamed', 'stored', 'taken_personal', 'distributed_taken', 'distributed')      # catch / distribute 小步（進度檔 sub_r<輪>.step）
 
 
-def distribute_actions(assign, roles_slots: dict, roles=ALL_ROLES) -> tuple:
-    """純函式（distribute 冪等）：每人每物種剛好 1 隻 →
-    (extras {角色: {物種: 多的隻數}}（要先存回公共）, takes [(角色, 物種)]（還缺的；抓寵者自己那種不取，缺了留給事後驗證報錯）)"""
-    catcher = {sp: r for r, _, sp in assign}
-    sps = [sp for _, _, sp in assign]
-    extras, takes = {}, []
+def sub_key(stage: str) -> str:
+    """catch2 / distribute2 → 'sub_r2'（同一輪的 catch 與 distribute 共用一份小步進度）"""
+    return f'sub_r{stage_round(stage)}'
+
+
+def sub_at(st: dict, step: str) -> bool:
+    """小步進度 st 是否已做到（含）step"""
+    cur = (st or {}).get('step')
+    return cur in SUB_STEPS and SUB_STEPS.index(cur) >= SUB_STEPS.index(step)
+
+
+def bar_count_bad(roles_slots: dict, want: int, roles=ALL_ROLES) -> dict:
+    """純函式（distribute 唯一的驗證）：每人寵物欄有寵物的格數應 = want → {角色: 實際格數}（不對的才列；沒讀到的角色 = None）"""
+    out = {}
     for r in roles:
-        held = held_counts((roles_slots or {}).get(r), sps)
-        for sp in sps:
-            if held[sp] > 1:
-                extras.setdefault(r, {})[sp] = held[sp] - 1
-            elif held[sp] == 0 and catcher[sp] != r:
-                takes.append((r, sp))
-    return extras, takes
-
-
-RENAME_FAIL_TAG = '還原名字沒全部成功'          # pet_catch.RENAME_FAIL_TAG（rename 階段一般失敗時印；不 import pet_catch 以免子程序外多載模組）
-
-
-def rename_failed(lines) -> bool:
-    """pet_catch 輸出有 RENAME_FAIL_TAG → 這批還原名字沒全部成功（已走成長字串登錄備援）"""
-    return any(RENAME_FAIL_TAG in str(ln) for ln in lines or [])
-
-
-def unnamed_roles(roles_slots: dict, species) -> list:
-    """寵物欄還有名字框是成長字串（沒名字、身分靠登錄檔 / 縮圖）的任務寵的角色（照 ALL_ROLES 順序）"""
-    sps = set(species)
-    return [r for r in ALL_ROLES if any(not s.get('empty') and not s.get('name') and (s.get('unnamed') or s.get('guess'))
-                                        and slot_species(s) in sps for s in (roles_slots or {}).get(r) or [])]
+        slots = (roles_slots or {}).get(r)
+        n = None if slots is None else sum(1 for s in slots if s and not s.get('empty'))
+        if n != want:
+            out[r] = n
+    return out
 
 
 def free_slots(slots, size: int = 5) -> int:
@@ -337,43 +322,10 @@ def group_by_name(names: dict, roles=None) -> list:
     return list(out.items())
 
 
-def recount_plan(assign, roles_slots: dict, public: dict, personal: dict, count: int) -> dict:
-    """純函式（抓寵續跑）：每個抓寵者實際已抓 = 寵物欄任務寵 + 公共倉庫該物種 + 從個人倉庫取得回來的（自動存倉庫溢出）→
-    {角色: {'sp', 'slots', 'public', 'personal', 'take_personal', 'pre_store', 'store', 'take_public', 'got'}}。
-    pre_store = 取回個人倉庫前先存公共騰出的欄位數（一次抓滿時欄放不下的溢出在個人倉庫，使用者 2026-10-15）；store 含它（取回後再存剩下的 store - pre_store）。
-    整理目標：還要抓（got < count）→ 寵物欄的全存公共（下一批從 0 開始、最後一批留 1）；已夠 → 寵物欄剛好留 1 隻（多的存公共、沒有就從公共取 1）。
-    假設每個物種只有一個抓寵者（恐龍 / 卡坦都是）；公共倉庫裡原本就有的同物種也算（Lv1 任務寵，分配時一樣能用）"""
-    out = {}
-    for r, _, sp in assign:
-        slots = (roles_slots or {}).get(r) or []
-        n_s, n_pub, n_per = count_species(slots, sp), int((public or {}).get(sp, 0)), int(((personal or {}).get(r) or {}).get(sp, 0))
-        tp = n_per                                                    # 個人倉庫的全取回（欄放不下就先存公共騰位，pre_store）
-        pre = max(0, tp - free_slots(slots))
-        n2 = n_s + tp
-        got = n2 + n_pub
-        if got < count:
-            store, take = n2, 0
-        else:
-            store, take = max(0, n2 - 1), (1 if n2 == 0 else 0)
-        out[r] = dict(sp=sp, slots=n_s, public=n_pub, personal=n_per, take_personal=tp, pre_store=pre, store=store, take_public=take, got=got)
-    return out
-
-
 def take_plan(assign, roles=ALL_ROLES) -> list:
     """每人每物種要 1 隻；抓寵者自己留的那隻不取 → [(角色, 物種)]"""
     catcher = {sp: r for r, _, sp in assign}
     return [(r, sp) for r in roles for _, _, sp in assign if catcher[sp] != r]
-
-
-def missing_pets(roles_slots: dict, species, roles=ALL_ROLES) -> dict:
-    """每人每物種應剛好 1 隻 → {角色: {物種: 實際隻數}}（不對的才列）"""
-    out = {}
-    for r in roles:
-        slots = (roles_slots or {}).get(r) or []
-        bad = {sp: count_species(slots, sp) for sp in species if count_species(slots, sp) != 1}
-        if bad:
-            out[r] = bad
-    return out
 
 
 def train_status(roles_slots: dict, need: dict, roles=ALL_ROLES) -> tuple:
@@ -561,11 +513,6 @@ class Tools:
     def read_step(self, track):
         import quest
         return quest.read_step_no(track)
-
-    def save_catch_pre(self, rs) -> None:
-        """抓寵前寵物欄快照給 pet_catch register 用（排除騎寵 / 抓寵前就在的寵物）"""
-        import pet_catch
-        pet_catch.save_pre(rs)
 
     def money(self) -> tuple:
         """寵物面板頂部資源列 → (石幣, 鑽石)；面板打不開 / 讀不到 → (None, None)"""
@@ -797,210 +744,147 @@ class Run:
         return self.pass_or(rc, EXIT_BAIT, msg) if kind == 'pass' else self.fail(EXIT_BAIT, msg)
 
     def s_catch(self, stage) -> int:
-        """每人要 count 隻：進度檔 got_<段> = 每人已抓（並存好）幾隻。中途失敗續跑時（catch_started 標記，或抓寵者寵物欄已有任務寵）
-        先數實際數量（寵物欄 + 公共倉庫 + 抓寵者個人倉庫，pet.py depot-list），整理成「寵物欄 0 隻、其餘在公共」再照剩餘隻數分組補抓（不重抓）"""
+        """catch：一次抓滿 N → 改名 → 存公共 → 取個人倉庫溢出的改名（使用者 2026-10-16 最簡流程）。
+        小步進度檔 sub_r<輪>：caught → renamed → stored → taken_personal（distribute 段再 → distributed_taken → distributed）；中斷從下一小步接，不重新盤點。
+        抓前只讀一次寵物欄（算每個抓寵者「在欄 / 溢出個人倉庫」隻數 = min(N, 空格) / 其餘）；抓完之後完全不讀寵物欄 / 倉庫。"""
         if self.p.get('already_done'):
             return 0
         rd, count = self.round_conf(stage), self.q.get('count', 5)
         assign, cand = rd['assign'], species_csv(rd['assign'])
         catchers = [r for r, _, _ in assign]
-        gkey, skey = f'got_{stage}', f'catch_started_{stage}'
-        old = self.p.get(f'caught_{stage}', 0)                        # 舊版進度檔：每人同一個數
-        got = dict(self.p.get(gkey) or {r: old for r in catchers})
-        if all(got.get(r, 0) >= count for r in catchers):
+        key, skey = sub_key(stage), f'catch_started_{stage}'
+        st = self.p.get(key) or {}
+        if sub_at(st, 'taken_personal'):
             return 0
-        rc = self.solo(EXIT_CATCH)                                     # 抓寵前一定關遇敵 + 解散（卡坦第 2 輪前 questrun 交完是組隊狀態）
-        if rc:
-            return rc
-        rc, rs = self.pet_list(catchers, cand)                         # 一次抓滿；放不下的自動進個人倉庫（空格最少的那人決定溢出量；例：獎勵寵沒丟 → 3 格 → 溢出 2）
-        if rc:
-            return self.pass_or(rc, EXIT_CATCH, f'抓前讀寵物欄失敗 pet rc={rc}')
-        if self.p.get(skey) or any(count_species(rs.get(r), sp) for r, _, sp in assign):
-            rc, got = self.recount(stage, assign, rs, cand, count)
+        if not st.get('step'):                                          # 還沒抓完：從頭（抓前檢查 → 誘餌 → 抓）
+            rc = self.solo(EXIT_CATCH)                                   # 抓寵前一定關遇敵 + 解散（卡坦第 2 輪前 questrun 交完是組隊狀態）
             if rc:
                 return rc
-            self.p[gkey] = got
+            rc, rs = self.pet_list(catchers)                              # 抓前唯一一次讀寵物欄
+            if rc:
+                return self.pass_or(rc, EXIT_CATCH, f'抓前讀寵物欄失敗 pet rc={rc}')
+            free = {r: free_slots(rs.get(r)) for r in catchers}
+            if min(free.values()) <= 0 or any(count - f > f for f in free.values()):
+                return self.fail(EXIT_CATCH, f'抓寵者寵物欄空格不夠（{free}；一次抓 {count} 隻，溢出的要能一次取回）→ 先存 / 丟寵物', 'uv run --no-project python tools/gui/pet.py list --role all')
+            have_task = [r for r, _, sp in assign if count_species(rs.get(r), sp) or any(s.get('unnamed') for s in rs.get(r) or [])]   # 數字名（成長字串）的寵物也算
+            if self.p.get(skey) and have_task:                           # 上次抓到一半失敗、寵物欄已有任務寵：不盤點、不重抓 → 請人處理
+                return self.fail(EXIT_CATCH, f'{stage}：上次抓寵中斷且 {have_task} 寵物欄已有任務寵（不自動盤點倉庫）→ 手動整理後重跑，或全部丟掉重抓',
+                                 f'uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}')
+            in_bar = {r: min(count, f) for r, f in free.items()}
+            event(f'{stage}：{catchers} 一次抓滿 {count} 隻（寵物欄空格 {free}，放不下的自動進個人倉庫）')
+            rc = self.take_bait(assign, count)
+            if rc:
+                return rc
+            self.p[skey] = True
             self.save()
-            if all(got[r] >= count for r in catchers):
-                event(f'{stage}：實際數量已夠 {got} → 不再抓')
-                return 0
-            rc, rs = self.pet_list(catchers, cand)
-            if rc:
-                return self.pass_or(rc, EXIT_CATCH, f'整理後讀寵物欄失敗 pet rc={rc}')
-        self.p[skey] = True
-        self.save()
-        groups: dict = {}
-        for r, f, sp in assign:                                         # 剩餘隻數相同的抓寵者一起抓（pet_catch --count 每人同一個數）
-            if count - got.get(r, 0) > 0:
-                groups.setdefault(count - got.get(r, 0), []).append((r, f, sp))
-        for need, sub in sorted(groups.items(), reverse=True):
-            rc, rs = self.catch_all(stage, sub, need, rs, cand, got)
+            rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', count, '--stages', 'setup,wait'], 3600)
+            if rc:                                                       # pet_catch 失敗時自己會取消自動抓寵（9 / 10 除外）
+                return self.pass_or(rc, EXIT_CATCH, f'抓寵失敗 pet_catch rc={rc}（14 系別 / 物種選不到、103 設定 / 逾時）；已取消自動抓寵，寵物欄沒有任務寵時重跑會從頭抓',
+                                    f'uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}（或 pet_catch.py --catch-off 後手動）')
+            st = {'step': 'caught', 'in_bar': in_bar}
+            self.p[key] = st
+            self.save()
+            rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', count, '--stages', 'baitback'], 1800)   # 背包剩的誘餌存回公共
+            if rc in PASS:
+                return rc
+        in_bar = st.get('in_bar') or {}
+        if not sub_at(st, 'renamed'):                                    # 1. 欄內數字名（成長字串）全改回物種名
+            rc = self.reset_names(catchers)
             if rc:
                 return rc
-        return 0
-
-    def recount(self, stage, assign, rs, cand, count) -> tuple:
-        """續跑：數各抓寵者實際已抓（寵物欄 + 公共倉庫 + 個人倉庫）→ 整理（個人倉庫的取回、寵物欄的存公共 / 夠了留 1 隻）→ (rc, {角色: 已抓})"""
-        catchers = ','.join(r for r, _, _ in assign)
-        rc, lines = self.sub('pet.py', ['depot-list', '--depot', 'public,personal', '--role', catchers, '--candidates', cand], 1800)
-        if rc:
-            return self.pass_or(rc, EXIT_CATCH, f'續跑數倉庫失敗 pet depot-list rc={rc}', f'uv run --no-project python tools/gui/pet.py depot-list --depot public,personal --role {catchers} --candidates {cand}'), None
-        c = last_json(lines).get('counts') or {}
-        plan = recount_plan(assign, rs, c.get('public') or {}, c.get('personal') or {}, count)
-        unk = (c.get('public') or {}).get('null') or (c.get('public') or {}).get(None)
-        event(f'{stage}：續跑實際數量 ' + '、'.join(f'{r} {v["sp"]} 欄 {v["slots"]} 公共 {v["public"]} 個人 {v["personal"]}' for r, v in plan.items())
-              + (f'；公共倉庫有 {unk} 張認不出物種' if unk else ''))
-        for r, v in plan.items():
-            pre, rest = v['pre_store'], v['store'] - v['pre_store']
-            steps = [(['store-many', '--role', r, '--pets', ','.join([v['sp']] * pre), '--depot', 'public', '--pick', 'last'], pre),
-                     (['take-many', '--depot', 'personal', '--plan', ','.join([f'{r}:{v["sp"]}'] * v['take_personal'])], v['take_personal']),
-                     (['store-many', '--role', r, '--pets', ','.join([v['sp']] * rest), '--depot', 'public', '--pick', 'last'], rest),
-                     (['take-many', '--depot', 'public', '--plan', f'{r}:{v["sp"]}'], v['take_public'])]
-            for args, n in steps:
-                if not n:
+            st['step'] = 'renamed'
+            self.save()
+        if not sub_at(st, 'stored'):                                     # 2. 改完名的馬上全部存公共（每個抓寵者一次 store-many；騎寵不碰）
+            done = st.setdefault('stored_roles', [])
+            for r, _, sp in assign:
+                if r in done:
                     continue
-                rc, _ = self.sub('pet.py', args + ['--candidates', cand], 1800)
+                pets = ','.join([sp] * in_bar.get(r, 0))
+                rc, _ = self.sub('pet.py', ['store-many', '--role', r, '--pets', pets, '--depot', 'public', '--pick', 'last'], 1800)
                 if rc:
-                    return self.pass_or(rc, EXIT_DIST, f'續跑整理寵物失敗 pet {args[0]} rc={rc}', 'uv run --no-project python tools/gui/pet.py ' + ' '.join(args + ['--candidates', cand])), None
-        return 0, {r: v['got'] for r, v in plan.items()}
-
-    def catch_all(self, stage, assign, need, rs, cand, got) -> tuple:
-        """這組抓寵者（剩餘隻數都是 need、寵物欄沒有任務寵）**一次抓滿 need 隻**（不依寵物欄空格分批；使用者 2026-10-15：外掛捉寵設置已勾「自動存倉庫」，
-        欄滿了多抓的自動進個人寵物倉庫；舊版分批的顧慮「進個人倉庫沒縮圖取不出來」已過時 —— 2026-10-14 起名字為主、reset-name 還原物種名，
-        且實跑 notes/quest-log.md 339 行：欄只有 3 空格各抓 5 隻、2 隻自動進個人倉庫 → 取回成功）。外掛可抓捕數 = need。
-        抓完：register 只核對「在欄新增」min(need, 空格) 隻（溢出的不在欄）→ recount 數實際（欄 + 公共 + 個人倉庫）並整理
-        （欄先存公共騰位 → 個人倉庫取回 → 欄留 1 隻、其餘存公共）→ 取回的 reset-name → 名字驗證 → 欄每人剛好 1 隻、總隻數 = count。→ (rc, 最新寵物欄)"""
-        catchers = [r for r, _, _ in assign]
-        free = {r: free_slots(rs.get(r)) for r in catchers}
-        if min(free.values()) <= 0:
-            return self.fail(EXIT_CATCH, f'抓寵者寵物欄沒有空格（{free}）→ 先存 / 丟寵物', 'uv run --no-project python tools/gui/pet.py list --role all'), rs
-        in_bar = {r: min(need, f) for r, f in free.items()}
-        event(f'{stage}：{catchers} 還要 {need} 隻 → 一次抓滿（寵物欄空格 {free}，放不下的自動進個人倉庫）')
-        # 誘餌：這一輪每個抓寵者開始時一次取出並拆出 need 個（其餘存回公共，例 50 → 留 5、存回 45）；背包已剛好 need 個（續跑 / 重跑）→ pet_catch bait 不取不拆（冪等）
-        # （2026-10-15 使用者：舊版每批「取 k 拆 k」是錯的；出處 = 實跑紀錄 notes/quest-log.md、notes/plan-dino-katan.md）
-        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'bait', '--keep-short-bait'], 1800)
-        # 不夠的人現有誘餌留背包，只買缺額（2026-10-15 使用者：寵物任務買可抓捕數不需旗標；--confirm-buy-bait 保留為 no-op）
-        short = []
-        have = bait_short_counts(lines)
-        if rc and rc != BAIT_ITEM:
-            return self.pass_or(rc, EXIT_CATCH, f'取誘餌失敗 pet_catch rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --assign "{csv_assign(assign)}" --count {need} --stages bait'), rs
-        if rc == BAIT_ITEM:
-            short = [r for r, _, _ in assign if r not in bait_ok_roles(lines)]
-        for r in short:                                                 # 誘餌不夠的人：現有的照用，只用「+」買缺額（have 讀不到 = 0 = 全買）
-            rc = self.buy_plus(r, need, have.get(r, 0))
-            if rc:
-                return rc, rs
-        self.save_pre(rs)                                               # 抓寵前寵物欄快照（pet_catch register 排除騎寵 / 舊寵物，不必再讀一次）
-        # 2026-10-14 名字為主：setup,wait → rename（reset-name 抓寵者：成長字串還原成物種名）→ register（名字驗證；名字讀不出的才登錄成長字串）
-        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'setup,wait,rename,register',
-                                              '--expect-bar', ','.join(f'{r}:{n}' for r, n in in_bar.items())], 3600)
-        if rc == PET_FEE:                                               # 還原名字讀到費用字樣（已按取消）→ 停手（鐵則 3）
-            return self.fail(EXIT_DIST, f'抓完還原名字時讀到費用字樣（pet_catch rc={rc}）→ 已按取消、停手（鐵則 3）',
-                             '看 tools/.cache/ui-log/*pet-rename* 截圖，確認改名是否收費'), rs
-        if rc:                                                          # pet_catch 失敗時自己會取消自動抓寵（9 / 10 除外）；續跑會先數實際數量
-            return self.pass_or(rc, EXIT_CATCH, f'抓寵失敗 pet_catch rc={rc}（14 系別 / 物種選不到、15 新寵物名字 / 縮圖是別的物種、16 名字讀不出（還原失敗、成長字串也讀不出）、'
-                                f'17 在欄新寵物數量不對 / 沒登錄、103 設定 / 逾時）；已取消自動抓寵，重跑會先數實際已抓（含倉庫）再補',
-                                f'uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}（或 pet_catch.py --catch-off 後手動）'), rs
-        if rename_failed(lines):                                        # 還原名字一般失敗（pet_catch 已走成長字串登錄備援）→ 取回後 reset-name / 名字驗證會再試一次
-            event(f'{stage}：還原名字沒全部成功（名字讀不出的靠成長字串登錄 + 縮圖備援）')
-        # 整理：recount 讀欄 + 公共 + 個人倉庫 → 騰位、取回溢出、欄留 1、其餘存公共（取回的名字框可能是成長字串 → 下面 reset-name）
-        rc, rs = self.pet_list(catchers, cand)
-        if rc:
-            return self.pass_or(rc, EXIT_CATCH, f'抓完讀寵物欄失敗 pet rc={rc}'), rs
-        spill = {r: need - in_bar[r] for r in catchers if need - in_bar[r] > 0}
+                    return self.pass_or(rc, EXIT_DIST, f'{r} 存 {pets} 進公共失敗 pet rc={rc}',
+                                        f'uv run --no-project python tools/gui/pet.py store-many --role {r} --pets {pets} --depot public --pick last')
+                done.append(r)
+                self.save()
+            st['step'] = 'stored'
+            self.save()
+        spill = {r: count - in_bar.get(r, 0) for r in catchers if count - in_bar.get(r, 0) > 0}       # 3. 個人倉庫溢出的取出來改名（抓寵者自己就有自己那種）
         if spill:
-            event(f'{stage}：預期溢出到個人倉庫 {spill} → 取回')
-        count = self.q.get('count', 5)                                  # 續跑時 need < count：總隻數（含之前抓的）要 = count
-        rc, cnt = self.recount(stage, assign, rs, cand, count)
-        if rc:
-            return rc, rs
-        bad = {r: cnt[r] for r in catchers if cnt.get(r) != count}
-        if bad:
-            return self.fail(EXIT_CATCH, f'一次抓滿後實際總隻數不對（應各 {count}）：{bad}（欄 + 公共 + 個人倉庫；個人倉庫的牌認不出物種？）',
-                             f'uv run --no-project python tools/gui/pet.py depot-list --depot public,personal --role {",".join(catchers)} --candidates {cand}；重跑會先數實際數量'), rs
-        if spill:                                                       # 從個人倉庫取回的寵物 → 名字還原 + 名字驗證
+            plan = ','.join(f'{r}:{sp}' for r, _, sp in assign for _ in range(spill.get(r, 0)))
+            rc, _ = self.sub('pet.py', ['take-many', '--depot', 'personal', '--plan', plan, '--candidates', cand], 3600)    # 溢出的牌沒名字 → 靠縮圖候選
+            if rc:
+                return self.pass_or(rc, EXIT_DIST, f'從個人倉庫取回溢出的任務寵失敗 pet rc={rc}',
+                                    f'uv run --no-project python tools/gui/pet.py take-many --depot personal --plan {plan} --candidates {cand}')
             rc = self.reset_names(list(spill))
             if rc:
-                return rc, rs
-        rc, rs = self.pet_list(catchers, cand)
-        if rc:
-            return self.pass_or(rc, EXIT_CATCH, f'整理後讀寵物欄失敗 pet rc={rc}'), rs
-        un = unnamed_roles(rs, [sp for _, _, sp in assign])
-        bad = {r: count_species(rs.get(r), sp) for r, _, sp in assign if count_species(rs.get(r), sp) != 1}
-        if bad or un:
-            return self.fail(EXIT_DIST, f'抓完整理後名字驗證失敗：欄內任務寵隻數不是 1 {bad}；名字框仍是成長字串 {un}',
-                             f'uv run --no-project python tools/gui/pet.py list --role all；重跑 petquest.py run {self.qid} --from {stage} 會先數實際數量'), rs
-        for r in catchers:
-            got[r] = got.get(r, 0) + need
-        self.p[f'got_{stage}'] = got
-        self.p[f'caught_{stage}'] = min(got.values())
+                return rc
+            for r, _, sp in assign:                                      # 溢出 > 1 時多的再存公共（欄只留 1 隻自用；一般情況溢出剛好 1 隻 → 不用）
+                if spill.get(r, 0) > 1:
+                    pets = ','.join([sp] * (spill[r] - 1))
+                    rc, _ = self.sub('pet.py', ['store-many', '--role', r, '--pets', pets, '--depot', 'public', '--pick', 'last'], 1800)
+                    if rc:
+                        return self.pass_or(rc, EXIT_DIST, f'{r} 多的 {pets} 存公共失敗 pet rc={rc}',
+                                            f'uv run --no-project python tools/gui/pet.py store-many --role {r} --pets {pets} --depot public --pick last')
+        st['step'] = 'taken_personal'
         self.save()
-        event(f'{stage}：一次抓滿 {need} 隻完成並整理（累計 {got}）')
-        rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'baitback'], 1800)   # 背包剩的誘餌存回公共
-        if rc in PASS:
-            return rc, rs
-        if rc:
-            event(f'{stage}：剩餘誘餌存回公共失敗 pet_catch rc={rc}（不影響任務；之後手動 bag.py store 或下次取誘餌時會冪等處理）')
-        return 0, rs
+        event(f'{stage}：抓寵 / 改名 / 存公共 / 取個人倉庫完成')
+        return 0
+
+    def take_bait(self, assign, count) -> int:
+        """誘餌：每個抓寵者這一輪一次取出並拆出 count 個（背包已剛好 → 不動）；不夠的人現有照用、只用「+」買缺額（不需旗標）"""
+        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', count, '--stages', 'bait', '--keep-short-bait'], 1800)
+        have = bait_short_counts(lines)
+        if rc and rc != BAIT_ITEM:
+            return self.pass_or(rc, EXIT_CATCH, f'取誘餌失敗 pet_catch rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --assign "{csv_assign(assign)}" --count {count} --stages bait')
+        if rc == BAIT_ITEM:
+            for r in [r for r, _, _ in assign if r not in bait_ok_roles(lines)]:      # have 讀不到 = 0 = 全買
+                rc = self.buy_plus(r, count, have.get(r, 0))
+                if rc:
+                    return rc
+        return 0
 
     def reset_names(self, roles) -> int:
-        """pet.py reset-name --role <角色>（distribute 後補還原：寵物欄還有名字框是成長字串的任務寵 → 交寵物「選擇」視窗要靠名字點卡）。
-        費用字樣（pet 67）→ 停手（鐵則 3）；驗證視窗 / 斷線透傳；其他失敗只記事件、照常往下（名字讀不出的靠登錄檔 + 縮圖備援）"""
+        """pet.py reset-name --role <角色>：寵物欄成長字串名字 → 物種名（後面 store-many / 交寵物都靠物種名）。
+        費用字樣（pet 67）→ 165 停手（鐵則 3）；驗證視窗 / 斷線透傳；其他失敗也停（不帶著沒改名的寵物往下存）"""
         rc, _ = self.sub('pet.py', ['reset-name', '--role', ','.join(roles)], 900)
         if rc in PASS:
             return rc
         if rc == PET_FEE:
             return self.fail(EXIT_DIST, f'還原名字時讀到費用字樣（pet rc={rc}）→ 已按取消、停手（鐵則 3）', '看 tools/.cache/ui-log/*pet-rename* 截圖，確認改名是否收費')
         if rc:
-            event(f'還原名字失敗 pet rc={rc}（{",".join(roles)}）→ 照常往下（存倉前會再試、成長字串登錄檔備援）')
+            return self.fail(EXIT_DIST, f'還原名字失敗 pet rc={rc}（{",".join(roles)}）',
+                             f'uv run --no-project python tools/gui/pet.py reset-name --role {",".join(roles)}；之後 petquest.py run {self.qid} 從下一小步續跑')
         return 0
 
-    def save_pre(self, rs) -> None:
-        fn = getattr(self.T, 'save_catch_pre', None)
-        if fn:
-            try:
-                fn(rs)
-            except OSError as e:
-                event(f'抓寵前快照存檔失敗：{e}（pet_catch 會自己再讀一次）')
-
     def s_distribute(self, stage) -> int:
+        """distribute：其他人從公共倉庫取自己缺的種類（一次 take-many）→ 只驗每人寵物欄剛好「騎寵 + 本輪種類數」格有寵物。
+        格數 = 1 + 本輪物種數：恐龍博士 2 種 → 3 格（騎寵 + 魯尼帖斯 + 貝魯卡）；卡坦每輪 4 種（鯊 4 種 / 雞 4 種，每人每種各 1 隻）→ 5 格，不是 3。
+        不比名字 / 縮圖 / 成長字串，不數倉庫。續跑：sub_r<輪>.taken = 已取到的 角色:物種，只補缺的"""
         if self.p.get('already_done'):
             return 0
         assign = self.round_conf(stage)['assign']
-        cand = species_csv(assign)
-        rc, rs = self.pet_list(ALL_ROLES, cand)                  # 冪等：先讀 5 人寵物欄，已持有的不重取、多的先存回公共
-        if rc:
-            return self.pass_or(rc, EXIT_DIST, f'分配前讀寵物欄失敗 pet rc={rc}')
-        extras, takes = distribute_actions(assign, rs)
-        for r, d in extras.items():
-            pets = ','.join(sp for sp, n in d.items() for _ in range(n))
-            event(f'{stage}：{r} 持有多餘任務寵 {d} → 存回公共倉庫')
-            rc, _ = self.sub('pet.py', ['store-many', '--role', r, '--pets', pets, '--depot', 'public', '--pick', 'last', '--candidates', cand], 1800)
-            if rc:
-                return self.pass_or(rc, EXIT_DIST, f'多取的任務寵存回公共失敗 pet rc={rc}',
-                                    f'uv run --no-project python tools/gui/pet.py store-many --role {r} --pets {pets} --depot public --pick last --candidates {cand}')
-        if not takes:
-            event(f'{stage}：5 人都已持有各物種 → 不取')
-        else:
-            plan = ','.join(f'{r}:{sp}' for r, sp in takes)
-            event(f'{stage}：還缺 {len(takes)} 隻 → take-many {plan}')
-            rc, lines = self.sub('pet.py', ['take-many', '--depot', 'public', '--plan', plan, '--candidates', cand], 3600)
+        st = self.p.setdefault(sub_key(stage), {})
+        if not sub_at(st, 'distributed_taken'):
+            todo = [f'{r}:{sp}' for r, sp in take_plan(assign) if f'{r}:{sp}' not in (st.get('taken') or [])]
+            event(f'{stage}：從公共倉庫取 {len(todo)} 隻 → take-many {",".join(todo)}')
+            rc, lines = self.sub('pet.py', ['take-many', '--depot', 'public', '--plan', ','.join(todo)], 3600)
             if rc:
                 done = [f'{o.get("role")}:{o.get("pet") or o.get("target") or o.get("name")}' for o in (last_json(lines).get('ops') or []) if isinstance(o, dict) and o.get('ok')]
-                return self.pass_or(rc, EXIT_DIST, f'公共倉庫分配 take-many 失敗 pet rc={rc}' + (f'（已取到 {done}）' if done else '') + '；重跑會先讀寵物欄只補缺的',
-                                    f'重跑 uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}（自動只補缺的）')
-        rc, rs = self.pet_list(ALL_ROLES, cand)
+                st.setdefault('taken', []).extend(d for d in done if d in todo)
+                self.save()
+                return self.pass_or(rc, EXIT_DIST, f'公共倉庫分配 take-many 失敗 pet rc={rc}' + (f'（已取到 {done}）' if done else '') + '；重跑只補沒取到的',
+                                    f'重跑 uv run --no-project python tools/gui/petquest.py run {self.qid} --from {stage}')
+            st['step'] = 'distributed_taken'
+            self.save()
+        want = 1 + len({sp for _, _, sp in assign})
+        rc, rs = self.pet_list(ALL_ROLES)
         if rc:
             return self.pass_or(rc, EXIT_DIST, f'分配後讀寵物欄失敗 pet rc={rc}')
-        miss = missing_pets(rs, [sp for _, _, sp in assign])
-        if miss:
-            return self.fail(EXIT_DIST, f'分配後每人每物種不是剛好 1 隻：{miss}', 'uv run --no-project python tools/gui/pet.py list --role all --candidates ' + cand)
-        un = unnamed_roles(rs, [sp for _, _, sp in assign])
-        if un:                                                          # 備援取出的成長字串寵物 → 交寵物前還原名字（pet_turnin 選擇視窗依名字點卡）
-            event(f'{stage}：{un} 還有名字框是成長字串的任務寵 → reset-name')
-            rc = self.reset_names(un)
-            if rc:
-                return rc
+        bad = bar_count_bad(rs, want)
+        if bad:
+            return self.fail(EXIT_DIST, f'分配後每人寵物欄應剛好 {want} 格有寵物（騎寵 + 本輪 {want - 1} 種）：實際 {bad}', 'uv run --no-project python tools/gui/pet.py list --role all')
+        st['step'] = 'distributed'
+        self.save()
         return 0
 
     def s_train(self, stage) -> int:
@@ -1262,10 +1146,11 @@ def print_plan(qid: int, o: dict) -> None:
         for i, rd in enumerate(q['rounds'], 1):
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
-            print(f'  catch{sfx}   一次抓滿 {q.get("count", 5)} 隻（不分批）：先 pet_catch.py --assign "{csv_assign(a)}" --count {q.get("count", 5)} --stages bait（每人取 / 拆一次，背包已剛好就不動）'
-                  f' → [誘餌不夠（不需旗標）：現有的照用、外掛「+」只買缺額，不讀石幣；按前讀不到鑽石不按、每次驗可抓捕數 +1 / 鑽石不變] → --stages setup,wait,rename,register --expect-bar 角色:min(隻數, 空格)（第一次輪詢 N×20+20 秒、之後 60 秒；'
-                  f'rename = 抓寵者 reset-name、register = 名字驗證，名字讀不出才登錄成長字串）→ 整理（欄先存公共騰位 → 個人倉庫溢出取回 → 欄留 1、其餘存公共 → 取回的 reset-name）→ list 名字驗證 → pet_catch.py --stages baitback（剩的誘餌存回公共）')
-            print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" --candidates {species_csv(a)} → list 驗每人每物種 1 隻')
+            print(f'  catch{sfx}   一次抓滿 {q.get("count", 5)} 隻（不分批）：pet.py list（抓前唯一一次）→ pet_catch.py --assign "{csv_assign(a)}" --count {q.get("count", 5)} --stages bait'
+                  f'（每人取 / 拆一次；不夠現有照用、外掛「+」只買缺額，不讀石幣，鑽石不變）→ --stages setup,wait → baitback')
+            print(f'            → pet.py reset-name --role {",".join(r for r, _, _ in a)} → 每人 store-many --pets 物種×在欄隻數 --depot public --pick last'
+                  f' → 溢出的 take-many --depot personal（--candidates {species_csv(a)}）+ reset-name（溢出 > 1 才再存多的）')
+            print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" → pet.py list 只驗每人寵物欄 {1 + len({sp for _, _, sp in a})} 格有寵物（騎寵 + {len({sp for _, _, sp in a})} 種）')
             print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
                   f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；連兩輪 ≥ 門檻 {rd["need"]}）→ 關遇敵 → autoswap off{"（--keep-autoswap 不關）" if o.get("keep_autoswap") else ""} → rest-all')
             if i == 1:
