@@ -441,6 +441,20 @@ rc, d = bag.depot_store_items(['DKBO', 'DKBO2'], items)
 check('depot_store_items：倉庫滿 94 → 立即停、不做下一人', rc == bag.EXIT_FULL and not any(s[0] == 'DKBO2' for s in stores))
 check('bag 新函式測試也是 0 次 powershell', PS_CALLS == [])
 
+# 同圖：同一格同時命中迎新助力禮盒與 2轉新手禮盒 → 不算 skipped、照開
+class SameImgTools(FakeTools):
+    def find_items(self, role, names):
+        rc, d = super().find_items(role, names)
+        if not rc and d.get('迎新助力禮盒') is not None:
+            d['2轉新手禮盒'] = d['迎新助力禮盒']
+        return rc, d
+
+
+reset_progress()
+T = SameImgTools()
+rc, out = quiet(nc.run, to_stage='boxes', tools=T, fresh=True)
+check('同圖 2轉新手禮盒：照開迎新助力禮盒、skipped 空', all(('use', r, '迎新助力禮盒') in T.calls for r in ROLES) and not any(v['skipped'] for v in nc.load_progress()['data']['boxes'].values()), f'rc={rc}')
+
 # ---------------- --skip ----------------
 reset_progress()
 T = FakeTools()

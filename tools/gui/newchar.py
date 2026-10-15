@@ -316,7 +316,9 @@ class Run:
                 rc, f = T.find_items(r, OPEN_BOXES + SKIP_BOXES + [COIN] + GEAR)
                 if rc:
                     return self.fail(rc, EXIT_BOX, f'{r} 盤點背包失敗（bag rc {rc}）', bag_rc=rc, boxes=res)
-                info['skipped'] = present(f, SKIP_BOXES)
+                open_slots = {f[o] for o in present(f, OPEN_BOXES)}
+                # 迎新助力禮盒與 N轉新手禮盒縮圖同圖（imageId 50055）：同一格兩個名稱都命中 = 其實是迎新助力禮盒（2026-10-15 PrimalSA2 實機：彈窗名稱核對）
+                info['skipped'] = [n for n in present(f, SKIP_BOXES) if f[n] not in open_slots]
                 if info['skipped']:
                     event(f'{r}：背包有 {info["skipped"]}（等級條件不符，不開）')
                 opened = False
