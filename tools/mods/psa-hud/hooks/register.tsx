@@ -437,6 +437,12 @@ export function statParts(s: Stat): HudParts {
   const out: HudParts = { who: `${s.name ? `${s.name}  ` : ''}${levelText(s.level) || '?'}  HP ${num(s.hp, s.hpPct)}  MP ${num(s.mp, s.mpPct)}` }
   if (s.petLevel || s.petHp != null) out.pet = `寵 ${s.petName && s.petName !== '?' ? `${s.petName} ` : ''}${levelText(s.petLevel) || '?'} HP ${v(s.petHp)}`
   if (s.map || s.pos) out.loc = `${s.map ?? ''} ${s.pos ?? ''}`.trim()
+  // 表格用的結構化欄位（pane 的人物 / 寵物 / 地圖列）
+  out.f = {
+    ...(s.name ? { name: s.name } : {}), level: levelText(s.level) || '?', hp: num(s.hp, s.hpPct), mp: num(s.mp, s.mpPct),
+    ...(s.petName && s.petName !== '?' ? { petName: s.petName } : {}), ...(s.petLevel || s.petHp != null ? { petLevel: levelText(s.petLevel) || '?', petHp: v(s.petHp) } : {}),
+    ...(s.map ? { map: s.map } : {}), ...(s.pos ? { pos: s.pos } : {}),
+  }
   return out
 }
 // 分段 → 一行（/psa-hud 指令回覆、舊測試）
@@ -1197,43 +1203,135 @@ export function wrapW(text: string, width: number, maxLines = 2, indent = '  '):
   return out
 }
 
-// 一個視窗段落的輸入（tickState 的 WinView + tickProg 的進度行；主視窗 watch 不在時 st = 一次性 stat）
-export type SecIn = { w: WinView; prog: ProgLine[]; st?: Stat | null }
-// 一個視窗段落 → 已折好的行（純函式）。tag：多視窗時標題前加 [程序名]
-export function sectionLines(i: SecIn, width = PANE_W, tag = false): PaneLine[] {
+// ── 表格排版（2026-10-15 使用者定案：上方每視窗一張小表上下排、下方錯誤 / 改進紀錄表）──
+// 一個畫表的純函式：欄寬（固定 / flex 吃剩餘）、顯示寬度（中文 2）、截短加 …、框線；上下兩種表共用。
+// 每格兩側各 1 格空白；框線字元算 1 寬，所以整張表顯示寬度 = width（不會超過 pane）
+export type TRow = { cells: string[]; tone: PaneLine['tone']; bold?: boolean; max?: number }
+export type TCol = { w: number | 'flex' }
+export type TableIn = { width: number; cols: TCol[]; rows: TRow[]; title?: string; header?: string[]; rule?: boolean }
+const padW = (t: string, w: number) => t + ' '.repeat(Math.max(0, w - dispW(t)))
+// 截短到顯示寬度 w（超過結尾換成 …）
+export function truncW(t: string, w: number): string {
+  const s = t.replace(/[\r\n\t]+/g, ' ').trim()       // 保留中間連續空白（同列兩個值的對齊用）
+  if (dispW(s) <= w) return s
+  let o = ''
+  for (const c of s) { if (dispW(o) + charW(c) + 1 > w) break; o += c }
+  return `${o}…`
+}
+export function tableLines(i: TableIn): PaneLine[] {
+  const n = i.cols.length
+  const fixed = i.cols.reduce((a, c) => a + (c.w === 'flex' ? 0 : c.w), 0)
+  const flex = Math.max(4, i.width - fixed - (n + 1) - 2 * n)
+  const ws = i.cols.map(c => (c.w === 'flex' ? flex : c.w))
+  const line = (l: string, m: string, r: string) => `${l}${ws.map(w => '─'.repeat(w + 2)).join(m)}${r}`
   const out: PaneLine[] = []
-  const IND = '  '
-  const W = Math.max(20, width - IND.length)
-  const push = (text: string, tone: PaneLine['tone'], max = 1, bold = false) => {
-    for (const l of wrapW(text, W, max, IND)) out.push({ text: IND + l, tone, ...(bold ? { bold } : {}) })
+  const gray = (text: string) => out.push({ text, tone: 'gray' })
+  if (i.title) {
+    const t = ` ${truncW(i.title, Math.max(1, i.width - 5))} `
+    gray(`┌${t}${'─'.repeat(Math.max(0, i.width - 2 - dispW(t)))}┐`)
+  } else gray(line('┌', '┬', '┐'))
+  const emit = (r: TRow) => {
+    const cols = r.cells.map((c, k) => { const t = String(c ?? ''); return dispW(t) <= ws[k]! ? [t] : wrapW(t, ws[k]!, k === n - 1 ? (r.max ?? 1) : 1, '') })
+    const h = Math.max(1, ...cols.map(c => c.length))
+    for (let y = 0; y < h; y++) {
+      const body = ws.map((w, k) => padW(truncW(cols[k]?.[y] ?? '', w), w)).join(' │ ')
+      out.push({ text: `│ ${body} │`, tone: r.tone, ...(r.bold ? { bold: true } : {}) })
+    }
   }
+  if (i.header) { emit({ cells: i.header, tone: 'plain', bold: true }); gray(line('├', '┼', '┤')) }
+  i.rows.forEach((r, k) => {
+    emit(r)
+    if (i.rule && k < i.rows.length - 1) gray(line('├', '┼', '┤'))
+  })
+  gray(line('└', '┴', '┘'))
+  return out
+}
+
+// 視窗代號：PrimalSA → p1、PrimalSA2 → p2、PrimalSA3 → p3（依程序名尾數；與 clients.py ROSTERS 的 p1 / p2 一致）
+export const pLabel = (client: string) => `p${/(\d+)$/.exec(client)?.[1] ?? '1'}`
+// 地圖名縮短（保守：只去掉「五十年前」前綴與括號註記；仍太長由表格截短）
+export function shortMap(m: string): string {
+  return m.replace(/^五十年前/, '').replace(/[（(][^）)]*[）)]$/, '').trim()
+}
+// 地圖 + 座標：去掉地圖編號（「1013:13,16」→「13,16」）；沒資料 → undefined
+function mapPos(map?: string, pos?: string): string | undefined {
+  const p = pos?.replace(/^\d+:/, '')
+  const t = [map ? shortMap(map) : '', p ?? ''].filter(Boolean).join(' ')
+  return t || undefined
+}
+const LEFT_W = 22     // 同列兩個值時，左邊那個值佔的顯示寬度
+// 同列兩個值：左值補空白對齊到 LEFT_W；放不下（cw = 內容欄寬）就退成單一空白，讓右值盡量不被截
+const pair = (a: string, b: string | undefined, cw: number) => {
+  if (!b) return a
+  const wide = `${dispW(a) < LEFT_W ? padW(a, LEFT_W) : `${a}  `}${b}`
+  return dispW(wide) <= cw ? wide : `${a} ${b}`
+}
+// 事件 / 動作行裡的 HH:MM:SS 縮成 HH:MM
+const hhmm = (t: string) => t.replace(/\b(\d\d:\d\d):\d\d\b/, '$1')
+
+// 一個視窗的輸入（tickState 的 WinView + tickProg 的進度行；主視窗 watch 不在時 st = 一次性 stat）
+export type SecIn = { w: WinView; prog: ProgLine[]; st?: Stat | null }
+// 一個視窗 → 一張小表（純函式）。tag：多視窗時表頭加 p1 / p2 代號；extra：額外的警示列（單視窗的停手旗標 banner）
+export function winTable(i: SecIn, width = PANE_W, tag = false, extra: Banner[] = []): PaneLine[] {
   const w = i.w
+  const cw = Math.max(4, width - 11)          // 內容欄顯示寬度（見 tableLines：欄 4 + 框線 3 + 內距 4）
+  const rows: TRow[] = []
+  const add = (label: string, text: string | undefined, tone: PaneLine['tone'], max = 1, bold = false) => { if (text) rows.push({ cells: [label, text], tone, max, ...(bold ? { bold } : {}) }) }
   const hints = Array.isArray(w.wl?.hints) ? w.wl.hints : []
-  for (const l of wrapW(`${tag ? `[${w.client}] ` : ''}${String(w.wl?.main ?? '')}`, width, 1, IND)) out.push({ text: l, tone: 'plain', bold: true })
-  // 紅字：停手旗標 / verify_suspect（al）+ 狀態提示裡的紅字（verify_suspect / 斷線 / alerts / 監看未執行）；同一件事只寫一次
+  // ！警示：停手旗標 / verify_suspect（al）+ 狀態提示裡的紅字；同一件事只寫一次；多件事多列
   const al = Array.isArray(w.al) ? w.al : []
-  const reds = [...al.map(b => String(b.text ?? '')), ...hints.filter(x => x.tone === 'red').map(x => String(x.text ?? ''))]
+  const alerts: { text: string; tone: PaneLine['tone'] }[] = [
+    ...extra.map(b => ({ text: String(b.text ?? ''), tone: (b.tone === 'yellow' ? 'yellow' : 'red') as PaneLine['tone'] })),
+    ...al.map(b => ({ text: String(b.text ?? ''), tone: 'red' as const })),
+    ...hints.filter(x => x.tone === 'red').map(x => ({ text: String(x.text ?? ''), tone: 'red' as const })),
+  ]
   const seen: string[] = []
-  for (const r of reds) {
-    const key = r.replace(/（只停這個視窗）$/, '')
+  for (const a of alerts) {
+    const key = a.text.replace(/（只停這個視窗）$/, '')
     if (seen.includes(key)) continue
     seen.push(key)
-    push(`！${r}`, 'red', 3, true)            // 停手紅字含清除指令，最多折 3 行不截掉
+    add('！', a.text, a.tone, 3, true)          // 停手紅字含清除指令，最多折 3 行不截掉
   }
   // HUD：watch 的分段；主視窗 watch 不在時退回一次性 stat；都沒有 = 讀取中
   const hp = w.hp ?? (w.ht == null && i.st ? statParts(i.st) : null)
-  if (hp) {
-    push(`${hp.who}${hp.note ?? ''}`, hp.err ? 'yellow' : 'plain')
-    if (hp.pet) push(hp.pet, 'plain')
-    if (hp.loc) push(hp.loc, 'plain')
-  } else push(w.ht ?? '（等級 / HP 讀取中…）', w.ht ? 'plain' : 'gray')
-  // 遇敵 + buff 剩餘時間同一行
-  const sl = [w.en?.text, w.bf?.text].filter(Boolean).join(' · ')
-  if (sl) push(sl, w.en?.warn || w.bf?.warn ? 'yellow' : 'green', 2)
-  // 任務 / 練功 + 最近事件 + 最後動作（第一行可折 2 行，其他 1 行）
-  i.prog.forEach((p, k) => push(String(p.text ?? '').trimStart(), p.tone === 'red' ? 'red' : p.tone, k === 0 ? 2 : 1))
-  // 次要提示（監看只讀 / 重開中 / 提示視窗）放最後
-  for (const x of hints) if (x.tone !== 'red') push(String(x.text ?? ''), x.tone === 'yellow' ? 'yellow' : 'gray', 2)
+  const f = hp?.f
+  const note = hp?.note ? ` ${hp.note}` : ''
+  if (hp && f) {
+    const who = [f.name, f.level].filter(Boolean).join(' ')
+    add('人物', pair(who || '—', `HP ${f.hp ?? '?'} / MP ${f.mp ?? '?'}${note}`, cw), hp.err ? 'yellow' : 'plain')
+    if (f.petLevel || f.petHp != null) add('寵物', pair([f.petName, f.petLevel ?? '?'].filter(Boolean).join(' '), `HP ${f.petHp ?? '?'}`, cw), 'plain')
+    else add('寵物', '—', 'gray')
+    add('地圖', pair(mapPos(f.map, f.pos) ?? '—', w.en?.text, cw), w.en?.warn ? 'yellow' : 'plain')
+  } else if (hp) {
+    add('人物', `${hp.who}${note}`, hp.err ? 'yellow' : 'plain')
+    if (hp.pet) add('寵物', hp.pet.replace(/^寵 /, ''), 'plain')
+    const loc = hp.loc?.replace(/\s\d+:(?=\d+,\d+)/, ' ')
+    if (loc || w.en) add('地圖', pair(loc ? loc.replace(/^(\S+)(\s)/, (_m, a: string, s: string) => shortMap(a) + s) : '—', w.en?.text, cw), w.en?.warn ? 'yellow' : 'plain')
+  } else {
+    add('人物', w.ht ?? '讀取中…', 'gray')
+    if (w.en) add('地圖', pair('—', w.en.text, cw), w.en.warn ? 'yellow' : 'plain')
+  }
+  add('Buff', w.bf?.text, w.bf?.warn ? 'yellow' : 'green', 2)
+  // 任務 / 練功（狀態）+ 事件 + 動作；沒資料的事件 / 動作列不顯示
+  const prog = Array.isArray(i.prog) ? i.prog : []
+  const tone = (p: ProgLine): PaneLine['tone'] => (p.tone === 'red' ? 'red' : p.tone)
+  const first = prog[0]
+  if (first) add('狀態', String(first.text ?? '').trim().replace(/^任務：—$/, '—') || '—', tone(first), 2)
+  else add('狀態', '—', 'gray')
+  let evN = 0
+  for (const p of prog.slice(1)) {
+    const t = String(p.text ?? '').trim()
+    if (!t || /^(事件|動作)：—$/.test(t)) continue
+    if (t.startsWith('動作')) add('動作', hhmm(t.replace(/^動作\s*/, '')), tone(p))
+    else { add(evN++ === 0 ? '事件' : '', hhmm(t.replace(/^事件：?\s*/, '')), tone(p)); }
+  }
+  // 次要提示（監看只讀 / 重開中 / 提示視窗）：表格下方一行灰字（有黃字提示就整行黃）
+  const sec = hints.filter(x => x.tone !== 'red')
+  const out = tableLines({
+    width, cols: [{ w: 4 }, { w: 'flex' }], rows,
+    title: `${tag ? `${pLabel(w.client)} ` : ''}${w.client}${w.wl?.main ? ` · ${w.wl.main}` : ''}`,
+  })
+  if (sec.length) out.push({ text: truncW(`${sec.map(x => String(x.text ?? '')).join(' · ')}`, width), tone: sec.some(x => x.tone === 'yellow') ? 'yellow' : 'gray' })
   return out
 }
 
@@ -1254,35 +1352,46 @@ export function errGroups(lines: ErrEntry[]): { e: ErrEntry; n: number }[] {
 export type PaneData = {
   wl?: WatchLine | null; st?: Stat | null; ht?: string | null; en?: { text: string; warn: boolean } | null
   pg?: ProgLine[] | null; lines?: ErrEntry[] | null
-  // 每視窗一段（wins / progs 依 client 對上；單視窗也走同一條路，標題不加 [程序名]）；還沒讀過（空）時退回 wl / st / ht / en / pg。
-  // banner 非空就在最上面顯示（單視窗的 verify-halt.json、舊共用旗標提示）
+  // 每視窗一張表（wins / progs 依 client 對上；單視窗也走同一條路，表頭不加 p1）；還沒讀過（空）時退回 wl / st / ht / en / pg。
+  // banner（單視窗的 verify-halt.json、舊共用旗標提示）併入第一張表的「！」列
   wins?: WinView[] | null; progs?: WinProg[] | null; banner?: Banner[] | null
   width?: number; now?: number             // pane 寬度（bodyColumns）、現在時間（錯誤紀錄當天只顯示時:分）
 }
+export const LOG_SHOW = 6     // 下方錯誤 / 改進紀錄表最多顯示幾筆（合併後）
+const hm2 = (ts: number, now?: number) => {
+  const s = stamp(ts)           // MM/DD HH:MM
+  return now !== undefined && new Date(now).toDateString() === new Date(ts).toDateString() ? s.slice(6) : s.slice(0, 5)
+}
+// 錯誤 / 改進紀錄表：時間 / 次數 / 來源 / 內容 / 狀態；每筆之間有橫線；內容欄吃剩餘寬度
+export function errTable(lines: ErrEntry[], width: number, now?: number, max = LOG_SHOW): PaneLine[] {
+  if (lines.length === 0) return [{ text: '（還沒有錯誤紀錄）', tone: 'gray' }]
+  const groups = errGroups(lines).slice(0, max)
+  const src = (e: ErrEntry) => `${e.client && !isMainClient(e.client) ? `${pLabel(e.client)} ` : ''}${e.source ?? ''}`.trim() || '—'
+  const showSrc = width >= 56
+  const sw = Math.min(12, Math.max(4, ...groups.map(g => dispW(src(g.e)))))
+  const cols: TCol[] = [{ w: 5 }, { w: 4 }, ...(showSrc ? [{ w: sw }] : []), { w: 'flex' }, { w: 6 }]
+  const rows: TRow[] = groups.map(({ e, n }) => ({
+    cells: [hm2(e.ts, now), `×${n}`, ...(showSrc ? [src(e)] : []), e.error.replace(/\s+/g, ' '), e.fix ? '已改進' : '待改進'],
+    tone: e.fix ? 'green' : 'yellow',
+  }))
+  return tableLines({ width, cols, header: ['時間', '次數', ...(showSrc ? ['來源'] : []), '內容', '狀態'], rows, rule: true })
+}
 export function paneLines(d: PaneData): PaneLine[] {
-  const width = typeof d.width === 'number' && d.width >= 30 ? d.width : PANE_W
+  const width = typeof d.width === 'number' && d.width >= 34 ? d.width : PANE_W
   const out: PaneLine[] = []
-  for (const b of Array.isArray(d.banner) ? d.banner : []) for (const l of wrapW(`！${String(b.text ?? '')}`, width, 3)) out.push({ text: l, tone: b.tone === 'yellow' ? 'yellow' : 'red', bold: true })
   const progs = Array.isArray(d.progs) ? d.progs : []
   const pgOf = (c: string) => progs.find(x => x.client === c)?.lines
   const wins: WinView[] = Array.isArray(d.wins) && d.wins.length
     ? d.wins
     : [{ client: MAIN_CLIENT, wl: d.wl ?? { main: '（沒有狀態）', hints: [] }, ht: d.ht ?? null, en: d.en ?? null }]
   const multi = wins.length > 1
+  const banner = Array.isArray(d.banner) ? d.banner : []
   wins.forEach((w, k) => {
-    if (k > 0) out.push({ text: '', tone: 'plain' })
     const prog = pgOf(w.client) ?? (isMainClient(w.client) && Array.isArray(d.pg) ? d.pg : [])
-    out.push(...sectionLines({ w, prog: Array.isArray(prog) ? prog : [], st: isMainClient(w.client) ? d.st ?? null : null }, width, multi))
+    out.push(...winTable({ w, prog: Array.isArray(prog) ? prog : [], st: isMainClient(w.client) ? d.st ?? null : null }, width, multi, k === 0 ? banner : []))
   })
-  out.push({ text: '─'.repeat(Math.min(width, 40)), tone: 'gray' })
-  const lines = Array.isArray(d.lines) ? d.lines : []
-  for (const l of wrapW(`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆；同樣的合併 ×N）`, width, 1)) out.push({ text: l, tone: 'gray' })
-  if (lines.length === 0) out.push({ text: '（還沒有錯誤紀錄）', tone: 'gray' })
-  for (const { e, n } of errGroups(lines)) {
-    const r = errLine(e, d.now, n)
-    for (const l of wrapW(r.head, width, 2)) out.push({ text: l, tone: r.pending ? 'yellow' : 'plain' })
-    if (!r.pending) for (const l of wrapW(r.fix, width - 2, 1)) out.push({ text: `  ${l}`, tone: 'green' })
-  }
+  out.push({ text: '', tone: 'plain' })
+  out.push(...errTable(Array.isArray(d.lines) ? d.lines : [], width, d.now))
   return out
 }
 export type PaneEls = { Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps> }

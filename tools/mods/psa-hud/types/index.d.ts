@@ -34,7 +34,9 @@ export type WinView = {
   hp?: HudParts | null; bf?: { text: string; warn: boolean } | null
 }
 // HUD 分段：who = 名字 / 等級 / HP / MP、pet = 寵物、loc = 地圖座標、note = stale 說明「（原因 · N 秒前）」；err = 讀取失敗訊息
-export type HudParts = { who: string; pet?: string; loc?: string; note?: string; err?: boolean }
+// f = 表格用的結構化欄位（人物 / 寵物 / 地圖列；數值都已轉成字串）
+export type HudFields = { name?: string; level?: string; hp?: string; mp?: string; petName?: string; petLevel?: string; petHp?: string; map?: string; pos?: string }
+export type HudParts = { who: string; pet?: string; loc?: string; note?: string; err?: boolean; f?: HudFields }
 // pane 一行（已依寬度折好）
 export type PaneLine = { text: string; tone: 'plain' | 'gray' | 'yellow' | 'red' | 'green'; bold?: boolean }
 // 多視窗：每個視窗一份即時進度區

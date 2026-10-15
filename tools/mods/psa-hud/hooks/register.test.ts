@@ -629,7 +629,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(tree).toMatchObject({ type: 'Box' })
     expect(await ui.find({ type: 'Text', text: /疑似答題/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /2轉125級/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /寵 \?級 HP 909/ })).toBeDefined()   // 'o級' 不顯示怪字、寵物名 ? 不顯示
+    expect(await ui.find({ type: 'Text', text: /寵物 +│ \?級 +HP 909/ })).toBeDefined()   // 'o級' 不顯示怪字、寵物名 ? 不顯示
     await ui.unmount()
   })
 
@@ -728,14 +728,29 @@ import {
 
 const YMD = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` }
 const STAMP = (ms: number) => { const d = new Date(ms); return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}` }
-// 單視窗情境的 pane 文字（2026-10-15 改版：重點在前、紅字緊接標題、HUD 分行、警報不重複、錯誤紀錄當天只顯示時:分、待改進黃字不另起一行）
+// 表格列 / 表頭 helper（寬度 = PANE_SITE.bodyColumns 60；中文算 2）
+const PW = 60
+const padTo = (t: string, w: number) => t + ' '.repeat(Math.max(0, w - dispW(t)))
+const R = (label: string, content: string) => `│ ${padTo(label, 4)} │ ${padTo(content, PW - 11)} │`
+const HD = (title: string) => { const t = ` ${title} `; return `┌${t}${'─'.repeat(PW - 2 - dispW(t))}┐` }
+const BOT = `└${'─'.repeat(6)}┴${'─'.repeat(PW - 9)}┘`
+// 單視窗情境的 pane 文字（2026-10-15 表格 UI：表頭 → ！警示列 → 人物 / 寵物 / 地圖 → 狀態 / 事件 / 動作；次要提示在表格下方灰字）
 const SINGLE_TEXTS = () => [
-  '戰鬥中（完整・演出中）', '  ！疑似答題 / 驗證視窗，請人工處理', '  ！警告：連續 3 次遇到不認得的畫面', '  ！警告：第二筆',
-  '  DKBO 2轉125級 HP 475 MP 90（戰鬥前 · 3s 前）', '  寵 ?級 HP 909', '  柯奧的民家 1112:15,15',
-  '  任務：四大洞窟：琉璃洞窟 進行中', '  10:00:00 開始：任務 [2000]，選項 {}', '  10:00:05 任務 2000「琉璃洞窟」詳情結果：accepted',
-  `  動作 ${HMS(T0 - 5000)} click 120,80（5 秒前）`, '  已有 watch 在跑（不是這個 HUD 啟動的），只讀',
-  '─'.repeat(40), '錯誤 / 改進紀錄（新→舊，最多 100 筆；同樣的合併 ×N）', `${STAMP(T0 - 60000).slice(6)} #3 [quest] 主視窗錯誤`,
+  HD('PrimalSA · 戰鬥中（完整・演出中）'), R('！', '疑似答題 / 驗證視窗，請人工處理'), R('！', '警告：連續 3 次遇到不認得的畫面'), R('！', '警告：第二筆'),
+  R('人物', `DKBO 2轉125級 HP 475 / MP 90 （戰鬥前 · 3s 前）`), R('寵物', `${padTo('?級', 22)}HP 909`), R('地圖', '柯奧的民家 15,15'),
+  R('狀態', '任務：四大洞窟：琉璃洞窟 進行中'), R('事件', '10:00 開始：任務 [2000]，選項 {}'), R('', '10:00 任務 2000「琉璃洞窟」詳情結果：accepted'),
+  R('動作', `${HMS(T0 - 5000).slice(0, 5)} click 120,80（5 秒前）`), BOT,
+  '已有 watch 在跑（不是這個 HUD 啟動的），只讀', '',
 ]
+// 下方錯誤紀錄表：表頭 + 一筆（當天只顯示時:分）
+const CELL = (x: string) => x.replace(/^│[^│]*│ /, '').replace(/ │$/, '').trim()
+const SINGLE_ERR = (t: string[]) => {
+  const e = t.slice(SINGLE_TEXTS().length)
+  expect(e.length).toBe(5)
+  expect(e[0]).toMatch(/^┌─+┬─+┬─+┬─+┬─+┐$/)
+  expect(e[1]).toMatch(/^│ 時間 +│ 次數 +│ 來源 +│ 內容 +│ 狀態 +│$/)
+  expect(e[3]).toMatch(new RegExp(`^│ ${STAMP(T0 - 60000).slice(6)} +│ ×1 +│ quest +│ 主視窗錯誤 +│ 待改進 │$`))
+}
 const RO3 = '監看：已有 watch 在跑（只讀）｜spawn 2 次｜卡住重開 0 次｜最後退出碼 3'
 
 // clients.py running --rostered 只列 ROSTERS 有登錄的（PrimalSA3 沒名單 → 不出現，Python 端已濾）；查不到（undefined）= 維持單視窗
@@ -750,7 +765,9 @@ for (const running of ['PrimalSA\n', '', 'PrimalSA\r\n', undefined]) {
     expect(a.text).toBe('上一次讀取還在進行中\n監看：執行中｜spawn 0 次｜卡住重開 0 次｜最後退出碼 無')
     expect(b.text).toBe(RO3)
     expect(d.text).toBe('用法：/psa-hud watch on|off|status')
-    expect(await paneTexts($)).toEqual(SINGLE_TEXTS())
+    const pt = await paneTexts($)
+    expect(pt.slice(0, SINGLE_TEXTS().length)).toEqual(SINGLE_TEXTS())
+    SINGLE_ERR(pt)
     expect(log.spawnEnv).toEqual([{ PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8' }, { PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8' }])
     expect(log.runs.some(r => r.argv.some(x => x.endsWith('clients.py')))).toBe(true)          // 有偵測（背景、不在繪製時）
     expect(log.runs.filter(r => r.argv.includes('--stop')).length).toBe(0)
@@ -786,24 +803,25 @@ test('多視窗：偵測到 PrimalSA2 → 第二支 watch 帶 PSA_CLIENT；pane 
   ])
   expect(st.text).toBe(`[PrimalSA] ${RO3}\n[PrimalSA2] ${RO3}`)
   const t = await paneTexts($)
-  // 各自視窗停手（2026-10-15）：verify_suspect 紅字放在自己的段落（狀態行下一行），不在最上面、不寫「全部視窗停手」
-  const i0 = t.indexOf('[PrimalSA] 戰鬥中（完整・演出中）')
-  expect(i0).toBe(0)
-  expect(t[1]).toBe('  ！疑似答題 / 驗證視窗，請人工處理（只停這個視窗）')
+  // 各自視窗停手（2026-10-15）：verify_suspect 紅字放在自己那張表的「！」列，不在最上面、不寫「全部視窗停手」
+  expect(t[0]!.startsWith('┌ p1 PrimalSA · 戰鬥中（完整・演出中）')).toBe(true)
+  expect(t[1]).toBe(R('！', '疑似答題 / 驗證視窗，請人工處理（只停這個視窗）'))
   expect(t.filter(x => x.includes('疑似答題')).length).toBe(1)                       // 同一件事只寫一次（不再三處重複）
   expect(t.some(x => x.includes('全部視窗停手'))).toBe(false)
-  expect(t).toContain('[PrimalSA2] 主畫面')
-  expect(t).toContain('  DKBO6 1轉60級 HP 300 MP 50')
-  expect(t).toContain('  庫塔伊洞窟地下一樓 60049:30,25')
-  expect(t).toContain('  遇敵中 · 智慧果 ?（bufftime.py read）')              // 有 exp 圖示、沒有 bufftime.json
-  expect(t).toContain('  任務：四大洞窟：琉璃洞窟 進行中')
-  expect(t).toContain('  練功中：地雷區（快速戰鬥）')
-  // 每視窗一段：PrimalSA2 的練功行在 [PrimalSA2] 標題之後
-  expect(t.indexOf('  練功中：地雷區（快速戰鬥）')).toBeGreaterThan(t.indexOf('[PrimalSA2] 主畫面'))
-  expect(t.indexOf('  任務：四大洞窟：琉璃洞窟 進行中')).toBeLessThan(t.indexOf('[PrimalSA2] 主畫面'))
-  expect(t).toContain(`  動作 ${HMS(T0 - 5000)} click 120,80（5 秒前）`)          // 主視窗最後動作 = 沒標籤的行
-  expect(t).toContain(`  動作 ${HMS(T0 - 2000)} click 9,9（2 秒前）`)             // PrimalSA2 最後動作（標籤去掉）
-  expect(t).toContain(`${STAMP(T0 - 30000).slice(6)} #4 [PrimalSA2] [grind] 二號錯誤`)
+  const i2 = t.findIndex(x => x.startsWith('┌ p2 PrimalSA2 · 主畫面'))
+  expect(i2).toBeGreaterThan(0)
+  const t2 = t.slice(i2)                                                              // PrimalSA2 那張表之後
+  expect(t2[1]).toBe(R('人物', `${padTo('DKBO6 1轉60級', 22)}HP 300 / MP 50`))
+  expect(t2[2]).toBe(R('寵物', '—'))
+  expect(t2[3]).toBe(R('地圖', '庫塔伊洞窟地下一樓 30,25  遇敵中'))   // 去掉地圖編號、遇敵放地圖列右邊
+  expect(t2[4]).toBe(R('Buff', '智慧果 ?（bufftime.py read）'))                      // 有 exp 圖示、沒有 bufftime.json
+  expect(t2[5]).toBe(R('狀態', '練功中：地雷區（快速戰鬥）'))
+  expect(t2.some(x => x.includes('任務：四大洞窟'))).toBe(false)
+  expect(t.slice(0, i2).join('\n')).toContain('任務：四大洞窟：琉璃洞窟 進行中')       // 主視窗那張表
+  expect(t).toContain(R('動作', `${HMS(T0 - 5000).slice(0, 5)} click 120,80（5 秒前）`))   // 主視窗最後動作 = 沒標籤的行
+  expect(t).toContain(R('動作', `${HMS(T0 - 2000).slice(0, 5)} click 9,9（2 秒前）`))      // PrimalSA2 最後動作（標籤去掉）
+  expect(t.some(x => /^│ \d\d:\d\d +│ ×1 +│ p2 grind +│ 二號錯誤 +│ 待改進 │$/.test(x))).toBe(true)
+  expect(t.some(x => /^│ \d\d:\d\d +│ ×1 +│ quest +│ 主視窗錯誤 +│ 待改進 │$/.test(x))).toBe(true)
   // 指令：只關 PrimalSA2 的監看 → 只有它送 --stop（帶 PSA_CLIENT）
   const off = await $.command.run({ command: 'psa-hud', args: 'watch off PrimalSA2' } as never)
   expect(String(off.text).startsWith('[PrimalSA2] 監看：已關閉')).toBe(true)
@@ -826,9 +844,10 @@ test('verify-halt.json 存在：單視窗也在最上面紅字警示（沒有檔
   await flush()
   await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
   const t = await paneTexts($)
-  expect(t[0]).toBe(`！PrimalSA 停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} uikit：連 3 次不認得`)
-  expect(t.slice(1, 3).join('').replace(/\s+/g, ' ')).toBe('！人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA')   // 折行但指令完整
-  expect(t.slice(3)).toEqual(SINGLE_TEXTS())
+  expect(t[0]).toBe(HD('PrimalSA · 戰鬥中（完整・演出中）'))
+  const msg = t.slice(1, 5).map(CELL).join(' ').replace(/\s+/g, ' ')                 // 折行但訊息與指令完整
+  expect(msg).toBe(`PrimalSA 停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} uikit：連 3 次不認得 人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA`)
+  expect(t.slice(1, 5).every(x => x.startsWith('│ ！') || x.startsWith('│      │'))).toBe(true)
 })
 
 test('舊共用旗標（client=PrimalSA2）+ 只有主視窗：主視窗不紅，只一行黃字提示怎麼清', async ($, on) => {
@@ -837,9 +856,9 @@ test('舊共用旗標（client=PrimalSA2）+ 只有主視窗：主視窗不紅�
   await flush()
   await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
   const t = await paneTexts($)
-  const n = t.indexOf(SINGLE_TEXTS()[0]!)
-  expect(t.slice(0, n).join(' ').replace(/\s+/g, ' ')).toBe('！舊共用驗證旗標屬 PrimalSA2（主視窗不受影響）；清：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2')
-  expect(t.slice(n)).toEqual(SINGLE_TEXTS())
+  expect(t[1]!.startsWith('│ ！   │ 舊共用驗證旗標屬 PrimalSA2')).toBe(true)
+  expect(t.slice(1, 5).join(' ').replace(/[│\s]+/g, ' ')).toContain('uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2')
+  expect(t.filter(x => x.includes('停手')).length).toBe(0)                            // 主視窗不紅
 })
 
 test('多視窗：PrimalSA2 自己的 verify-halt.json → 只在 PrimalSA2 段落紅字，主視窗段落沒有停手字', async ($, on) => {
@@ -849,10 +868,9 @@ test('多視窗：PrimalSA2 自己的 verify-halt.json → 只在 PrimalSA2 段�
   await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
   await flush()
   const t = await paneTexts($)
-  const i2 = t.indexOf('[PrimalSA2] 主畫面')
+  const i2 = t.findIndex(x => x.startsWith('┌ p2 PrimalSA2'))
   expect(i2).toBeGreaterThan(0)
-  expect(t[i2 + 1]).toBe(`  ！停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} watch：不認得 10 秒`)
-  expect(t.slice(i2 + 2, i2 + 4).join('').replace(/\s+/g, ' ')).toBe(' ！人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2')
+  expect(t.slice(i2 + 1, i2 + 4).map(CELL).join(' ').replace(/\s+/g, ' ')).toBe(`停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} watch：不認得 10 秒 人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2`)
   expect(t.slice(0, i2).some(x => x.includes('停手：驗證旗標'))).toBe(false)
 })
 
@@ -948,7 +966,7 @@ test('Supervisor.dispose：收掉子程序、不寫設定、不送 --stop、不�
 })
 
 // ───────────── pane 排版（2026-10-15 改版：每視窗一段、重點在前、依顯示寬度折行、智慧果剩餘時間）─────────────
-import { dispW, errGroups, paneLines, sectionLines, wrapW, PANE_W } from './register'
+import { dispW, errGroups, errTable, paneLines, tableLines, truncW, winTable, wrapW, PANE_W } from './register'
 
 test('dispW / wrapW：全形算 2；依寬度折行、續行縮排、超過行數加 …；英數字不從中間切', () => {
   expect(dispW('ab中文')).toBe(6)
@@ -966,38 +984,110 @@ test('errGroups：同一視窗 + 來源 + 錯誤 + 改進合併成一筆（保�
 })
 
 const WV = (o: object = {}) => ({ client: 'PrimalSA2', wl: { main: '主畫面', hints: [] }, ht: 'x', en: { text: '遇敵中', warn: false }, al: [], ...o }) as never
-test('sectionLines：標題 → 紅字（去重）→ HUD 分行 → 遇敵 + 智慧果 → 進度 → 次要提示', () => {
+const HP = (o: object = {}) => ({
+  who: 'DKBO6  0轉105級  HP 482  MP 100', pet: '寵 0轉105級 HP 1008', loc: '五十年前波拉島 500:210,344',
+  f: { name: 'DKBO6', level: '0轉105級', hp: '482', mp: '100', petLevel: '0轉105級', petHp: '1008', map: '五十年前波拉島', pos: '500:210,344' }, ...o,
+})
+const wOf = (ls: { text: string }[]) => ls.map(x => dispW(x.text))
+
+test('winTable：表頭 → ！警示列（去重）→ 人物 / 寵物 / 地圖 → Buff → 狀態 / 事件 / 動作；列與列之間沒有橫線', () => {
   const w = WV({
     wl: { main: '主畫面', hints: [{ text: '已有 watch 在跑（不是這個 HUD 啟動的），只讀', tone: 'gray' }, { text: '疑似答題 / 驗證視窗，請人工處理', tone: 'red' }] },
     al: [{ text: '疑似答題 / 驗證視窗，請人工處理（只停這個視窗）', tone: 'red' }],
-    hp: { who: 'DKBO6  0轉105級  HP 482  MP 100', pet: '寵 0轉105級 HP 1008', loc: '五十年前波拉島 500:210,344' },
-    bf: { text: '智慧果 剩 1:23', warn: false },
+    hp: HP(), bf: { text: '智慧果 剩 1:23', warn: false },
   })
-  const l = sectionLines({ w, prog: [{ text: '練功中：波拉島', tone: 'plain' }, { text: ' 15:25:12 follow：升級', tone: 'gray' }] }, 64, true)
-  expect(l.map(x => x.text)).toEqual([
-    '[PrimalSA2] 主畫面', '  ！疑似答題 / 驗證視窗，請人工處理（只停這個視窗）', '  DKBO6 0轉105級 HP 482 MP 100', '  寵 0轉105級 HP 1008',
-    '  五十年前波拉島 500:210,344', '  遇敵中 · 智慧果 剩 1:23', '  練功中：波拉島', '  15:25:12 follow：升級', '  已有 watch 在跑（不是這個 HUD 啟動的），只讀',
-  ])
+  const l = winTable({ w, prog: [
+    { text: '練功中：波拉島', tone: 'plain' }, { text: ' 15:25:12 follow：升級', tone: 'gray' }, { text: '動作 15:22:01 關外掛面板（閒置 6 分）', tone: 'yellow' },
+  ] }, 64, true)
+  const t = l.map(x => x.text)
+  expect(t[0]!.startsWith('┌ p2 PrimalSA2 · 主畫面 ─')).toBe(true)
+  expect(t[0]!.endsWith('┐')).toBe(true)
+  expect(t[1]!.startsWith('│ ！   │ 疑似答題')).toBe(true)
+  expect(t.filter(x => x.includes('疑似答題')).length).toBe(1)                       // 同一件事只寫一次
   expect(l[1]).toMatchObject({ tone: 'red', bold: true })
+  expect(t[2]!.startsWith('│ 人物 │ DKBO6 0轉105級')).toBe(true)
+  expect(t[2]).toMatch(/HP 482 \/ MP 100 +│$/)
+  expect(t[3]).toMatch(/^│ 寵物 │ 0轉105級 +HP 1008 +│$/)
+  expect(t[4]).toMatch(/^│ 地圖 │ 波拉島 210,344 +遇敵中 +│$/)               // 去掉地圖編號、「五十年前」
+  expect(t[5]).toMatch(/^│ Buff │ 智慧果 剩 1:23 +│$/)
   expect(l[5]!.tone).toBe('green')
-  // 不遇敵或智慧果時間未知 → 黃字
-  expect(sectionLines({ w: WV({ en: { text: '不遇敵', warn: true } }), prog: [] }).find(x => x.text.includes('不遇敵'))!.tone).toBe('yellow')
-  expect(sectionLines({ w: WV({ bf: { text: '智慧果 ?（bufftime.py read）', warn: true } }), prog: [] }).find(x => x.text.includes('智慧果'))!.tone).toBe('yellow')
-  // 主視窗 watch 不在：退回一次性 stat
-  expect(sectionLines({ w: WV({ client: 'PrimalSA', ht: null, hp: null }), prog: [], st: { ok: true, level: '0轉1級', hp: 3, mp: 4 } }).map(x => x.text)).toContain('  0轉1級 HP 3 MP 4')
+  expect(t[6]).toMatch(/^│ 狀態 │ 練功中：波拉島 +│$/)
+  expect(t[7]).toMatch(/^│ 事件 │ 15:25 follow：升級 +│$/)
+  expect(t[8]).toMatch(/^│ 動作 │ 15:22 關外掛面板（閒置 6 分） +│$/)
+  expect(l[8]!.tone).toBe('yellow')
+  expect(t[9]!.startsWith('└──────┴')).toBe(true)
+  expect(t.slice(1, 9).some(x => x.includes('├'))).toBe(false)                        // 上方表格列與列之間不加橫線
+  expect(t[10]).toBe('已有 watch 在跑（不是這個 HUD 啟動的），只讀')                    // 次要提示：表格下方灰字一行
+  expect(l[10]!.tone).toBe('gray')
+  expect(wOf(l.slice(0, 10)).every(n => n === 64)).toBe(true)                          // 表格寬度固定
+  // 單視窗：表頭只寫程序名
+  expect(winTable({ w: WV(), prog: [] }, 64, false)[0]!.text.startsWith('┌ PrimalSA2')).toBe(true)
 })
 
-test('paneLines：每行顯示寬度不超過 pane 寬度（長錯誤 / 長事件都折行或截斷）', () => {
+test('winTable：沒有 buff 不顯示 Buff 列；不遇敵 / buff 時間未知 → 黃字；沒資料的事件 / 動作列不顯示；無警示不顯示 ！', () => {
+  const t0 = winTable({ w: WV({ hp: HP() }), prog: [{ text: '任務：—', tone: 'plain' }, { text: '事件：—', tone: 'gray' }, { text: '動作：—', tone: 'gray' }] }, 64, true).map(x => x.text)
+  expect(t0.some(x => x.includes('Buff') || x.includes('！') || x.includes('事件') || x.includes('動作'))).toBe(false)
+  expect(winTable({ w: WV({ hp: HP(), en: { text: '不遇敵', warn: true } }), prog: [] }).find(x => x.text.includes('不遇敵'))!.tone).toBe('yellow')
+  expect(winTable({ w: WV({ hp: HP(), bf: { text: '智慧果 ?（bufftime.py read）', warn: true } }), prog: [] }).find(x => x.text.includes('智慧果'))!.tone).toBe('yellow')
+  // 多件警示 = 多列；停手指令長 → 折行不截掉
+  const halt = winTable({ w: WV({ hp: HP(), al: [
+    { text: '停手：驗證旗標 uikit：連 3 次不認得', tone: 'red' }, { text: '人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2', tone: 'red' },
+  ] }), prog: [] }, 64, true).map(x => x.text)
+  expect(halt.filter(x => x.startsWith('│ ！   │')).length).toBe(2)
+  expect(halt.join('').replace(/[│\s]/g, '')).toContain('verifyhalt.pyclearPrimalSA2')
+  // 主視窗 watch 不在：退回一次性 stat；讀不到 → 讀取中
+  expect(winTable({ w: WV({ client: 'PrimalSA', ht: null, hp: null }), prog: [], st: { ok: true, level: '0轉1級', hp: 3, mp: 4 } }).map(x => x.text).join('\n')).toContain('0轉1級')
+  expect(winTable({ w: WV({ ht: null, hp: null }), prog: [] }).map(x => x.text).join('\n')).toContain('讀取中…')
+  // 單視窗的 banner 併入「！」列（黃字提示 = 黃）
+  const b = winTable({ w: WV({ hp: HP() }), prog: [] }, 64, false, [{ text: '舊共用驗證旗標屬 PrimalSA2', tone: 'yellow' }])
+  expect(b[1]).toMatchObject({ tone: 'yellow' })
+  expect(b[1]!.text.startsWith('│ ！   │ 舊共用')).toBe(true)
+})
+
+test('tableLines / truncW：中文算 2、截短加 …、框線；內容過長不撐破', () => {
+  expect(truncW('一二三四五六', 8)).toBe('一二三…')
+  expect(truncW('abc', 8)).toBe('abc')
+  const l = tableLines({ width: 30, cols: [{ w: 4 }, { w: 'flex' }], title: 't', rows: [{ cells: ['人物', '長'.repeat(50)], tone: 'plain' }] })
+  expect(l.map(x => dispW(x.text))).toEqual([30, 30, 30])
+  expect(l[1]!.text.endsWith('… │')).toBe(true)
+  expect(l[0]!.text.startsWith('┌ t ─')).toBe(true)
+})
+
+test('errTable：5 欄、每筆之間橫線、預設 6 筆新的在上、同句合併 ×N、待改進黃 / 已改進綠、當天只顯示時:分', () => {
+  const now = new Date(2026, 9, 15, 15, 30).getTime()
+  const e = (id: number, error: string, o: object = {}) => ({ id, ts: now - id * 60000, error, fix: null, source: 'questrun', ...o })
+  const lines = [e(1, 'A'), e(2, 'A'), e(3, 'B', { source: 'bag', client: 'PrimalSA2' }), e(4, 'C', { fix: '已修' }),
+    e(5, 'D'), e(6, 'E'), e(7, 'F'), e(8, 'G', { ts: new Date(2026, 9, 10, 8, 5).getTime() })]
+  const l = errTable(lines, 64, now)
+  const t = l.map(x => x.text)
+  expect(t[0]).toMatch(/^┌─+┬─+┬─+┬─+┬─+┐$/)
+  expect(t[1]).toMatch(/^│ 時間 +│ 次數 +│ 來源 +│ 內容 +│ 狀態 +│$/)
+  expect(t[3]).toMatch(/^│ 15:29 +│ ×2 +│ questrun +│ A +│ 待改進 │$/)         // 同句合併 ×2
+  expect(t[5]).toMatch(/^│ 15:27 +│ ×1 +│ p2 bag +│ B +│ 待改進 │$/)
+  expect(l[3]!.tone).toBe('yellow')
+  expect(t.filter(x => x.startsWith('│ 15:') || x.startsWith('│ 10/')).length).toBe(6)  // 6 筆上限（A×2 合併 → 6 組）
+  expect(t.filter(x => x.startsWith('├')).length).toBe(6)                              // 表頭下 1 + 筆與筆之間 5
+  expect(t[7]).toMatch(/已改進 │$/)
+  expect(l.find(x => x.text.includes('已改進'))!.tone).toBe('green')
+  expect(t.every(x => dispW(x) === 64)).toBe(true)
+  expect(t.join('\n')).not.toContain('G')                                            // 第 7 組以後不顯示
+  // 非當天顯示 月/日
+  expect(errTable([e(8, 'G', { ts: new Date(2026, 9, 10, 8, 5).getTime() })], 64, now).map(x => x.text).join('\n')).toContain('│ 10/10 │')
+  expect(errTable([], 64, now)).toEqual([{ text: '（還沒有錯誤紀錄）', tone: 'gray' }])
+})
+
+test('paneLines：每行顯示寬度不超過 pane 寬度（長錯誤 / 長事件 / 3 個視窗堆疊）', () => {
   const long = '任務 2031「英雄島前傳（必做）」要有龍王的守護 buff 才組隊跑：背包與公共倉庫都沒有龍王的守護 → 改走單人逃跑（同一行指令加 --solo）'
-  for (const width of [40, 60, PANE_W, 80]) {
+  for (const width of [40, 60, PANE_W, 80, 120]) {
     const ls = paneLines({
-      wins: [WV({ client: 'PrimalSA', hp: { who: 'DKBO  4轉126級  HP 51  MP 100', loc: '老爺爺的家 1013:13,16' } }), WV({ bf: { text: '智慧果 剩 1:23 · 龍王 ?（bufftime.py read）', warn: true } })],
+      wins: [WV({ client: 'PrimalSA', hp: HP() }), WV({ bf: { text: '智慧果 剩 1:23 · 龍王 ?（bufftime.py read）', warn: true } }), WV({ client: 'PrimalSA3', hp: HP() })],
       progs: [{ client: 'PrimalSA', lines: [{ text: `任務：${long}`, tone: 'plain' }, { text: ` 15:28:34 ${long}`, tone: 'gray' }] }],
       lines: [{ id: 1, ts: 0, error: long, fix: long, source: 'questrun' }, { id: 2, ts: 0, error: long, fix: null, source: 'bag' }],
       width, now: 0,
     })
     for (const l of ls) expect(dispW(l.text)).toBeLessThanOrEqual(width)
-    expect(ls.some(l => l.text.startsWith('[PrimalSA2]'))).toBe(true)
+    const heads = ls.map(l => l.text).filter(x => x.startsWith('┌ p'))
+    expect(heads.map(x => x.slice(2, 4))).toEqual(['p1', 'p2', 'p3'])               // 3 張小表上下堆疊（p1 在前）
   }
 })
 
@@ -1009,5 +1099,5 @@ test('多視窗：PrimalSA2 有 bufftime.json → pane 顯示「智慧果 剩 H:
   await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
   await flush()
   const t = await paneTexts($)
-  expect(t).toContain('  遇敵中 · 智慧果 剩 1:23')
+  expect(t).toContain(R('Buff', '智慧果 剩 1:23'))
 })
