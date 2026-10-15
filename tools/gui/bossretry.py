@@ -276,7 +276,8 @@ class Run:
         import questrun
         rc = questrun.retry_form(self.T, lambda: self.T.team_form_as(who), f'bossretry 以 {who} 為隊長組隊')
         if rc:
-            return self.passthru(rc, EXIT_REGROUP, f'以 {who} 為隊長組 5 人失敗 team rc={rc}（掉隊者與其他人在不同地圖時快速組隊可能不支援，待實機）')
+            import team
+            return self.passthru(rc, EXIT_REGROUP, f'以 {who} 為隊長組 5 人失敗 team rc={rc}（{team.describe(rc) or "見 team.py 檔頭退出碼"}；詳細原因看上面 team 的訊息 / errlog）')
         cards, err = self.T.team_cards()                       # 組完再驗一次：隊長真的是 who、其他 4 人都是隊員（使用者 2026-10-12 要求）
         lead, miss = team_roles(cards) if cards is not None else (None, ['?'])
         if lead != who or miss:

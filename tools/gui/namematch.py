@@ -224,6 +224,37 @@ def learn_from(rows_by_slot: dict, labels: dict, tpl: dict, log=print) -> int:
     return n_new
 
 
+def plan_labels(slots: list, order: list, texts: dict, tpl_hits: dict, have: dict, log=print):
+    """純函式：決定這次要學哪些卡 → {slot: 名字}；None = 有矛盾、整次不學。前提：卡片數 = 名單人數（順序可靠）。
+    每張卡的標籤 = 名單順序 order[slot]；學之前要「確認」：
+      - OCR 交叉確認 ok，或這個名字已經有樣板（追加變體）；
+      - 第一次學、OCR 讀不出時（2026-10-15 p3 DKBO14 名字 OCR 讀成 '001A' / 'D0'）：**其他每一張卡都被既有樣板命中且與順序一致**
+        → 剩下這張的順序標籤由「全隊格位 + 其他人樣板」交叉確認，才學（learn_from 另外擋「與別人樣板也像」）。
+    任何卡 OCR 讀到別人 / 樣板命中別人 → None"""
+    import team
+    labels = {}
+    for s in slots:
+        name = order[s]
+        hit = tpl_hits.get(s)
+        if hit and hit != name:
+            log(f'namematch learn：slot{s} 順序 {name} 但樣板命中 {hit}，矛盾，整次不學')
+            return None
+        ck = team.cross_check(name, texts.get(s, []))
+        if ck == 'conflict':
+            log(f'namematch learn：slot{s} 順序 {name} 但 OCR {texts.get(s)} 矛盾，整次不學')
+            return None
+        if ck != 'ok' and name not in have:
+            others = [t for t in slots if t != s]
+            if others and all(tpl_hits.get(t) == order[t] for t in others):
+                log(f'namematch learn：slot{s} {name} OCR {texts.get(s)} 沒確認到，但其他 {len(others)} 張樣板都命中且符合順序 → 依格位學')
+            else:
+                # 第一次學這個名字（例：PrimalSA2 的 DKBO6～10）：OCR 要精確命中名單上的這個名字（或它的尾碼）才學，讀不出就先跳過這張
+                log(f'namematch learn：slot{s} {name} 還沒有樣板且 OCR {texts.get(s)} 沒確認到，這張先不學')
+                continue
+        labels[s] = name
+    return labels
+
+
 def learn(log=print) -> int:
     """面板開著、5 人都在線 → 以「卡片順序 + OCR 交叉確認不矛盾」當標籤學樣板。回 0 = 成功（含「沒有新變體」）、其他 = 沒學"""
     import team
@@ -242,25 +273,17 @@ def learn(log=print) -> int:
         return 2
     texts = team.ocr_names(len(cards))
     have = load_tpl()
-    labels = {}
-    for c in cards:
-        name = order[c.slot]
-        ck = team.cross_check(name, texts.get(c.slot, []))
-        if ck == 'conflict':
-            log(f'namematch learn：slot{c.slot} 順序 {name} 但 OCR {texts.get(c.slot)} 矛盾，整次不學')
-            return 3
-        if ck != 'ok' and name not in have:
-            # 第一次學這個名字（例：PrimalSA2 的 DKBO6～10）：OCR 要精確命中名單上的這個名字（或它的尾碼）才學，讀不出就先跳過這張
-            log(f'namematch learn：slot{c.slot} {name} 還沒有樣板且 OCR {texts.get(c.slot)} 沒確認到，這張先不學')
-            continue
-        labels[c.slot] = name
+    rows = capture()
+    if not rows or not all(c.slot in rows for c in cards):
+        log('namematch learn：名字截圖失敗')
+        return 1
+    tm = {s: d['name'] for s, d in match_rows(rows, have).items()} if have else {}
+    labels = plan_labels([c.slot for c in cards], order, texts, tm, have, log)
+    if labels is None:
+        return 3
     if not labels:
         log('namematch learn：沒有可學的卡片（新名字 OCR 都沒確認到），不學')
         return 2
-    rows = capture()
-    if not rows or not all(s in rows for s in labels):
-        log('namematch learn：名字截圖失敗')
-        return 1
     tpl = have
     n = learn_from(rows, labels, tpl, log)
     if n:

@@ -15,7 +15,9 @@
   45 解散沒做成（quest.disband_team 失敗，或解散後仍有隊伍）
   46 當前角色不是隊長（解散要隊長；不點）
   47 全員單人（沒有任何隊伍）；disband 遇到這個回 0
-  44 form 專用：快速組隊提示視窗沒出現 / 隊長卡名字讀不出 / 隊長或隊員標籤點了沒亮（在按「組隊」前就停，關提示、不按組隊）
+  44 form 專用：快速組隊提示視窗沒出現 / 找不到隊長卡（卡片不足 5 張時名字確認不了）/ 隊長或隊員標籤點了沒亮（在按「組隊」前就停，關提示、不按組隊）
+     提示視窗的卡片一定由左到右照名單順序排（使用者 2026-10-15）→ 依格位點：隊長 = 名單第 N 個 → 上排第 N 格（第 5 格先拖），
+     提示視窗名字 OCR 只寫 log 參考、不擋點擊（兩位數尾碼 DKBO10 / DKBO11 常讀成 DKBOII、DKB1，以前因此 44）。
 
 判斷依據（P-I1 / P-I4 實測，2026-10-11；座標 = 截圖座標）：
 - 卡片存在：卡片米色 (249,231,203) vs 空位棕 (169,127,84)，看卡片左緣 (416 / 726, y)。順序固定 = 視窗名單順序（主視窗 DKBO, DKBO2～DKBO5；PrimalSA2 DKBO6～DKBO10；clients.roster()；真名是字母 O；DKB0 同義）
@@ -383,6 +385,23 @@ QT_WAIT_DONE_S = 8.0                 # 按組隊後提示視窗消失 + HUD 回�
 QT_POLL_S = 0.1
 
 
+EXIT_DESC = {
+    EXIT_PANEL: '切換面板打不開',
+    EXIT_INCOMPLETE: '隊伍不完整（沒 --regroup）',
+    EXIT_MISSING: '有角色不在線（卡片數不足）',
+    EXIT_OCR_CONFLICT: '名字矛盾 / 組隊後驗證不符 / 按組隊後提示視窗不消失',
+    EXIT_QT: '快速組隊提示視窗步驟失敗（沒出現 / 找不到隊長卡 / 角標沒亮）',
+    EXIT_DISBAND_FAIL: '解散沒做成',
+    EXIT_NOT_LEADER: '當前角色不是隊長',
+    EXIT_NO_TEAM: '全員單人',
+}
+
+
+def describe(rc: int) -> str:
+    """team 退出碼 → 一句說明（bossretry 等呼叫端寫錯誤訊息用；不認得的碼回空字串）"""
+    return EXIT_DESC.get(rc, '')
+
+
 def badge_state(c) -> str:
     """提示視窗卡片角標像素 → 'red'（隊長）/ 'blue'（隊員）/ 'none'。
     紅：R > 110（2026-10-12 實機第 3 欄第 3 點 (771,255) 是角帶暗邊 (131,2,0)，舊門檻 R > 180 → 選了隊長也判沒亮 → 44；未選的棕 G ≈ 117 不會誤中）"""
@@ -415,11 +434,12 @@ def read_badges(leader_col: int, member_cols: list, shift: int = 0):
     return out[0], out[1:]
 
 
-def prompt_name_ok(col: int, leader: str, shift: int = 0) -> bool:
-    """上排第 col 欄名字 OCR 必須確認是 leader（cross_check ok）；讀不出 / 讀到別人都拒絕"""
+def prompt_name_note(col: int, leader: str, shift: int = 0) -> tuple:
+    """上排第 col 欄名字 OCR → (cross_check 結果, 文字行)。**只寫 log 參考、不擋點擊**（使用者 2026-10-15：
+    提示視窗卡片一定照名單順序，依格位點即可；兩位數尾碼 DKBO10 / DKBO11 的 OCR 常讀成 DKBOII / DKB1 / B011 不穩，以前因此 44）"""
     x = QT_X0 + QT_DX * col - shift
     texts = uikit.ocr((x + QT_NAME_BOX[0], QT_NAME_Y, QT_NAME_BOX[2], QT_NAME_BOX[3]), '-Zooms', QT_OCR_ZOOMS)
-    return cross_check(leader, texts) == 'ok'
+    return cross_check(leader, texts), texts
 
 
 def _qt_abort(why: str, snap_tag: str) -> int:
@@ -467,8 +487,8 @@ def _quick_team_prompt(leader: str, col: int, size: int) -> int:
             return _qt_abort('拖上排前提示視窗特徵不在，沒拖', 'team-form-drag-gone')
         uikit.gui('seq', 'drag %d %d %d %d; wait %d' % (QT_TOP_DRAG + (QT_TOP_SETTLE_MS,)), note=f'team form 上排往左拖（{leader} 在第 {col + 1} 張）')
         shift = QT_TOP_SHIFT
-    if not prompt_name_ok(col, leader, shift):
-        return _qt_abort(f'提示視窗上排第 {col + 1} 欄名字 OCR 無法確認是 {leader}（左移 {shift}），不點', 'team-form-leadername')
+    ck, texts = prompt_name_note(col, leader, shift)            # 只記 log，不擋（格位依名單順序）
+    print(f'form：提示視窗上排第 {col + 1} 欄（左移 {shift}）依名單順序 = {leader}；名字 OCR 參考 {ck} {texts}')
     uikit.mark('ocr-leader')
     # 隊長：先讀再點（切換式）；已經是紅帶就不點
     b = read_badges(col, [], shift)
@@ -512,8 +532,20 @@ def _quick_team_prompt(leader: str, col: int, size: int) -> int:
 
 
 def _strict_unknown(cards: list) -> bool:
-    """最終確認的名字規則（計畫決定 3）：名字 OCR / 樣板讀不出的卡片最多 1 張（>1 → 不可信）"""
+    """最終確認的名字規則（計畫決定 3）：名字 OCR / 樣板讀不出的卡片最多 1 張（>1 → 不可信）。
+    卡片數 = 名單人數時順序可靠（格位 = 名單順序，使用者 2026-10-15）→ 讀不出只是警告、不擋（讀到別人的名字 = conflict 仍擋）"""
+    if len(cards) == len(charstate.chars()):
+        return False
     return sum(1 for c in cards if c.check == 'unknown') > 1
+
+
+def leader_card(cards: list, leader: str):
+    """隊長卡：卡片數 = 名單人數 → 依格位（名單第 N 個 = 第 N 張卡，不看名字）；否則（有人離線、補位）只認名字確認過的卡"""
+    order = charstate.chars()
+    if len(cards) == len(order):
+        i = next((k for k, n in enumerate(order) if charstate.same(n, leader)), None)
+        return cards[i] if i is not None else None
+    return next((c for c in cards if c.name and c.check == 'ok' and charstate.same(c.name, leader)), None)
 
 
 def form(leader=None, size: int = 5, login_all: bool = False, regroup: bool = False) -> int:
@@ -580,10 +612,14 @@ def form(leader=None, size: int = 5, login_all: bool = False, regroup: bool = Fa
     if _strict_unknown(cards):
         uikit.close_panel(uikit.SWITCH, known_open=True)
         return uikit.fail(SRC, EXIT_OCR_CONFLICT, '超過 1 張卡片名字讀不出，不組隊')
-    lc = next((c for c in cards if c.name and c.check == 'ok' and charstate.same(c.name, leader)), None)
+    bad = [c for c in cards if c.check == 'conflict']           # 讀到別人的名字（樣板 / OCR 與順序矛盾）→ 不組
+    if bad:
+        uikit.close_panel(uikit.SWITCH, known_open=True)
+        return uikit.fail(SRC, EXIT_OCR_CONFLICT, '名字與卡片順序矛盾，不組隊：' + '、'.join(f'slot{c.slot}={c.name} 但 OCR {c.ocr}' for c in bad))
+    lc = leader_card(cards, leader)
     if lc is None:
         uikit.close_panel(uikit.SWITCH, known_open=True)
-        return uikit.fail(SRC, EXIT_QT, f'找不到名字確認過的 {leader} 卡片，不組隊')
+        return uikit.fail(SRC, EXIT_QT, f'找不到 {leader} 的卡片（卡片 {len(cards)} 張 < 名單時只認名字確認過的卡），不組隊')
     if lc.slot > 4:
         uikit.close_panel(uikit.SWITCH, known_open=True)
         return uikit.fail(SRC, EXIT_QT, f'{leader} 在第 {lc.slot + 1} 張卡，提示視窗上排最多 5 欄，不組隊')

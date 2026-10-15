@@ -169,6 +169,14 @@ g = fake_switch.install(fake_switch.Game(fake_switch.mk(labels=('solo',) * 5, cu
 fake_time()
 rc, out = fake_switch.run(team.form, 'DKB010')
 check('team.form --leader DKB010：第 5 張拖完 OCR 確認 → 隊長 DKBO10', rc == 0 and g.cards[4]['label'] == 'leader', out[-400:])
+# 2026-10-15 p2 實機：拖完 DKBO10 卡名字 OCR 讀成 '0010' / 'BO'（離線重跑 qt.png）或完全讀不出 → 以前 44 三次；
+# 提示視窗卡片一定照名單順序（使用者 2026-10-15）→ 依格位點，名字只記 log
+for ocr_txt in (['BO', 'BO'], []):
+    g = fake_switch.install(fake_switch.Game(fake_switch.mk(labels=('solo',) * 5, current=4)))
+    g.prompt_ocr = ocr_txt
+    fake_time()
+    rc, out = fake_switch.run(team.form, 'DKBO10')
+    check(f'team.form --leader DKBO10：提示視窗名字 OCR {ocr_txt} → 依格位點 962,320、組成 0', rc == 0 and (962, 320) in g.clicks and g.cards[4]['label'] == 'leader', out[-300:])
 
 # char.switch
 g = fake_switch.install(fake_switch.Game(fake_switch.mk()))

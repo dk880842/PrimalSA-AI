@@ -257,14 +257,20 @@ g.q_leader_dead = True
 rc, out = run(team.form)
 check('form 隊長點了不亮 → 44、沒點下排', rc == 44 and (549, 520) not in g.clicks and (720, 665) not in g.clicks, str(g.clicks))
 
+# 提示視窗卡片一定照名單順序（使用者 2026-10-15）→ 依格位點；名字 OCR 只記 log、不擋（以前讀不出 / 讀錯 → 44）
 g = install(Game(mk(SOLOS)))
 g.prompt_ocr = ['DKB02']
 rc, out = run(team.form)
-check('form 提示視窗隊長名 OCR 讀到別人 → 44、沒點隊長', rc == 44 and (549, 320) not in g.clicks, str(g.clicks))
+check('form 提示視窗隊長名 OCR 讀到別人 → 只記 log，仍依格位點 549,320 組成 0', rc == 0 and (549, 320) in g.clicks and '名字 OCR 參考 conflict' in out, f'{rc} {g.clicks}')
 g = install(Game(mk(SOLOS)))
 g.prompt_ocr = []
 rc, out = run(team.form)
-check('form 提示視窗隊長名讀不出 → 44（不猜）', rc == 44 and (549, 320) not in g.clicks)
+check('form 提示視窗隊長名讀不出 → 依格位照點、組成 0', rc == 0 and (549, 320) in g.clicks and g.cards[0]['label'] == 'leader', f'{rc}')
+# 實機讀法（2026-10-15 p3 qt1.png / p2 qt.png，-Image 離線重跑 ocr.ps1 的結果）：兩位數尾碼常讀成 DKBOII / DKB1 / 0010 / BO
+g = install(Game(mk(SOLOS)))
+g.prompt_ocr = ['DKBOII', 'DKB1']
+rc, out = run(team.form)
+check('form 提示視窗名字讀成 DKBOII / DKB1（p3 DKBO11 實機）→ 不擋、組成 0', rc == 0 and (549, 320) in g.clicks, f'{rc}')
 
 g = install(Game(mk(SOLOS)))
 g.q_preselect = {0}
@@ -285,7 +291,13 @@ team.QT_WAIT_DONE_S = 8.0
 
 g = install(Game(mk(SOLOS), ocr={}))
 rc, out = run(team.form)
-check('form 卡片名字全讀不出（>1 張 unknown）→ 43、0 次點擊', rc == 43 and fclicks(g) == [], f'{rc}')
+check('form 5 張卡名字全讀不出 → 格位 = 名單順序，照組成 0（只警告）', rc == 0 and '警告' in out and g.cards[0]['label'] == 'leader', f'{rc}')
+g = install(Game(mk(SOLOS), ocr={**OCR_REAL, NAMES[1]: [OCR_REAL[NAMES[2]][0]]}))
+rc, out = run(team.form)
+check('form 某張卡 OCR 讀到別人的名字（矛盾）→ 43、0 次面板內點擊', rc == 43 and fclicks(g) == [], f'{rc} {g.clicks}')
+g = install(Game(mk(('solo',) * 4, names=NAMES[:4]), ocr={}))
+rc, out = run(team.form, None, 4)
+check('form 卡片 4 張 < 名單（--size 4）且名字讀不出 → 43 不組（順序不可靠時仍要名字）', rc == 43 and fclicks(g) == [], f'{rc}')
 
 g = install(Game(mk(('solo', 'solo', 'other', 'solo', 'solo'))))
 rc, out = run(team.form)
