@@ -92,7 +92,7 @@ uv run --no-project python tools/gui/errlog.py list
 - 背景模式 `dclick`（倉庫存入）、`key` 打字（含中文）都實測可用（2026-10-09）。`key` 語法：一般字元 = 打進輸入框；`{ESC}` `{BS}` 等 = 按鍵；`{a}` = 只按 a 鍵（快捷鍵用）。
 - `gui.ps1` 必須保持 **UTF-8 with BOM**（PowerShell 5.1 讀無 BOM 檔會把中文當 Big5，整支解析失敗）。
 
-## 多視窗（PSA_CLIENT，2026-10-15 第 1 步：選視窗 + 點擊鎖；第 3a 步：每視窗狀態隔離 + 不自動登錄 + 全視窗驗證停手；第 3b 步：基本工具依名單）
+## 多視窗（PSA_CLIENT，2026-10-15 第 1 步：選視窗 + 點擊鎖；第 3a 步：每視窗狀態隔離 + 不自動登錄 + 全視窗驗證停手；第 3b 步：基本工具依名單；第 3d 步：psa-hud 顯示全部視窗）
 同機多開時每個視窗是不同名稱的執行檔（`PrimalSA.exe` = 主視窗 DKBO～DKBO5；`PrimalSA2.exe` = DKBO6～DKBO10；名單寫死在 `tools/gui/clients.py`）。
 - **選視窗**：環境變數 `PSA_CLIENT` = 程序名稱（不含 .exe），**不設 = PrimalSA，行為與以前完全相同**。例：`PSA_CLIENT=PrimalSA2 bash tools/gui/gui.sh info`、`PSA_CLIENT=PrimalSA2 bash tools/gui/mirror.sh`、`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/walk.py ...`。
   精確比對程序名稱（`psawin.ps1` 的 `Find-PsaProcess`；gui / stat / ocr / findmark / titlematch / digitmatch / mirror 共用）：沒在執行 → `gui.ps1` exit 1「PrimalSA2 沒有在執行」、讀圖腳本回 `{"ok":false,"error":"遊戲沒有在執行（PrimalSA2）"}`；**同名程序多個或名稱不合法 → exit 6，不操作**。
@@ -115,6 +115,9 @@ uv run --no-project python tools/gui/errlog.py list
 - **PrimalSA2 現在能用的**（離線測試過，**未實機**）：gui.sh、mirror.sh、讀圖 .ps1、`walk.py`、`heal.py`、`verifyhalt.py`、`team.py`（status / check / form / disband，預設隊長 DKBO6）、`char.py`、`ass.py`、`pet.py`、`bag.py`、`exp.py`、`depot_use.py`、`grind.py start|ensure|check|follow`（依 DKBO6 等級換點）、`petwatch.py`（`--exp-fruit` 吃給隊長）、`watch.py`（認 DKBO6～10）、`netwatch.py --watch`（斷線只點確定 + halt，不自動登錄；人登入回來後 recover 的 team.form / grind ensure 用 PrimalSA2 名單）、`namematch.py learn`。
   第一次用 PrimalSA2 建議：5 人在線、切換面板開著 → `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/namematch.py learn`（學名字樣板；沒樣板時 team / char 走順序 + OCR，較慢但可用）。
 - **任務 / 轉生腳本**（第 3c 步，離線測試過，**未實機**）：quest / questrun / questdetail / rebirth* / postrebirth / petquest / pet_catch / petdrop / pet_turnin / shopbuy / relogin / bossretry 也改讀視窗名單（隊長 = 名單第 1 個、抓寵者 = 第 2 個）；名單沒登錄的視窗（例 PrimalSA3）CLI 拒跑。多視窗時 relogin / `--stuck` 重登回 109 停手（不自動登錄）。用法見 ui/quest.md「多視窗」。
+- **psa-hud 顯示全部視窗**（第 3d 步，使用者定案 D5：一個 Claude session 看全部；離線測試過，**未實機**）：mod 每 30 秒在背景跑一次 `clients.py running --rostered`（只讀程序清單，ROSTERS 有登錄且正在執行的才算；繪製時不跑 powershell），只有主視窗 → pane / 標題 / watch spawn / 指令與以前逐字相同。
+  偵測到 PrimalSA2 → 多 spawn 一支 `PSA_CLIENT=PrimalSA2 watch.py`（各自 lock / state.json / psa-hud.json，在 `tools/.cache/clients/PrimalSA2/`；連 2 次偵測不到才收掉）；pane 頂端每視窗一段（`[PrimalSA] 狀態行`、提示行、等級 / HP / buff 行、遇敵行），進度區每視窗「任務 / 練功中」+ 最近 1 筆事件 + 最後動作 + 警報（actions.log 依 `[程序名]` 標籤分視窗；主視窗 = 沒標籤的行）；錯誤紀錄非主視窗顯示 `[PrimalSA2]`。
+  **警示**：`tools/.cache/verify-halt.json` 存在（單視窗也顯示）或多視窗時任一視窗 `verify_suspect` → pane 最上面紅字粗體。session 標題看主視窗，多視窗加「（N 視窗）」。指令：`/psa-hud watch on|off|status [程序名|all]`、`/psa-hud ack [程序名|all]`（不給 = 全部）。
 - 離線測試：`test_multiclient.py`、`test_roster.py`（第 3b 步：PSA_CLIENT=PrimalSA2 名單情境 + 主視窗常數逐字核對，0 次 powershell 呼叫）、`test_clientctx.py`（假 powershell.exe 守門：路徑快照〔沒設 PSA_CLIENT 時 63 個路徑常數與改版前逐字相同〕、verify-halt、netwatch 多視窗不登錄、gui.sh 退出碼）、`test_psawin.ps1`（真 powershell，只測不存在 / 同名多個的程序名與自用 Mutex，碰不到遊戲）。
 
 ## 移動：先用 walk.py（不要自己算座標點地面）

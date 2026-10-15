@@ -78,6 +78,15 @@ _run = clients.running
 clients.running = lambda timeout=15.0: None
 check('查不到程序清單 → others None、主視窗當作多視窗（保守）', clients.others_running('PrimalSA') is None and clients.multi_window('PrimalSA'))
 clients.running = _run
+# rostered_running（psa-hud 多視窗偵測，第 3d 步）：只列 ROSTERS 有登錄的、資料夾名寫法、照 ROSTERS 順序
+check('rostered_running：PrimalSA3 / notepad 不列、大小寫換成名單寫法', clients.rostered_running(['primalsa2', 'PrimalSA3', 'PrimalSA']) == ['PrimalSA', 'PrimalSA2'])
+clients.running = lambda timeout=15.0: None
+check('rostered_running：查不到程序清單 → None', clients.rostered_running() is None)
+clients.running = _run
+import subprocess as _sp  # noqa: E402
+_cli = _sp.run([sys.executable, str(GUI / 'clients.py'), 'running', '--rostered'], capture_output=True, text=True, encoding='utf-8',
+               env={**os.environ, 'PSA_TEST_PROCS': 'PrimalSA2,PrimalSA3,PrimalSA'})
+check('clients.py running --rostered（CLI）：一行一個、退出碼 0', _cli.returncode == 0 and _cli.stdout.split() == ['PrimalSA', 'PrimalSA2'], repr(_cli.stdout))
 os.environ['PSA_TEST_PROCS'] = 'PrimalSA'
 check('proc_client：自己的程序沒設 PSA_CLIENT = PrimalSA', sys.platform != 'linux' or clients.proc_client(os.getpid()) == 'PrimalSA')
 check('proc_client：讀不到 → None', clients.proc_client(99999999) is None)

@@ -17,7 +17,7 @@ export type Stat = {
 }
 
 // errlog.jsonl 一筆
-export type ErrEntry = { id: number; ts: number; error: string; fix: string | null; source: string | null }
+export type ErrEntry = { id: number; ts: number; error: string; fix: string | null; source: string | null; client?: string }  // client：非主視窗才有（errlog.py 寫的程序名）
 
 // pane 頂端狀態行：主行 + 提示行（tone：red 警示 / yellow 提醒 / gray 資訊）
 export type WatchTone = 'red' | 'yellow' | 'gray'
@@ -25,6 +25,13 @@ export type WatchLine = { main: string; hints: { text: string; tone: WatchTone }
 
 // 即時進度區一行（tone：plain 一般 / gray 次要 / yellow 提醒 / red 警報）
 export type ProgLine = { text: string; tone: 'plain' | 'gray' | 'yellow' | 'red' }
+
+// 多視窗（第 3d 步）：每個視窗一份狀態行 / HUD 行 / 遇敵行
+export type WinView = { client: string; wl: WatchLine; ht: string | null; en: { text: string; warn: boolean } | null }
+// 多視窗：每個視窗一份即時進度區
+export type WinProg = { client: string; lines: ProgLine[] }
+// 頂端醒目警示（verify-halt.json、任一視窗 verify_suspect）
+export type Banner = { text: string; tone: WatchTone }
 
 declare module 'claude-code' {
   interface PluginState {
@@ -43,6 +50,11 @@ declare module 'claude-code' {
       line: WatchLine
       // 即時進度區（任務 / 最近事件 / 最後動作 / 警報，最多 6 行）
       prog: ProgLine[]
+      // 多視窗時每視窗一份（只有 1 個視窗 = 空陣列，pane 照單視窗畫）
+      wins: WinView[]
+      progs: WinProg[]
+      // 頂端醒目警示（空 = 不顯示）
+      banner: Banner[]
     }
   }
 }
