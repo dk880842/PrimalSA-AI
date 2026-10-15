@@ -110,8 +110,14 @@ check('watch NameTracker：連 2 次讀到 DKB08 → DKBO8', tr.ocr_name == 'DKB
 
 # ---- team：尾碼 / OCR 交叉確認 ----
 check('suffix_tails 主視窗 = 02～05', team.suffix_tails(MAIN) == {'02': 'DKBO2', '03': 'DKBO3', '04': 'DKBO4', '05': 'DKBO5'})
-check('suffix_tails PrimalSA2 = 06～09、010', team.suffix_tails(P2) == {'06': 'DKBO6', '07': 'DKBO7', '08': 'DKBO8', '09': 'DKBO9', '010': 'DKBO10'}
-      or team.suffix_tails(P2) == {'07': 'DKBO7', '08': 'DKBO8', '09': 'DKBO9', '010': 'DKBO10'}, str(team.suffix_tails(P2)))
+check('suffix_tails PrimalSA2 = 06～09、010（隊長 DKBO6 也列）', team.suffix_tails(P2) == {'06': 'DKBO6', '07': 'DKBO7', '08': 'DKBO8', '09': 'DKBO9', '010': 'DKBO10'},
+      str(team.suffix_tails(P2)))
+OCR6 = ['06', 'B06', '06', '06', 'D06']                         # 2026-10-15 實機 namematch learn 讀 DKBO6 卡片的結果
+check('name_hits：實機 DKBO6 OCR（06 / B06 / D06）→ DKBO6 強證據', team.name_hits(OCR6) == ({'DKBO6'}, False))
+check('cross_check：順序 DKBO6、OCR 只有尾碼 06 → ok', team.cross_check('DKBO6', OCR6) == 'ok')
+check('cross_check：順序 DKBO7、OCR 06 → conflict（06 不會被算成別人）', team.cross_check('DKBO7', ['06']) == 'conflict')
+check('name_hits：16 / 6 不認（尾碼至少 2 字、要 06）', team.name_hits(['16'])[0] == set() and team.name_hits(['6'])[0] == set())
+check('resolve_name：卡片 < 5 時 slot 0 只讀到 06 → DKBO6', team.resolve_name(0, OCR6) == 'DKBO6')
 check('name_hits：07 → DKBO7', team.name_hits(['07'])[0] == {'DKBO7'})
 check('name_hits：010 / D010 → DKBO10', team.name_hits(['010'])[0] == {'DKBO10'} and team.name_hits(['D010'])[0] == {'DKBO10'})
 check('name_hits：10 太短 → 不認', team.name_hits(['10'])[0] == set())
@@ -239,6 +245,36 @@ check('OCR 讀到 DKBO7 → 學', pet.check_avatar_name('DKBO7', ctx) and 'DKBO7
 pg.avatar_label = {'DKBO8': 'DKBO9'}
 check('OCR 讀到別人（DKBO9）→ 不符', not pet.check_avatar_name('DKBO8', ctx) and 'DKBO8' not in ctx['tpl']['avatar'])
 check('第 5 個頭像（DKBO10）名字在面板外 → 不核對', pet.check_avatar_name('DKBO10', ctx) and 'DKBO10' not in ctx['tpl']['avatar'])
+
+# 共用樣板簿裡有主視窗的名字（2026-10-15 實機 71：DKBO8 頭像名被主視窗 DKBO3 樣板判走）→ 只跟本視窗名單比
+pg.avatar_label = {}
+pg.avatar_ocr = False
+av8, _ = petmatch.grab([petmatch.avatar_box('DKBO8') + ('brown',)])
+av8 = av8[0]
+h8 = format(petmatch.pack(av8), 'x')
+tpl_mix = {'name': {}, 'digit': {}, 'avatar': {'DKBO3': [h8], 'DKBO7': list(ctx['tpl']['avatar']['DKBO7'])}}
+check('match_whole 不限名單：DKBO8 的圖被主視窗 DKBO3 樣板吃掉（舊行為重現）', petmatch.match_whole('avatar', av8, tpl_mix)[0] == 'DKBO3')
+check('match_whole only=名單：主視窗 DKBO3 不參與 → None', petmatch.match_whole('avatar', av8, tpl_mix, only=P2)[0] is None)
+check('match_whole only 用 canon（DKB07 也算 DKBO7）', petmatch._book(tpl_mix, 'avatar', ['DKB07']).keys() == {'DKBO7'})
+ctx_mix = {'tpl': tpl_mix, 'learn': False, 'dirty': False}
+check('check_avatar_name DKBO8：主視窗 DKBO3 樣板不再判不符', pet.check_avatar_name('DKBO8', ctx_mix))
+check('learn_whole only=名單：主視窗 DKBO3 長得一樣也不擋 DKBO8 學', petmatch.learn_whole('avatar', 'DKBO8', av8, tpl_mix, only=P2)
+      and 'DKBO8' in tpl_mix['avatar'] and tpl_mix['avatar']['DKBO3'] == [h8])
+check('學完：本視窗命中 DKBO8', petmatch.match_whole('avatar', av8, tpl_mix, only=P2)[0] == 'DKBO8')
+tpl_mix2 = {'avatar': {'DKBO7': [h8]}}
+check('learn_whole only=名單：跟本視窗別人（DKBO7）一樣 → 照舊判可疑不學', not petmatch.learn_whole('avatar', 'DKBO8', av8, tpl_mix2, only=P2))
+pg.avatar_label = {'DKBO8': 'DKBO7'}
+ctx_bad = {'tpl': {'name': {}, 'digit': {}, 'avatar': {'DKBO7': list(ctx['tpl']['avatar']['DKBO7'])}}, 'learn': False, 'dirty': False}
+check('check_avatar_name：DKBO8 頭像下真的是 DKBO7 的名字 → 仍判不符', not pet.check_avatar_name('DKBO8', ctx_bad))
+pg.avatar_label = {}
+
+# ---- pet --role 逗號清單（檔頭範例 --role DKBO,DKBO3；照名單順序）----
+check('role_list 逗號：DKBO10,dkb08 → 照名單順序 [DKBO8, DKBO10]', pet.role_list('DKBO10,dkb08') == ['DKBO8', 'DKBO10'])
+check('role_list 逗號：重複去重、空白容忍', pet.role_list(' DKBO7 , DKBO7,DKBO6') == ['DKBO6', 'DKBO7'])
+check('role_list 逗號：任一不認得（主視窗 DKBO2）→ None', pet.role_list('DKBO7,DKBO2') is None)
+check('role_list 逗號：夾 all / 空項 → None', pet.role_list('all,DKBO7') is None and pet.role_list('DKBO7,') is None)
+rc, out = fake_switch.run(pet.list_roles, 'DKBO8,DKBO10', False, False, False)
+check('pet.list_roles --role DKBO8,DKBO10 → 0、只讀這兩人', rc == 0 and 'DKBO8' in out and 'DKBO10' in out and 'DKBO7' not in out, out[-400:])
 
 # ---- 主視窗常數不變（子程序，不設 PSA_CLIENT）----
 code = ('import sys; sys.path.insert(0, %r); import testenv, json, charstate, ass, petmatch, petwatch, grind, exp, uikit; '

@@ -24,6 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import digitmatch  # noqa: E402
+import charname  # noqa: E402
 import clients  # noqa: E402
 import uikit  # noqa: E402
 
@@ -143,9 +144,20 @@ def save_tpl(tpl: dict, layout: str = LAYOUT) -> None:
 
 
 # ---- 整塊圖：名字 / 頭像名 ----
-def match_whole(kind: str, rows, tpl: dict):
-    """→ (標籤或 None, 最佳分, 次佳「別的標籤」分)。墨點太少 / 沒樣板 → (None, 0, 0)"""
+def _book(tpl: dict, kind: str, only=None) -> dict:
+    """樣板簿；only = 只留這些標籤（O / 0 視為相同，charname.canon）；None = 全部（與以前相同）。
+    頭像名用：樣板檔全部視窗共用，主視窗 DKBO～DKBO4 與 PrimalSA2 DKBO6～DKBO9 在同一簿，
+    頭像名字框只有 54 px 寬（「DKBO」+ 1 個數字），不同視窗的名字只差一個數字（例 DKBO3 / DKBO8）→ 只跟這個視窗的名單比"""
     book = tpl.get(kind) or {}
+    if only is None:
+        return book
+    keep = {charname.canon(x) for x in only}
+    return {k: v for k, v in book.items() if charname.canon(k) in keep}
+
+
+def match_whole(kind: str, rows, tpl: dict, only=None):
+    """→ (標籤或 None, 最佳分, 次佳「別的標籤」分)。墨點太少 / 沒樣板 → (None, 0, 0)。only = 只比這些標籤（見 _book）"""
+    book = _book(tpl, kind, only)
     if not rows or ink(rows) < MIN_INK[kind] or not book:
         return None, 0.0, 0.0
     stride = len(rows[0]) + 2 * PAD
@@ -168,14 +180,15 @@ def match_whole(kind: str, rows, tpl: dict):
     return rk[0][0], sc, second
 
 
-def learn_whole(kind: str, label: str, rows, tpl: dict, log=None) -> bool:
-    """把整塊圖加進樣板。標籤可疑（別的標籤 IoU 也 ≥ HIT_MIN）/ 墨點不足 / 已有幾乎相同變體 / 變體已滿 → False（不改 tpl）"""
+def learn_whole(kind: str, label: str, rows, tpl: dict, log=None, only=None) -> bool:
+    """把整塊圖加進樣板。標籤可疑（別的標籤 IoU 也 ≥ HIT_MIN）/ 墨點不足 / 已有幾乎相同變體 / 變體已滿 → False（不改 tpl）。
+    only = 可疑檢查只跟這些標籤比（見 _book；別視窗的名字不會擋住這個視窗學）"""
     if not rows or ink(rows) < MIN_INK[kind] or (kind == 'name' and uikit.is_name_fragment(label)):
         return False
     stride = len(rows[0]) + 2 * PAD
     img = pack(rows)
     book = tpl.setdefault(kind, {})
-    for other, vs in book.items():
+    for other, vs in _book(tpl, kind, only).items():
         if other != label and any(iou(img, int(h, 16), stride) >= HIT_MIN for h in vs):
             if log:
                 log(f'petmatch：{kind} 標籤 {label!r} 但與既有 {other!r} 樣板 IoU ≥ {HIT_MIN}，標籤可疑，不學')

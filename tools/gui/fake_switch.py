@@ -20,8 +20,8 @@ Q_RED, Q_BLUE, Q_BROWN = (233, 4, 3), (3, 74, 255), (169, 117, 70)     # 快速�
 NAMES = clients.roster() or ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
 # OCR 假資料（P-I1 實測：Zooms 2~6 合併結果）
 OCR_MAIN = {'DKBO': ['DKBO'], 'DKBO2': ['DKBO2', 'D02', '02'], 'DKBO3': ['03', '003'], 'DKBO4': ['DKBO4', 'B04'], 'DKBO5': ['05']}
-# PrimalSA2（未實機，比照主視窗的讀法：整名 / 只剩尾碼 / 數字 0 混淆 DKB010）
-OCR_P2 = {'DKBO6': ['DKBO6'], 'DKBO7': ['07', '007'], 'DKBO8': ['DKB08', 'B08'], 'DKBO9': ['09'], 'DKBO10': ['DKB010', '010']}
+# PrimalSA2（DKBO6 = 2026-10-15 實機 namematch learn 讀到的；其餘比照主視窗的讀法：整名 / 只剩尾碼 / 數字 0 混淆 DKB010）
+OCR_P2 = {'DKBO6': ['06', 'B06', '06', '06', 'D06'], 'DKBO7': ['07', '007'], 'DKBO8': ['DKB08', 'B08'], 'DKBO9': ['09'], 'DKBO10': ['DKB010', '010']}
 OCR_REAL = OCR_P2 if NAMES and NAMES[0] == 'DKBO6' else OCR_MAIN
 
 
