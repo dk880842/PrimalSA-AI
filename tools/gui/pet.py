@@ -2689,6 +2689,8 @@ def _store_all_roles(plan_roles: list, depot: str, allow_slot1: bool, ams: list,
                     op['rc'] = rc
                     return rc
                 sl['name'], sl['renamed'] = op['pet'], True
+                sl['was_unnamed'] = sl.pop('unnamed', None)               # 已還原成名字：身分改比名字（ident_matches 看 unnamed 會拿成長字串比而誤判不符）
+                sl.pop('guess', None)
         if todo:
             pre_mount = uikit.px(thumb_pts(0))
             if pre_mount is None:
@@ -2742,7 +2744,7 @@ def _store_all_roles(plan_roles: list, depot: str, allow_slot1: bool, ams: list,
                 path = uikit.snap('pet-store-nochange')
                 return bad(EXIT_VERIFY, f'點了存入但寵物欄 / 倉庫張數沒照預期變（寵物空格 {f2 and sum(f2["empty"])}→要 {pre_empty}；倉庫 {d2 and 20 - sum(d2["empty"])}→要 {depot_n}）；不重點，請人看截圖{"：" + path if path else ""}')
             op['rc'] = 0
-            if sl.get('unnamed') and sl.get('species') and petmatch.learn_species(species_reg(ctx), sl['species'], None, sl['unnamed']):
+            if (sl.get('unnamed') or sl.get('was_unnamed')) and sl.get('species') and petmatch.learn_species(species_reg(ctx), sl['species'], None, sl.get('unnamed') or sl['was_unnamed']):
                 ctx['rdirty'] = True
             print(f'pet：{r} 的 {want}（原第 {sl["slot"]} 格）存入{"個人" if depot == "personal" else "公共"}倉庫')
         expect[r] = pre_empty
