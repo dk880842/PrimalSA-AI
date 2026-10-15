@@ -91,15 +91,17 @@ def classify_label(cols) -> str:
 
 
 def suffix_tails(known) -> dict:
-    """白名單 → {尾碼: 名字}：去掉共同字首（保留共同字首最後一個字）後的尾碼，例 DKBO2 → '02'、DKBO10 → '010'。
-    隊長（第 1 個）不列（它就是共同字首本身，尾碼太短；單獨讀到另外處理）；尾碼互為後綴的（會誤認）兩個都不列"""
+    """白名單 → {尾碼: 名字}：去掉共同字首（保留共同字首最後一個字）後的尾碼，例 DKBO2 → '02'、DKBO10 → '010'、DKBO6 → '06'。
+    尾碼不到 2 字的不列：主視窗隊長 DKBO 就是共同字首本身（尾碼 '0'），單獨讀到另外處理（bare）；
+    PrimalSA2 隊長 DKBO6 不是別人的字首 → 尾碼 '06' 照列（2026-10-15 實機 OCR 只讀到 06 / B06 / D06，以前不列 → 學不到樣板）。
+    尾碼互為後綴的（會誤認）兩個都不列"""
     ks = [charname.canon(k) for k in known]
     if len(ks) < 2:
         return {}
     pre = os.path.commonprefix(ks)
     cut = max(0, len(pre) - 1)
     tails = {}
-    for k, name in zip(ks[1:], list(known)[1:]):
+    for k, name in zip(ks, list(known)):
         t = k[cut:]
         if len(t) >= 2:
             tails[t] = name

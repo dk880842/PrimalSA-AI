@@ -2,7 +2,7 @@
 """寵物面板腳本化（P6：list / set-state / rest-all；P7：store / take）。計畫：notes/plan-scriptify.md §5。只用標準函式庫。
 
 用法（專案根目錄；WSL / Windows 原生指令相同；角色名 DKB0 / DKBO 都收，輸出用真名 DKBO）：
-  uv run --no-project python tools/gui/pet.py list [--role DKBO|all] [--json]           # 唯讀：每格 名字 / 狀態 / 等級
+  uv run --no-project python tools/gui/pet.py list [--role DKBO|DKBO,DKBO3|all] [--json]   # 唯讀：每格 名字 / 狀態 / 等級（逗號清單照名單順序）
   uv run --no-project python tools/gui/pet.py levels [--role all] [--slots 2,3,4,5] [--json]   # 唯讀：只讀等級 + 名字框點陣指紋 nh（練寵輪詢；不認名字）
   uv run --no-project python tools/gui/pet.py set-state DKBO 迪基格斯 出戰|等待|騎乘 [--slot N] [--allow-mount]
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
@@ -264,7 +264,8 @@ def check_avatar_name(role: str, ctx: dict) -> bool:
     rows, _ = petmatch.grab([box + ('brown',)])
     if not rows:
         return True                              # 讀不到不當不符（主證據是黃框）
-    label, sc, _ = petmatch.match_whole('avatar', rows[0], ctx['tpl'])
+    mine = charstate.chars()      # 頭像名樣板簿全部視窗共用：只跟這個視窗的名單比（2026-10-15 PrimalSA2 DKBO8 被主視窗 DKBO3 樣板判走 → 71）
+    label, sc, _ = petmatch.match_whole('avatar', rows[0], ctx['tpl'], only=mine)
     if label:
         return charstate.same(label, role)
     if petmatch.ink(rows[0]) < petmatch.MIN_INK['avatar']:
@@ -278,7 +279,7 @@ def check_avatar_name(role: str, ctx: dict) -> bool:
                 return False
         if not clients.is_default() and not hits:
             return True                          # 非主視窗第一次學（DKBO6～10）：OCR 要精確命中名單上的這個名字才學；讀不出 = 不學、不當不符
-        if petmatch.learn_whole('avatar', role, rows[0], ctx['tpl'], log):
+        if petmatch.learn_whole('avatar', role, rows[0], ctx['tpl'], log, only=mine):
             ctx['dirty'] = True
     return True
 
@@ -1111,9 +1112,18 @@ def _out(rc: int, info: dict, t0: float, msg: str = '', as_json_only: bool = Fal
 
 
 def role_list(arg: str) -> list | None:
-    """'all' → 全部頭像角色（照白名單順序）；其他 → 單一角色（寬鬆正規化）；不認得 → None"""
+    """'all' → 全部頭像角色（照白名單順序）；'DKBO,DKBO3'（逗號分隔）→ 照白名單順序、去重；其他 → 單一角色（寬鬆正規化）；
+    任一不認得（含逗號清單裡夾 all、空項）→ None。要保留使用者順序的多角色指令用 roles_multi"""
     if str(arg).lower() == 'all':
         return [r for r in (charstate.display(c) for c in charstate.chars()) if r in petmatch.AVATAR_Y]
+    if ',' in str(arg):
+        got = set()
+        for t in (x.strip() for x in str(arg).split(',')):
+            r = role_list(t) if t and t.lower() != 'all' else None
+            if not r:
+                return None
+            got.add(r[0])
+        return [r for r in role_list('all') if r in got]
     hit = charstate.norm_char(arg)
     r = charstate.display(hit) if hit else None
     return [r] if r in petmatch.AVATAR_Y else None
