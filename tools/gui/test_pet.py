@@ -64,6 +64,8 @@ def btn_clicks(g):
 
 # ---------------- 純函式 ----------------
 check('退出碼常數 70～74、78', (pet.EXIT_PANEL, pet.EXIT_SELECT, pet.EXIT_NAME, pet.EXIT_FORBID, pet.EXIT_NOCHANGE, pet.EXIT_BATTLE) == (70, 71, 72, 73, 74, 78))
+check('role_list：all / 單一角色照舊（主視窗）', pet.role_list('all') == ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'] and pet.role_list('dkb03') == ['DKBO3'] and pet.role_list('DKBO6') is None)
+check('role_list 逗號清單（檔頭範例 DKBO,DKBO3）→ 照名單順序', pet.role_list('DKBO3,DKB0') == ['DKBO', 'DKBO3'] and pet.role_list('DKBO,DKBO9') is None)
 check('狀態別名：休息 = 等待、戰鬥 = 出戰、亂字 = None', (pet.norm_state('休息'), pet.norm_state('戰鬥'), pet.norm_state('騎乘'), pet.norm_state('跑')) == ('等待', '出戰', '騎乘', None))
 ON, OFF = (182, 124, 60), (245, 225, 192)
 check('btn_state：只有出戰亮', pet.btn_state({'出戰': [ON, ON], '騎乘': [OFF, OFF], '等待': [OFF, OFF]}) == '出戰')
