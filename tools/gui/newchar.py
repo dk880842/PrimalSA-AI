@@ -6,12 +6,14 @@
 ass.py set_many（實機過）/ points（同日新增、未實機）、team.py form、quest.py、grind.go。
 
 用法（專案根目錄；WSL / Windows 原生指令相同；PSA_CLIENT=PrimalSA2 → 名單 DKBO6～DKBO10）：
-  uv run --no-project python tools/gui/newchar.py plan [--confirm-buy] [--no-grind]          # 只印步驟 / 狀態 / 退出碼，完全不碰遊戲（= run --dry-run）
-  uv run --no-project python tools/gui/newchar.py run [--from 步驟] [--to 步驟] [--fresh] [--confirm-buy] [--no-grind] [--dry-run]
+  uv run --no-project python tools/gui/newchar.py plan [--confirm-buy] [--no-grind] [--skip 步驟,...]          # 只印步驟 / 狀態 / 退出碼，完全不碰遊戲（= run --dry-run）
+  uv run --no-project python tools/gui/newchar.py run [--from 步驟] [--to 步驟] [--fresh] [--confirm-buy] [--no-grind] [--skip 步驟,...] [--dry-run]
     --from / --to    只做這段（中斷後接著做；已完成的步驟記在進度檔 newchar.json〔12 小時內有效〕，重跑自動跳過；--from 指定的那步一定重做）
     --fresh          不看進度檔，從頭（每步本身也會先看狀態：已開的禮盒 / 已穿的裝備 / 已存的道具 / 已是目標的寵物與勾選都不重做）
     --confirm-buy    花石幣買溫蒂妮Lv5的金幣 + 隊長人物首次動作 風的精靈：**目前未支援**（shopbuy 只會買耐久力回複藥）→ 該步記「未支援」跳過、最後回 199
     --no-grind       最後不去練功
+    --skip 步驟[,步驟]  被 skip 的步驟完全不執行（不開任何面板），記為「略過（--skip）」；視為滿足 --from 的前置檢查；
+                     不影響退出碼（199 只給待手動 / 未支援）；plan 也標出（例：--skip points = 自動加點這次不做）
   可 import：newchar.run(...) → 退出碼；結果 dict 在 newchar.LAST
 
 步驟（名單 = clients.roster()，第 1 個是隊長；每步驗證 → 點 → 驗證，失敗不重點）：
@@ -119,13 +121,16 @@ def plan(o: dict) -> list:
 
 
 def print_plan(o: dict, from_stage: str, to_stage: str, done=()) -> None:
+    skip = o.get('skip') or ()
     print(f'newchar：名單 {ALL_ROLES}（隊長 {LEADER}；PSA_CLIENT={clients.name()}）')
     on = False
     for st, status, acts in plan(o):
         on = on or st == from_stage
         mark = '✓' if st in done else ('→' if on else '·')
+        if st in skip:
+            mark, status = '－', '略過（--skip）'
         print(f'  {mark} {st}［{status}］')
-        if on:
+        if on and st not in skip:
             for a in acts:
                 print(f'      - {a}')
         if st == to_stage:
@@ -405,14 +410,18 @@ class Run:
 
 
 def run(from_stage: str = 'preflight', to_stage: str = 'grind', dry_run: bool = False, tools=None, fresh: bool = False,
-        confirm_buy: bool = False, no_grind: bool = False) -> int:
+        confirm_buy: bool = False, no_grind: bool = False, skip=()) -> int:
     LAST.clear()
-    o = dict(fresh=fresh, confirm_buy=confirm_buy, no_grind=no_grind)
+    skip = tuple(skip or ())
+    o = dict(fresh=fresh, confirm_buy=confirm_buy, no_grind=no_grind, skip=skip)
     if not ALL_ROLES:
         print(f'{SRC}：PSA_CLIENT={clients.name()} 沒有寫死的名單（clients.ROSTERS）', file=sys.stderr)
         return EXIT_ARGS
     if from_stage not in STAGES or to_stage not in STAGES or STAGES.index(from_stage) > STAGES.index(to_stage):
         print(f'{SRC}：--from / --to 不對（{STAGES}）', file=sys.stderr)
+        return EXIT_ARGS
+    if [s for s in skip if s not in STAGES or s == 'preflight']:
+        print(f'{SRC}：--skip 不對（{STAGES[1:]}；preflight 不能略過）', file=sys.stderr)
         return EXIT_ARGS
     if dry_run:
         print_plan(o, from_stage, to_stage, () if fresh else load_progress().get('done', []))
@@ -420,7 +429,7 @@ def run(from_stage: str = 'preflight', to_stage: str = 'grind', dry_run: bool = 
         return 0
     R = Run(tools or Tools(), o)
     before = STAGES[1:STAGES.index(from_stage)]
-    missing = [s for s in before if s not in R.p['done'] and s not in R.p['pending']]
+    missing = [s for s in before if s not in R.p['done'] and s not in R.p['pending'] and s not in skip]
     if missing:
         print(f'{SRC}：--from {from_stage} 但進度檔沒有完成 {missing}（先照順序跑，或 --fresh 從頭）', file=sys.stderr)
         return EXIT_ARGS
@@ -430,6 +439,9 @@ def run(from_stage: str = 'preflight', to_stage: str = 'grind', dry_run: bool = 
     if 'preflight' not in todo:
         todo = ['preflight'] + todo                          # preflight 每次都跑（不記進度）
     for st in todo:
+        if st in skip:
+            event(f'步驟 {st} 略過（--skip）')
+            continue
         if st not in ('preflight', from_stage) and st in R.p['done']:      # --from 指定的那步一定重做（想重做某步就 --from 它）
             event(f'步驟 {st} 進度檔已完成 → 跳過')
             continue
@@ -442,7 +454,7 @@ def run(from_stage: str = 'preflight', to_stage: str = 'grind', dry_run: bool = 
         event(f'完成，但有待手動 / 未支援步驟：{pend}')
     elif not rc:
         event('全部完成')
-    LAST.update(R.info, ok=rc == 0, rc=rc, done=list(R.p['done']), pending=pend)
+    LAST.update(R.info, ok=rc == 0, rc=rc, done=list(R.p['done']), pending=pend, skipped=[s for s in todo if s in skip])
     return rc
 
 
@@ -456,13 +468,15 @@ def main(argv=None) -> int:
     ap.add_argument('--fresh', action='store_true', help='不看進度檔，從頭（每步仍會先看狀態、已完成的不重做）')
     ap.add_argument('--confirm-buy', action='store_true', help='花石幣買溫蒂妮Lv5的金幣 + 風的精靈（目前未支援 → 記未支援、最後 199）')
     ap.add_argument('--no-grind', action='store_true', help='最後不去練功')
+    ap.add_argument('--skip', default='', help='略過的步驟（逗號分隔，例 points）：完全不執行、不開面板，不影響退出碼')
     ap.add_argument('--dry-run', action='store_true', help='同 plan：只印步驟，不碰遊戲')
     a = ap.parse_args(argv)
     dry = a.dry_run or a.cmd == 'plan'
     if not dry:
         import winenv
         winenv.enable_server()
-    rc = run(a.from_stage, a.to_stage, dry, None, a.fresh, a.confirm_buy, a.no_grind)
+    rc = run(a.from_stage, a.to_stage, dry, None, a.fresh, a.confirm_buy, a.no_grind,
+             [x.strip() for x in a.skip.split(',') if x.strip()])
     print(json.dumps(dict(LAST, rc=rc), ensure_ascii=False, default=str))
     return rc
 
