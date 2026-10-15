@@ -111,8 +111,8 @@ check('全部完成後進度清空', json.loads(pr.PROGRESS.read_text(encoding='
 f = Fake(bag_lists=[bags({'DKBO': 3}, {'DKBO': ['儀之兜', '山賊的羽飾', '龍之鎧']}), bags(14)])
 rc = go(f, confirm_drop=True, from_seg='bag1', to_seg='bag1')
 pu = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'purge']
-check('清背包①：DKBO 空 3 < 6 → 先 --dry-run 再實刪（只刪 DKBO、白名單 + 笛子）→ 重讀 OK', rc == 0 and len(pu) == 2 and pu[0][-1] == '--dry-run'
-      and pu[1][1] == 'DKBO' and '龍的魅力之笛' in pu[1][3] and '--dry-run' not in pu[1], f'rc={rc} {pu}')
+check('清背包①：DKBO 空 3 < 6 → 先 --dry-run 再實刪（只刪 DKBO、白名單 + 笛子）→ 重讀 OK', rc == 0 and len(pu) == 3 and pu[0][-1] == '--dry-run'
+      and all(x[1] == 'DKBO' and '--dry-run' not in x for x in pu[1:]) and '龍的魅力之笛' in ','.join(x[3] for x in pu[1:]), f'rc={rc} {pu}')
 f = Fake(bag_lists=[bags({'DKBO': 3}, {'DKBO': ['儀之兜']})])
 rc = go(f, from_seg='bag1', to_seg='bag1')
 pu = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'purge']

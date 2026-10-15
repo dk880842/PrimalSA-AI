@@ -1184,6 +1184,7 @@ PURGE_FORBID = ['大地的羈絆', '火的羽毛飾品', '風的鎖', '水的戒
 # 仙尼亞的花 / 郵寄物 / 切繩石是任務途中中間品（2017 / 2018），Task 表查不到是否為下一步條件；2026-10-14 使用者已知任務中途誤刪的風險並接受，仍列入。
 # 而且同名有兩個道具：2448 是步 2 獎勵、2416 是步 1 要交的條件道具，用名稱刪會刪到進行中的任務道具）。
 # test_questdefs 核對：每個名稱都在 bag.md 白名單表、不在 PROTECT / PURGE_FORBID、也不是任何 questdefs 任務的條件道具（不會刪到任務要交的東西）
+MAZU_FAMILY = ['馬祖的斧頭', '馬祖的矛', '馬祖的棍棒']
 AUTO_PURGE = ['儀之兜', '杉的手環', '龍之鎧', '龍之槍', '龍之衣', '月光的手鐲', '巴巴洛的許可證', '空想的衣服',
               '老爺爺的護身符', '薩頓家的秘藥', '山賊的羽飾',
               '馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '空想的帽子', '空想的豎琴',
@@ -1386,8 +1387,11 @@ def del_list_ok(readings, names, n_marked: int, others=None) -> tuple:
     4. 逐位置合併：每個位置至少一個候選讀法判成勾選名稱、沒有候選把它判成別的名稱 / 別的道具；位置名稱的多重集合 == 勾選名稱多重集合。
     names = 每個勾選格的名稱（同名多格就重複列）"""
     want = list(names)
+    # 2026-10-15：馬祖的斧頭 / 矛 / 棍棒同圖（背包縮圖只能推定其一）→ 提示窗讀到同家族的名字視為同一類（都是 AUTO_PURGE 白名單）
+    fam = [n for n in MAZU_FAMILY if n in want]
+    want_cls = want + [n for n in MAZU_FAMILY if fam and n not in want]
     ents = {k: del_entries(_reading_texts(v)) for k, v in readings.items()}
-    cls = {k: [del_classify(e, want, others) for e in es] for k, es in ents.items()}
+    cls = {k: [del_classify(e, want_cls, others) for e in es] for k, es in ents.items()}
     for k, cs in cls.items():
         for e, (kind, n) in zip(ents[k], cs):
             if kind == 'protected':
@@ -1418,7 +1422,9 @@ def del_list_ok(readings, names, n_marked: int, others=None) -> tuple:
         if len(tn) != 1:
             return False, f'第 {i + 1} 條判不出唯一名稱 {sorted(tn)}（讀到 {[ents[k][i] for k in cand]}）'
         got.append(tn.pop())
-    if sorted(got) != sorted(want):
+    def _fam(n):
+        return '馬祖的' if n in MAZU_FAMILY else n
+    if sorted(map(_fam, got)) != sorted(map(_fam, want)):
         return False, f'條目 {got} 與勾選 {want} 不一致'
     return True, f'條目 {got}（候選讀法 {len(cand)} 個）'
 

@@ -81,6 +81,7 @@ NEED1, NEED2 = 6, 8                # 清背包①（1.82 後段最大 bag_slots 
 HERO_SOLO = ['--solo']            # questrun 156（沒龍王）→ 單人逃跑重跑同一段（2026-10-14 起自動，不再停 173 交人）
 HERO_DROP = ['--drop-reward', '巴朵蘭恩', '--confirm-drop', '巴朵蘭恩', '--drop-items', '薩姆吉爾的首飾', '--confirm-drop-items', '薩姆吉爾的首飾']
 
+PURGE_CHUNK = 3
 SEGMENTS = ['inventory', 'adult', 'yayoi', 'hero', 'q182a', 'bag1', 'q182b', 'bag2', 'caves', 'dino', 'katan', 'quiz', 'finish']
 TITLES = {'inventory': '盤點交接', 'adult': '成人儀式', 'yayoi': '彌生和日美子', 'hero': '紅暴（英雄島前傳）', 'q182a': '1.82 前段',
           'bag1': '清背包①', 'q182b': '1.82 後段', 'bag2': '清背包②', 'caves': '四大洞窟', 'dino': '恐龍博士', 'katan': '卡坦的願望',
@@ -297,9 +298,11 @@ class Run:
                 return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：purge --dry-run rc={rc}', fmt('bag.py', args + ['--dry-run']))
             if not self.o.get('confirm_drop'):
                 continue
-            rc, _ = self.sub('bag.py', args, 1200)
-            if rc:
-                return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：purge rc={rc}（93 防護 / 96 提示窗清單對不上）', fmt('bag.py', args))
+            for i in range(0, len(ns), PURGE_CHUNK):           # 2026-10-15：一次勾 10 件提示窗清單超出一頁讀不全（96）→ 每次最多 PURGE_CHUNK 個名字
+                cargs = ['purge', ','.join(roles), '--names', ','.join(ns[i:i + PURGE_CHUNK])]
+                rc, _ = self.sub('bag.py', cargs, 1200)
+                if rc:
+                    return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：purge rc={rc}（93 防護 / 96 提示窗清單對不上）', fmt('bag.py', cargs))
         if not self.o.get('confirm_drop'):
             return self.fail(EXIT_BAG, f'{TITLES[seg]}：空格不足 {short}（要 ≥ {need}），刪道具要 --confirm-drop（只 --dry-run 列了 {plan}）',
                              '; '.join(fmt('bag.py', ['purge', ','.join(rs), '--names', ','.join(ns)]) for rs, ns in groups) or '人工清背包')
