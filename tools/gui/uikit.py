@@ -4,7 +4,8 @@
 安全原則（鐵則 2~5、SKILL.md）：
 - 面板內點擊一律經 safe_click：面板特徵不在 → 不點（回 False，避免背景點擊穿透到地面走路）；點到 FORBIDDEN 矩形 → 丟 ForbiddenClick。
 - preflight：版面、netwatch、戰鬥鎖、畫面連 3 次不認得（疑似驗證視窗）→ 退出 9 停手通知使用者。
-  多視窗（PSA_CLIENT）：本視窗驗證停手旗標（verifyhalt.py，每視窗一份）存在 → 一律 9；回 9 時（preflight / fail）多視窗才設本視窗旗標（其他視窗照常）。
+  多視窗（PSA_CLIENT）：本視窗驗證停手旗標（verifyhalt.py，每視窗一份）存在 → 9（watch 沒在跑時 preflight 先現場連讀，已知正常畫面穩定 5 秒就自動清掉繼續）；
+  回 9 時（preflight / fail）多視窗才設本視窗旗標（其他視窗照常）。
 - CACHE = 這個視窗的狀態資料夾（clients.cache_dir：主視窗 = tools/.cache 不變；其他 = tools/.cache/clients/<程序名>）；SHARED_CACHE = 全部視窗共用。
 - 名字比對「對不上就拒絕」：人物名走 charstate.norm_char（= charname 的正規化，與 watch 同一套）；寵物名 snap_pet 對 Monster 表。
 所有會碰遊戲的函式都走模組層級的 gui / sleep / clock（測試可替換）；匯入本模組不會碰遊戲。
@@ -149,16 +150,33 @@ def transition_now() -> str | None:
     return screen_sigs.transition(dict(zip(pts, cols))) if cols is not None else None
 
 
-def known_popup_now() -> str | None:
-    """現場讀一次 watch 的全部點：面板上疊「已知彈窗」（screen_sigs.annotate 的 popup_*：數字鍵盤 / 數量輸入 / 確定取消 / 刪除確認 / 道具說明彈窗）→ 種類，否則 None。
-    只在 screen() 判 unknown 時才值得問（preflight 用：這些彈窗不是驗證視窗，不計次）"""
+def screen_annot() -> tuple[dict, list] | None:
+    """現場讀一次 watch 的全部點（同 watch.py）→ (classify 結果, annotate 附註)；讀不到 None"""
     pts = list(dict.fromkeys(screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()))
     cols = px(pts)
     if cols is None:
         return None
     d = dict(zip(pts, cols))
-    ann = screen_sigs.annotate(d, screen_sigs.classify(d))
-    return next((a for a in ann if a.startswith('popup_') and a in screen_sigs.ANNOT_KNOWN), None)
+    c = screen_sigs.classify(d)
+    return c, screen_sigs.annotate(d, c)
+
+
+def known_popup_now() -> str | None:
+    """現場讀一次 watch 的全部點：面板上疊「已知彈窗」（screen_sigs.annotate 的 popup_*：數字鍵盤 / 數量輸入 / 確定取消 / 刪除確認 / 道具說明彈窗）→ 種類，否則 None。
+    只在 screen() 判 unknown 時才值得問（preflight 用：這些彈窗不是驗證視窗，不計次）"""
+    r = screen_annot()
+    if r is None:
+        return None
+    return next((a for a in r[1] if a.startswith('popup_') and a in screen_sigs.ANNOT_KNOWN), None)
+
+
+def verify_screen():
+    """驗證停手旗標自動清用：現場讀一次 → (state, annot, 狀態文字)；讀不到 ('error', [], …)。測試可替換"""
+    r = screen_annot()
+    if r is None:
+        return 'error', [], screen_sigs.label({'state': 'error'})
+    c, ann = r
+    return c['state'], ann, screen_sigs.label(c, ann)
 
 
 def hud_visible() -> bool:
@@ -214,15 +232,39 @@ def watch_preflight_ok() -> bool:
     return True
 
 
+VH_READ_GAP_S = 1.0             # 旗標自動清（watch 沒在跑時）：連讀間隔；讀 verifyhalt.AUTO_CLEAR_N 次 ≈ 5 秒
+
+
+def verify_autoclear_now(vh: dict, src: str) -> bool:
+    """watch 沒在跑的視窗：旗標存在時現場連讀（verifyhalt.AutoClear，同 watch 的判斷）→ 已知正常畫面穩定 5 秒 → 清掉回 True；
+    任何一次不正常（unknown / 對話框 / 讀不到…）立刻回 False（照舊停手）。手動設的旗標不讀、直接 False。零點擊"""
+    import verifyhalt
+    if vh.get('src') == verifyhalt.MANUAL_SRC:
+        return False
+    ac = verifyhalt.AutoClear()
+    t = clock()
+    for i in range(verifyhalt.AUTO_CLEAR_N * 2):          # 正常情況 AUTO_CLEAR_N 次就夠；上限防呆
+        st, ann, lab = verify_screen()
+        if not screen_sigs.normal_screen(st, ann):
+            return False
+        if ac.feed(vh, True, clock() - t, clock()):
+            return verifyhalt.auto_clear(vh, lab, src=f'preflight:{src}')
+        sleep(VH_READ_GAP_S)
+    return False
+
+
 def preflight(src: str, fast: bool = True) -> int:
     """開跑前檢查，回退出碼（0 = 可以動）：版面不是 2880x1659 → 2；netwatch halt → 直接 sys.exit(10)；
     battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）；
     載入圖 / 全黑轉場（transition_now）不計次、等它過去（最多 screen_sigs.TRANSITION_MAX_S 秒）。
     fast=True 且 watch 狀態夠新時（watch_preflight_ok）省掉 layout / netwatch / 畫面連讀（約 0.36 s → 約 0.02 s）；battle.lock 一律檢查。
-    本視窗驗證停手旗標（verifyhalt.py）存在 → 一開始就 9（不讀畫面）；連 3 次不認得回 9 時多視窗才設本視窗旗標（trip_verify）"""
+    本視窗驗證停手旗標（verifyhalt.py）存在 → 9；但 watch 沒在跑時先現場連讀約 5 秒（verify_autoclear_now），已知正常畫面穩定 → 自動清掉照常往下
+    （watch 在跑就交給 watch 清，這裡不讀畫面）；連 3 次不認得回 9 時多視窗才設本視窗旗標（trip_verify）"""
     import battleguard
     vh = verify_halted()
-    if vh:                                        # 這個視窗出現過驗證視窗（多視窗）：本視窗停手，人清旗標前不動（其他視窗照常）
+    if vh and watch_state() is None and verify_autoclear_now(vh, src):
+        vh = None                                 # 畫面已恢復正常且穩定：旗標自動清掉（2026-10-16 使用者：偵測保留、旗標自動清）
+    if vh:                                        # 這個視窗疑似出現驗證視窗（多視窗）：本視窗停手，旗標清掉前不動（其他視窗照常）
         import verifyhalt
         print(f'{src}：' + verifyhalt.message(vh), file=sys.stderr)
         return EXIT_UNKNOWN_SCREEN

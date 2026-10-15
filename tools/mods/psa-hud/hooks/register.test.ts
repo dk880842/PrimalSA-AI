@@ -848,7 +848,7 @@ test('verify-halt.json 存在：單視窗也在最上面紅字警示（沒有檔
   const t = await paneTexts($)
   expect(t[0]).toBe(HD('PrimalSA · 戰鬥中（完整・演出中）'))
   const msg = t.slice(1, 5).map(CELL).join(' ').replace(/\s+/g, ' ')                 // 折行但訊息與指令完整
-  expect(msg).toBe(`PrimalSA 停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} uikit：連 3 次不認得 人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA`)
+  expect(msg).toBe(`PrimalSA 停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} uikit：連 3 次不認得 畫面恢復 5 秒自動清；手動：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA`)
   expect(t.slice(1, 5).every(x => x.startsWith('│ ！') || x.startsWith('│      │'))).toBe(true)
 })
 
@@ -872,7 +872,7 @@ test('多視窗：PrimalSA2 自己的 verify-halt.json → 只在 PrimalSA2 段�
   const t = await paneTexts($)
   const i2 = t.findIndex(x => x.startsWith('┌ p2 PrimalSA2'))
   expect(i2).toBeGreaterThan(0)
-  expect(t.slice(i2 + 1, i2 + 4).map(CELL).join(' ').replace(/\s+/g, ' ')).toBe(`停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} watch：不認得 10 秒 人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2`)
+  expect(t.slice(i2 + 1, i2 + 4).map(CELL).join(' ').replace(/\s+/g, ' ')).toBe(`停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} watch：不認得 10 秒 畫面恢復 5 秒自動清；手動：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2`)
   expect(t.slice(0, i2).some(x => x.includes('停手：驗證旗標'))).toBe(false)
 })
 
@@ -1039,7 +1039,7 @@ test('winTable：沒有 buff 不顯示 Buff 列；不遇敵 / buff 時間未知 
   expect(winTable({ w: WV({ hp: HP(), bf: { text: '智慧果 ?（bufftime.py read）', warn: true } }), prog: [] }).find(x => x.text.includes('智慧果'))!.tone).toBe('yellow')
   // 多件警示 = 多列；停手指令長 → 折行不截掉
   const halt = winTable({ w: WV({ hp: HP(), al: [
-    { text: '停手：驗證旗標 uikit：連 3 次不認得', tone: 'red' }, { text: '人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2', tone: 'red' },
+    { text: '停手：驗證旗標 uikit：連 3 次不認得', tone: 'red' }, { text: '畫面恢復 5 秒自動清；手動：uv run --no-project python tools/gui/verifyhalt.py clear PrimalSA2', tone: 'red' },
   ] }), prog: [] }, 64, true).map(x => x.text)
   expect(halt.filter(x => x.startsWith('│ ！   │')).length).toBe(2)
   expect(halt.join('').replace(/[│\s]/g, '')).toContain('verifyhalt.pyclearPrimalSA2')

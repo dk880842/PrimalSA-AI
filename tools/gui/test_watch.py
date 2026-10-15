@@ -1284,5 +1284,81 @@ fk.on_call = None
 fk.pixel = main_px
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
 
+# ---------------------------------------------------------------- 驗證停手旗標自動清（使用者 2026-10-16）
+import verifyhalt  # noqa: E402
+import actlog  # noqa: E402
+import clients  # noqa: E402
+import logpaths  # noqa: E402
+QEV = logpaths.p(clients.npath('quest-events.log'))
+
+
+def vh_set(clk, src='uikit', reason='連 3 次不認得', eid=None):
+    """直接寫本視窗旗標（ts 用假時鐘；trip 單視窗不寫，所以不走 trip）"""
+    verifyhalt.clear(why='test')
+    d = {'ts': clk.t - 1, 'client': 'PrimalSA', 'src': src, 'reason': reason}
+    if eid is not None:
+        d['err_id'] = eid
+    verifyhalt.path().parent.mkdir(parents=True, exist_ok=True)
+    verifyhalt.path().write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
+
+
+def run_s(w, clk, secs, step=0.5):
+    for _ in range(int(round(secs / step))):
+        w.cycle(); clk.t += step
+
+
+w, clk, fk = make('vhauto')
+eid = errlog.add('驗證停手（測試）', source='uikit')
+vh_set(clk, eid=eid)
+fk.pixel = UNK
+run_s(w, clk, 40)
+check('旗標存在 + 畫面一直 unknown 40 s → 絕不清', verifyhalt.active() is not None and watchstate.read()['flags']['verify_halt'] is True)
+fk.pixel = (0, px_out('idle'), '')
+run_s(w, clk, 3)
+fk.pixel = UNK
+run_s(w, clk, 1)
+check('短暫恢復主畫面 3 s 又 unknown → 不清', verifyhalt.active() is not None)
+fk.pixel = (0, px_out('idle'), '')
+run_s(w, clk, 4)
+check('恢復主畫面未滿 5 s → 還在', verifyhalt.active() is not None)
+run_s(w, clk, 2)
+st = watchstate.read()
+check('主畫面連續 ≥ 5 s（≥ 6 次讀圖）→ 自動清除、flags.verify_halt=False、verify_autoclear 帶狀態',
+      verifyhalt.active() is None and st['flags']['verify_halt'] is False and (st['flags'].get('verify_autoclear') or {}).get('label') == '主畫面',
+      str(st['flags']))
+row = next((r for r in errlog._read(errlog.LOG) if r.get('id') == eid), {})
+check('清除時設旗標那筆 errlog 補 fix（自動清除）', '自動清除' in (row.get('fix') or ''), str(row))
+al = actlog.LOG.read_text(encoding='utf-8') if actlog.LOG.exists() else ''
+check('actions.log 一筆「verifyhalt 自動清除（畫面已恢復：主畫面）」', 'verifyhalt 自動清除（畫面已恢復：主畫面）' in al, al[-200:])
+qe = QEV.read_text(encoding='utf-8') if QEV.exists() else ''
+check('quest-events.log 一筆 verifyhalt 自動清除', 'verifyhalt：verifyhalt 自動清除（畫面已恢復：主畫面）' in qe, qe[-200:])
+# 對話框（驗證視窗可能長得像 NPC 對話框）不清
+w, clk, fk = make('vhauto2')
+vh_set(clk)
+fk.pixel = (0, px_out('dialog'), '')
+run_s(w, clk, 20)
+check('對話框 20 s → 不清（驗證視窗可能像對話框）', watchstate.read()['screen']['state'] == 'dialog' and verifyhalt.active() is not None)
+# 手動設的不自動清
+vh_set(clk, src='manual', reason='手動')
+fk.pixel = (0, px_out('idle'), '')
+run_s(w, clk, 20)
+check('手動 set 的旗標（src=manual）主畫面 20 s 也不清', verifyhalt.active() is not None)
+# 讀圖時間早於旗標時間的不算（剛設的旗標不會被前一輪的畫面清掉）
+w, clk, fk = make('vhauto3')
+fk.pixel = (0, px_out('idle'), '')
+vh_set(clk)
+verifyhalt.path().write_text(json.dumps({'ts': clk.t + 100, 'client': 'PrimalSA', 'src': 'uikit', 'reason': '未來'}), encoding='utf-8')
+run_s(w, clk, 20)
+check('讀圖時間早於旗標時間 → 不算', verifyhalt.active() is not None)
+run_s(w, clk, 90)
+check('之後主畫面穩定 → 清除', verifyhalt.active() is None)
+# 面板上疊已知彈窗（道具說明彈窗等 popup_*）算已知正常
+check('normal_screen：主畫面 / 跑路 / 戰鬥 / 認得的面板 / popup_* = 正常；dialog / reward / select / unknown / login / 提示視窗 = 不正常',
+      all(screen_sigs.normal_screen(s_, a_) for s_, a_ in (('idle', []), ('walking', []), ('battle', []), ('panel', []), ('unknown', ['popup_item', 'over_bag'])))
+      and not any(screen_sigs.normal_screen(s_, a_) for s_, a_ in (('dialog', []), ('reward', []), ('select', []), ('unknown', []), ('unknown', ['login']),
+                                                                   ('unknown', ['loading']), ('idle', ['notice_dialog']), ('error', []), ('minimized', []), (None, []))))
+verifyhalt.clear(why='test')
+winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
+
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

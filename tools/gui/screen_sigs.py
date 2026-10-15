@@ -532,6 +532,23 @@ def popup_over_panel(px: dict):
 ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗；popup_item = 背包道具說明彈窗）
 
 
+NORMAL_STATES = ('idle', 'walking', 'battle', 'panel')   # 驗證停手旗標自動清認的「已知正常畫面」（verifyhalt.AutoClear，使用者 2026-10-16）
+
+
+def normal_screen(state, annot=()) -> bool:
+    """驗證停手旗標可以自動清的畫面（watch 每輪 / uikit.preflight 現場讀共用）：
+    主畫面 idle / 自動跑路 walking / 戰鬥 battle / 認得的面板 panel，而且沒有任何附註（提示視窗 notice_dialog 等）；
+    或 unknown 但附註是面板上疊已知彈窗（popup_*，ANNOT_KNOWN）。
+    刻意不算：對話框 dialog（驗證視窗是 NpcScript，可能長得像對話框）、獲得物品 reward、選擇對象 select、
+    登入 / 選角 / 載入 / 全黑、其他 unknown、讀不到 / 最小化 / 沒開遊戲"""
+    annot = list(annot or [])
+    if state in NORMAL_STATES:
+        return not annot
+    if state == 'unknown':
+        return any(a.startswith('popup_') and a in ANNOT_KNOWN for a in annot)
+    return False
+
+
 def annot_points() -> list:
     """annotate 需要的取樣點（不在 points() 裡；watch 的 pixel 呼叫把兩組一起讀，classify 的 points() 不變）"""
     seen, out = set(points()), []

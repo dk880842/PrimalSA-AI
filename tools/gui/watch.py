@@ -20,6 +20,9 @@
 **零輸入**：只送 gui.ps1 的 pixel / info（一律帶 -NoRestore 1：遊戲最小化時不還原視窗）與 stat.ps1 / ocr.ps1 / digitmatch.ps1（每 3 s 一次讀 HUD 數值：digitmatch 樣板比對第一順位，讀不出的欄位才用 stat.ps1 補；每分鐘最多一次用 stat 補學樣板）。
 不送任何點擊、按鍵、走路、fg / max / seq / waitpix（shot 只在 unknown_long 觸發存證用一次）；test_watch.py 用白名單與 AST 檢查把關。
 watch 不上傳截圖（只有 unknown_long 觸發時唯讀存一張到 tools/.cache/watch-alerts/），不做驗證視窗判斷（那是 quest 那一層）；state 不能當點擊依據。
+驗證停手旗標自動清（使用者 2026-10-16）：本視窗 verify-halt.json 存在時，每輪把畫面餵給 verifyhalt.AutoClear；
+已知正常畫面（screen_sigs.normal_screen）連續 5 秒且 ≥ 6 次 → verifyhalt.auto_clear（寫 log、errlog 補 fix），state.flags.verify_autoclear 記最後一次。
+unknown / 對話框等一律不清（只刪旗標檔，仍是零輸入）。
 """
 import argparse
 import json
@@ -266,6 +269,8 @@ class Watcher:
         self.known_since = None
         self.unk_alert = None            # {'kind','since','msg','shot'} + 內部 'err_id'
         self.q_alerts: list = []
+        self.vh_auto = verifyhalt.AutoClear()   # 驗證停手旗標自動清的計時（2026-10-16）
+        self.vh_cleared = None           # 最後一次自動清：{'ts', 'label'}（state.flags.verify_autoclear）
         self.q_off = self._qlog_size()   # 啟動時記下檔案大小，只看之後新增的行
         self.last_qscan = mono()
         # 人物名 / 寵物名（第 7 階段）
@@ -435,6 +440,7 @@ class Watcher:
             self.cycle_ms.append(self.cur_cycle_ms)
         self._update_interval()
         self._update_alerts()
+        self._autoclear_verify()
         self._maybe_ocr(kind)
         self._maybe_buffs(kind)
         self.flush()
@@ -543,6 +549,24 @@ class Watcher:
                     self._clear_unknown(st)
             else:
                 self.known_since = None
+
+    def _autoclear_verify(self) -> None:
+        """本視窗驗證停手旗標存在 → 這輪畫面餵 AutoClear（已知正常畫面穩定 5 秒 / 6 次才清；unknown 等任何一次都歸零）"""
+        try:
+            d = verifyhalt.active()
+        except Exception:      # noqa: BLE001
+            return
+        if d is None:
+            self.vh_auto.feed(None, False, self.mono())
+            return
+        normal = screen_sigs.normal_screen(self.cur, self.annot)
+        if not self.vh_auto.feed(d, normal, self.mono(), self.screen_ts):
+            return
+        lab = screen_sigs.label({'state': self.cur, **self.cls}, self.annot)
+        if verifyhalt.auto_clear(d, lab, 'watch'):
+            self.vh_cleared = {'ts': self.clock(), 'label': lab}
+            self._flags_cache = None
+        self.vh_auto.reset()
 
     def _snap_alert(self):
         """unknown_long 觸發時存一張截圖（gui shot，唯讀）→ 回路徑；失敗 / 遊戲最小化 → None。只留最新 ALERT_SHOT_KEEP 張"""
@@ -870,7 +894,7 @@ class Watcher:
                        'full': self.cls['full'], 'cmd': self.cls['cmd'], 'auto_off': self.cls['auto_off'], 'gold': self.cls['gold'], 'panel': self.cls['panel'],
                        'enc_on': self.enc_on, 'stable_n': self.stable_n, 'src': 'pixel'},
             'hud': self._hud_section(now),
-            'flags': dict(self._flags(mono), verify_suspect=bool(self._alerts())),
+            'flags': dict(self._flags(mono), verify_suspect=bool(self._alerts()), verify_autoclear=self.vh_cleared),
             'alerts': self._alerts(),
         }
         return d

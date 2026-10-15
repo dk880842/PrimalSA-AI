@@ -203,9 +203,12 @@ check('status 退出碼 9', verifyhalt.main(['status']) == 9)
 import uikit  # noqa: E402
 import netwatch  # noqa: E402
 import watchstate  # noqa: E402
+uikit.watch_state = lambda *a, **k: None               # watch 不在（真的 state.json 不影響）
+VS_READS = []
+uikit.verify_screen = lambda: VS_READS.append(1) or ('unknown', [], '不認得的畫面')   # 旗標自動清的現場讀圖：預設不認得（照舊 9），不碰遊戲
 screen_reads = []
 uikit.screen = lambda *a, **k: screen_reads.append(1) or {'state': 'idle'}
-check('uikit.preflight → 9（不讀畫面）', uikit.preflight('t') == uikit.EXIT_UNKNOWN_SCREEN and not screen_reads)
+check('uikit.preflight → 9（不讀畫面；自動清現場讀一次就因 unknown 放棄）', uikit.preflight('t') == uikit.EXIT_UNKNOWN_SCREEN and not screen_reads and len(VS_READS) == 1)
 check('uikit.watch_preflight_ok → False', uikit.watch_preflight_ok() is False)
 r = netwatch.check_and_reconnect(src='t')
 check('netwatch.check_and_reconnect → status verify（不點）', r['status'] == 'verify')
@@ -289,6 +292,88 @@ VH.write_text('壞檔', encoding='utf-8')
 check('壞檔 → 算主視窗的（保守）', verifyhalt.active() is not None and verifyhalt.active(client='PrimalSA2') is None)
 verifyhalt.clear()
 check('migrate_legacy 沒舊檔 → None', verifyhalt.migrate_legacy() is None)
+
+# ---- 旗標自動清（使用者 2026-10-16：偵測保留、旗標自動清）----
+import actlog  # noqa: E402
+_procs = os.environ.get('PSA_TEST_PROCS')
+ac = verifyhalt.AutoClear()
+F1 = {'ts': 100.0, 'src': 'uikit', 'reason': 'x'}
+check('AutoClear：unknown 一直餵 → 不清', not any(ac.feed(F1, False, t, 200.0) for t in range(60)))
+r = [ac.feed(F1, True, 10 + i * 0.5, 200.0) for i in range(10)]
+check('AutoClear：正常 0.5 s 一次，第 11 次（滿 5 s 且 ≥ 6 次）才 True', not any(r) and ac.feed(F1, True, 15.0, 200.0))
+ac = verifyhalt.AutoClear()
+r = [ac.feed(F1, True, i, 200.0) for i in range(4)] + [ac.feed(F1, False, 4, 200.0)] + [ac.feed(F1, True, 5 + i, 200.0) for i in range(5)]
+check('AutoClear：正常 4 s 後一次 unknown → 歸零重算', not any(r) and ac.feed(F1, True, 10, 200.0))
+ac = verifyhalt.AutoClear(need_s=5, need_n=6)
+check('AutoClear：時間夠但次數不足（降頻）→ 不清', not any(ac.feed(F1, True, i * 3, 200.0) for i in range(5)) and ac.feed(F1, True, 15, 200.0))
+ac = verifyhalt.AutoClear()
+check('AutoClear：讀圖早於旗標時間 → 不算', not any(ac.feed(F1, True, i, 50.0) for i in range(20)))
+check('AutoClear：手動 set（src=manual）→ 永不清', not any(ac.feed({'ts': 1, 'src': 'manual', 'reason': 'm'}, True, i, 200.0) for i in range(30)))
+ac = verifyhalt.AutoClear()
+for i in range(10):
+    ac.feed(F1, True, i * 0.5, 200.0)
+check('AutoClear：換了一筆旗標 → 重新計時', not ac.feed(dict(F1, ts=101.0), True, 5.0, 200.0))
+check('AutoClear：沒有旗標 → False', not ac.feed(None, True, 99, 200.0))
+
+os.environ['PSA_TEST_PROCS'] = 'PrimalSA,PrimalSA2'
+verifyhalt.clear()
+verifyhalt.trip('畫面連 3 次不認得', 'grind')
+d0 = verifyhalt.active()
+check('trip 時 errlog id 存進旗標', isinstance(d0.get('err_id'), int))
+check('auto_clear：旗標已換成別筆 → 不清', verifyhalt.auto_clear(dict(d0, ts=1.0), '主畫面') is False and verifyhalt.active() is not None)
+check('auto_clear：同一筆 → 清掉', verifyhalt.auto_clear(d0, '主畫面', 'watch') is True and verifyhalt.active() is None)
+al = actlog.LOG.read_text(encoding='utf-8')
+check('auto_clear 寫 actions.log「verifyhalt 自動清除（畫面已恢復：主畫面）」', 'verifyhalt 自動清除（畫面已恢復：主畫面）' in al)
+row = next(r for r in errlog._read(errlog.LOG) if r['id'] == d0['err_id'])
+check('auto_clear 把設旗標那筆 errlog 補 fix', '自動清除' in (row.get('fix') or ''), str(row))
+qe = (LD / 'quest-events.log').read_text(encoding='utf-8')
+check('auto_clear 寫 quest-events.log 一行', 'verifyhalt 自動清除（畫面已恢復：主畫面）' in qe)
+check('停手訊息說明會自動清 + 手動指令', '自動清' in verifyhalt.message(d0) and 'clear PrimalSA' in verifyhalt.message(d0))
+
+# preflight（watch 不在）現場連讀：已知正常畫面穩定 5 秒 → 清掉繼續；中途 unknown → 照舊 9；watch 在 → 不讀、交給 watch
+_clk, _slp = uikit.clock, uikit.sleep
+T = [1e10]                                               # 牆鐘晚於旗標時間
+uikit.clock = lambda: T[0]
+def _adv(s):
+    T[0] += s
+uikit.sleep = _adv
+seq = []
+def _vs():
+    VS_READS.append(1)
+    return seq.pop(0) if seq else ('idle', [], '主畫面')
+uikit.verify_screen = _vs
+uikit.screen = lambda *a, **k: {'state': 'idle'}
+_lc2, _ng2 = layout.current, netwatch.guard
+layout.current = lambda *a, **k: uikit.LAYOUT
+netwatch.guard = lambda src, **k: {'status': 'ok'}
+verifyhalt.trip('不認得', 'quest')
+VS_READS.clear()
+rc = uikit.preflight('pfauto')
+check('preflight：watch 不在 + 主畫面穩定 → 自動清旗標、回 0（讀 6 次、約 5 秒）', rc == 0 and verifyhalt.active() is None and len(VS_READS) == verifyhalt.AUTO_CLEAR_N, f'rc={rc} reads={len(VS_READS)}')
+verifyhalt.trip('不認得', 'quest')
+VS_READS.clear()
+seq[:] = [('idle', [], '主畫面')] * 3 + [('unknown', [], '不認得的畫面')]
+check('preflight：讀到一半 unknown → 9、旗標保留', uikit.preflight('pfauto') == 9 and verifyhalt.active() is not None and len(VS_READS) == 4)
+VS_READS.clear()
+seq[:] = [('unknown', ['popup_item', 'over_bag'], '面板：背包＋道具說明彈窗')] * 6
+check('preflight：背包＋道具說明彈窗穩定 → 自動清、回 0', uikit.preflight('pfauto') == 0 and verifyhalt.active() is None)
+verifyhalt.trip('不認得', 'quest')
+VS_READS.clear()
+seq[:] = [('dialog', [], '對話框')]
+check('preflight：對話框 → 不清、9', uikit.preflight('pfauto') == 9 and verifyhalt.active() is not None)
+uikit.watch_state = lambda *a, **k: {'flags': {}}
+VS_READS.clear()
+check('preflight：watch 在跑 → 不現場讀（交給 watch）、9', uikit.preflight('pfauto') == 9 and not VS_READS and verifyhalt.active() is not None)
+uikit.watch_state = lambda *a, **k: None
+verifyhalt.clear()
+verifyhalt.write('人手動', src='manual')
+VS_READS.clear()
+check('preflight：手動 set 的旗標 → 不讀不清、9', uikit.preflight('pfauto') == 9 and not VS_READS and verifyhalt.active() is not None)
+verifyhalt.clear()
+uikit.clock, uikit.sleep = _clk, _slp
+layout.current, netwatch.guard = _lc2, _ng2
+uikit.verify_screen = lambda: VS_READS.append(1) or ('unknown', [], '不認得的畫面')
+os.environ['PSA_TEST_PROCS'] = _procs
 
 # watch.py：unknown_long / quest 警報兩處都 trip，state.flags 帶 verify_halt（靜態）
 ws = (GUI / 'watch.py').read_text(encoding='utf-8')

@@ -11,7 +11,16 @@ quest.py 的驗證警報）→ 只寫**那個視窗自己的**旗標，只有那
   - follow 每輪開頭 → 9
   - gui.ps1 的 click / dclick / drag / key / typeq（psawin.ps1 Test-PsaVerifyHalt，依請求的 PSA_CLIENT）→ 不送輸入、exit 9（最後一道保險）
   - watch.py 不停（零輸入），state.flags.verify_halt = True
-旗標**不會自己消失**：人處理完驗證視窗後手動清 `uv run --no-project python tools/gui/verifyhalt.py clear <程序名>`。
+**自動清（使用者 2026-10-16：偵測保留、旗標自動清；當天 7 次以上誤設〔刪除確認窗、道具說明彈窗、手動開的面板、新視窗剛開〕）**：
+  旗標存在時，本視窗畫面連續 AUTO_CLEAR_S（5）秒、至少 AUTO_CLEAR_N（6）次讀圖都是「已知正常畫面」
+  （screen_sigs.normal_screen：主畫面 idle / 自動跑路 walking / 戰鬥 battle / 認得的面板 panel〔沒有提示視窗等附註〕，
+  或面板上疊已知彈窗 popup_*）→ 自動清掉，寫 actions.log、quest-events.log「verifyhalt 自動清除（畫面已恢復：<狀態>）」、
+  把設旗標時那筆 errlog 補 fix（psa-hud 錯誤表看得到）。判斷邏輯 = AutoClear（一份，兩個呼叫端共用）：
+  - watch.py（常駐、零輸入、每 0.5 s 讀一次）每輪餵一次 → 主要的清除者
+  - watch 沒在跑的視窗：uikit.preflight 遇到旗標時自己現場連讀 6 次（間隔 1 s）判斷，通過就清掉繼續、否則照舊 9
+  **絕不清**：任何一次讀到 unknown / 對話框（驗證視窗是 NpcScript，可能長得像對話框）/ 獲得物品 / 選擇對象 / 登入 / 選角 /
+  載入 / 全黑 / 主畫面帶提示視窗 / 最小化 / 讀不到 → 計時歸零；讀圖時間早於旗標時間的不算；`set` 手動設的（src=manual）不自動清。
+  手動清照舊：`uv run --no-project python tools/gui/verifyhalt.py clear <程序名>`。
 
 只在「多視窗情境」才寫（clients.multi_window：非主視窗，或主視窗時還有別的 PrimalSA* 在跑；查不到程序清單當作多視窗）。
 單一視窗時不寫，行為與改版前完全相同（那個腳本本來就停了，使用者處理完重跑即可；只有自己 = 各自停手）。
@@ -22,10 +31,11 @@ quest.py 的驗證警報）→ 只寫**那個視窗自己的**旗標，只有那
   import verifyhalt
   verifyhalt.trip('畫面連 3 次不認得', src='grind')   # 多視窗才寫（本視窗）；回 True = 有寫 / 已經有
   verifyhalt.active()                                  # → dict（本視窗旗標內容）或 None
+  ac = verifyhalt.AutoClear(); ac.feed(flag, normal, now, read_wall)   # True = 該清了 → verifyhalt.auto_clear(flag, 狀態文字, src)
 命令列：
   python tools/gui/verifyhalt.py [status [程序名|all]]   列出各視窗旗標（退出碼 0 = 都沒有、9 = 有）；不給 = all
-  python tools/gui/verifyhalt.py clear [程序名|all]      人處理完驗證視窗後清除；不給 = 本視窗（PSA_CLIENT，不設 = PrimalSA）
-  python tools/gui/verifyhalt.py set 原因                手動設本視窗（PSA_CLIENT）的旗標
+  python tools/gui/verifyhalt.py clear [程序名|all]      手動清除（畫面恢復正常會自動清，這是備用）；不給 = 本視窗（PSA_CLIENT，不設 = PrimalSA）
+  python tools/gui/verifyhalt.py set 原因                手動設本視窗（PSA_CLIENT）的旗標（不會自動清）
 """
 import json
 import os
@@ -35,9 +45,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import clients  # noqa: E402
+import logpaths  # noqa: E402
 
 NAME = 'verify-halt.json'
 EXIT_VERIFY = 9                                                  # = uikit.EXIT_UNKNOWN_SCREEN
+AUTO_CLEAR_S = 5.0               # 自動清：已知正常畫面要連續這麼久（使用者 2026-10-16）
+AUTO_CLEAR_N = 6                 # 而且至少這麼多次讀圖（watch 降頻到 2～4 s 一輪時，時間會拉長到 6 次為止）
+MANUAL_SRC = 'manual'            # `verifyhalt.py set` 手動設的旗標：不自動清
 
 
 def _base() -> Path:
@@ -118,8 +132,10 @@ def clear_cmd(n: str | None = None) -> str:
 def message(d: dict | None, client: str | None = None) -> str:
     """給腳本印的停手訊息（只停這個視窗）"""
     n = clients.name() if client is None else clients.normalize(client)
+    auto = ('手動設的旗標不會自動清' if (d or {}).get('src') == MANUAL_SRC
+            else f'畫面回到已知正常狀態穩定 {int(AUTO_CLEAR_S)} 秒會自動清（watch / 下次 preflight）')
     return (f'本視窗（{n}）驗證停手旗標存在（{describe(d)}）→ 不動作（鐵則 5；其他視窗不受影響）；'
-            f'人處理完驗證視窗後清：{clear_cmd(n)}')
+            f'{auto}；手動清：{clear_cmd(n)}')
 
 
 def migrate_legacy() -> str | None:
@@ -149,7 +165,17 @@ def write(reason: str, src: str = '', p=None) -> bool:
     p = Path(p)
     if p.exists():
         return True
+    eid = None
+    try:                   # 先寫 errlog 拿 id 存進旗標：自動清時補 fix（psa-hud 錯誤表顯示已恢復）
+        import errlog
+        eid = errlog.add(f'驗證停手（只停 {n}）：{reason}（{src}）；這個視窗的腳本會停、其他視窗照常；'
+                         + ('手動設的不會自動清' if src == MANUAL_SRC else f'畫面恢復正常穩定 {int(AUTO_CLEAR_S)} 秒自動清')
+                         + f'，或手動 verifyhalt.py clear {n}', source=src or 'verifyhalt')
+    except Exception:      # noqa: BLE001  紀錄失敗不影響停手
+        pass
     d = {'ts': time.time(), 'client': n, 'src': src, 'reason': str(reason)[:300], 'pid': os.getpid()}
+    if eid is not None:
+        d['err_id'] = eid
     tmp = p.with_name(p.name + f'.{os.getpid()}.tmp')
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
@@ -157,12 +183,6 @@ def write(reason: str, src: str = '', p=None) -> bool:
         os.replace(tmp, p)
     except OSError:
         return False
-    try:
-        import errlog
-        errlog.add(f'驗證停手（只停 {n}）：{reason}（{src}）；這個視窗的腳本會停、其他視窗照常，處理完跑 verifyhalt.py clear {n}',
-                   source=src or 'verifyhalt')
-    except Exception:      # noqa: BLE001  紀錄失敗不影響停手
-        pass
     try:
         import actlog
         actlog.add('verifyhalt', f'SET {src}：{reason}')
@@ -185,8 +205,9 @@ def trip(reason: str, src: str = '', multi=None, p=None) -> bool:
         return False
 
 
-def clear(p=None, client: str | None = None) -> bool:
-    """清某個視窗（不給 = 本視窗）的旗標；舊共用旗標屬於該視窗也一起清。回 True = 有清掉東西"""
+def clear(p=None, client: str | None = None, why: str | None = None) -> bool:
+    """清某個視窗（不給 = 本視窗）的旗標；舊共用旗標屬於該視窗也一起清。回 True = 有清掉東西。
+    why = actions.log 的說明（不給 = 「CLEAR <程序名>（人工清除）」）"""
     if p is not None:
         targets = [Path(p)]
         n = clients.name()
@@ -208,10 +229,86 @@ def clear(p=None, client: str | None = None) -> bool:
     if done:
         try:
             import actlog
-            actlog.add('verifyhalt', f'CLEAR {n}（人工清除）')
+            actlog.add('verifyhalt', why or f'CLEAR {n}（人工清除）')
         except Exception:      # noqa: BLE001
             pass
     return done
+
+
+def _key(d: dict | None):
+    """一筆旗標的身分（同一筆 = 時間 / 來源 / 原因都一樣）"""
+    return None if not d else (d.get('ts'), d.get('src'), d.get('reason'))
+
+
+class AutoClear:
+    """旗標自動清的計時器（watch 每輪 / preflight 現場連讀共用，判斷只有這一份）。
+    feed(旗標, 這次讀圖是否已知正常, 單調時間, 讀圖的牆鐘時間) → True = 該清了：
+      - 沒旗標 / 手動設的（src=manual）→ 歸零、False
+      - 換了一筆旗標 → 重新計時
+      - 不正常（unknown 等，見 screen_sigs.normal_screen）或讀圖早於旗標時間 → 歸零、False
+      - 連續正常 ≥ need_s 秒且 ≥ need_n 次 → True"""
+
+    def __init__(self, need_s: float = AUTO_CLEAR_S, need_n: int = AUTO_CLEAR_N):
+        self.need_s, self.need_n = need_s, need_n
+        self.key = None
+        self.reset()
+
+    def reset(self) -> None:
+        self.t0 = None
+        self.n = 0
+
+    def feed(self, flag: dict | None, normal: bool, now: float, read_wall: float | None = None) -> bool:
+        if not flag or flag.get('src') == MANUAL_SRC:
+            self.key = None
+            self.reset()
+            return False
+        k = _key(flag)
+        if k != self.key:
+            self.key = k
+            self.reset()
+        ts = flag.get('ts')
+        if not normal or (isinstance(ts, (int, float)) and read_wall is not None and read_wall < ts):
+            self.reset()
+            return False
+        if self.t0 is None:
+            self.t0 = now
+        self.n += 1
+        return now - self.t0 >= self.need_s and self.n >= self.need_n
+
+
+def note_event(msg: str) -> None:
+    """寫本視窗 quest-events.log 一行（「verifyhalt：…」）；失敗不丟例外"""
+    try:
+        p = logpaths.p(clients.npath('quest-events.log'))
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, 'a', encoding='utf-8') as f:
+            f.write(f'{time.strftime("%Y-%m-%d %H:%M:%S")} verifyhalt：{msg}\n')
+    except OSError:
+        pass
+
+
+def auto_clear(expected: dict, label: str, src: str = 'watch') -> bool:
+    """AutoClear 判定該清 → 清本視窗旗標（清之前再讀一次：已經換成別筆就不清）。
+    寫 actions.log / quest-events.log「verifyhalt 自動清除（畫面已恢復：<label>）」、設旗標那筆 errlog 補 fix、stderr 印一行。回 True = 有清"""
+    try:
+        n = clients.name()
+        cur = active()
+        if not cur or _key(cur) != _key(expected) or cur.get('src') == MANUAL_SRC:
+            return False
+        msg = f'verifyhalt 自動清除（畫面已恢復：{label}）'
+        if not clear(why=f'{msg} {n}（{src}；原旗標 {describe(cur)}）'):
+            return False
+        note_event(f'{msg}；原旗標 {describe(cur)}（{src} 判斷，連續 {int(AUTO_CLEAR_S)} 秒以上已知正常畫面）')
+        if cur.get('err_id') is not None:
+            try:
+                import errlog
+                errlog.fix(cur['err_id'], f'{msg}（{src}）')
+            except Exception:      # noqa: BLE001
+                pass
+        print(f'{msg}：{n}（{src}）', file=sys.stderr, flush=True)
+        return True
+    except Exception:      # noqa: BLE001  清不掉 = 旗標還在 = 照舊停手（安全方向）
+        return False
 
 
 def known_clients() -> list[str]:

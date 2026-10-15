@@ -745,7 +745,8 @@ export function haltLines(client: string, h: Halt | undefined, state: WState | n
     const d = parseHalt(h.text) ?? {}                 // 壞檔也當旗標存在
     const when = typeof d.ts === 'number' ? ` ${stamp(d.ts * 1000)}` : ''
     out.push({ text: `${multi ? '' : `${client} `}停手：驗證旗標${when} ${d.src ?? ''}：${d.reason ?? ''}${h.legacy ? '（舊共用旗標檔）' : ''}`.replace(/\s+/g, ' ').trim(), tone: 'red' })
-    out.push({ text: `人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear ${client}`, tone: 'red' })
+    // 2026-10-16 起旗標會自動清（watch / preflight：已知正常畫面穩定 5 秒；verifyhalt.AutoClear），手動 set 的不會；手動清保留
+    out.push({ text: `${d.src === 'manual' ? '手動設的不自動清' : '畫面恢復 5 秒自動清'}；手動：uv run --no-project python tools/gui/verifyhalt.py clear ${client}`, tone: 'red' })
   }
   if (multi && state?.flags?.verify_suspect) out.push({ text: '疑似答題 / 驗證視窗，請人工處理（只停這個視窗）', tone: 'red' })
   return out
