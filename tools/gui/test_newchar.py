@@ -96,6 +96,7 @@ class FakeTools:
         self.worn = {r: [] for r in ROLES}
         self.auto = {r: False for r in ROLES}
         self.points_rc = 15
+        self.healon = {r: False for r in ROLES}
         self.quest_rc = {'初入石器': 0, '覲見村長': 0}
         self.use_noop = set()             # 使用了但沒消失的道具（模擬按鈕落空）
 
@@ -189,6 +190,16 @@ class FakeTools:
             self.auto[r] = True
         return 0, {r: {'自動戰鬥': True} for r in plan_}, '', {'changed': changed}
 
+    def ass_heal_set(self, roles):
+        self.calls.append(('heal', tuple(roles)))
+        rc = self._rc('heal')
+        if rc:
+            return rc, {}, '找不到標籤', {}
+        changed = {r: ['精靈補血'] for r in roles if not self.healon[r]}
+        for r in roles:
+            self.healon[r] = True
+        return 0, {r: {'精靈補血': {'on': True}} for r in roles}, '', {'changed': changed}
+
     def points_set(self, leader, verify):
         self.calls.append(('points', leader, tuple(verify)))
         return self.points_rc, {}, '方案不同' if self.points_rc else '', {}
@@ -226,6 +237,8 @@ check('禮盒內容存倉：公共 4 樣 × 5、1轉新手禮盒 每人個人倉
 check('寵物：迪基格斯 出戰、瑪斯貝卡 騎乘（allow_mount）', all(T.pets[r] == {'迪基格斯': '出戰', '瑪斯貝卡': '騎乘'} for r in ROLES)
       and ('pet', '瑪斯貝卡', '騎乘', True) in T.calls)
 check('外掛自動戰鬥：5 人、隊長最後', ('ass', ('DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO')) in T.calls and all(T.auto.values()))
+check('精靈補血：5 人（隊長最後）打勾、在自動戰鬥之後、加點之前', ('heal', ('DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO')) in T.calls and all(T.healon.values())
+      and T.names().index('ass') < T.names().index('heal') < T.names().index('points') and 'heal' in nc.LAST['done'])
 check('加點：隊長設、其他 4 人看', ('points', 'DKBO', ('DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')) in T.calls)
 check('組隊：隊長 DKBO、5 人', ('team', 'DKBO', 5) in T.calls)
 check('任務：初入石器 → 覲見村長', [c[1] for c in T.calls if c[0] == 'quest'] == ['初入石器', '覲見村長'])
@@ -478,6 +491,33 @@ check('plan 顯示略過', rc == 0 and '略過（--skip）' in out and nc.LAST['
 rc, out = quiet(nc.main, ['plan', '--skip', 'points,buy'])
 check('CLI --skip points,buy', rc == 0 and out.count('略過（--skip）') == 2)
 check('--skip 測試 0 次 powershell', PS_CALLS == [])
+
+# ---- heal 步驟（精靈補血）----
+reset_progress()
+T = FakeTools(rc={'heal': 17})
+rc, out = quiet(nc.run, tools=T, fresh=True, skip=['points'])
+check('heal 失敗（ass 17）→ 195、info.ass_rc = 17 / ass_step = heal、後面的步驟沒跑', rc == nc.EXIT_BATTLE and nc.LAST.get('ass_rc') == 17 and nc.LAST.get('ass_step') == 'heal'
+      and 'team' not in T.names() and 'heal' not in nc.LAST['done'], f'rc={rc} {nc.LAST}')
+T = FakeTools(rc={'heal': 8})
+rc, out = quiet(nc.run, tools=T, fresh=True, skip=['points'])
+check('heal 回 8（戰鬥中）→ 原碼停手', rc == 8, f'rc={rc}')
+reset_progress()
+T = FakeTools()
+rc, out = quiet(nc.run, tools=T, fresh=True, skip=['heal', 'points'])
+check('--skip heal：不呼叫 ass_heal_set、不寫進完成', rc == 0 and 'heal' not in T.names() and 'heal' not in nc.LAST['done'] and nc.LAST['skipped'] == ['heal', 'points'], f'rc={rc}')
+reset_progress()
+nc.save_progress({'ts': __import__('time').time(), 'client': nc.clients.name(), 'done': ['boxes', 'pets', 'store', 'battle'], 'pending': {}})
+T = FakeTools()
+T.points_rc = 0
+rc, out = quiet(nc.run, from_stage='points', tools=T)
+check('舊進度檔沒有 heal：--from points 照跑（不報前置缺漏）', rc == 0 and 'heal' not in T.names() and 'points' in nc.LAST['done'], f'rc={rc} {out[-200:]}')
+nc.save_progress({'ts': __import__('time').time(), 'client': nc.clients.name(), 'done': ['boxes', 'pets', 'store', 'battle'], 'pending': {}})
+T = FakeTools()
+T.points_rc = 0
+rc, out = quiet(nc.run, tools=T)
+check('舊進度檔沒有 heal：整段續跑時 heal 補做一次、battle 不重做', rc == 0 and 'heal' in T.names() and 'ass' not in T.names(), f'rc={rc}')
+rc, out = quiet(nc.run, dry_run=True, fresh=True)
+check('plan 顯示 heal 步驟', 'heal［' in out, out[-300:])
 
 print('全部通過' if not fails else f'{fails} 項失敗')
 sys.exit(1 if fails else 0)

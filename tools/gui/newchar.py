@@ -23,6 +23,8 @@ ass.py set_many（實機過）/ points（同日新增、未實機）、team.py f
   pets       寵物面板：迪基格斯 → 出戰、瑪斯貝卡 → 騎乘（pet.set_state_many；騎乘要 allow_mount；已是目標狀態不點）
   store      背包面板開一次逐人：寵物誘餌 / 離線水晶 / 2倍智慧果 / 安撫之素 → 公共倉庫；1轉新手禮盒（banPubDepot）→ 個人倉庫（bag.depot_store_items；沒有的略過）
   battle     外掛 5 人「自動戰鬥」開（ass.set_many，隊長最後；快速戰鬥在村長家被禁，練功時 grind 再開）
+  heal       外掛 戰鬥設置 → 自動補血 → 精靈補血 5 人打勾（ass.heal_set；OCR 找「精靈補血」標籤列再點勾選框，已勾不點、點後驗證；
+             失敗 = 195（info.ass_rc / ass_step = heal；ass 17 = 找不到標籤）；**未實機**；舊進度檔沒有此步驟也能續跑）
   points     外掛自動加點（ass.points_set：速度80 / 體力50 / 腕力999 / 耐力0 + 同步加點）。**座標待量測**：加點視窗改目標值的輸入流程
              沒實測（ui/ass.md），腳本不改方案 —— 方案已是這套才勾自定義 + 同步加點；不是（新角色一定不是）→ ass 15 →
              本步記「待手動」跳過、繼續後面的步驟、最後回 199；OCR 讀不到 → ass 16，同樣跳過。不會盲點座標
@@ -39,7 +41,7 @@ ass.py set_many（實機過）/ points（同日新增、未實機）、team.py f
   192 boxes 失敗（info.bag_rc：90～96 見 bag.py）
   193 pets 失敗（info.pet_rc：70～78 見 pet.py）
   194 store 失敗（info.bag_rc）
-  195 battle 失敗（info.ass_rc）
+  195 battle / heal 失敗（info.ass_rc；heal 另有 info.ass_step = heal）
   196 team 失敗（info.team_rc：40～47）
   197 quest 失敗（info.quest_rc；quest.py 2 = 不認得的畫面 → 改回 9 停手）
   198 grind 失敗（info.grind_rc：50～59）
@@ -66,7 +68,7 @@ PROGRESS_TRUST_S = 12 * 3600
 EXIT_ARGS, EXIT_PRE, EXIT_BOX, EXIT_PET, EXIT_STORE, EXIT_BATTLE, EXIT_TEAM, EXIT_QUEST, EXIT_GRIND, EXIT_PENDING = range(190, 200)
 PASS = (uikit.EXIT_IN_BATTLE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)   # 8 / 9 / 10 原碼停手
 
-STAGES = ['preflight', 'boxes', 'pets', 'store', 'battle', 'points', 'team', 'quest', 'buy', 'grind']
+STAGES = ['preflight', 'boxes', 'pets', 'store', 'battle', 'heal', 'points', 'team', 'quest', 'buy', 'grind']
 ALL_ROLES = clients.roster()          # 這個視窗的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
 LEADER = ALL_ROLES[0] if ALL_ROLES else ''
 
@@ -86,6 +88,7 @@ LAST: dict = {}
 
 STATUS = {   # 步驟實作狀態（plan 顯示）
     'preflight': '完成', 'boxes': '完成（bag.wear 未實機）', 'pets': '完成', 'store': '完成（bag.store-items 未實機）', 'battle': '完成',
+    'heal': '未實機（ass.heal 同日新增）',
     'points': '座標待量測', 'team': '完成', 'quest': '完成', 'buy': '未支援', 'grind': '完成',
 }
 
@@ -110,6 +113,7 @@ def plan(o: dict) -> list:
         ('pets', STATUS['pets'], [f'{BATTLE_PET} → 出戰、{MOUNT_PET} → 騎乘（allow_mount；已是目標不點）']),
         ('store', STATUS['store'], [f'公共：{" / ".join(BOX_CONTENTS)}', f'個人：{NEXT_BOX}（禁止存公共）', '沒有的略過']),
         ('battle', STATUS['battle'], [f'外掛 {n} 人自動戰鬥開（隊長最後）']),
+        ('heal', STATUS['heal'], [f'外掛 戰鬥設置 → 自動補血 → 精靈補血 {n} 人打勾（ass.heal_set；OCR 找標籤列、已勾不點、點後驗證；失敗 195）']),
         ('points', STATUS['points'], ['外掛自動加點：速度80 / 體力50 / 腕力999 / 耐力0 + 同步加點（隊長設、其他人看勾選）',
                                      '方案目標值輸入流程未實測 → 方案不是這套就不改不勾（ass 15）、讀不到（ass 16）→ 記待手動、跳過、最後 199']),
         ('team', STATUS['team'], [f'team.form（隊長 {LEADER}、{n} 人）']),
@@ -135,7 +139,7 @@ def print_plan(o: dict, from_stage: str, to_stage: str, done=()) -> None:
                 print(f'      - {a}')
         if st == to_stage:
             on = False
-    print('  退出碼：190 參數 / 191 preflight / 192 boxes / 193 pets / 194 store / 195 battle / 196 team / 197 quest / 198 grind / '
+    print('  退出碼：190 參數 / 191 preflight / 192 boxes / 193 pets / 194 store / 195 battle / heal / 196 team / 197 quest / 198 grind / '
           '199 完成但有待手動 / 未支援步驟；8 / 9 / 10 原碼停手')
 
 
@@ -208,6 +212,10 @@ class Tools:
     def ass_set_many(self, plan_):
         import ass
         return ass.set_many(plan_)
+
+    def ass_heal_set(self, roles):
+        import ass
+        return ass.heal_set(roles, True)
 
     def points_set(self, leader, verify):
         import ass
@@ -367,6 +375,12 @@ class Run:
             return self.fail(rc, EXIT_BATTLE, f'外掛自動戰鬥失敗（ass rc {rc}）：{msg}', ass_rc=rc)
         return self.done('battle', battle_changed=info.get('changed', {}))
 
+    def heal(self):
+        rc, sts, msg, info = self.T.ass_heal_set(clients.leader_last())
+        if rc:
+            return self.fail(rc, EXIT_BATTLE, f'外掛精靈補血打勾失敗（ass rc {rc}）：{msg}', ass_rc=rc, ass_step='heal')
+        return self.done('heal', heal_changed=info.get('changed', {}))
+
     def points(self):
         rc, sts, msg, info = self.T.points_set(LEADER, [r for r in ALL_ROLES if r != LEADER])
         if rc in PASS:
@@ -431,7 +445,7 @@ def run(from_stage: str = 'preflight', to_stage: str = 'grind', dry_run: bool = 
         return 0
     R = Run(tools or Tools(), o)
     before = STAGES[1:STAGES.index(from_stage)]
-    missing = [s for s in before if s not in R.p['done'] and s not in R.p['pending'] and s not in skip]
+    missing = [s for s in before if s not in R.p['done'] and s not in R.p['pending'] and s not in skip and s != 'heal']   # heal 是後加的步驟：舊進度檔沒有它不算前置缺漏
     if missing:
         print(f'{SRC}：--from {from_stage} 但進度檔沒有完成 {missing}（先照順序跑，或 --fresh 從頭）', file=sys.stderr)
         return EXIT_ARGS
