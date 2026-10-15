@@ -14,6 +14,8 @@
   uv run --no-project python tools/gui/ass.py points all get [--no-plan]   # 唯讀：便捷功能 → 特色設定 自定義加點 / 同步加點 勾選 + SET 視窗讀方案（按取消）
   uv run --no-project python tools/gui/ass.py points DKBO set              # 隊長方案 = 速度80 / 體力50 / 腕力999 / 耐力0 才勾自定義 + 同步加點；方案不同 → 15 不改（輸入流程未實測）
         （2026-10-15 寫成，**未實機**：OCR 框推估；做完一律切回右半「戰鬥設置」）
+  uv run --no-project python tools/gui/ass.py heal all get                 # 唯讀：每人 精靈補血 / 寵物技能補血 / 肉和物品補血 勾否 + 下拉 + 人物 / 寵物 / 騎寵 %
+  uv run --no-project python tools/gui/ass.py heal all set 精靈補血 on      # 只改精靈補血勾選（all 或 DKBO6,DKBO7）；OCR 找標籤列定位，已是目標不點、點後驗證；做完捲回頂端（2026-10-15，**未實機**）
     多人流程（--pause）：關原地遇敵 + 等戰鬥結束 → 一次開面板逐人（讀現值 → 不同才改 → 讀回確認；隊長最後）→ grind.py ensure 恢復掛機。
     預設不暫停遇敵（快速戰鬥中開外掛面板不用停遇敵，2026-10-12 使用者；戰鬥打斷 rc 6 / 12 自動等 3 秒重試 2 次）。旗標：--pause 強制先關遇敵 + 等戰鬥結束、改完 grind ensure 恢復、--no-resume 搭 --pause 時不恢復、--dry-run 只讀不改。只動「一般動作」，首次動作 / 對象都不碰。
 角色：這個視窗的名單（主視窗 DKBO / DKBO2～DKBO5；PSA_CLIENT=PrimalSA2 為 DKBO6～DKBO10；真名字母 O；DKB0… 同義；不分大小寫）。頭像位置依名單第 1～5 個。
@@ -24,7 +26,7 @@
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
 退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色（面板開著但頭像被遮住 / 點了不變）/ 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到；選角色時面板被遊戲關掉、重開 2 次仍不行）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
         12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 13 battle：人物首次動作的值確定不對（不自動改）/
-        15 points：加點方案不是 POINTS_PLAN（目標值輸入流程未實測 = 座標待量測，不改不勾）/ 16 points：特色設定分頁 / 加點視窗 OCR 讀不到（不點勾選）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
+        17 heal：OCR 找不到「精靈補血」標籤（捲了仍找不到，不點）/ 15 points：加點方案不是 POINTS_PLAN（目標值輸入流程未實測 = 座標待量測，不改不勾）/ 16 points：特色設定分頁 / 加點視窗 OCR 讀不到（不點勾選）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
 戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
   是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
@@ -1060,6 +1062,191 @@ def _main_points(a) -> int:
     return rc
 
 
+# ---- 自動補血（戰鬥設置分頁「自動補血」段：精靈補血 / 寵物技能補血 / 使用肉和物品補血；2026-10-15 寫成，**未實機**）----
+# 捲動有慣性漂移、換角色內容 y 差約 6px → 不寫死 y：OCR 找「精靈補血」標籤那一列，勾選框 = (HEAL_CHK_X, 標籤 y)。
+HEAL_CHK_X = 656                                    # 三個補血勾選框的 x
+HEAL_BOX = (640, 330, 700, 430)                     # OCR 區：自動補血整段（x y w h）；未捲動時精靈補血約 y 612（區內 → 不用捲）、捲過後約 y 425
+HEAL_Y_MIN, HEAL_Y_MAX = 340, 740                   # 標籤 y 要落在這範圍才點（太靠面板邊緣 = 被切到一半）
+HEAL_DOTS = ((0, 0), (-6, -5), (6, 5), (-6, 5), (6, -5))   # 勾選框取樣點（相對框中心）：全純白 = 沒勾；任一點不是白 = 勾（p2 實機 2026-10-15：框心 656,612 未勾 255,255,255 / 已勾 40,40,40）
+HEAL_SCROLL = (700, 563, 700, 430)                  # 往下露出自動補血（ui/ass.md：慣性後約再多捲一點）
+HEAL_UNSCROLL = (700, 300, 700, 700)                # 回頂端
+HEAL_SCROLL_TRIES = 2
+HEAL_ROWS = ('精靈補血', '寵物技能補血', '肉和物品補血')
+EXIT_HEAL_NOLABEL = 17                              # heal：OCR 找不到「精靈補血」標籤（捲了仍找不到）→ 不點
+
+
+def parse_heal(lines) -> dict:
+    """純函式：自動補血段 OCR 行 [(文字, x, y)] → {列名: {'y': 標籤 y, 'dd': 下拉文字, 'pct': [人物, 寵物, 騎寵 的 % 數字（讀不到的略過）]}}。
+    列名 = HEAL_ROWS；只收找得到標籤的列。「精靈補血」要排除含「寵物」的行（寵物技能補血）。
+    標籤與下拉文字被 OCR 併成同一行時，下拉 = 標籤後面剩下的字。% 取標籤下 20～90px 內的 \\d+%（依 x 排序）"""
+    lines = [(str(t), x, y) for t, x, y in (lines or [])]
+    out: dict = {}
+    for t, x, y in lines:
+        key = None
+        if '寵物技能' in t:
+            key = '寵物技能補血'
+        elif '肉和物品' in t or '物品補血' in t:
+            key = '肉和物品補血'
+        elif '精靈補血' in t and '寵物' not in t:
+            key = '精靈補血'
+        if key and key not in out:
+            out[key] = {'y': y, 'dd': '', 'pct': [], 'text': t}
+    for key, row in out.items():
+        for t, x, y in lines:
+            if abs(y - row['y']) <= 15 and t != row['text'] and not any(k in t for k in ('補血', '寵物技能', '肉和物品')) and x > 800:
+                row['dd'] = t.strip()
+        if len(row['text']) > len(key) + 2 and not row['dd']:
+            row['dd'] = row['text'].split('補血', 1)[-1].strip()
+        pcts = []
+        for t, x, y in lines:
+            if 20 <= y - row['y'] <= 90:
+                for m in re.finditer(r'(\d+)\s*%', t):
+                    pcts.append((x, int(m.group(1))))
+        row['pct'] = [v for _, v in sorted(pcts)]
+        row.pop('text')
+    return out
+
+
+def heal_checked(cols) -> bool | None:
+    """純函式：勾選框取樣點顏色 → 勾 / 沒勾；空 / 讀不到回 None"""
+    if not cols:
+        return None
+    return any(c != UNCHECKED for c in cols)
+
+
+def _heal_read(box=HEAL_BOX) -> dict:
+    return parse_heal(_ocr_lines(box, '-Zooms', '2,3,4'))
+
+
+def _heal_chk(y: int) -> bool | None:
+    cols = _px([(HEAL_CHK_X + dx, y + dy) for dx, dy in HEAL_DOTS])
+    return heal_checked(cols)
+
+
+def _heal_find(role: str) -> tuple:
+    """面板開著、角色已選好：切到戰鬥設置分頁 → OCR 找精靈補血標籤；不在可點範圍就往下捲（最多 HEAL_SCROLL_TRIES 次）。
+    回 (rows | None, 這次有沒有捲過)。rows 的 y 都是這一刻的畫面座標"""
+    if not _points_click(role, BATTLE_TAB, '戰鬥設置分頁（補血）', 400):
+        return None, False
+    scrolled = False
+    for n in range(HEAL_SCROLL_TRIES + 1):
+        rows = _heal_read()
+        sp = rows.get('精靈補血')
+        if sp and HEAL_Y_MIN <= sp['y'] <= HEAL_Y_MAX:
+            return rows, scrolled
+        if n == HEAL_SCROLL_TRIES or not panel_open():
+            break
+        gui('drag', *map(str, HEAL_SCROLL), note=f'ass.py {role} 捲到自動補血')
+        scrolled = True
+        sleep(0.6)
+    return None, scrolled
+
+
+def _heal_unscroll(role: str) -> None:
+    """捲過就捲回頂端（pet_on_top 才算還原；其他功能依賴右半在戰鬥設置頂端）；最多 3 次，面板不在就不拖"""
+    for _ in range(3):
+        if not panel_open():
+            return
+        gui('drag', *map(str, HEAL_UNSCROLL), note=f'ass.py {role} 自動補血捲回頂端')
+        sleep(0.6)
+        if pet_on_top():
+            return
+    log(f'ass：警告 {role} 自動補血捲回頂端後仍讀不到「戰寵」標題（之後 pet / battle 可能回 7）')
+
+
+def _visit_heal(want: bool | None, rows_wanted=('精靈補血',)):
+    """heal get / set 的逐人動作（_many 用）。want None = 唯讀；True / False = 把 rows_wanted 的勾選改成 want（已是就不點、點後驗證、不補點）。
+    回 (退出碼, 狀態 dict, 訊息, 改了哪些)；狀態 = {列名: {'on': bool, 'dd': 文字, 'pct': [...]}}"""
+    def visit(role):
+        scrolled, todo = False, []
+        try:
+            rows, scrolled = _heal_find(role)
+            if rows is None:
+                return (EXIT_HEAL_NOLABEL if panel_open() else EXIT_PANEL_LOST), None, \
+                    f'{role}：OCR 找不到「精靈補血」標籤（捲了 {HEAL_SCROLL_TRIES} 次）→ 不點（OCR 框 {HEAL_BOX}）', []
+            st = {}
+            for k, r in rows.items():
+                on = _heal_chk(r['y'])
+                if on is None:
+                    return EXIT_PANEL_LOST, st, f'{role}：讀不到 {k} 勾選框像素', []
+                st[k] = {'on': on, 'dd': r['dd'], 'pct': r['pct']}
+            if want is None:
+                return EXIT_OK, st, '', []
+            for k in rows_wanted:
+                if k not in st:
+                    return EXIT_HEAL_NOLABEL, st, f'{role}：找不到「{k}」標籤 → 不點', todo
+                if st[k]['on'] == want:
+                    continue
+                if not panel_open() or selected_role() != role:
+                    return EXIT_PANEL_LOST, st, f'點 {k} 前面板已不在 / 角色不對 → 不點', todo
+                y = rows[k]['y']
+                gui('seq', f'click {HEAL_CHK_X} {y}; wait 300', note=f'ass.py {role} {k} → {"勾" if want else "取消"}')
+                todo.append(k)
+                for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
+                    sleep(w)
+                    if not panel_open():
+                        return EXIT_PANEL_LOST, st, f'點 {k} 後面板消失', todo
+                    if _heal_chk(y) == want:
+                        st[k]['on'] = want
+                        log(f'ass：{role} {k} → {"勾" if want else "取消"}（已確認）')
+                        break
+                else:
+                    return EXIT_CONFIRM, st, f'{role}：{k} 點了仍是{"沒勾" if want else "勾著"}（不補點）', todo
+            return EXIT_OK, st, '', todo
+        finally:
+            if scrolled:
+                _heal_unscroll(role)
+    return visit
+
+
+def heal_get(roles, no_wait: bool = False) -> tuple:
+    """唯讀：一次開面板逐人讀 精靈補血 / 寵物技能補血 / 肉和物品補血 勾選 + 下拉文字 + % 門檻。回值同 set_many"""
+    return _many({r: None for r in roles}, _visit_heal(None), no_wait)
+
+
+def heal_set(roles, want: bool, rows_wanted=('精靈補血',), no_wait: bool = False) -> tuple:
+    """一次開面板逐人把 rows_wanted（預設只有精靈補血）勾選改成 want；已是目標不點、點後驗證。隊長（名單第 1 個）放最後。回值同 set_many"""
+    roles = ordered_roles(roles)
+    return _many({r: None for r in roles}, _visit_heal(want, rows_wanted), no_wait)
+
+
+def fmt_heal(st: dict) -> str:
+    parts = []
+    for k in HEAL_ROWS:
+        if k in st:
+            r = st[k]
+            parts.append(f'{k}={"勾" if r["on"] else "不勾"}' + (f'/{r["dd"]}' if r.get('dd') else '')
+                         + (f' %={"/".join(str(v) for v in r["pct"])}' if r.get('pct') else ''))
+    return '  '.join(parts)
+
+
+def _main_heal(a) -> int:
+    rest = list(a.rest)
+    ok = rest == ['get'] or (len(rest) == 3 and rest[0] == 'set' and rest[1] == '精靈補血' and rest[2].lower() in ('on', 'off', '開', '關'))
+    if not ok:
+        print('heal 用法：ass.py heal all|DKBO6,DKBO7 get | ass.py heal all|DKBO6,… set 精靈補血 on|off')
+        return EXIT_USAGE
+    roles = list(ROLES) if a.role.lower() == 'all' else [norm_role(r) for r in a.role.split(',')]
+    if not roles or not all(roles) or len(set(roles)) != len(roles):
+        print(f'角色要是 all 或逗號分隔的 {" / ".join(ROLES)}（不可重複）')
+        return EXIT_USAGE
+    if layout.current() != '2880x1659':
+        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+        return EXIT_LAYOUT
+    import winenv
+    winenv.enable_server()
+    if rest == ['get']:
+        rc, sts, msg, info = heal_get(roles, a.no_wait)
+    else:
+        rc, sts, msg, info = heal_set(roles, rest[2].lower() in ('on', '開'), ('精靈補血',), a.no_wait)
+    for r, st in sts.items():
+        ch = info.get('changed', {}).get(r)
+        print(f'{r}：{fmt_heal(st)}' + (f'（改了 {"、".join(ch)}）' if ch else ''))
+    if rc:
+        print(f'失敗（退出碼 {rc}）：{msg}')
+    return rc
+
+
 def fmt(states: dict, items=None) -> str:
     return '  '.join(f'{i}={"開" if states[i] else "關"}' for i in (items or ITEMS) if i in states)
 
@@ -1179,7 +1366,7 @@ def _main_pet_many(a) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='外掛 ASS 左欄戰鬥設定讀 / 設')
-    ap.add_argument('cmd', choices=['get', 'set', 'pet', 'battle', 'points'])
+    ap.add_argument('cmd', choices=['get', 'set', 'pet', 'battle', 'points', 'heal'])
     ap.add_argument('role', help='名單內角色：主視窗 DKBO / DKBO2~5、PrimalSA2 DKBO6~10（DKB0… 同義）')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
     ap.add_argument('--dry-run', action='store_true', help='多人 pet：只讀不改')
@@ -1194,6 +1381,8 @@ def main(argv=None) -> int:
         return _main_battle(a)
     if a.cmd == 'points':
         return _main_points(a)
+    if a.cmd == 'heal':
+        return _main_heal(a)
     if a.cmd == 'pet' and (a.role.lower() == 'all' or ',' in a.role):
         return _main_pet_many(a)
     role = norm_role(a.role)
