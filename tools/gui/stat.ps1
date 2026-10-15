@@ -49,9 +49,10 @@ public class WS {
 "@ -ReferencedAssemblies System.Drawing
 function Out-Json($o) { $o | ConvertTo-Json -Compress; exit 0 }
 [WS]::SetProcessDPIAware() | Out-Null
-$proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
-if (-not $proc) { Out-Json @{ ok = $false; error = '遊戲沒有在執行' } }
-$h = $proc.MainWindowHandle
+if (-not (Test-Path Function:\Find-PsaProcess)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # 依 PSA_CLIENT 選遊戲程序（沒設 = PrimalSA；同名多個不操作）
+$fp = Find-PsaProcess
+if (-not $fp.ok) { Out-Json @{ ok = $false; error = (Get-PsaFindError $fp) } }
+$h = $fp.proc.MainWindowHandle
 # 最小化時 Unity 不繪製，這裡不去還原（不打擾使用者），直接回報
 if ([WS]::IsIconic($h)) { Out-Json @{ ok = $false; error = '遊戲視窗最小化' } }
 $r = New-Object WS+RECT; [WS]::GetClientRect($h, [ref]$r) | Out-Null

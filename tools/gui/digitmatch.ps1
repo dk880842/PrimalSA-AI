@@ -66,9 +66,10 @@ if ($Image) {
   $W = $full.Width; $Hh = $full.Height
 } else {
   [DM]::SetProcessDPIAware() | Out-Null
-  $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
-  if (-not $proc) { Out-Json @{ ok = $false; error = '遊戲沒有在執行' } }
-  $h = $proc.MainWindowHandle
+  if (-not (Test-Path Function:\Find-PsaProcess)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # 依 PSA_CLIENT 選遊戲程序（沒設 = PrimalSA；同名多個不操作）
+  $fp = Find-PsaProcess
+  if (-not $fp.ok) { Out-Json @{ ok = $false; error = (Get-PsaFindError $fp) } }
+  $h = $fp.proc.MainWindowHandle
   if ([DM]::IsIconic($h)) { Out-Json @{ ok = $false; error = '遊戲視窗最小化' } }
   $r = New-Object DM+RECT; [DM]::GetClientRect($h, [ref]$r) | Out-Null
   $W = $r.R; $Hh = $r.B

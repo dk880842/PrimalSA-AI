@@ -3,7 +3,9 @@
 # 由 winenv.py 的 GuiServer 啟動：powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File serve.ps1
 # 計畫與協定：notes/plan-gui-speedup.md 3.3；3a 驗證結果同檔。
 #
-# 請求（一行，純 ASCII JSON）：{"id":12,"script":"ocr","pos":["75","270"],"named":{"Zooms":"2,3,4"}}
+# 請求（一行，純 ASCII JSON）：{"id":12,"script":"ocr","pos":["75","270"],"named":{"Zooms":"2,3,4"},"client":"PrimalSA2"}
+#   client = 這個請求要操作的遊戲程序名稱（多視窗，見 psawin.ps1）。每個請求執行前把 $env:PSA_CLIENT 設成它；
+#   沒帶 / 空字串 = 移除 PSA_CLIENT（= 主視窗 PrimalSA）。一定每次重設，上一個請求的 client 不會留到下一個。
 #   管理指令：{"id":1,"cmd":"ping"} / {"cmd":"stats"} / {"cmd":"quit"}
 # 回應：先寫 "\n"（吃掉前面可能殘留的半行），再 "\x1ePSA " + 一行 JSON：{"id":12,"rc":0,"out":"...","err":"...","ms":71}
 #   out = 腳本的一般輸出（行以 \n 連接）；err = 錯誤 / 警告 / 詳細 / 資訊串流（行以 \n 連接，帶前綴）；rc = 腳本 exit 碼（例外 = 1）
@@ -33,6 +35,9 @@ $__psa_w = New-Object IO.StreamWriter([Console]::OpenStandardOutput(), (New-Obje
 $__psa_w.AutoFlush = $false
 $__psa_r = New-Object IO.StreamReader([Console]::OpenStandardInput(), (New-Object Text.UTF8Encoding $false))
 $__psa_dir = $PSScriptRoot
+# 多視窗共用函式（Find-PsaProcess、點擊鎖）先載入一次：被呼叫的腳本看得到，就不用每個請求重新 dot-source（省約 5 ms）。
+# psawin.ps1 改了 → winenv 依 mtime 重開 server。
+. (Join-Path $__psa_dir 'psawin.ps1')
 $__psa_allow = @('gui', 'ocr', 'stat', 'findmark', 'titlematch', 'digitmatch')
 $__psa_state = @{ req = 0; quit = $false }
 
@@ -68,6 +73,9 @@ function Invoke-PsaRequest($__psa_line) {
     $__psa_named = @{}
     if ($__psa_q.named) { foreach ($__psa_pp in $__psa_q.named.PSObject.Properties) { $__psa_named[$__psa_pp.Name] = [string]$__psa_pp.Value } }
     $__psa_pos = @(); if ($null -ne $__psa_q.pos) { foreach ($__psa_a in @($__psa_q.pos)) { $__psa_pos += [string]$__psa_a } }
+    # 多視窗：這個請求的目標程序（gui.ps1 的 hwnd 快取鍵含 client，不會拿到別的視窗）
+    $__psa_client = [string]$__psa_q.client
+    if ($__psa_client) { $env:PSA_CLIENT = $__psa_client } else { Remove-Item Env:PSA_CLIENT -ErrorAction SilentlyContinue }
     $Error.Clear(); $global:LASTEXITCODE = 0
     $__psa_res = & $__psa_path @__psa_named @__psa_pos *>&1
     $__psa_rc = $global:LASTEXITCODE

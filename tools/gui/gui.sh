@@ -8,6 +8,8 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 # 路徑換算：WSL 用 wslpath -w；Git Bash 用 cygpath -w；都沒有就用原路徑
 winpath() { if command -v wslpath >/dev/null 2>&1; then wslpath -w "$1"; elif command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 PS="$(winpath "$DIR/gui.ps1")"
+# 多視窗：PSA_CLIENT=PrimalSA2 bash tools/gui/gui.sh ... 操作另一個視窗（不設 = PrimalSA）。WSL 要列進 WSLENV 才傳得到 powershell.exe（Git Bash 直接繼承，加了也無害）
+if [ -n "$PSA_CLIENT" ]; then case ":$WSLENV:" in *:PSA_CLIENT:*) ;; *) export WSLENV="${WSLENV:+$WSLENV:}PSA_CLIENT" ;; esac; fi
 cmd="$1"; shift
 if [ "$cmd" = shot ]; then
   out="${1:-shot.png}"

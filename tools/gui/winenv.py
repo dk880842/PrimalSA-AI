@@ -8,6 +8,7 @@
   winenv.ps_argv('gui.ps1', 'info')   # → ['powershell.exe', '-NoProfile', ..., '-File', <Windows 路徑>, 'info']
   winenv.run_ps('gui.ps1', 'shot')    # 執行並回傳 CompletedProcess（UTF-8、errors=replace、已去掉 \\r）
   winenv.spawn_detached(argv, log)  # 背景常駐程序（脫離終端；WSL setsid / Windows DETACHED_PROCESS），回 pid（grind 去練功起 follow 用）
+  winenv.client_env()             # 多視窗：設了 PSA_CLIENT 時給 powershell.exe 的環境（WSL 加 WSLENV）；沒設回 None（照舊繼承）
   winenv.enable_server()          # 長程序（quest / heal / petwatch / walk 主流程）明確呼叫；WSL 預設走常駐 serve.ps1、Windows 原生需 PSA_GUI_SERVER=1（=0 一律關）
 
 命令列自測：python tools/gui/winenv.py
@@ -24,6 +25,8 @@ import sys
 import threading
 import time
 from pathlib import Path
+
+import clients
 
 ROOT = Path(__file__).resolve().parents[2]
 GUI_DIR = ROOT / 'tools' / 'gui'
@@ -80,10 +83,25 @@ def ps_argv(script: str, *args: str) -> list[str]:
     return [*PS_PREFIX, '-File', to_windows(p), *map(str, args)]
 
 
+def client_env(env=None, kind: str | None = None) -> dict | None:
+    """多視窗：PSA_CLIENT（遊戲程序名稱，見 clients.py / psawin.ps1）要傳給 powershell.exe。
+    沒設（或空字串）→ None：子程序照舊繼承目前環境，行為與改版前完全相同。
+    有設 → 環境副本；WSL 另把 PSA_CLIENT 加進 WSLENV（WSL → Windows 程序只會帶 WSLENV 列出的變數；Windows 原生直接繼承）"""
+    env = os.environ if env is None else env
+    if not (env.get('PSA_CLIENT') or '').strip():
+        return None
+    out = dict(env)
+    if (kind or platform_kind()) == 'wsl':
+        names = [x for x in (out.get('WSLENV') or '').split(':') if x]
+        if not any(x.split('/')[0] == 'PSA_CLIENT' for x in names):
+            out['WSLENV'] = ':'.join([*names, 'PSA_CLIENT'])
+    return out
+
+
 def _oneshot(script: str, *args: str, timeout: float | None = None) -> subprocess.CompletedProcess:
-    """一次性：每次啟動一個 powershell.exe -File（原本的做法）"""
+    """一次性：每次啟動一個 powershell.exe -File（原本的做法）；設了 PSA_CLIENT 就帶下去（client_env）"""
     r = subprocess.run(ps_argv(script, *args), capture_output=True, text=True, encoding='utf-8',
-                       errors='replace', timeout=timeout)
+                       errors='replace', timeout=timeout, env=client_env())
     r.stdout = (r.stdout or '').replace('\r', '')
     r.stderr = (r.stderr or '').replace('\r', '')
     return r
@@ -103,7 +121,10 @@ def run_ps(script: str, *args: str, timeout: float | None = None) -> subprocess.
 
 # ---------------------------------------------------------------------------------------------
 # 常駐 server（serve.ps1）client。協定與設計見 notes/plan-gui-speedup.md 3.3 / 3.4。
-# 每個 Python 程序各自一個 server（lazily 啟動）。「程序結束後 server 一定要結束」靠五層保險（2026-10-10 追查 serve.ps1 殘留後加固）：
+# 每個 Python 程序各自一個 server（lazily 啟動）。
+# 多視窗（PSA_CLIENT）：server 不綁視窗，每個請求自己帶 client（呼叫當下的 PSA_CLIENT），serve.ps1 執行前設好 $env:PSA_CLIENT、
+#   gui.ps1 的 hwnd 快取鍵含 client。選這個而不是「每個 client 一個 server」：目標視窗跟著請求走、不靠 server 啟動時的環境，
+#   同一個 Python 程序中途改 PSA_CLIENT 也不會送錯；server 數量、gui-server.pids、reap 都不用變。「程序結束後 server 一定要結束」靠五層保險（2026-10-10 追查 serve.ps1 殘留後加固）：
 #   ① atexit / quest.main 的 finally 明確呼叫 close()：送 quit → 關 stdin → 等 CLOSE_WAIT 秒 → 還活著就 kill WSL 這側的 interop 代理，
 #      並用記下的 Windows PID `taskkill /f`（殺代理不保證 Windows 側的 powershell.exe 跟著死）；
 #   ② SIGTERM / SIGHUP 先 close() 再 raise SystemExit（讓 finally / atexit 跑；呼叫端自裝 handler 則串接）；
@@ -296,7 +317,7 @@ class GuiServer:
 
     def _watch_files(self) -> dict:
         d = {}
-        for n in ['serve', *SERVER_SCRIPTS]:
+        for n in ['serve', 'psawin', *SERVER_SCRIPTS]:   # psawin.ps1 由 serve.ps1 啟動時載入一次，改了也要重開
             try:
                 d[n] = (GUI_DIR / f'{n}.ps1').stat().st_mtime
             except OSError:
@@ -435,7 +456,8 @@ class GuiServer:
         pos, named = split_named(name, args)
         est, is_input = estimate_timeout(name, pos, named)
         tmo = timeout if timeout is not None else est
-        req = {'script': name, 'pos': pos, 'named': named}
+        # client：這個請求要操作的遊戲程序（沒設 = ''，serve.ps1 移除 PSA_CLIENT = 主視窗，與改版前相同）
+        req = {'script': name, 'pos': pos, 'named': named, 'client': (os.environ.get('PSA_CLIENT') or '').strip()}
         with self.lock:
             for attempt in (1, 2):
                 if not self._ensure():

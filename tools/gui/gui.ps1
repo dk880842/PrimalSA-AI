@@ -18,6 +18,8 @@
 #                                     只給唯讀監看（watch.py 的 pixel / info）用；送輸入的指令不要帶
 #   -Note "用途"                       任何指令後面可加，附註寫進操作 log（gui.sh 用環境變數 PSA_NOTE）
 #   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 2000 行；另有按小時分檔 tools/.cache/actions/，保留 14 天）；shot / pixel / wait* 不記
+#   多視窗：環境變數 PSA_CLIENT = 遊戲程序名稱（PrimalSA2 …；不設 = PrimalSA），見 psawin.ps1。找不到 exit 1；同名多個 / 名稱不合法 exit 6；
+#           點擊鎖（具名 Mutex，click / dclick / drag 移游標那段）5 秒內拿不到 → 不點、exit 7
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
 # 座標系：縮圖座標 × Scale = 客戶區像素座標。Scale 預設 2。
 # 背景模式（預設，2026-10-09 實測可用）：不把遊戲拉到前景，使用者可以繼續用其他視窗。
@@ -120,11 +122,14 @@ public class Guard {
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
+if (-not (Test-Path Function:\Find-PsaProcess)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # Find-PsaProcess（依 PSA_CLIENT 選程序）、Enter/Exit-PsaInputLock（點擊鎖）
+$Client = Get-PsaClient
 # 視窗 handle 快取（只給唯讀的 pixel / info 用；常駐 serve.ps1 以 & 呼叫、同一 runspace，$global: 跨次保留；一次性執行每次新行程，等於沒快取）。
-# 命中條件：IsWindow 且該視窗所屬行程 PID == 快取的 PrimalSA PID（防 handle 被回收給別的視窗）；任一不符就重查（Get-Process 約 27 ms）。
+# 命中條件：快取的 client 名稱 == 這次的 PSA_CLIENT，且 IsWindow、該視窗所屬行程 PID == 快取的 PID（防 handle 被回收給別的視窗）；任一不符就重查（約 27 ms）。
+# 常駐 server 每個請求可能是不同 client（serve.ps1 依請求設 PSA_CLIENT），所以 client 名稱一定要在快取鍵裡，不然會拿到別的視窗。
 # click / key 等輸入指令一律不用快取，每次重查，確保不會把輸入送到錯的視窗。
 $h = [IntPtr]::Zero
-if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:__psa_pid) {
+if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:__psa_pid -and $global:__psa_client -eq $Client) {
   $__psa_wp = [uint32]0
   if ([W]::IsWindow([IntPtr]$global:__psa_hwnd)) {
     [W]::GetWindowPid([IntPtr]$global:__psa_hwnd, [ref]$__psa_wp) | Out-Null
@@ -132,10 +137,12 @@ if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:
   }
 }
 if ($h -eq [IntPtr]::Zero) {
-  $proc = Get-Process PrimalSA -ErrorAction SilentlyContinue
-  if (-not $proc) { $global:__psa_hwnd = $null; $global:__psa_pid = $null; Write-Error "PrimalSA 沒有在執行"; exit 1 }
-  $h = $proc.MainWindowHandle
-  if ($h -ne [IntPtr]::Zero) { $global:__psa_hwnd = [int64]$h; $global:__psa_pid = [int]@($proc)[0].Id }
+  $global:__psa_hwnd = $null; $global:__psa_pid = $null; $global:__psa_client = $null
+  $fp = Find-PsaProcess
+  # 沒在執行 = exit 1（訊息「<名稱> 沒有在執行」，與舊版相同）；同名多個 / 名稱不合法 = exit 6，都不操作
+  if (-not $fp.ok) { Write-Error $fp.error; if ($fp.kind -eq 'none') { exit 1 } else { exit 6 } }
+  $h = $fp.proc.MainWindowHandle
+  if ($h -ne [IntPtr]::Zero) { $global:__psa_hwnd = [int64]$h; $global:__psa_pid = [int]$fp.proc.Id; $global:__psa_client = $Client }
 }
 # 最小化時 Unity 不繪製，要還原；用 SW_SHOWNOACTIVATE(4) 不搶焦點
 # 例外：-NoRestore 1（watch 唯讀監看用）→ 最小化時什麼都不做，印 minimized、exit 3（不 ShowWindow、不 sleep）
@@ -182,7 +189,15 @@ function ToLParam($x, $y) { $cx = [int]([double]$x * $Scale); $cy = [int]([doubl
 # 背景滑鼠：游標移到 (x,y)（縮圖座標）並送一則滑鼠訊息；wParam = 按著的鍵（MK_LBUTTON 1 / MK_RBUTTON 2）
 function BgMsg($msg, $wp, $x, $y) { MoveTo $x $y; [W]::PostMessage($h, $msg, [IntPtr]$wp, (ToLParam $x $y)) | Out-Null }
 # 背景滑鼠動作開始 / 結束：鎖住使用者實體滑鼠、記下並還原使用者游標（動作期間使用者移動的量被吞掉，游標回到原位）
-function BgBegin { [Guard]::Start(); $script:saved = New-Object W+POINT; [W]::GetCursorPos([ref]$script:saved) | Out-Null; Wake }
+# 點擊鎖：其他視窗的 gui.ps1 正在移游標時排隊；逾時不點、exit 7（exit 會先跑呼叫端的 finally → BgEnd / UnlockInput，沒拿到鎖就不放）
+function LockInput {
+  $script:lk = Enter-PsaInputLock
+  if (-not $script:lk.ok) { ActLog "點擊鎖逾時（等 $($script:lk.waitMs) ms），$Cmd 未執行"; Write-Error "點擊鎖逾時：其他視窗的點擊佔住游標超過 $PsaInputLockTimeoutMs ms，這次沒點"; exit 7 }
+  if ($script:lk.abandoned) { ActLog '點擊鎖：前一個持有者沒放就結束（已接手）' }
+  if ($script:lk.waitMs -gt 300) { ActLog "點擊鎖等了 $($script:lk.waitMs) ms" }
+}
+function UnlockInput { Exit-PsaInputLock $script:lk; $script:lk = $null }
+function BgBegin { LockInput; [Guard]::Start(); $script:saved = New-Object W+POINT; [W]::GetCursorPos([ref]$script:saved) | Out-Null; Wake }
 # BgEnd 放在 finally 裡跑：$script:saved 有值才還原游標；Guard 一定 Stop，Join 逾時寫 actions.log
 function BgEnd {
   try {
@@ -190,7 +205,8 @@ function BgEnd {
     if ($script:saved) { [W]::SetCursorPos($script:saved.X, $script:saved.Y) | Out-Null }
   } finally {
     $script:saved = $null
-    if (-not [Guard]::Stop()) { ActLog "Guard Stop Join 逾時（累計 $([Guard]::JoinTimeouts) 次）" }
+    try { if (-not [Guard]::Stop()) { ActLog "Guard Stop Join 逾時（累計 $([Guard]::JoinTimeouts) 次）" } }
+    finally { UnlockInput }
   }
 }
 # 按鍵：WM_KEYDOWN / WM_KEYUP。Unity 會自己 TranslateMessage 產生 WM_CHAR（實測 {BS} 一次刪一字）
@@ -223,7 +239,7 @@ function BgKeys([string]$s) {
   }
 }
 
-# 操作 log：一行「HH:mm:ss 指令 參數 附註」，append 後裁到最新 2000 行，並同步寫按小時分檔 actions/YYYY-MM-DD_HH.log（失敗不影響操作；多程序偶爾掉一行可接受）
+# 操作 log：一行「HH:mm:ss 指令 參數 附註」（非主視窗為「HH:mm:ss [PrimalSA2] 指令 …」），append 後裁到最新 2000 行，並同步寫按小時分檔 actions/YYYY-MM-DD_HH.log（失敗不影響操作；多程序偶爾掉一行可接受）
 $actLog = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache\actions.log'))
 # 按小時分檔 tools/.cache/actions/YYYY-MM-DD_HH.log（不截斷，保留 14 天；新檔建立時順便刪過期檔）；失敗吞掉
 $actDir = Join-Path (Split-Path $actLog) 'actions'
@@ -245,7 +261,9 @@ function ActLog([string]$msg) {
     New-Item -ItemType Directory -Force (Split-Path $actLog) | Out-Null
     $enc = New-Object System.Text.UTF8Encoding($false)
     $now = Get-Date
-    $line = "$($now.ToString('HH:mm:ss')) $msg`n"
+    # 多視窗：非主視窗（PSA_CLIENT ≠ PrimalSA）在時間後面加「[程序名]」；主視窗維持舊格式
+    $tag = if (Test-PsaDefaultClient $Client) { '' } else { "[$Client] " }
+    $line = "$($now.ToString('HH:mm:ss')) $tag$msg`n"
     [IO.File]::AppendAllText($actLog, $line, $enc)
     ActLogHourly $line $now $enc
     $lines = [IO.File]::ReadAllLines($actLog, $enc)
@@ -284,9 +302,11 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
   'click' {
     if ($A3 -eq 'right') { $dn = 0x0204; $up = 0x0205; $mk = 2; $fdn = 8; $fup = 16 } else { $dn = 0x0201; $up = 0x0202; $mk = 1; $fdn = 2; $fup = 4 }
     if ($script:Fg) {
-      Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
-      [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
-      [W]::mouse_event($fup, 0, 0, 0, [IntPtr]::Zero)
+      try {
+        LockInput; Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
+        [W]::mouse_event($fdn, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 60
+        [W]::mouse_event($fup, 0, 0, 0, [IntPtr]::Zero)
+      } finally { UnlockInput }
     } else {
       try {
         BgBegin
@@ -301,11 +321,13 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
   'dclick' {
     # 雙擊：游標不動、兩次按放間隔 80ms（在 Windows 雙擊時間內）。倉庫存入 / 取出用
     if ($script:Fg) {
-      Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
-      for ($i = 0; $i -lt 2; $i++) {
-        [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40
-        [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero); if ($i -eq 0) { Start-Sleep -Milliseconds 80 }
-      }
+      try {
+        LockInput; Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
+        for ($i = 0; $i -lt 2; $i++) {
+          [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero); Start-Sleep -Milliseconds 40
+          [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero); if ($i -eq 0) { Start-Sleep -Milliseconds 80 }
+        }
+      } finally { UnlockInput }
     } else {
       # 背景模式未實測：第二下用 WM_LBUTTONDBLCLK（0x0203），照 Windows 雙擊的訊息順序送
       try {
@@ -322,13 +344,15 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
   }
   'drag' {
     if ($script:Fg) {
-      Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
-      [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)
-      for ($i = 1; $i -le 10; $i++) {
-        $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
-        MoveTo $x $y; Start-Sleep -Milliseconds 30
-      }
-      [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
+      try {
+        LockInput; Focus; MoveTo $A1 $A2; Start-Sleep -Milliseconds 60
+        [W]::mouse_event(2, 0, 0, 0, [IntPtr]::Zero)
+        for ($i = 1; $i -le 10; $i++) {
+          $x = [double]$A1 + ([double]$A3 - [double]$A1) * $i / 10; $y = [double]$A2 + ([double]$A4 - [double]$A2) * $i / 10
+          MoveTo $x $y; Start-Sleep -Milliseconds 30
+        }
+        [W]::mouse_event(4, 0, 0, 0, [IntPtr]::Zero)
+      } finally { UnlockInput }
     } else {
       try {
         BgBegin

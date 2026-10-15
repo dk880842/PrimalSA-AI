@@ -4,6 +4,8 @@
 # - 視窗可自由縮放，畫面保持比例。預設置頂，可在畫面右鍵選單與標題列選單取消（兩邊同步）。
 # - 遊戲最小化時 DWM 沒有畫面可給（Unity 最小化不繪製）→ 顯示提示；遊戲重開會自動重新接上。
 # - 單一執行個體：已經開著就把它帶到前面。位置、大小、置頂存在 tools/.cache/mirror.txt。
+# - 多視窗：PSA_CLIENT = 遊戲程序名稱（PrimalSA2 …；不設 = PrimalSA）。每個程序各一個鏡像（單例鎖、標題、存檔都分開）；
+#   同名程序有多個時不挑，顯示提示（見 psawin.ps1）。
 # 舊版每幀用 PrintWindow 截圖，2 幀/秒 ≈ 全機 CPU 0.9%；DWM 縮圖不需要。
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type -ReferencedAssemblies System.Drawing, System.Windows.Forms @"
@@ -29,11 +31,11 @@ public class Mirror : Form {
   const uint SC_TOP = 0x1000;   // 標題列系統選單的「置頂」
   public static void DpiAware() { SetProcessDPIAware(); }
 
-  IntPtr game = IntPtr.Zero, thumb = IntPtr.Zero; string msg = "找遊戲視窗…"; string stateFile;
+  IntPtr game = IntPtr.Zero, thumb = IntPtr.Zero; string msg = "找遊戲視窗…"; string stateFile, procName;
   Timer timer = new Timer(); MenuItem topItem; int srcW, srcH; bool shown;
-  public Mirror(string stateFile) {
-    this.stateFile = stateFile;
-    Text = "精靈王石器 畫面"; DoubleBuffered = true; BackColor = Color.Black;
+  public Mirror(string stateFile, string procName, string title) {
+    this.stateFile = stateFile; this.procName = procName;
+    Text = title; DoubleBuffered = true; BackColor = Color.Black;
     StartPosition = FormStartPosition.Manual; ClientSize = new Size(720, 415); Location = new Point(40, 40);
     bool top = true;   // 預設置頂；存檔裡有記錄就以存檔為準（右鍵選單可取消）
     try {
@@ -81,8 +83,11 @@ public class Mirror : Form {
     if (!shown) return;
     if (game == IntPtr.Zero || !IsWindow(game)) {
       Drop(); game = IntPtr.Zero;
-      foreach (var p in Process.GetProcessesByName("PrimalSA")) if (p.MainWindowHandle != IntPtr.Zero) game = p.MainWindowHandle;
-      if (game == IntPtr.Zero) { Status("遊戲沒有在執行"); return; }
+      // 精確比對程序名稱（PSA_CLIENT）；同名多個不挑（不知道是哪個視窗）
+      var ps = Process.GetProcessesByName(procName);
+      if (ps.Length > 1) { Status("同名程序 " + procName + " 有 " + ps.Length + " 個，不知道要鏡像哪一個"); return; }
+      if (ps.Length == 1 && ps[0].MainWindowHandle != IntPtr.Zero) game = ps[0].MainWindowHandle;
+      if (game == IntPtr.Zero) { Status("遊戲沒有在執行（" + procName + "）"); return; }
     }
     if (IsIconic(game)) { Status("遊戲視窗最小化（Unity 最小化不繪製）"); return; }
     RECT r; GetClientRect(game, out r);
@@ -114,17 +119,25 @@ public class Mirror : Form {
 }
 "@
 [Mirror]::DpiAware()
-# 單一執行個體：已開著就把那個視窗帶到前面
+. (Join-Path $PSScriptRoot 'psawin.ps1')   # Get-PsaClient / Test-PsaDefaultClient
+$Client = Get-PsaClient
+if ($Client -notmatch '^[A-Za-z0-9_.-]{1,64}$') { Write-Error "PSA_CLIENT 名稱不合法：$Client"; exit 6 }
+# 主視窗沿用舊的單例鎖名 / 標題 / 存檔；其他視窗各自一份
+$isMain = Test-PsaDefaultClient $Client
+$mutexName = if ($isMain) { 'PrimalSA-AI-Mirror' } else { "PrimalSA-AI-Mirror-$Client" }
+$title = if ($isMain) { '精靈王石器 畫面' } else { "精靈王石器 畫面（$Client）" }
+$stateName = if ($isMain) { 'mirror.txt' } else { "mirror-$Client.txt" }
+# 單一執行個體（每個程序一個）：已開著就把那個視窗帶到前面
 $created = $false
-$mutex = New-Object System.Threading.Mutex($true, 'PrimalSA-AI-Mirror', [ref]$created)
+$mutex = New-Object System.Threading.Mutex($true, $mutexName, [ref]$created)
 if (-not $created) {
   Add-Type -Namespace M -Name U -MemberDefinition '[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c);'
-  $other = Get-Process powershell | Where-Object { $_.MainWindowTitle -eq '精靈王石器 畫面' } | Select-Object -First 1
+  $other = Get-Process powershell | Where-Object { $_.MainWindowTitle -eq $title } | Select-Object -First 1
   if ($other) { [M.U]::ShowWindow($other.MainWindowHandle, 9) | Out-Null; [M.U]::SetForegroundWindow($other.MainWindowHandle) | Out-Null }
   exit 0
 }
-$state = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache\mirror.txt'))
+$state = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\.cache\$stateName"))
 New-Item -ItemType Directory -Force (Split-Path $state) | Out-Null
 [System.Windows.Forms.Application]::EnableVisualStyles()
-[System.Windows.Forms.Application]::Run((New-Object Mirror $state))
+[System.Windows.Forms.Application]::Run((New-Object Mirror $state, $Client, $title))
 $mutex.ReleaseMutex()

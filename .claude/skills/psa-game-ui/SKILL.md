@@ -91,6 +91,16 @@ uv run --no-project python tools/gui/errlog.py list
 - 背景模式 `dclick`（倉庫存入）、`key` 打字（含中文）都實測可用（2026-10-09）。`key` 語法：一般字元 = 打進輸入框；`{ESC}` `{BS}` 等 = 按鍵；`{a}` = 只按 a 鍵（快捷鍵用）。
 - `gui.ps1` 必須保持 **UTF-8 with BOM**（PowerShell 5.1 讀無 BOM 檔會把中文當 Big5，整支解析失敗）。
 
+## 多視窗（PSA_CLIENT，2026-10-15 第 1 步：選視窗 + 點擊鎖）
+同機多開時每個視窗是不同名稱的執行檔（`PrimalSA.exe` = 主視窗 DKBO～DKBO5；`PrimalSA2.exe` = DKBO6～DKBO10；名單寫死在 `tools/gui/clients.py`）。
+- **選視窗**：環境變數 `PSA_CLIENT` = 程序名稱（不含 .exe），**不設 = PrimalSA，行為與以前完全相同**。例：`PSA_CLIENT=PrimalSA2 bash tools/gui/gui.sh info`、`PSA_CLIENT=PrimalSA2 bash tools/gui/mirror.sh`、`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/walk.py ...`。
+  精確比對程序名稱（`psawin.ps1` 的 `Find-PsaProcess`；gui / stat / ocr / findmark / titlematch / digitmatch / mirror 共用）：沒在執行 → `gui.ps1` exit 1「PrimalSA2 沒有在執行」、讀圖腳本回 `{"ok":false,"error":"遊戲沒有在執行（PrimalSA2）"}`；**同名程序多個或名稱不合法 → exit 6，不操作**。
+  WSL 呼叫 powershell.exe 要經 WSLENV 才帶得過去：`winenv.run_ps`（一次性呼叫帶 `client_env()`）、`gui.sh` / `mirror.sh` 已自動加；常駐 `serve.ps1` 不綁視窗，**每個請求帶 `client`**，執行前設 / 清 `$env:PSA_CLIENT`，`gui.ps1` 的 hwnd 快取鍵含 client。
+- **點擊鎖**：`gui.ps1` 的 click / dclick / drag（背景與 fg 模式）在「游標移過去 → 移回」那段取 Windows 具名 Mutex `Local\PrimalSA-AI-Input`（跨行程、WSL / 原生共用，無競爭約 0.4 ms）；seq 裡每個點擊各自取放。5 秒拿不到 → **不點、exit 7**（actions.log 記「點擊鎖逾時」）；等超過 300 ms 或前一持有者沒放就死（abandoned，視為取得）也記 log。key（PostMessage）不鎖。
+- **操作 log**：非主視窗的行在時間後加 `[PrimalSA2]`（gui.ps1 與 actlog.py 同規則），主視窗格式不變。
+- **還不能給 PrimalSA2 用的**（後續階段）：寫死 DKBO 名字的 team / char / pet / bag / ass / quest / questrun / rebirth / petquest / exp / grind / relogin / netwatch；共用 `state.json` / `watch.py` / `uikit.preflight` 快路徑 / `heal.py`（讀 watchstate）/ `follow` / `grind.lock` / `battle.lock` / `current-char.json` / `netwatch.lock`。PrimalSA2 只用 gui.sh、mirror.sh、讀圖 .ps1、`walk.py`（`maphist.json` 仍共用）。
+- 離線測試：`test_multiclient.py`（假 powershell.exe 守門）、`test_psawin.ps1`（真 powershell，只測不存在 / 同名多個的程序名與自用 Mutex，碰不到遊戲）。
+
 ## 移動：先用 walk.py（不要自己算座標點地面）
 - **鏡頭高度一律拉到最左**（設置 → 畫面設置，見 [ui/setting.md](ui/setting.md)）：walk.py 的每格位移只在這個鏡頭下準，與視窗大小無關；滾輪會改鏡頭高度，**不要在遊戲畫面上滾滾輪**。走路 / 補血一直走錯格時先檢查這個。
 - 要走到某格 → `walk.py <地圖> <x> <y>`；要走進出口 → 加 `--exit <下一張地圖>`；要點 NPC → 腳本裡用 `walk.npc_steps` / `walk.talk_npc`（直接點 NPC 會自己走過去開對話）。

@@ -8,6 +8,7 @@
   actlog.add('walk', '10204 → 188,13')      # 寫一行：「23:14:25 walk 10204 → 188,13」
 命令列：python tools/gui/actlog.py <類別> <說明...>
 gui.ps1 的 click / drag / key 等也寫同一個檔（格式相同）；寫入失敗一律忽略，不影響操作。
+多視窗：設了 PSA_CLIENT 且不是主視窗 PrimalSA 時，時間後面加「[程序名] 」，例「23:14:25 [PrimalSA2] walk …」（gui.ps1 同規則）；主視窗格式不變。
 併發：append 單行 + 裁尾，偶爾多個程序同時裁尾可能掉一行，可接受。
 """
 import sys
@@ -15,6 +16,7 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import clients
 import logpaths
 
 LOG = logpaths.p(Path(__file__).resolve().parents[1] / '.cache' / 'actions.log')
@@ -59,7 +61,7 @@ def _hourly_add(line: str, path: Path, now: datetime) -> None:
 
 def add(kind: str, msg: str = '', path: Path = LOG, keep: int = KEEP) -> None:
     now = datetime.now()
-    line = f'{now:%H:%M:%S} {kind} {msg}'.rstrip().replace('\r', ' ').replace('\n', ' ')
+    line = f'{now:%H:%M:%S} {clients.log_tag()}{kind} {msg}'.rstrip().replace('\r', ' ').replace('\n', ' ')
     _hourly_add(line, path, now)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
