@@ -1039,6 +1039,60 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True, hint:
     return None
 
 
+# ---- 同名多疊：讀每疊數量 / 依數量選格（2026-10-15 petquest 恐龍博士：背包同時有「要留的 4 個」與「要存回的 46 個」兩疊，find_item 只回第一格 → 存錯疊）----
+SPLIT_QTY_BOX = (670, 430, 170, 45)     # 拆分「數量輸入」視窗裡的疊數（2026-10-12 實機量）
+SPLIT_CANCEL = (828, 545)               # 數量輸入視窗的取消鈕
+
+
+def parse_qty(texts) -> int | None:
+    """純函式：OCR 文字（字串或清單）→ 第一個 1～3 位數；沒有 None"""
+    if not isinstance(texts, str):
+        texts = ' '.join(str(t) for t in texts)
+    m = re.search(r'\d{1,3}', texts)
+    return int(m.group()) if m else None
+
+
+def stack_qty(i: int, want: str) -> int | None:
+    """背包第 i 格（want）的疊數：開彈窗核對名稱 → 有「拆分」鈕才點、讀數量輸入視窗、按取消（不改變任何東西）；沒有「拆分」鈕 = 單個 → 1。
+    名稱不符 / 開不了 / 讀不出 → None（呼叫端不可當 0 或猜值）。疊數 OCR 框沿用 rebirth_pets 拆分實測框"""
+    if not open_slot_popup(i):
+        return None
+    try:
+        if not name_match(popup_name(want), want):
+            return None
+        txt = re.sub(r'\s+', '', _ocr_join(POPUP_BTN_BOX, BTN_OPTS))
+        if '拆分' not in txt:
+            return 1
+        if not _click(628, 648, POPUP, f'bag 讀疊數：拆分 {want}', wait_ms=700):
+            return None
+        q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Zooms', '2,3'))
+        uikit.gui('seq', f'click {SPLIT_CANCEL[0]} {SPLIT_CANCEL[1]}; wait 600', note='bag 讀疊數：取消數量輸入')
+        return q
+    finally:
+        if popup_open():
+            close_popup()
+
+
+def stacks_of(want: str) -> list:
+    """背包頁目前角色：同名道具每疊 → [(格號, 疊數 | None)]（格號由小到大）。名稱用格名 OCR（只讀有道具的格），再逐疊 stack_qty"""
+    occ, texts = read_bag_names_ocr()
+    idx = [i for i in range(n_slots()) if (occ is None or occ[i]) and texts.get(i) and name_match(texts[i], want)]
+    return [(i, stack_qty(i, want)) for i in idx]
+
+
+def pick_stack(stacks, pick: str | None = None, want_count: int | None = None):
+    """純函式：[(格, 疊數)] → 選定格號 | None。want_count = 只要疊數剛好等於它的格（多個取格號小的；沒有 None）；
+    pick = 'largest' / 'smallest'（疊數讀不出的不參與）；都沒給 = 第一格。"""
+    if want_count is not None:
+        return next((i for i, q in stacks if q == want_count), None)
+    known = [(i, q) for i, q in stacks if q is not None]
+    if pick == 'largest':
+        return max(known, key=lambda t: (t[1], -t[0]))[0] if known else None
+    if pick == 'smallest':
+        return min(known, key=lambda t: (t[1], t[0]))[0] if known else None
+    return stacks[0][0] if stacks else None
+
+
 def _same_item(a, b) -> bool:
     """名稱相同（norm_name 後完全相等）"""
     na, nb = norm_name(a), norm_name(b)
@@ -1894,9 +1948,11 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
     return 0
 
 
-def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = False, all_copies: bool = False) -> int:
+def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = False, all_copies: bool = False, pick: str | None = None, want_count: int | None = None) -> int:
     """背包 want 存入倉庫（彈窗「存入」鈕；整疊）。keep_ok = 背包另有同名道具（拆分後的新疊）時不驗「消失」。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存。
     all_copies = 同名多格（不疊加的道具，例：千年龜的殼每個佔一格）一格一格存到背包沒有為止。
+    同名多疊（2026-10-15）：pick = 'largest' / 'smallest' 或 want_count = 疊數剛好 N 的那疊（例：存回 46 個那疊、留下 4 個那疊）；
+    指定時先逐疊讀疊數（stack_qty，拆分視窗讀完取消）選格，存之前再讀一次選中格疊數，對不上（或讀不出）→ 不按存入、回 95（EXIT_VERIFY）；找不到符合的疊 → 92。
     驗證：存後輪詢到「那一格變空」（像素；存入後不補位，ui/bag.md）——舊版等「背包找不到」，同名多格時誤報 95；像素讀不到才退回「找不到」。結果 LAST['stored']"""
     LAST.clear()
     if protected(want):
@@ -1909,11 +1965,25 @@ def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = Fal
         if rc:
             return rc
         while True:
-            i = find_item(want)
+            qty_i = None
+            if pick or want_count is not None:
+                stks = stacks_of(want)
+                i = pick_stack(stks, pick, want_count)
+                qty_i = dict(stks).get(i) if i is not None else None
+                if i is not None and qty_i is None:
+                    return _fail(EXIT_VERIFY, f'{role}「{want}」第 {i + 1} 格疊數讀不出（不存）', 'bag-store-qty')
+                if i is not None and want_count is not None and any(q is None for _, q in stks):
+                    return _fail(EXIT_VERIFY, f'{role}「{want}」有疊數讀不出的格（不存）', 'bag-store-qty')
+            else:
+                i = find_item(want)
             if i is None:
                 if stored:
                     break
-                return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
+                return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」' + (f'（指定 {pick or want_count}）' if pick or want_count is not None else ''), 'bag-noitem')
+            if qty_i is not None:                            # 存之前再讀一次選中格疊數（背包頁；格座標與倉庫頁右半相同）
+                q2 = stack_qty(i, want)
+                if q2 != qty_i or (want_count is not None and q2 != want_count):
+                    return _fail(EXIT_VERIFY, f'{role}「{want}」第 {i + 1} 格疊數 {q2}（預期 {want_count if want_count is not None else qty_i}），不存', 'bag-store-qty')
             rc = open_depot(depot)
             if rc:
                 return rc

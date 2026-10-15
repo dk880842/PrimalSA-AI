@@ -575,27 +575,69 @@ class Tools:
         return 0, info
 
     def bait_take(self, role, keep):
-        """公共倉庫取誘餌（整疊）→ 拆分出 keep 個 → 其餘（原疊，排在前面）存回公共，背包只剩 keep 個。**拆分流程只有手動實測過**"""
+        """背包只留 keep 個誘餌，其餘存回公共（**重跑冪等**，2026-10-15）。先讀背包現有每疊誘餌疊數（bag.stacks_of）：
+        - 總數 == keep → 已完成，不取、不拆（rc 95 / 164 / 175 的根因：DKBO2 背包已只剩一疊 4 個，舊版仍整疊拆分 → 沒拆出新疊）；
+        - 沒有 → 公共倉庫取整疊，再往下；總數 < keep → 全存回、記 split_short、回 92（誘餌不夠）；
+        - 總數 > keep：有一疊剛好 keep → 其餘疊依疊數存回；只有一疊 → 拆出 keep 個、把「疊數 = 原疊 − keep」那疊存回（不靠格序，不會存到要留的那疊）；
+          其他組合（多疊但沒有剛好 keep 的）無法安全判斷 → 95 停手；
+        - 疊數讀不出 → 95（不猜）。**拆分流程只有手動實測過；讀疊數（stack_qty）未實機**"""
         import bag
-        rc, found = bag.find_items(role, [BAIT])                 # 上次中斷時整疊可能已在背包（2026-10-12）→ 不重取
+        self.split_noop = False
+        self.split_short = None
+        rc, stacks = self._bait_stacks(role)
         if rc:
             return rc
-        if found.get(BAIT) is None:
+        if not stacks:
             rc = bag.depot_take(role, BAIT, 'public', hint=getattr(self, 'bait_hint', None))
             if rc:
                 return rc
             self.bait_hint = bag.LAST.get('depot_slot')          # 下一人先點這格核對（整疊存回後多半回到同一格），不逐格掃
-        self.split_noop = False
-        self.split_short = None
-        rc = self._split(role, BAIT, keep)
-        if rc:
-            if rc == bag.EXIT_ITEM and self.split_short is not None:   # 整疊比要的少（2026-10-13 petquest）：整疊存回公共，回 92 = 誘餌不夠（呼叫端決定買不買）
-                st = bag.depot_store(role, BAIT, 'public')
-                print(f'rebirth_pets：{role} 誘餌只有 {self.split_short} 個（要 {keep}）→ 整疊存回公共倉庫 rc {st}', flush=True)
-            return rc
-        if self.split_noop:
+            rc, stacks = self._bait_stacks(role)
+            if rc:
+                return rc
+            if not stacks:
+                return uikit.fail(SRC, bag.EXIT_VERIFY, f'{role} 取出後背包讀不到 {BAIT}')
+        if any(q is None for _, q in stacks):
+            return uikit.fail(SRC, bag.EXIT_VERIFY, f'{role} {BAIT} 疊數讀不出 {stacks}（不猜、不拆）')
+        total = sum(q for _, q in stacks)
+        if total == keep:
+            self.split_noop = True
+            print(f'rebirth_pets：{role} 背包誘餌已剛好 {keep} 個 → 不取不拆', flush=True)
             return 0
-        return bag.depot_store(role, BAIT, 'public', keep_ok=True)   # find_item 取第一格 = 原疊（新疊在隔壁格，排後面）；拆分後背包仍有新疊，不驗消失（2026-10-12 實機）
+        if total < keep:
+            st = bag.depot_store(role, BAIT, 'public', all_copies=True)
+            self.split_short = total
+            print(f'rebirth_pets：{role} 誘餌只有 {total} 個（要 {keep}）→ 全存回公共倉庫 rc {st}', flush=True)
+            return uikit.fail(SRC, bag.EXIT_ITEM, f'{role} {BAIT} 只有 {total} 個，要 {keep}（不夠）')
+        exact = next((i for i, q in stacks if q == keep), None)
+        if exact is not None:                                     # 重跑中斷在「拆完還沒存回」：留下那疊、其餘依疊數存回
+            for i, q in stacks:
+                if i == exact:
+                    continue
+                rc = bag.depot_store(role, BAIT, 'public', want_count=q, keep_ok=True)
+                if rc:
+                    return rc
+            return 0
+        if len(stacks) != 1:
+            return uikit.fail(SRC, bag.EXIT_VERIFY, f'{role} {BAIT} 有多疊 {stacks} 但沒有剛好 {keep} 的，無法安全判斷（停手）')
+        slot, q = stacks[0]
+        rc = self._split(role, BAIT, keep, slot=slot)
+        if rc:
+            return rc
+        if self.split_noop:                                       # 拆分視窗讀到整疊 = keep（與前面讀的不同）：不存回
+            return 0
+        return bag.depot_store(role, BAIT, 'public', keep_ok=True, want_count=q - keep)   # 存「疊數 = 原疊 − keep」那疊；拆分後背包仍有新疊，不驗消失（2026-10-12 實機）
+
+    def _bait_stacks(self, role):
+        """→ (rc, [(格, 疊數)])：選好角色後讀背包誘餌各疊"""
+        import bag
+        with bag.Session() as s:
+            if s.rc:
+                return s.rc, []
+            rc = bag.select_role(role)
+            if rc:
+                return rc, []
+            return 0, bag.stacks_of(BAIT)
 
     def bait_take_many(self, roles, keep):
         """多人取誘餌（2026-10-13）：背包面板只開一次（左欄頭像切人連續做完才關）；公共倉庫誘餌格號記起來，後面的人直接核對那格。
@@ -613,7 +655,7 @@ class Tools:
                 print(f'rebirth_pets：{role} 背包誘餌 = {keep}', flush=True)
         return 0
 
-    def _split(self, role, name, n):
+    def _split(self, role, name, n, slot=None):
         """背包第一格 name → 拆分鈕 → 數量鍵盤輸入 n → 確定；之後隔壁格要有 name。座標：notes/plan-dino-katan.md（手動實測）"""
         import bag
         if not 1 <= n <= 99:
@@ -624,7 +666,7 @@ class Tools:
             rc = bag.select_role(role)
             if rc:
                 return rc
-            i = bag.find_item(name)
+            i = slot if slot is not None else bag.find_item(name)     # slot = 呼叫端已選好的疊（多疊時不可靠 find_item 取第一格）
             if i is None:
                 return uikit.fail(SRC, bag.EXIT_ITEM, f'{role} 背包找不到 {name}（拆分）')
             if not bag.open_slot_popup(i):
@@ -684,7 +726,7 @@ class Tools:
             return rc
         if found.get(BAIT) is None:
             return 0
-        return bag.depot_store(role, BAIT, 'public')
+        return bag.depot_store(role, BAIT, 'public', all_copies=True)      # 多疊（拆分中斷留下的）全存回
 
     # ---- 外掛（ass 面板；本類自己寫的部分）----
     def _ass_open(self, role, tab):

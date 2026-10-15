@@ -434,7 +434,7 @@ class _S:
         return False
 
 
-keep = {k: getattr(bag, k) for k in ('Session', 'select_role', 'find_item', 'open_slot_popup', 'name_match', 'popup_name', '_ocr_join', '_click', 'close_popup', 'depot_store', 'find_items')}
+keep = {k: getattr(bag, k) for k in ('Session', 'select_role', 'find_item', 'open_slot_popup', 'name_match', 'popup_name', '_ocr_join', '_click', 'close_popup', 'depot_store', 'find_items', 'stacks_of')}
 keep_ocr, keep_gui, keep_fail = rp.ocr_lines, uikit.gui, uikit.fail
 clicks = []
 bag.Session, bag.select_role, bag.find_item, bag.open_slot_popup = _S, lambda r: 0, lambda n: 0, lambda i: True
@@ -452,7 +452,7 @@ try:
         rc = t._split('DKBO2', rp.BAIT, 5)
     check('_split：整疊 3 < 要 5 → 按取消 828,545、回 92、記 split_short', rc == bag.EXIT_ITEM and t.split_short == 3
           and any('828 545' in str(c) for c in clicks) and not any('755 451' in str(c) for c in clicks), str(clicks))
-    bag.find_items = lambda role, names: (0, {rp.BAIT: 0})
+    bag.stacks_of = lambda w: [(0, 3)]
     clicks.clear()
     with contextlib.redirect_stdout(io.StringIO()):
         rc = t.bait_take('DKBO2', 5)
