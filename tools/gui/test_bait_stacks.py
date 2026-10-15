@@ -2,7 +2,7 @@
 """同名多疊誘餌離線測試（不碰遊戲；2026-10-15 p1 petquest 恐龍博士 rc 95 / 164 / 175 的兩個 bug）。
 用法：uv run --no-project python tools/gui/test_bait_stacks.py
 驗：bag.pick_stack / parse_qty 純函式；bag.depot_store 依疊數選格（最大疊 / 剛好 N 個）、存之前疊數對不上不按存入；
-rebirth_pets.bait_take 重跑冪等（背包已剛好 keep → 不取不拆）、多疊存回「不是要留的那疊」、拆分後存 原疊 − keep 那疊、不夠 → 全存回回 92。"""
+rebirth_pets.bait_take 最簡流程（背包已剛好 keep 跳過、不是 keep 全存回重取、拆分只讀整疊 qty < / == / > keep 三種、不做名稱 / 按鈕 / 標題 OCR）。"""
 import contextlib
 import io
 import sys
@@ -91,7 +91,7 @@ finally:
     for k, v in keep.items():
         setattr(bag, k, v)
 
-# ---- rebirth_pets.bait_take ----
+# ---- rebirth_pets.bait_take（2026-10-16 最簡流程）----
 keep = {k: getattr(bag, k) for k in ('Session', 'select_role', 'stacks_of', 'depot_take', 'depot_store', 'find_item', 'open_slot_popup', 'name_match',
                                      'popup_name', '_ocr_join', '_click', 'close_popup', 'read_slot_name')}
 keep_ocr, keep_gui, keep_fail, keep_open = rp.ocr_lines, uikit.gui, uikit.fail, uikit.is_open
@@ -99,50 +99,57 @@ calls, state = [], {'stacks': [], 'qty': '50'}
 try:
     bag.Session, bag.select_role = _S, lambda r: 0
     bag.stacks_of = lambda w: list(state['stacks'])
-    bag.depot_take = lambda *a, **k: calls.append(('take',)) or state.update(stacks=[(0, 50)]) or 0
+    bag.find_item = lambda n, **k: 0 if state['stacks'] else None           # 背包有沒有誘餌（只看格名）
+    bag.depot_take = lambda *a, **k: calls.append(('take',)) or state.update(stacks=[(0, int(state['qty']))]) or 0
     bag.depot_store = lambda role, w, d='public', **k: calls.append(('store', k)) or 0
-    bag.find_item, bag.open_slot_popup = lambda n: 0, lambda i: True
-    bag.name_match, bag.popup_name, bag._ocr_join = lambda a, b: True, lambda n=None: n, lambda box, o: '使用 拆分'
-    bag._click, bag.close_popup, bag.read_slot_name = lambda *a, **k: True, lambda: True, lambda i, d=False: rp.BAIT
-    rp.ocr_lines = lambda box, *o: [('數量輸入', 0, 0)] if box[1] == 170 else [(state['qty'], 0, 0)]
+    bag.open_slot_popup = lambda i: True
+    # 名稱 / 按鈕 / 標題 OCR 一律炸掉：新流程不准再呼叫
+    def boom(*a, **k):
+        raise AssertionError('不該再做名稱 / 按鈕列 OCR')
+    bag.name_match, bag.popup_name, bag._ocr_join = boom, boom, boom
+    bag._click, bag.close_popup, bag.read_slot_name = lambda *a, **k: calls.append(('click', a[0], a[1])) or True, lambda: True, lambda i, d=False: rp.BAIT
+    ocr_boxes = []
+    rp.ocr_lines = lambda box, *o: ocr_boxes.append(box) or ([(state['qty'], 0, 0)] if state['qty'] else [])
     uikit.gui = lambda *a, **k: calls.append(('gui', a[1] if len(a) > 1 else a)) or ''
     uikit.fail = lambda src, rc, msg: rc
     uikit.is_open = lambda *a, **k: True
     t = rp.Tools()
 
-    def run(stacks, keepn=4):
-        calls.clear()
-        state['stacks'] = stacks
+    def run(stacks, keepn=4, qty='50', keep_short=False):
+        calls.clear(); ocr_boxes.clear()
+        state['stacks'], state['qty'] = stacks, qty
         with contextlib.redirect_stdout(io.StringIO()):
-            return t.bait_take('DKBO2', keepn)
+            return t.bait_take('DKBO2', keepn, keep_short)
 
     rc = run([(3, 4)])
-    check('重跑冪等：背包已剛好 4 個一疊 → 不取、不拆、不存（rc 0）', rc == 0 and not calls and t.split_noop, str(calls))
+    check('背包已剛好 4 個 → 跳過（不取、不拆、不存、不開彈窗）', rc == 0 and not calls and t.split_noop, str(calls))
     rc = run([(2, 1), (3, 3)])
-    check('總數剛好 4（兩疊）也不動', rc == 0 and not calls)
-    rc = run([(0, 4), (1, 46)])
-    check('多疊 4 + 46：存回 46 那疊（want_count=46），不拆', rc == 0 and calls == [('store', {'want_count': 46, 'keep_ok': True})], str(calls))
-    rc = run([(0, 50)])
-    check('單疊 50 → 拆 4 → 存 want_count=46 那疊', rc == 0 and calls[-1] == ('store', {'keep_ok': True, 'want_count': 46}) and any('755 451' in str(c) for c in calls), str(calls))
+    check('總數剛好 4（兩疊）也跳過', rc == 0 and not calls)
+    rc = run([(0, 4), (1, 46)], qty='50')
+    check('背包是 4 + 46（不是 keep）→ 全存回 → 重取整疊 → 拆 4 → 存 46',
+          rc == 0 and calls[0] == ('store', {'all_copies': True}) and calls[1] == ('take',) and calls[-1] == ('store', {'keep_ok': True, 'want_count': 46}), str(calls))
+    rc = run([(0, 10), (1, 20)], qty='30')
+    check('多疊 10 + 20 也一律全存回重取（不回 95）', rc == 0 and calls[0] == ('store', {'all_copies': True}) and calls[1] == ('take',))
     rc = run([])
-    check('背包沒有 → 先取公共整疊再拆存', rc == 0 and calls[0] == ('take',) and calls[-1][0] == 'store', str(calls))
-    rc = run([(0, 2)])
-    check('只有 2 < 4 → 全存回、回 92、split_short=2', rc == bag.EXIT_ITEM and t.split_short == 2 and calls == [('store', {'all_copies': True})], str(calls))
-    calls.clear(); state['stacks'] = [(0, 3)]
-    with contextlib.redirect_stdout(io.StringIO()) as out:
-        rc = t.bait_take('DKBO5', 5, keep_short=True)
-    check('keep_short：公共取到 3 < 要 5 → 不存回（沒有 store）、回 92、split_short=3、印「背包誘餌不足 = 3」',
-          rc == bag.EXIT_ITEM and t.split_short == 3 and not calls and '背包誘餌不足 = 3' in out.getvalue(), str(calls))
+    check('第一次（背包沒誘餌）：不讀疊數、取整疊 50 → 拆 4（只讀 1 次數量）→ 存 46',
+          rc == 0 and calls[0] == ('take',) and calls[-1] == ('store', {'keep_ok': True, 'want_count': 46}) and ocr_boxes == [(670, 430, 170, 45)]
+          and any('755 451' in str(c) for c in calls) and any('610 545' in str(c) for c in calls), str(calls) + str(ocr_boxes))
+    rc = run([], qty='4')
+    check('整疊 == keep → 取消 828,545、不存回、split_noop', rc == 0 and t.split_noop and calls[-1] == ('gui', 'click 828 545; wait 600') and not any(c[0] == 'store' for c in calls), str(calls))
+    rc = run([], qty='2')
+    check('整疊 2 < 4（非 keep_short）→ 取消、全存回、回 92、split_short=2', rc == bag.EXIT_ITEM and t.split_short == 2 and calls[-1] == ('store', {'all_copies': True})
+          and any('828 545' in str(c) for c in calls), str(calls))
+    rc = run([], keepn=5, qty='3', keep_short=True)
+    check('keep_short：整疊 3 < 5 → 取消、不存回、回 92、split_short=3', rc == bag.EXIT_ITEM and t.split_short == 3 and not any(c[0] == 'store' for c in calls), str(calls))
     state['stacks'] = []
     bag.depot_take = lambda *a, **k: calls.append(('take',)) or bag.EXIT_ITEM
     calls.clear()
     with contextlib.redirect_stdout(io.StringIO()) as out:
         rc = t.bait_take('DKBO5', 5, keep_short=True)
     check('keep_short：公共已空 → 現有 0、回 92、印「不足 = 0」', rc == bag.EXIT_ITEM and t.split_short == 0 and '背包誘餌不足 = 0' in out.getvalue())
-    rc = run([(0, None)])
-    check('疊數讀不出 → 95、不動', rc == bag.EXIT_VERIFY and not calls)
-    rc = run([(0, 10), (1, 20)])
-    check('多疊但沒有剛好 keep → 95 停手、不動', rc == bag.EXIT_VERIFY and not calls)
+    bag.depot_take = lambda *a, **k: calls.append(('take',)) or state.update(stacks=[(0, int(state['qty'] or 0))]) or 0
+    rc = run([], qty='')
+    check('整疊數量讀不出 → 取消、回 95、不存回', rc == bag.EXIT_VERIFY and not any(c[0] == 'store' for c in calls), str(calls))
 finally:
     for k, v in keep.items():
         setattr(bag, k, v)

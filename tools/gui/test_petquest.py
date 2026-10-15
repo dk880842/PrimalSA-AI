@@ -539,10 +539,11 @@ class _S:
         return False
 
 
-keep = {k: getattr(bag, k) for k in ('Session', 'select_role', 'find_item', 'open_slot_popup', 'name_match', 'popup_name', '_ocr_join', '_click', 'close_popup', 'depot_store', 'find_items', 'stacks_of')}
+keep = {k: getattr(bag, k) for k in ('Session', 'select_role', 'find_item', 'open_slot_popup', 'name_match', 'popup_name', '_ocr_join', '_click', 'close_popup', 'depot_store', 'depot_take', 'find_items', 'stacks_of')}
+bag.depot_take = lambda *a, **k: 0
 keep_ocr, keep_gui, keep_fail = rp.ocr_lines, uikit.gui, uikit.fail
 clicks = []
-bag.Session, bag.select_role, bag.find_item, bag.open_slot_popup = _S, lambda r: 0, lambda n: 0, lambda i: True
+bag.Session, bag.select_role, bag.find_item, bag.open_slot_popup = _S, lambda r: 0, lambda n, **k: None if k.get('popup_fallback') is False else 0, lambda i: True
 bag.name_match, bag.popup_name, bag._ocr_join = lambda a, b: True, lambda n: n, lambda box, o: '使用 拆分'
 bag._click = lambda *a, **k: True
 bag.close_popup = lambda: True
