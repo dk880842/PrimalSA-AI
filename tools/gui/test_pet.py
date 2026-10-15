@@ -957,6 +957,23 @@ rc, out, err = run(pet.take_many, 'DKBO', [BRA], 'public')
 check('take-many 從公共取回 1 隻沒名字的布拉奇多斯（成長字串靠登錄檔）', rc == 0 and g.pets['DKBO'][2] is not None and g.pets['DKBO'][2].get('unnamed') in (GS[1], GS[2]), f'rc={rc} {err[-200:]}')
 
 
+# ---- '?' 目標：取沒名字（成長字串）的卡，不認物種（2026-10-16 卡坦 p2：溢出那隻從沒改名、登錄檔把字串記成別的鯊魚 → 舊版 72）----
+check("parse_target '?' / '?@1'：unnamed、名字 None", pet.parse_target('?') == {'name': None, 'growth': None, 'level': None, 'unnamed': True}
+      and pet.parse_target('?@1')['level'] == 1 and pet.fmt_target(pet.parse_target('?@1')) == '?@1' and pet.parse_plan('DKBO:?')[0][1].get('unnamed'))
+petmatch.save_species({'thumb': {}, 'growth': {GS[3]: '加克拉'}})          # 字串登錄成別的物種（撞號 / 學錯）也不影響
+g = new(pets=mk_pets(DKBO=[{'name': '布拉奇多斯', 'state': '騎乘', 'level': 5}, None, None, None, None]),
+        depot=fake_pet.mk_depot(DKBO={'personal': ['迪基格斯', '摩娜西普', {'name': '克邦凱斯', 'unnamed': GS[3], 'species': '克邦凱斯', 'level': 1}]}))
+rc, out, err = run(pet.take_plan, pet.parse_plan('DKBO:?'), 'personal')
+check("take-many --plan DKBO:?：個人倉庫 迪基格斯 / 摩娜西普 / ?(47/10/7/1) → 取出沒名字那張（不看縮圖 / 登錄檔）",
+      rc == 0 and g.pets['DKBO'][1] and g.pets['DKBO'][1].get('unnamed') == GS[3] and [c['name'] for c in g.depot['DKBO']['personal'] if c] == ['迪基格斯', '摩娜西普'], f'rc={rc} {err[-300:]}')
+g = new(pets=mk_pets(DKBO=[{'name': '布拉奇多斯', 'state': '騎乘', 'level': 5}, None, None, None, None]),
+        depot=fake_pet.mk_depot(DKBO={'personal': ['迪基格斯', {'name': BRA, 'unnamed': GS[0], 'species': BRA, 'level': 1}, {'name': BRA, 'unnamed': GS[1], 'species': BRA, 'level': 1}]}))
+rc, out, err = run(pet.take_plan, pet.parse_plan('DKBO:?'), 'personal')
+check("take-many --plan DKBO:?：沒名字的卡 2 張 > 要取 1 張 → 72、零取出點擊（不猜）", rc == 72 and depot_free(g) == 0, f'rc={rc}')
+rc, out, err = run(pet.take_plan, pet.parse_plan('DKBO:?,DKBO:?'), 'personal')
+check("take-many --plan DKBO:?,DKBO:?：2 張都取（張數 = 要取的）", rc == 0 and [c['name'] for c in g.depot['DKBO']['personal'] if c] == ['迪基格斯'], f'rc={rc} {err[-300:]}')
+
+
 # ---------------- 2026-10-12：批次取出 / 不准盲取 / set-state-many ----------------
 fresh_tpl()
 check('parse_target：名字 / @等級 / #成長字串 / 組合 / 錯字', pet.parse_target('朵拉比斯') == {'name': '朵拉比斯', 'growth': None, 'level': None}

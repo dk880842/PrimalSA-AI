@@ -149,7 +149,7 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
      - **reset-name 邊讀邊改**：`list_role(on_slot=)` 每格讀完仍選中就改名，不再「讀完全部再選回去」（舊：選第 2 格再選第 1 格）；`--slot N` 只選 / 讀那一格（`only`）。
   4. 流程腳本共用 `pet.reset_soft(角色)`（2026-10-14 晚，離線測試）：67 / 9 / 10 原樣回（停手）；其他失敗 rc 0 + `soft_rc`（呼叫端記事件、名字讀不出的那隻走成長字串登錄備援）；
      `info['renamed']` = {角色: [還原成功的成長字串]}。用在 rebirth_pets catch（每批抓完；67 → 103；learn-species 只在還原失敗時）與 pet_catch 的 `--stages rename,register`（單獨手動補做用）。
-     **petquest（恐龍博士 / 卡坦，2026-10-16 最簡流程）直接呼叫 `pet.py reset-name --role 抓寵者`**（不經 pet_catch rename / register）：抓完全改名 → 馬上 `store-many --depot public` → 個人倉庫溢出的 `take-many --depot personal --candidates` 取回後再 `reset-name`；67 → 165 停手、其他失敗也停（不帶沒改名的寵物往下存）；不再有名字驗證 / 登錄備援，最後只驗每人寵物欄格數 = 騎寵 + 本輪種類數。
+     **petquest（恐龍博士 / 卡坦，2026-10-16 最簡流程）直接呼叫 `pet.py reset-name --role 抓寵者`**（不經 pet_catch rename / register）：抓完全改名 → 馬上 `store-many --depot public` → 個人倉庫溢出的 `take-many --depot personal --plan "角色:?"` 取回後再 `reset-name`（`?` = 取**沒名字（成長字串）的卡**、不認物種不比縮圖：溢出那隻自動進倉從沒改名，個人倉庫其他寵物都有名字；沒名字的卡多於要取的張數 → 72 不猜，2026-10-16 卡坦 p2）；67 → 165 停手、其他失敗也停（不帶沒改名的寵物往下存）；不再有名字驗證 / 登錄備援，最後只驗每人寵物欄格數 = 騎寵 + 本輪種類數。
      rebirth_pets lock：騎寵有名字 → 外掛下拉比物種名，找不到才退回 catch 記的成長字串（**改名後下拉顯示什麼待實機確認**）。
 - **名字為主（`pet.NAME_FIRST`，`--img-first` 回下一段的縮圖為主）**：寵物格名字框 / 倉庫卡白字先用整名樣板（petmatch 名字樣板、petglyph 卡片名字整塊圖）讀、讀不到才 OCR；
   **讀到 Monster 表物種名就採用（`species_src: name`）、不跑縮圖**（list / depot-list / store / take 的取前取後核對都一樣，`img_conflict(named=True)` 直接略過）；

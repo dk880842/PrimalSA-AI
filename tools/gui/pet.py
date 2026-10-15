@@ -14,6 +14,7 @@
   uv run --no-project python tools/gui/pet.py take-many --role all --pets 朵拉比斯 [--depot personal|public] [--skip-missing]
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"   # 每人不同目標
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO4:#34/7/4/8~7,DKBO5:#31/7/4/8~8"   # ~N = 格號提示（撞號 / 同字串多張時指定哪張）
+  uv run --no-project python tools/gui/pet.py take-many --depot personal --plan "DKBO7:?"   # ? = 沒名字（成長字串）的卡、不認物種（petquest 取抓寵溢出）；這人計畫裡 ? 有 k 個、倉庫沒名字的卡 > k → 72 不猜
     格號提示（2026-10-14 errlog #843～851）：取出一隻後同倉庫後面的卡往前遞補 → 後續項目的提示自動 -1（shift_hints）；取前一定核對身分，
     提示那張不是目標 → relocate_card 重讀整個倉庫以身分定位（只收唯一吻合；多張且有 @等級 再比卡片等級），仍判不出 → 72 不取。
     單次 take --index 不受影響：不符就 72（不自動改找）。沒給提示的目標照舊每次現場逐張找（快取只決定先看哪張，取走後格號也跟著 -1）
@@ -2088,30 +2089,38 @@ CARD_DIGIT_FIX = str.maketrans({'l': '1', 'I': '1', '|': '1', '丨': '1', 'i': '
 def parse_target(text):
     """取出目標字串 → {'name', 'growth', 'level'}（純函式）。
     '朵拉比斯' / '朵拉比斯@126'（同名多隻用等級分）/ '#35/7/3/8'（沒名字的新寵物，成長字串）/ '克邦凱斯#35/7/3/8@1'。
+    '?' / '?@1' = 沒名字（名字框是成長字串）的卡、不認物種（t['unnamed']；petquest 取抓寵溢出進個人倉庫的那隻：個人倉庫只有它沒名字，
+    鯊魚系縮圖太像、成長字串登錄會撞號，不比縮圖 / 登錄檔，2026-10-16 卡坦 p2 rc 72）。
     '~N' 結尾 = 格號提示（倉庫第 N 格，1～20；同字串撞號時用來指定哪一張，take_plan 取走前面的卡會自動遞補 -1，取前一定核對身分）→ t['hint']（沒給就沒有這個 key）。
     名字對不到 Monster 表、格式錯、三者全空、格號超出 1～20 或格號沒配名字 / 成長字串 → None"""
     m = TARGET_RE.match(str(text or '').strip())
     if not m:
         return None
     raw = m['name'].strip()
-    name = uikit.snap_pet(raw) if raw else None
-    if raw and not name:
+    unnamed = raw in ('?', '？')
+    name = uikit.snap_pet(raw) if raw and not unnamed else None
+    if raw and not name and not unnamed:
         return None
     t = {'name': name, 'growth': m['growth'], 'level': int(m['level']) if m['level'] else None}
+    if unnamed:
+        t['unnamed'] = True
     if m['hint']:
         if not 1 <= int(m['hint']) <= 20 or not (name or m['growth']):      # 格號提示一定要配名字 / 成長字串（身分），不准只靠格號 + 等級
             return None
         t['hint'] = int(m['hint'])
-    return t if (t['name'] or t['growth'] or t['level'] is not None) else None
+    return t if (t['name'] or t['growth'] or t['level'] is not None or unnamed) else None
 
 
 def fmt_target(t: dict) -> str:
-    return ((t.get('name') or '') + (f'#{t["growth"]}' if t.get('growth') else '') + (f'@{t["level"]}' if t.get('level') is not None else '')
+    return (('?' if t.get('unnamed') else '') + (t.get('name') or '') + (f'#{t["growth"]}' if t.get('growth') else '') + (f'@{t["level"]}' if t.get('level') is not None else '')
             + (f'~{t["hint"]}' if t.get('hint') else ''))
 
 
 def target_ok(idn: dict, t: dict, reg: dict) -> bool:
-    """名字框身分 idn 是不是目標 t（名字 / 成長字串；等級另外驗）。t 只有等級（--index + --expect-level）→ 身分不設限 True"""
+    """名字框身分 idn 是不是目標 t（名字 / 成長字串；等級另外驗）。t 只有等級（--index + --expect-level）→ 身分不設限 True。
+    t['unnamed']（'?'）→ 卡上沒有名字就算（不認物種；_find_target_card 另要求讀到成長字串）"""
+    if t.get('unnamed') and idn.get('name'):
+        return False
     if t.get('name') and not card_is(idn, t['name'], reg):
         return False
     if t.get('growth') and idn.get('growth') != t['growth']:
@@ -2287,6 +2296,8 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
     for k, c in gl.items():
         if k not in cache and (c['name'] or c['growth']):
             cache[k] = {'name': c['name'], 'growth': c['growth']}
+    if t.get('unnamed'):
+        return _find_unnamed_card(d, depot, t, ctx, info, cache, filled)
     if t.get('level') is None and not info.get('glyph_retry'):
         # 卡片字形（整頁 0 點擊）讀得出名字 / 成長字串、且吻合目標 → 直接當找到，不逐張選卡（2026-10-14 一張少 5～10 次點擊）。
         # 安全：_take_in_depot 取前一定選這張、讀名字框核對；不符 → 退回逐張選卡找一次（glyph_retry），所以字形讀錯只會慢、不會取錯
@@ -2352,6 +2363,37 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
         return None, (f'{depot} 倉庫有 {len(named)} 張 {t.get("name") or fmt_target(t)}，其中 {len(unsure)} 張（格 {[c + 1 for c in unsure]}）'
                       f'卡片等級讀不確定、沒有一張確定是 Lv{t["level"]}（讀到 {seen}），不取')
     return None, f'{depot} 倉庫裡逐張看不到 {fmt_target(t)}（讀到 {seen}）'
+
+
+def _find_unnamed_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache: dict, filled: list) -> tuple:
+    """'?' 目標：逐張選卡讀名字框，收「沒名字、讀到成長字串」的卡（不認物種、不比縮圖 / 登錄檔）。
+    張數 ≤ t['unnamed_max']（take_plan 填：這個角色計畫裡還沒取的 '?' 隻數，預設 1）→ 取第一張；超過 → 不猜（None）。有 @等級 → 等級相等的才算"""
+    seen, hits = {}, []
+    for k in filled:
+        if not click_card(k, f'pet 找倉庫卡 第 {k + 1} 格'):
+            break
+        _, ok = wait_for_card(k, depot)
+        if not ok:
+            seen[k + 1] = 'select-fail'
+            continue
+        idn = read_ident(ctx, 4, 1.0)
+        cache[k] = {'name': idn['name'], 'growth': idn['growth']}
+        seen[k + 1] = idn['name'] or (f'?({idn["growth"]})' if idn['growth'] else None)
+        if idn['name'] or not idn['growth']:
+            continue
+        if t.get('level') is not None:
+            lv = card_level_now(k, extra=True)
+            seen[k + 1] = f'{seen[k + 1]}@{lv}'
+            if lv != t['level'] and not level_uncertain(lv, t['level']):
+                continue
+        hits.append(k)
+    info['cards'] = seen
+    mx = t.get('unnamed_max') or 1
+    if not hits:
+        return None, f'{depot} 倉庫裡逐張看不到沒名字（成長字串）的卡（讀到 {seen}）'
+    if len(hits) > mx:
+        return None, f'{depot} 倉庫有 {len(hits)} 張沒名字的卡（格 {[k + 1 for k in hits]}），多於要取的 {mx} 張，判不出是哪張，不猜（讀到 {seen}）'
+    return hits[0], ''
 
 
 def relocate_card(depot: str, idx: int, t: dict, ctx: dict, info: dict, cache: dict) -> tuple:
@@ -2495,7 +2537,10 @@ def _take_in_depot(role: str, depot: str, idx, t: dict, ctx: dict, info: dict, c
     nm2 = idn2['name'] or (f'?({idn2["growth"]})' if idn2['growth'] else None)
     info['name'] = nm2
     want = t.get('name')
-    if idn2['growth']:                                         # 沒名字：縮圖確認物種（取出的新寵物縮圖在寵物欄，倉庫分頁也看得到）
+    if t.get('unnamed'):                                       # '?' 目標：只驗取出來的沒有名字（成長字串 / 讀不出），不認物種、不比縮圖
+        if idn2['name']:
+            return bad(EXIT_VERIFY, f'取出來的第 {new_slot} 格名字是 {nm2}，不是沒名字的新寵物！停手交人處理，不自動存回')
+    elif idn2['growth']:                                       # 沒名字：縮圖確認物種（取出的新寵物縮圖在寵物欄，倉庫分頁也看得到）
         sp, _src, why2 = unnamed_species(new_slot - 1, idn2['growth'], ctx)
         info['species'] = sp
         if why2:
@@ -2687,6 +2732,9 @@ def take_plan(ops: list, depot: str = 'personal', skip_missing: bool = False, pa
         print(f'pet：{cmd} 參數不對（倉庫 {depot!r}、目標 {ops!r}）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
     ops = group_ops(ops)
+    for i, (r, t) in enumerate(ops):                                            # '?'（沒名字的卡）：這個角色計畫裡從這項起還要取幾張 → 倉庫裡沒名字的卡超過就不猜
+        if t.get('unnamed'):
+            t['unnamed_max'] = sum(1 for rr, tt in ops[i:] if rr == r and tt.get('unnamed'))
     hints = {i: t['hint'] for i, (_, t) in enumerate(ops) if t.get('hint')}     # 第 i 項的格號提示（~N）：取走前面的卡會遞補，跟著 shift_hints 調整（不改 t 本身）
     ctx = load_ctx(learn)
     ctx['skip_missing'] = skip_missing

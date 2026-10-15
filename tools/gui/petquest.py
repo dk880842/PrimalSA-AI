@@ -36,7 +36,8 @@
                         不讀石幣、鑽石前後不變，不夠 163）→ pet_catch.py --stages setup,wait（wait 第一次輪詢 N×20+20 秒、之後 60 秒）→ [caught]（不存回誘餌：只取 / 買剛好 N，使用者 2026-10-16）
                   1.    pet.py reset-name --role 抓寵者（寵物欄成長字串名字 → 物種名；費用字樣 67 → 165 停手）→ [renamed]
                   2.    一次 pet.py store-many --plan "r:物種×在欄隻數,…" --depot public --pick last（面板開一次、左欄頭像連續換人；騎寵不碰；已存完的人記 stored_roles，續跑只做剩下的）→ [stored]
-                  3.    溢出的（N − 在欄）：pet.py take-many --depot personal --plan r:物種 --candidates 本輪物種（溢出的牌沒名字，靠縮圖候選）→ reset-name 取回者
+                  3.    溢出的（N − 在欄）：pet.py take-many --depot personal --plan "r:?"（溢出的那隻自動進倉、從沒改名，卡上是成長字串：取「沒名字」的卡，
+                        不認物種 / 不比縮圖；沒名字的卡多於溢出隻數 → pet 72 不猜，2026-10-16 卡坦 p2）→ reset-name 取回者
                         （溢出 > 1 才再 store-many 多的進公共，欄只留 1 隻自用）→ [taken_personal]
                 抓寵者寵物欄剩自己要的 1 隻。**拿掉**（舊版）：catch-pre 快照、register 名字驗證 / 成長字串登錄備援、recount（depot-list 三處清點 / pre_store / 冪等重算）。
                 中斷後重跑：已抓完（caught 之後）直接從下一小步接；抓到一半失敗（進度檔 catch_started 旗標有、沒 caught）→ 164 請人處理（不讀寵物欄、不自動盤點）。
@@ -704,7 +705,7 @@ class Run:
         if self.p.get('already_done'):
             return 0
         rd, count = self.round_conf(stage), self.q.get('count', 5)
-        assign, cand = rd['assign'], species_csv(rd['assign'])
+        assign = rd['assign']
         catchers = [r for r, _, _ in assign]
         key, skey = sub_key(stage), f'catch_started_{stage}'
         st = self.p.get(key) or {}
@@ -761,11 +762,11 @@ class Run:
             self.save()
         spill = {r: count - in_bar.get(r, 0) for r in catchers if count - in_bar.get(r, 0) > 0}       # 3. 個人倉庫溢出的取出來改名（抓寵者自己就有自己那種）
         if spill:
-            plan = ','.join(f'{r}:{sp}' for r, _, sp in assign for _ in range(spill.get(r, 0)))
-            rc, _ = self.sub('pet.py', ['take-many', '--depot', 'personal', '--plan', plan, '--candidates', cand], 3600)    # 溢出的牌沒名字 → 靠縮圖候選
+            plan = ','.join(f'{r}:?' for r in catchers for _ in range(spill.get(r, 0)))     # 溢出的從沒改名（成長字串）：取沒名字的卡，抓寵者只抓一種 → 不認物種
+            rc, _ = self.sub('pet.py', ['take-many', '--depot', 'personal', '--plan', plan], 3600)
             if rc:
-                return self.pass_or(rc, EXIT_DIST, f'從個人倉庫取回溢出的任務寵失敗 pet rc={rc}',
-                                    f'uv run --no-project python tools/gui/pet.py take-many --depot personal --plan {plan} --candidates {cand}')
+                return self.pass_or(rc, EXIT_DIST, f'從個人倉庫取回溢出的任務寵失敗 pet rc={rc}（72 = 沒名字的卡找不到 / 多於溢出隻數）',
+                                    f'uv run --no-project python tools/gui/pet.py take-many --depot personal --plan "{plan}"')
             rc = self.reset_names(list(spill))
             if rc:
                 return rc

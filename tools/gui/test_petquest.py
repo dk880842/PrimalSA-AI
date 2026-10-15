@@ -271,12 +271,18 @@ class Sim:
         if cmd == 'take-many':
             depot = self.opt(args, '--depot')
             ops = []
-            for part in self.opt(args, '--plan').split(','):
+            parts = self.opt(args, '--plan').split(',')
+            for i, part in enumerate(parts):
                 r, t = part.split(':')
                 name, lv = (t.split('@') + [None])[:2]
                 src = self.public if depot == 'public' else self.personal[r]
-                hit = next((p for p in src if (p['name'] == name or (p.get('num') and depot == 'personal' and '--candidates' in args and p['sp'] == name))
-                            and (lv is None or p['level'] == int(lv))), None)
+                if name == '?':                 # 沒名字的卡（成長字串，不認物種）：多於這個角色還要取的 '?' 隻數 → 72 不猜
+                    nums = [p for p in src if p.get('num')]
+                    if len(nums) > sum(1 for x in parts[i:] if x == f'{r}:?'):
+                        return self.out(72, js={'ops': list(ops)})
+                    hit = nums[0] if nums else None
+                else:
+                    hit = next((p for p in src if p['name'] == name and (lv is None or p['level'] == int(lv))), None)
                 if not hit or len(self.bar[r]) >= 5:
                     return self.out(72 if not hit else 77, js={'ops': list(ops)})
                 src.remove(hit)
@@ -684,7 +690,7 @@ check('不再呼叫 depot-list / 不傳 --expect-bar / 不跑 rename / register 
 pr = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']
 check('進度檔小步：sub_r1 = distributed、in_bar 記下每人在欄隻數', pr['sub_r1']['step'] == 'distributed' and pr['sub_r1']['in_bar'] == {'DKBO2': 4, 'DKBO3': 4}, str(pr.get('sub_r1')))
 tk = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and a[a.index('--depot') + 1] == 'personal'][0]
-check('溢出取回：--plan DKBO2:魯尼帖斯,DKBO3:貝魯卡 + --candidates（個人倉庫的牌沒名字）', tk[tk.index('--plan') + 1] == 'DKBO2:魯尼帖斯,DKBO3:貝魯卡' and '--candidates' in tk, str(tk))
+check('溢出取回：--plan DKBO2:?,DKBO3:?（取沒名字的卡，不認物種、不帶 --candidates）', tk[tk.index('--plan') + 1] == 'DKBO2:?,DKBO3:?' and '--candidates' not in tk, str(tk))
 tk = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and a[a.index('--depot') + 1] == 'public'][0]
 check('取公共：--plan 只有 distribute（抓寵者自己那種不取）、不帶 --candidates；每人每種 1 隻（8 隻）', len(tk[tk.index('--plan') + 1].split(',')) == 8 and '--candidates' not in tk
       and 'DKBO2:魯尼帖斯' not in tk[tk.index('--plan') + 1], str(tk))
@@ -722,6 +728,21 @@ tk = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and a[a.index('--depo
 cn = [x for x in seq_of(s) if x.startswith(('catch', 'reset', 'store', 'take'))]
 check('卡坦第 1 輪：4 抓寵者各 5 隻（空格 4、溢出 1）→ reset-name → store-many 公共 ×1（--plan 一次、4 人）→ take-many 個人 → reset-name → take-many 公共；每人 5 格（騎寵 + 4 種）',
       rc == 0 and all(len(pets_of(s, r)) == 5 for r in ROLES) and not s.public and cn.count('store-many-public') == 1 and len(tk[tk.index('--plan') + 1].split(',')) == 16, f'rc={rc} {cn} {[len(s.bar[r]) for r in ROLES]} {pq.LAST.get("info")}')
+
+# 卡坦 p2 實例（2026-10-16 rc 72）：個人倉庫除了第 2 格原戰寵還有別的有名字寵物（摩娜西普）→ 照樣只取沒名字那張
+s = Sim(2019)
+for r in ROLES:
+    s.bar[r] = s.bar[r][:1]
+s.personal[ROLES[1]].append(P('摩娜西普', level=80))
+rc = go(2019, s, from_stage='catch1', to_stage='distribute1')
+check('個人倉庫另有有名字的寵物：溢出照樣取回（取沒名字的卡）', rc == 0 and all(len(pets_of(s, r)) == 5 for r in ROLES), f'rc={rc} {seq_of(s)}')
+# 個人倉庫沒名字的卡多於溢出隻數（舊的數字名寵物還在）→ take-many 72 → 165 停手、不猜
+s = Sim(2019)
+for r in ROLES:
+    s.bar[r] = s.bar[r][:1]
+s.personal[ROLES[1]].append(s.num('克邦凱斯'))
+rc = go(2019, s, from_stage='catch1', to_stage='distribute1')
+check('個人倉庫沒名字的卡多於溢出 → 165（不猜）、小步停在 stored', rc == pq.EXIT_DIST and json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2019']['sub_r1']['step'] == 'stored', f'rc={rc}')
 
 # ---- 續跑：每個小步中斷後從下一小步接，不重新盤點
 def fail_once(s, pred, rc):
