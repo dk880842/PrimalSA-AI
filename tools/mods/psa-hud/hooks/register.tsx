@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { BoxProps, ElementConstructor, EngineInterface, Register, RenderElement, TextProps } from 'claude-code'
 
-import type { Banner, ErrEntry, ProgLine, Stat, WatchLine, WatchTone, WinProg, WinView } from '../types'
+import type { Banner, ErrEntry, HudParts, PaneLine, ProgLine, Stat, WatchLine, WatchTone, WinProg, WinView } from '../types'
 
 // 讀 HUD 的腳本：背景截圖 + Windows OCR，印一行 JSON（見 tools/gui/stat.ps1）
 // 遊戲畫面由獨立的鏡像視窗顯示（tools/gui/mirror.sh），pane 只放文字
@@ -53,9 +53,10 @@ export function errEntries(text: string): ErrEntry[] {
   return out.slice(-LOG_MAX).reverse()
 }
 
-// 一筆紀錄的顯示文字：[錯誤] 與 [改進]（沒改進 = 待改進）
-export function errLine(e: ErrEntry): { head: string; fix: string; pending: boolean } {
-  return { head: `${stamp(e.ts)} #${e.id}${e.client ? ` [${e.client}]` : ''}${e.source ? ` [${e.source}]` : ''} ${e.error}`, fix: e.fix ? `→ 改進：${e.fix}` : '→ 待改進', pending: !e.fix }
+// 一筆紀錄的顯示文字：[錯誤] 與 [改進]（沒改進 = 待改進）。now：與 now 同一天只顯示「時:分」；n > 1：合併了幾筆（×N）
+export function errLine(e: ErrEntry, now?: number, n = 1): { head: string; fix: string; pending: boolean } {
+  const when = now !== undefined && new Date(now).toDateString() === new Date(e.ts).toDateString() ? stamp(e.ts).slice(6) : stamp(e.ts)
+  return { head: `${when} #${e.id}${n > 1 ? ` ×${n}` : ''}${e.client ? ` [${e.client}]` : ''}${e.source ? ` [${e.source}]` : ''} ${e.error}`, fix: e.fix ? `→ 改進：${e.fix}` : '→ 待改進', pending: !e.fix }
 }
 
 // ───────────────────────── 即時狀態監看（watch.py）：路徑 / 解析 / 顯示 / 監督 ─────────────────────────
@@ -76,6 +77,7 @@ export const cacheRel = (c?: string | null) => (isMainClient(c) ? 'tools/.cache'
 export const notesRel = (c?: string | null) => (isMainClient(c) ? 'notes' : `notes/clients/${c}`)
 export const stateFileFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/state.json` : undefined }
 export const hudCfgFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/psa-hud.json` : undefined }
+export const buffTimeFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/bufftime.json` : undefined }   // bufftime.py 寫的預計到期
 export const questLogFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${notesRel(client)}/quest-events.log` : undefined }
 export const verifyHaltFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/verify-halt.json` : undefined }   // 每視窗一份（verifyhalt.path）
 
@@ -424,18 +426,22 @@ export function levelText(l: string | undefined): string | undefined {
   return l.endsWith('級') ? '?級' : '?'
 }
 
-// 數值排成一行文字
-export function format(s: Stat): string {
-  if (!s.ok) return `PSA: ${s.error ?? '讀取失敗'}`
+// 數值拆成幾段（pane 每段一行）：who 名字 / 等級 / HP / MP、pet 寵物、loc 地圖座標
+// 寵物名 '?'（沒學過 / 讀不出）不顯示，避免「寵 ? ?」這種雜訊；寵物等級讀不到才是 ?
+export function statParts(s: Stat): HudParts {
+  if (!s.ok) return { who: `PSA: ${s.error ?? '讀取失敗'}`, err: true }
   const v = (n: number | null | undefined) => (n == null ? '?' : String(n))
   // OCR 讀不到數字時改顯示血條比例（hpPct / mpPct），都沒有才是 ?
   const num = (n: number | null | undefined, pct: number | null | undefined) => (n != null ? String(n) : pct != null ? `${pct}%` : '?')
-  if (!s.level && s.hp == null && s.mp == null && s.hpPct == null) return 'PSA: 讀不到 HUD（對話 / 戰鬥 / 其他畫面蓋住，或視窗被遮）'
-  const parts = [`${s.name ? `${s.name}  ` : ''}${levelText(s.level) || '?'}  HP ${num(s.hp, s.hpPct)}  MP ${num(s.mp, s.mpPct)}`]
-  if (s.petLevel || s.petHp != null) parts.push(`寵 ${s.petName ? `${s.petName} ` : ''}${levelText(s.petLevel) || '?'} HP ${v(s.petHp)}`)
-  if (s.map || s.pos) parts.push(`${s.map ?? ''} ${s.pos ?? ''}`.trim())
-  return parts.join('  |  ')
+  if (!s.level && s.hp == null && s.mp == null && s.hpPct == null) return { who: 'PSA: 讀不到 HUD（對話 / 戰鬥 / 其他畫面蓋住，或視窗被遮）', err: true }
+  const out: HudParts = { who: `${s.name ? `${s.name}  ` : ''}${levelText(s.level) || '?'}  HP ${num(s.hp, s.hpPct)}  MP ${num(s.mp, s.mpPct)}` }
+  if (s.petLevel || s.petHp != null) out.pet = `寵 ${s.petName && s.petName !== '?' ? `${s.petName} ` : ''}${levelText(s.petLevel) || '?'} HP ${v(s.petHp)}`
+  if (s.map || s.pos) out.loc = `${s.map ?? ''} ${s.pos ?? ''}`.trim()
+  return out
 }
+// 分段 → 一行（/psa-hud 指令回覆、舊測試）
+export const joinParts = (p: HudParts) => [p.who, p.pet, p.loc].filter(Boolean).join('  |  ') + (p.note ?? '')
+export const format = (s: Stat): string => joinParts(statParts(s))
 
 // watch 活著 = 讀得到 state，且 (token, seq) 在 STALE_HINT_MS 內有變、watcher 沒說自己 stopping（另一 session / 平台的 watch 也算）
 export function watchAlive(state: WState | null, now: number, seenAt: number): boolean {
@@ -456,11 +462,44 @@ export function nameText(f?: (WF<string> & { stale?: boolean; conflict?: boolean
   return `${v}${f.stale ? '?' : ''}${f.conflict ? '!' : ''}`
 }
 
-// state.hud.buffs → 「EXP×2 龍王」；沒有 buff / 沒欄位 → undefined；舊值（stale）每項加 ?
-const BUFF_NAME: Record<string, string> = { exp: 'EXP×2', dragon: '龍王（不遇敵）' }
-export function buffText(b?: (WF<string[]> & { stale?: boolean }) | null): string | undefined {
-  const l = (b?.v ?? []).map(k => BUFF_NAME[k]).filter((x): x is string => !!x)
-  return l.length ? l.map(x => `${x}${b?.stale ? '?' : ''}`).join(' ') : undefined
+// ── buff 剩餘時間（智慧果 / 龍王的守護）──
+// watch 是零輸入，不會點 buff 圖示讀時間；時間來自 tools/gui/bufftime.py read 寫的本視窗 bufftime.json（預計到期 epoch 秒），pane 自己倒數。
+// 圖示有沒有看 state.hud.buffs（watch 每 12 s 像素判斷）。規則（每種 buff）：
+//   到期時間還沒到 → 「智慧果 剩 H:MM」（圖示讀得到且確定沒有 → 結尾加 ? 表示可能已消失）
+//   圖示有、但沒讀過時間 / 時間已過 → 「智慧果 ?」並提示指令（黃字）
+//   圖示沒有、也沒有有效時間 → 不顯示
+const BUFF_LABEL: Record<string, string> = { exp: '智慧果', dragon: '龍王' }
+export type BuffTimes = Record<string, { expires_ts?: number; read_ts?: number }>
+export function parseBuffTimes(text: string | undefined): BuffTimes {
+  if (!text) return {}
+  try {
+    const d = JSON.parse(text) as { buffs?: unknown }
+    return d && typeof d.buffs === 'object' && d.buffs ? (d.buffs as BuffTimes) : {}
+  } catch {
+    return {}
+  }
+}
+// 秒 → 「H:MM」（滿一天「N天H:MM」）
+export function hm(sec: number): string {
+  const t = Math.max(0, Math.floor(sec / 60))
+  const d = Math.floor(t / 1440), h = Math.floor((t % 1440) / 60), m = t % 60
+  return `${d ? `${d}天` : ''}${h}:${String(m).padStart(2, '0')}`
+}
+export const BUFFTIME_CMD = 'bufftime.py read'
+export function buffLine(b: (WF<string[]> & { stale?: boolean }) | null | undefined, times: BuffTimes, now: number): { text: string; warn: boolean } | undefined {
+  const icons = Array.isArray(b?.v) ? b!.v : undefined
+  const parts: string[] = []
+  let unknown = false
+  for (const k of ['exp', 'dragon']) {
+    const icon = icons?.includes(k) ?? false
+    const exp = times[k]?.expires_ts
+    const left = typeof exp === 'number' ? exp - now / 1000 : undefined
+    const gone = !!icons && !icon && !b?.stale          // 圖示讀得到且確定沒有
+    if (left !== undefined && left > 0) parts.push(`${BUFF_LABEL[k]} 剩 ${hm(left)}${gone ? '?' : ''}`)
+    else if (icon) { parts.push(`${BUFF_LABEL[k]} ?`); unknown = true }
+  }
+  if (!parts.length) return undefined
+  return { text: parts.join(' · ') + (unknown ? `（${BUFFTIME_CMD}）` : ''), warn: unknown }
 }
 
 // 遇敵狀態：screen.enc_on（watch 依右下「取消遇敵」鈕：true 開 / false 主畫面看不到 / null 戰鬥或面板蓋住不判）。
@@ -472,11 +511,12 @@ export function encText(state: WState | null, last?: boolean): { text: string; w
   if (val === undefined) return undefined
   const q = typeof cur === 'boolean' ? '' : ' ?'
   const dragon = (state?.hud?.buffs?.v ?? []).includes('dragon')
-  const text = val ? (dragon ? `遇敵中${q}（有龍王守護，推測實際不遇敵）` : `遇敵中${q}`) : (dragon ? `不遇敵${q}（龍王守護）` : `不遇敵${q}`)
+  const text = val ? (dragon ? `遇敵中${q}（龍王：推測實際不遇敵）` : `遇敵中${q}`) : (dragon ? `不遇敵${q}（龍王守護）` : `不遇敵${q}`)
   return { text, warn: !val, val }
 }
 
-export function hudText(state: WState | null, now: number, seenAt: number): string | null {
+// state.hud → 分段（pane 每段一行）；沒有任何數值 → null。stale 時 note =（原因 · N 秒前）
+export function hudParts(state: WState | null, now: number, seenAt: number): HudParts | null {
   const h = state?.hud
   if (!h) return null
   const v = <T,>(f?: WF<T>): T | undefined => f?.v
@@ -488,15 +528,18 @@ export function hudText(state: WState | null, now: number, seenAt: number): stri
     pos: pos && h.map?.id != null ? `${h.map.id}:${pos[0]},${pos[1]}${ms}` : pos ? `${pos[0]},${pos[1]}${ms}` : undefined,
   }
   if (!s.level && s.hp == null && s.mp == null && s.hpPct == null && !s.petLevel && !s.map && !s.pos) return null   // 只有名字不算有資料
-  let t = format(s)
+  const p = statParts(s)
   if (h.stale) {
     const age = Math.round((h.age_s ?? 0) + Math.max(0, now - seenAt) / 1000)
     const why = COVER_TEXT[state?.screen?.state ?? ''] ?? '讀取中'
-    t += `（${why} · ${age}s 前）`
+    p.note = `（${why} · ${age}s 前）`
   }
-  const bt = buffText(h.buffs)
-  if (bt) t += `  |  ${bt}`
-  return t
+  return p
+}
+// 同內容一行（hudAtom / /psa-hud 指令回覆）；buff 改在 pane 的 buff 行顯示，這裡不帶
+export function hudText(state: WState | null, now: number, seenAt: number): string | null {
+  const p = hudParts(state, now, seenAt)
+  return p ? joinParts(p) : null
 }
 
 async function poll($: EngineInterface): Promise<Stat> {
@@ -738,13 +781,15 @@ async function tickState($: EngineInterface): Promise<void> {
       const vm = viewModel({ state, badVersion, status: c.sup.status, lastCode: c.sup.lastCode, now: await $.clock.now(), seenAt: c.sup.seenAt, hasFile })
       const now = await $.clock.now()
       const alive = watchAlive(state, now, c.sup.seenAt)
-      const ht = alive ? (hudText(state, now, c.sup.seenAt) ?? '（等級 / HP 讀取中…）') : null
+      const hp = alive ? hudParts(state, now, c.sup.seenAt) : null
+      const ht = alive ? (hp ? joinParts(hp) : '（等級 / HP 讀取中…）') : null
+      const bf = buffLine(alive ? state?.hud?.buffs : undefined, parseBuffTimes(await readText(buffTimeFromCwd(projCwd, c.name) ?? `${cacheRel(c.name)}/bufftime.json`)), now) ?? null
       const et = alive ? encText(state, c.lastEnc) : undefined
       if (typeof et?.val === 'boolean') c.lastEnc = et.val
       const eo = et ? { text: et.text, warn: et.warn } : null
       seen.push({ client: c.name, state })
       const own = isMainClient(c.name) ? mainHalt : await readText(verifyHaltFromCwd(projCwd, c.name) ?? `${cacheRel(c.name)}/verify-halt.json`)
-      views.push({ client: c.name, wl: vm, ht, en: eo, al: multi ? haltLines(c.name, haltFor(c.name, own, mainHalt), state, true) : [] })
+      views.push({ client: c.name, wl: vm, ht, en: eo, al: multi ? haltLines(c.name, haltFor(c.name, own, mainHalt), state, true) : [], hp, bf })
       if (c.sup !== sup) continue
       const wasAlive = hudAlive
       hudAlive = alive
@@ -754,7 +799,7 @@ async function tickState($: EngineInterface): Promise<void> {
       const old = await read($, line)
       if (JSON.stringify(old) !== JSON.stringify(vm)) await update($, line, () => vm)
     }
-    const wv = views.length > 1 ? views : []
+    const wv = views
     if (JSON.stringify(await read($, winsAtom)) !== JSON.stringify(wv)) await update($, winsAtom, () => wv)
     const bn = bannerLines(mainHalt, seen)
     if (JSON.stringify(await read($, bannerAtom)) !== JSON.stringify(bn)) await update($, bannerAtom, () => bn)
@@ -983,7 +1028,8 @@ export function progressLines(i: ProgIn, names: Map<number, string> = new Map(),
   const out: ProgLine[] = []
   const g = grindActivity(i)
   const t = i.quest === undefined ? undefined : titleFromLog(i.quest, names)
-  out.push({ text: g ? `練功中：${g.spot}${g.quick ? '（快速戰鬥）' : ''}${i.state?.hud?.buffs?.v?.includes('exp') ? '＋EXP×2' + (i.state.hud.buffs.stale ? '?' : '') : ''}` : `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
+  // 智慧果 / 龍王改在 buff 行（含剩餘時間），這裡不再重複
+  out.push({ text: g ? `練功中：${g.spot}${g.quick ? '（快速戰鬥）' : ''}` : `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
   const ev = i.quest === undefined ? [] : i.quest.split(/\r?\n/).filter(l => l.trim()).slice(-events).map(cleanEvent)
   if (ev.length === 0) out.push({ text: '事件：—', tone: 'gray' })
   for (const e of ev) out.push({ text: cut(` ${e}`), tone: 'gray' })
@@ -995,9 +1041,7 @@ export function progressLines(i: ProgIn, names: Map<number, string> = new Map(),
     const tag = age === undefined ? '' : idle ? `（閒置 ${Math.floor(age / 60)} 分）` : `（${age} 秒前）`
     out.push({ text: cut(`動作 ${al.replace(/\s+/g, ' ').trim()}`.slice(0, PROG_W - tag.length) + tag), tone: idle ? 'yellow' : 'plain' })
   }
-  const st = i.state
-  const al2 = st?.flags?.verify_suspect ? '疑似答題 / 驗證視窗，請人工處理' : (st?.alerts ?? []).map(a => a.msg || a.line).find(Boolean)
-  if (al2) out.push({ text: cut(`警報：${String(al2)}`), tone: 'red' })
+  // 警報（verify_suspect / alerts）只在各視窗段落頂端的紅字顯示一次（viewModel 的紅色提示），這裡不重複
   return out.slice(0, 6)
 }
 
@@ -1049,12 +1093,14 @@ async function tickProg($: EngineInterface): Promise<void> {
     const lines = progressLines(main, questNameCache)
     if (JSON.stringify(await read($, prog)) !== JSON.stringify(lines)) await update($, prog, () => lines)
     const ps: WinProg[] = []
-    if (ctls.length > 1) {
+    {
+      // 每視窗一份（單視窗也是；事件：單視窗 2 行、多視窗 1 行）
+      const nEv = ctls.length > 1 ? 1 : 2
       for (const c of [...ctls]) {
-        if (isMainClient(c.name)) { ps.push({ client: c.name, lines: progressLines(main, questNameCache, 1) }); continue }
+        if (isMainClient(c.name)) { ps.push({ client: c.name, lines: progressLines(main, questNameCache, nEv) }); continue }
         const cr = cacheRel(c.name)
         const [q, st, fo, gr] = await Promise.all([rd(`${notesRel(c.name)}/quest-events.log`), rd(`${cr}/state.json`), rd(`${cr}/follow.json`), rd(`${cr}/grind.json`)])
-        ps.push({ client: c.name, lines: progressLines({ quest: q, actions: actionsFor(actions, c.name), state: parseState(st).state, now, follow: fo, grind: gr, spots }, questNameCache, 1) })
+        ps.push({ client: c.name, lines: progressLines({ quest: q, actions: actionsFor(actions, c.name), state: parseState(st).state, now, follow: fo, grind: gr, spots }, questNameCache, nEv) })
       }
     }
     if (JSON.stringify(await read($, progsAtom)) !== JSON.stringify(ps)) await update($, progsAtom, () => ps)
@@ -1096,70 +1142,159 @@ async function init($: EngineInterface, cwd: string, o: { openPane: boolean }): 
   $.clock.every(DETECT_PERIOD_MS, () => void detectClients($))
 }
 
+// ───────────────────────── pane 排版 ─────────────────────────
+// 2026-10-15 使用者：「有點亂、智慧果時間沒有、有些行字太長看不到」→ 改成每視窗一段、重點在前、依顯示寬度折行：
+//   [視窗] 畫面狀態 ｜ N 秒前                （粗體；單視窗不加 [視窗]）
+//     ！停手 / 驗證 / 斷線 / 警報              （紅字粗體，緊接標題）
+//     DKBO  4轉126級  HP 51  MP 100（面板前 · 23s 前）
+//     寵 0轉105級 HP 1008
+//     老爺爺的家 1013:13,16
+//     遇敵中 · 智慧果 剩 1:23 · 龍王 ?（bufftime.py read）   （綠；不遇敵 / 時間未知 = 黃）
+//     任務：… / 練功中：…                       （一般字）
+//     最近事件、最後動作                        （灰；閒置黃）
+//     監看只讀 / 提示視窗等次要提示              （灰 / 黃）
+// 下面是錯誤 / 改進紀錄：同一錯誤合併成一筆（×N），待改進的黃字、已改進的下一行綠字寫改進內容；每筆最多折 2 行。
+// 寬度：中日韓全形字算 2；pane 寬度取 ui.render 的 bodyColumns（拿不到用 PANE_W）
+export const PANE_W = 64
+const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꀀ-꓏가-힣豈-﫿︰-﹏＀-｠￠-￦]/
+const charW = (c: string) => (WIDE.test(c) ? 2 : 1)
+export function dispW(t: string): number {
+  let n = 0
+  for (const c of t) n += charW(c)
+  return n
+}
+// 依顯示寬度折行：第一行寬 width、續行前面加 indent；最多 maxLines 行，放不下的最後一行結尾換成 …
+export function wrapW(text: string, width: number, maxLines = 2, indent = '  '): string[] {
+  const out: string[] = []
+  let cur = '', w = 0
+  const chars = [...text.replace(/\s+/g, ' ').trim()]
+  for (let i = 0; i < chars.length; i++) {
+    const c = chars[i]!
+    const cw = charW(c)
+    if (w + cw > width) {
+      if (out.length + 1 >= maxLines) {
+        // 最後一行：留 1 格放 …
+        let t = cur
+        while (dispW(t) + 1 > width && t.length) t = [...t].slice(0, -1).join('')
+        out.push(`${t}…`)
+        return out
+      }
+      // 英數字中間不切（指令 / 路徑要能整段複製）：退回這一行最後一個空白，後半段帶到下一行
+      let carry = ''
+      if (/[!-~]/.test(c) && /[!-~]$/.test(cur)) {
+        const sp = cur.lastIndexOf(' ')
+        if (sp > indent.length && cur.length - sp <= 40) { carry = cur.slice(sp + 1); cur = cur.slice(0, sp) }
+      }
+      out.push(cur)
+      cur = indent + carry
+      w = dispW(cur)
+      if (c === ' ') continue
+    }
+    cur += c
+    w += cw
+  }
+  if (cur.trim()) out.push(cur)
+  return out
+}
+
+// 一個視窗段落的輸入（tickState 的 WinView + tickProg 的進度行；主視窗 watch 不在時 st = 一次性 stat）
+export type SecIn = { w: WinView; prog: ProgLine[]; st?: Stat | null }
+// 一個視窗段落 → 已折好的行（純函式）。tag：多視窗時標題前加 [程序名]
+export function sectionLines(i: SecIn, width = PANE_W, tag = false): PaneLine[] {
+  const out: PaneLine[] = []
+  const IND = '  '
+  const W = Math.max(20, width - IND.length)
+  const push = (text: string, tone: PaneLine['tone'], max = 1, bold = false) => {
+    for (const l of wrapW(text, W, max, IND)) out.push({ text: IND + l, tone, ...(bold ? { bold } : {}) })
+  }
+  const w = i.w
+  const hints = Array.isArray(w.wl?.hints) ? w.wl.hints : []
+  for (const l of wrapW(`${tag ? `[${w.client}] ` : ''}${String(w.wl?.main ?? '')}`, width, 1, IND)) out.push({ text: l, tone: 'plain', bold: true })
+  // 紅字：停手旗標 / verify_suspect（al）+ 狀態提示裡的紅字（verify_suspect / 斷線 / alerts / 監看未執行）；同一件事只寫一次
+  const al = Array.isArray(w.al) ? w.al : []
+  const reds = [...al.map(b => String(b.text ?? '')), ...hints.filter(x => x.tone === 'red').map(x => String(x.text ?? ''))]
+  const seen: string[] = []
+  for (const r of reds) {
+    const key = r.replace(/（只停這個視窗）$/, '')
+    if (seen.includes(key)) continue
+    seen.push(key)
+    push(`！${r}`, 'red', 3, true)            // 停手紅字含清除指令，最多折 3 行不截掉
+  }
+  // HUD：watch 的分段；主視窗 watch 不在時退回一次性 stat；都沒有 = 讀取中
+  const hp = w.hp ?? (w.ht == null && i.st ? statParts(i.st) : null)
+  if (hp) {
+    push(`${hp.who}${hp.note ?? ''}`, hp.err ? 'yellow' : 'plain')
+    if (hp.pet) push(hp.pet, 'plain')
+    if (hp.loc) push(hp.loc, 'plain')
+  } else push(w.ht ?? '（等級 / HP 讀取中…）', w.ht ? 'plain' : 'gray')
+  // 遇敵 + buff 剩餘時間同一行
+  const sl = [w.en?.text, w.bf?.text].filter(Boolean).join(' · ')
+  if (sl) push(sl, w.en?.warn || w.bf?.warn ? 'yellow' : 'green', 2)
+  // 任務 / 練功 + 最近事件 + 最後動作（第一行可折 2 行，其他 1 行）
+  i.prog.forEach((p, k) => push(String(p.text ?? '').trimStart(), p.tone === 'red' ? 'red' : p.tone, k === 0 ? 2 : 1))
+  // 次要提示（監看只讀 / 重開中 / 提示視窗）放最後
+  for (const x of hints) if (x.tone !== 'red') push(String(x.text ?? ''), x.tone === 'yellow' ? 'yellow' : 'gray', 2)
+  return out
+}
+
+// 錯誤紀錄合併：同一視窗 + 來源 + 錯誤文字 + 改進 → 一筆（保留最新那筆，n = 次數），順序照最新在前
+export function errGroups(lines: ErrEntry[]): { e: ErrEntry; n: number }[] {
+  const out: { e: ErrEntry; n: number; k: string }[] = []
+  for (const e of lines) {
+    const k = `${e.client ?? ''}|${e.source ?? ''}|${e.error}|${e.fix ?? ''}`
+    const hit = out.find(x => x.k === k)
+    if (hit) hit.n++
+    else out.push({ e, n: 1, k })
+  }
+  return out.map(({ e, n }) => ({ e, n }))
+}
+
 // pane 內容（純函式，測試直接呼叫）。注意：tsconfig 的 jsxFactory 是 h，
 // 這裡的箭頭函式參數不可以叫 h（會蓋掉 JSX 工廠 → 每個 <Text> 都變成「h is not a function」→ 整個 pane 空白）
 export type PaneData = {
   wl?: WatchLine | null; st?: Stat | null; ht?: string | null; en?: { text: string; warn: boolean } | null
   pg?: ProgLine[] | null; lines?: ErrEntry[] | null
-  // 多視窗（第 3d 步）：wins / progs 有 2 個以上才改成每視窗一段（各視窗的停手紅字 al 在自己段落）；banner 非空就在最上面顯示（單視窗的 verify-halt.json）
+  // 每視窗一段（wins / progs 依 client 對上；單視窗也走同一條路，標題不加 [程序名]）；還沒讀過（空）時退回 wl / st / ht / en / pg。
+  // banner 非空就在最上面顯示（單視窗的 verify-halt.json、舊共用旗標提示）
   wins?: WinView[] | null; progs?: WinProg[] | null; banner?: Banner[] | null
+  width?: number; now?: number             // pane 寬度（bodyColumns）、現在時間（錯誤紀錄當天只顯示時:分）
+}
+export function paneLines(d: PaneData): PaneLine[] {
+  const width = typeof d.width === 'number' && d.width >= 30 ? d.width : PANE_W
+  const out: PaneLine[] = []
+  for (const b of Array.isArray(d.banner) ? d.banner : []) for (const l of wrapW(`！${String(b.text ?? '')}`, width, 3)) out.push({ text: l, tone: b.tone === 'yellow' ? 'yellow' : 'red', bold: true })
+  const progs = Array.isArray(d.progs) ? d.progs : []
+  const pgOf = (c: string) => progs.find(x => x.client === c)?.lines
+  const wins: WinView[] = Array.isArray(d.wins) && d.wins.length
+    ? d.wins
+    : [{ client: MAIN_CLIENT, wl: d.wl ?? { main: '（沒有狀態）', hints: [] }, ht: d.ht ?? null, en: d.en ?? null }]
+  const multi = wins.length > 1
+  wins.forEach((w, k) => {
+    if (k > 0) out.push({ text: '', tone: 'plain' })
+    const prog = pgOf(w.client) ?? (isMainClient(w.client) && Array.isArray(d.pg) ? d.pg : [])
+    out.push(...sectionLines({ w, prog: Array.isArray(prog) ? prog : [], st: isMainClient(w.client) ? d.st ?? null : null }, width, multi))
+  })
+  out.push({ text: '─'.repeat(Math.min(width, 40)), tone: 'gray' })
+  const lines = Array.isArray(d.lines) ? d.lines : []
+  for (const l of wrapW(`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆；同樣的合併 ×N）`, width, 1)) out.push({ text: l, tone: 'gray' })
+  if (lines.length === 0) out.push({ text: '（還沒有錯誤紀錄）', tone: 'gray' })
+  for (const { e, n } of errGroups(lines)) {
+    const r = errLine(e, d.now, n)
+    for (const l of wrapW(r.head, width, 2)) out.push({ text: l, tone: r.pending ? 'yellow' : 'plain' })
+    if (!r.pending) for (const l of wrapW(r.fix, width - 2, 1)) out.push({ text: `  ${l}`, tone: 'green' })
+  }
+  return out
 }
 export type PaneEls = { Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps> }
 export function paneTree(els: PaneEls, d: PaneData): RenderElement {
   const { Box, Text } = els
-  const color = (t: WatchTone) => (t === 'red' ? 'red' : t === 'yellow' ? 'yellow' : undefined)
-  const wl = d.wl ?? { main: '（沒有狀態）', hints: [] }
-  const hints = Array.isArray(wl.hints) ? wl.hints : []
-  const st = d.st ?? null
-  const ht = d.ht ?? null
-  const en = d.en ?? null
-  const pg = Array.isArray(d.pg) ? d.pg : []
-  const lines = Array.isArray(d.lines) ? d.lines : []
-  const wins = Array.isArray(d.wins) && d.wins.length > 1 ? d.wins : null
-  const progs = Array.isArray(d.progs) && d.progs.length > 1 ? d.progs : null
-  const banner = Array.isArray(d.banner) ? d.banner : []
-  const progText = (p: ProgLine, key: string, text: string) => <Text key={key} wrap="truncate-end" color={p.tone === 'red' ? 'red' : p.tone === 'yellow' ? 'yellow' : undefined} dimColor={p.tone === 'gray'} bold={p.tone === 'red'}>{text}</Text>
+  const ls = paneLines(d)
   return (
     <Box flexDirection="column">
-      {banner.map((b, i) => <Text key={`ban${i}`} wrap="truncate-end" color={color(b.tone) ?? 'red'} bold>{String(b.text ?? '')}</Text>)}
-      {wins
-        ? wins.map((w, wi) => {
-            const wh = Array.isArray(w.wl?.hints) ? w.wl.hints : []
-            // 主視窗 watch 不在時退回一次性 stat（與單視窗相同）；其他視窗沒有一次性讀取
-            const wst = isMainClient(w.client) ? st : null
-            return (
-              <Box key={`win${wi}`} flexDirection="column">
-                <Text wrap="truncate-end" bold>{`[${w.client}] ${String(w.wl?.main ?? '')}`}</Text>
-                {(Array.isArray(w.al) ? w.al : []).map((b, i) => <Text key={`wal${wi}-${i}`} wrap="truncate-end" color={color(b.tone) ?? 'red'} bold>{`  ${String(b.text ?? '')}`}</Text>)}
-                {wh.map((hint, i) => <Text key={`wh${wi}-${i}`} wrap="truncate-end" color={color(hint.tone)} dimColor={hint.tone === 'gray'}>{`  ${String(hint.text ?? '')}`}</Text>)}
-                <Text wrap="truncate-end" dimColor={!wst && !w.ht}>{`  ${w.ht ?? (wst ? format(wst) : '（等級 / HP 讀取中…）')}`}</Text>
-                {w.en ? <Text wrap="truncate-end" color={w.en.warn ? 'yellow' : 'green'}>{`  ${String(w.en.text ?? '')}`}</Text> : null}
-              </Box>
-            )
-          })
-        : [
-            <Text key="main" wrap="truncate-end" bold>{String(wl.main ?? '')}</Text>,
-            ...hints.map((hint, i) => <Text key={`hint${i}`} wrap="truncate-end" color={color(hint.tone)} dimColor={hint.tone === 'gray'}>{String(hint.text ?? '')}</Text>),
-            <Text key="hud" wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>,
-            en ? <Text key="enc" wrap="truncate-end" color={en.warn ? 'yellow' : 'green'}>{String(en.text ?? '')}</Text> : null,
-          ]}
-      <Text dimColor>{'─'.repeat(20)}</Text>
-      {progs
-        ? progs.flatMap((w, wi) => (Array.isArray(w.lines) ? w.lines : []).map((p, i) => progText(p, `wp${wi}-${i}`, i === 0 ? `[${w.client}] ${String(p.text ?? '')}` : `  ${String(p.text ?? '').trimStart()}`)))
-        : pg.map((p, i) => progText(p, `prog${i}`, String(p.text ?? '')))}
-      <Text dimColor>{'─'.repeat(20)}</Text>
-      <Text dimColor>{`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆）`}</Text>
-      {lines.length === 0
-        ? <Text dimColor>（還沒有錯誤紀錄）</Text>
-        : lines.map((ent, i) => {
-            const r = errLine(ent)
-            return (
-              <Box key={`err${ent.id ?? i}-${i}`} flexDirection="column">
-                <Text wrap="truncate-end">{r.head}</Text>
-                <Text wrap="truncate-end" color={r.pending ? 'yellow' : 'green'} bold={r.pending}>{`   ${r.fix}`}</Text>
-              </Box>
-            )
-          })}
+      {ls.map((l, i) => (
+        <Text key={`l${i}`} wrap="truncate-end" color={l.tone === 'red' ? 'red' : l.tone === 'yellow' ? 'yellow' : l.tone === 'green' ? 'green' : undefined}
+          dimColor={l.tone === 'gray'} bold={!!l.bold}>{l.text}</Text>
+      ))}
     </Box>
   )
 }
@@ -1251,6 +1386,7 @@ export const register: Register = on => {
         wl: await read($, line), st: await read($, stat), ht: await read($, hudAtom), en: await read($, encAtom),
         pg: await read($, prog), lines: await read($, acts),
         wins: await read($, winsAtom), progs: await read($, progsAtom), banner: await read($, bannerAtom),
+        width: (e as { props?: { bodyColumns?: number } }).props?.bodyColumns, now: await $.clock.now(),
       })
     } catch (err) {
       // 繪製出錯也要畫一行說明，不讓 pane 空白（hook 拋例外時引擎不畫任何東西）

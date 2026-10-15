@@ -28,7 +28,15 @@ export type ProgLine = { text: string; tone: 'plain' | 'gray' | 'yellow' | 'red'
 
 // 多視窗（第 3d 步）：每個視窗一份狀態行 / HUD 行 / 遇敵行
 // al = 這個視窗自己的停手紅字（verify-halt.json 每視窗一份、verify_suspect），只顯示在該視窗段落
-export type WinView = { client: string; wl: WatchLine; ht: string | null; en: { text: string; warn: boolean } | null; al?: Banner[] }
+// hp = HUD 拆成幾段（pane 分行顯示；ht 是同內容的一行版，給 /psa-hud 指令回覆）；bf = buff 剩餘時間行（智慧果 / 龍王，讀 bufftime.json）
+export type WinView = {
+  client: string; wl: WatchLine; ht: string | null; en: { text: string; warn: boolean } | null; al?: Banner[]
+  hp?: HudParts | null; bf?: { text: string; warn: boolean } | null
+}
+// HUD 分段：who = 名字 / 等級 / HP / MP、pet = 寵物、loc = 地圖座標、note = stale 說明「（原因 · N 秒前）」；err = 讀取失敗訊息
+export type HudParts = { who: string; pet?: string; loc?: string; note?: string; err?: boolean }
+// pane 一行（已依寬度折好）
+export type PaneLine = { text: string; tone: 'plain' | 'gray' | 'yellow' | 'red' | 'green'; bold?: boolean }
 // 多視窗：每個視窗一份即時進度區
 export type WinProg = { client: string; lines: ProgLine[] }
 // 頂端醒目警示（單視窗的 verify-halt.json、舊共用旗標提示）；多視窗的停手紅字在 WinView.al
@@ -51,7 +59,7 @@ declare module 'claude-code' {
       line: WatchLine
       // 即時進度區（任務 / 最近事件 / 最後動作 / 警報，最多 6 行）
       prog: ProgLine[]
-      // 多視窗時每視窗一份（只有 1 個視窗 = 空陣列，pane 照單視窗畫）
+      // 每視窗一份（單視窗也有 1 筆；空 = 還沒讀過，pane 退回 line / hud / enc / prog）
       wins: WinView[]
       progs: WinProg[]
       // 頂端醒目警示（空 = 不顯示）
