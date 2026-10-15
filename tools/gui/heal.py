@@ -2,8 +2,10 @@
 """回村補血：取消原地遇敵 → 傳送薩姆吉爾 → 走進醫院 → 小護士「恢復氣血」→ 傳送回練功點 → 開原地遇敵。
 
 用法（專案根目錄）：
-  uv run --no-project python tools/gui/heal.py                 # 現在就回村補血，再回波拉島（約 21～24 秒；HEAL_DEBUG=1 印出每個 seq 的結果）
-  uv run --no-project python tools/gui/heal.py --spot 波拉島2   # 回到別的練功點（見 SPOTS）
+  uv run --no-project python tools/gui/heal.py                 # 現在就回村補血，再回「補血前所在的練功點」（約 21～24 秒；HEAL_DEBUG=1 印出每個 seq 的結果）
+                                                               # 不給 --spot：先用目前地圖 ID 對 spots 表；不在練功點 → grind.auto_spot_now 依等級選點；
+                                                               # 都判斷不了 → 不傳送、不補血、印警告、退出 3（EXIT_NO_SPOT；補血前先決定，不會留在醫院亂傳）
+  uv run --no-project python tools/gui/heal.py --spot 波拉島2   # 指定回到哪個練功點（見 SPOTS）；指定時照舊不判斷
   uv run --no-project python tools/gui/heal.py --no-return     # 補完停在醫院（不傳回練功點、不開原地遇敵；解任務被打飛後用，再用 quest.py 巡路回任務）
   uv run --no-project python tools/gui/heal.py --watch         # 常駐：每 15 秒看 HUD 血條，隊長血 / 魔太低就自動補
   uv run --no-project python tools/gui/heal.py --watch --hp 40 --mp 20 --every 15 --confirm 2 [--verbose] [--for 300]
@@ -241,7 +243,27 @@ def heal_trip(spot: str, no_return: bool = False, reopen: bool = True) -> None:
     log(f'完成，耗時 {time.time() - t0:.1f} 秒（{"、".join(seg)}）')
 
 
+EXIT_NO_SPOT = 3     # 沒給 --spot 且判斷不出回哪個練功點（補血前就停，不傳送）
 EXIT_VERIFY = 11     # --watch 因疑似驗證視窗暫停超過 10 分鐘，已停止（見 errlog）
+
+
+def resolve_return_spot(spot=None, here=None, auto=None) -> str | None:
+    """補完血要回的練功點：--spot 指定照舊 → 補血前所在的練功點（地圖 ID 對 spots）→ 依等級自動選點（grind.auto_spot_now = spots.auto_spot）→ None。
+    here / auto 供測試注入；grind 延後 import（grind 本身 import heal，避免循環）"""
+    if spot:
+        return spot
+    if here is None or auto is None:
+        import grind
+        here = here or grind.here_spot
+        auto = auto or grind.auto_spot_now
+    for fn in (here, auto):
+        try:
+            name = fn()
+        except Exception:
+            name = None
+        if name in SPOTS:
+            return name
+    return None
 
 
 def read_vitals(last_ts=None, wait: float = 6.0, sleep=time.sleep, mono=time.monotonic):
@@ -270,7 +292,7 @@ def low(s: dict, hp: int, mp: int) -> bool | None:
 def main() -> int:
     winenv.enable_server()   # 長程序：WSL 預設啟用常駐 server（Windows 原生需 PSA_GUI_SERVER=1；=0 關閉）
     ap = argparse.ArgumentParser(description='回村補血再回練功點')
-    ap.add_argument('--spot', default='波拉島', choices=SPOTS)
+    ap.add_argument('--spot', default=None, choices=SPOTS, help='補完回哪個練功點；不給 = 補血前所在的練功點，判斷不了才依等級選（再不行就不補、退出 3）')
     ap.add_argument('--no-return', action='store_true', help='補完血停在醫院，不傳回練功點、不開原地遇敵（解任務被打飛後用；不能和 --watch 併用）')
     ap.add_argument('--watch', action='store_true', help='常駐監看，血 / 魔太低就自動補')
     # 波拉島實測掉血很快：滿血到 20% 約 70 秒、25% → 1 只要一場，所以門檻抓高、間隔抓短
@@ -288,8 +310,16 @@ def main() -> int:
     if a.no_return and a.watch:
         log('--no-return 不能和 --watch 併用')
         return 2
+    if a.no_return:
+        heal_trip(a.spot or '波拉島', True)   # 不傳回，spot 用不到
+        return 0
     if not a.watch:
-        heal_trip(a.spot, a.no_return)
+        spot = resolve_return_spot(a.spot)
+        if not spot:
+            log('警告：判斷不出要回哪個練功點（不在練功點、也讀不到等級），這次不補血、不傳送；請用 --spot 指定')
+            return EXIT_NO_SPOT
+        log(f'補完回：{spot}')
+        heal_trip(spot)
         return 0
     log(f'監看中：血條 < {a.hp}% 或魔條 < {a.mp}%（連續 {a.confirm} 次）就回村補血（Ctrl+C 結束）')
     end = time.time() + a.duration if a.duration else None
@@ -312,8 +342,12 @@ def main() -> int:
                 time.sleep(3)
         if hits >= a.confirm:
             log(f'血 / 魔太低（HP {s.get("hp")} {s.get("hpPct")}%，MP {s.get("mp")} {s.get("mpPct")}%），回村補血')
+            spot = resolve_return_spot(a.spot)    # 每次補血前重算（練功點可能被 follow 換過）
+            if not spot:
+                log('警告：判斷不出要回哪個練功點，這次不補血、不傳送；請人工處理，停止監看')
+                return EXIT_NO_SPOT
             try:
-                heal_trip(a.spot)
+                heal_trip(spot)
             except RuntimeError as e:
                 log(f'補血流程失敗：{e}；停止監看，請人工處理')
                 return 1

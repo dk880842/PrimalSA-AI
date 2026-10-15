@@ -41,7 +41,7 @@ bash tools/gui/gui.sh seq "click 459 456; waitstill 4000"   # 點地面走路後
 uv run --no-project python tools/gui/walk.py 1000 81 66 [--exit 1005]   # 走到某地圖座標：OCR 讀起點 → maps.bin 自動找路 → 連點 + waitstill → 終點驗證（--exit = 終點是出口）
 uv run --no-project python tools/gui/walk.py --path "1000:86,88 84,81 83,73 81,66" [--exit 1005]   # 照手動 waypoint 走（沒有通行格資料的圖用）
 uv run --no-project python tools/gui/walk.py --plan 1000 81 66 [--from 92,99]   # 只印找路結果（每段要點的截圖座標），不動
-uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；--watch 看血條比例（%）自動補（watch 活著時讀 state.hud 的 hpPct / mpPct，0 次額外 stat；不可用退回現場 stat；疑似驗證視窗暫停）
+uv run --no-project python tools/gui/heal.py [--spot 波拉島] [--watch --hp 40 --mp 20 --every 15]   # 回村補血再回練功點（約 21～24 秒）；不給 --spot = 回補血前所在的練功點（地圖 ID 對 spots 表）→ 不在練功點則 grind.auto_spot_now 依等級選 → 都判斷不了就不補血不傳送、退出 3；--watch 看血條比例（%）自動補（watch 活著時讀 state.hud 的 hpPct / mpPct，0 次額外 stat；不可用退回現場 stat；疑似驗證視窗暫停）
 uv run --no-project python tools/gui/heal.py --no-return   # 補完血停在醫院，不傳回練功點、不開遇敵（解任務被打飛後用）
 uv run --no-project python tools/gui/quest.py --solo --task 任務名   # 單人逃跑：遇怪按逃跑，到 NPC ESC 對話框退出碼 20，被打飛退出碼 21；--fight = 戰鬥步按自動戰鬥，退出碼 0 才是打贏（35 沒贏 / 36 不確定 / 33 對話無進展 / 34 不同圖，見 /psa-quest-solo）
 uv run --no-project python tools/gui/team.py status|check|disband   # 隊伍狀態（唯讀）/ 檢查 1 隊長 + 4 隊員（0 = 符合）/ `form` 快速組隊（0 = 已組好，已組好時不點；41 要 `--regroup`、42 要 `--login-all`）/ 解散（當前須為隊長；隊長標 2026-10-12 起是小「L」，舊紅「隊」字也認，實機 rc 0）；退出碼 40～47 見 ui/team.md；名字用 namematch.py 整名樣板比對（`namematch.py learn|read|list`，見 ui/team.md）
