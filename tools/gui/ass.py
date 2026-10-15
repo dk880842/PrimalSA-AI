@@ -730,7 +730,7 @@ EXIT_WRONG_ACTION = 13                       # 人物首次動作的值確定不
 # 隊長的人物首次動作是帳號特有設定：主視窗 = 風的精靈；PrimalSA2（隊長 DKBO6）2026-10-15 起也是風的精靈
 # （buywendy.py 買溫蒂妮Lv5的金幣、穿上、設首次動作；金幣沒穿 / 沒設時 questrun 交接 ass.py battle 回 13 或補勾選）；
 # 其他視窗沒量過 → 不檢查首次動作（只查 5 人自動戰鬥），要檢查就設環境變數 PSA_LEADER_FIRST=技能名（或 `ass.py battle all --leader-first 技能名`；空字串 = 不檢查）。
-LEADER_FIRST = {'PrimalSA': '風的精靈', 'PrimalSA2': '風的精靈'}
+LEADER_FIRST = {'PrimalSA': '風的精靈', 'PrimalSA2': '風的精靈', 'PrimalSA3': '風的精靈'}
 LEADER_FIRST_ENV = 'PSA_LEADER_FIRST'
 
 
