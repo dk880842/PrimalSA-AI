@@ -2387,6 +2387,11 @@ def _main() -> int:
             shot = snap('bye')
             gui('key', '{ESC}', note='只有「再見」的對話框：ESC 關閉（不回答）')
             from_select = bool(last_select_t) and time.time() - last_select_t <= BYE_SELECT_WINDOW
+            if a.stop_after_dialog and (dialogs or rewards):
+                # 2026-10-15 紅暴步 4 / 5：領完獎後選擇對象面板又點到 NPC 閒聊「再見」→ 這步其實已完成，ESC 後正常收片（不回 40）
+                time.sleep(0.8)
+                event(f'--stop-after-dialog：步驟已完成（對話 {dialogs}、獎勵 {rewards}）後只剩「再見」閒聊 → ESC 關閉，視為這步結束', shot)
+                return finish(a)
             if from_select and byes < BYE_MAX:
                 event(f'選擇對象面板點到只有「再見」的閒聊（OCR 確認）→ ESC 關閉、回原流程（第 {byes} 次；不是驗證視窗）', shot)
             else:
