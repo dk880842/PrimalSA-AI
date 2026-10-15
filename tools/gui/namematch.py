@@ -109,8 +109,17 @@ def load_tpl(layout: str = LAYOUT) -> dict:
 
 
 def save_tpl(tpl: dict, layout: str = LAYOUT) -> None:
+    """寫樣板檔。樣板檔全部視窗共用（name-tpl），load_tpl 只載入這個視窗名單內的名字 →
+    存檔時把檔案裡「不在本視窗白名單」的名字原樣保留（PrimalSA2 學 DKBO6～10 不會洗掉主視窗的 DKBO～DKBO5）"""
     TPL_DIR.mkdir(parents=True, exist_ok=True)
     p = tpl_path(layout)
+    mine = {charname.canon(n) for n in charstate.chars()} | {charname.canon(n) for n in tpl}
+    try:
+        raw = json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
+    except (ValueError, OSError):
+        raw = {}
+    keep = {n: vs for n, vs in raw.items() if charname.canon(n) not in mine} if isinstance(raw, dict) else {}
+    tpl = dict(keep, **tpl)
     tmp = p.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_text(json.dumps(tpl, ensure_ascii=False), encoding='utf-8')
     tmp.replace(p)
@@ -232,6 +241,7 @@ def learn(log=print) -> int:
         log(f'namematch learn：卡片數 {len(cards)} != {len(order)}（有人離線，順序不可靠），不學')
         return 2
     texts = team.ocr_names(len(cards))
+    have = load_tpl()
     labels = {}
     for c in cards:
         name = order[c.slot]
@@ -239,12 +249,19 @@ def learn(log=print) -> int:
         if ck == 'conflict':
             log(f'namematch learn：slot{c.slot} 順序 {name} 但 OCR {texts.get(c.slot)} 矛盾，整次不學')
             return 3
+        if ck != 'ok' and name not in have:
+            # 第一次學這個名字（例：PrimalSA2 的 DKBO6～10）：OCR 要精確命中名單上的這個名字（或它的尾碼）才學，讀不出就先跳過這張
+            log(f'namematch learn：slot{c.slot} {name} 還沒有樣板且 OCR {texts.get(c.slot)} 沒確認到，這張先不學')
+            continue
         labels[c.slot] = name
+    if not labels:
+        log('namematch learn：沒有可學的卡片（新名字 OCR 都沒確認到），不學')
+        return 2
     rows = capture()
     if not rows or not all(s in rows for s in labels):
         log('namematch learn：名字截圖失敗')
         return 1
-    tpl = load_tpl()
+    tpl = have
     n = learn_from(rows, labels, tpl, log)
     if n:
         save_tpl(tpl)

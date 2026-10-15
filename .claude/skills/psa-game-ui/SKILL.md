@@ -92,7 +92,7 @@ uv run --no-project python tools/gui/errlog.py list
 - 背景模式 `dclick`（倉庫存入）、`key` 打字（含中文）都實測可用（2026-10-09）。`key` 語法：一般字元 = 打進輸入框；`{ESC}` `{BS}` 等 = 按鍵；`{a}` = 只按 a 鍵（快捷鍵用）。
 - `gui.ps1` 必須保持 **UTF-8 with BOM**（PowerShell 5.1 讀無 BOM 檔會把中文當 Big5，整支解析失敗）。
 
-## 多視窗（PSA_CLIENT，2026-10-15 第 1 步：選視窗 + 點擊鎖；第 3a 步：每視窗狀態隔離 + 不自動登錄 + 全視窗驗證停手）
+## 多視窗（PSA_CLIENT，2026-10-15 第 1 步：選視窗 + 點擊鎖；第 3a 步：每視窗狀態隔離 + 不自動登錄 + 全視窗驗證停手；第 3b 步：基本工具依名單）
 同機多開時每個視窗是不同名稱的執行檔（`PrimalSA.exe` = 主視窗 DKBO～DKBO5；`PrimalSA2.exe` = DKBO6～DKBO10；名單寫死在 `tools/gui/clients.py`）。
 - **選視窗**：環境變數 `PSA_CLIENT` = 程序名稱（不含 .exe），**不設 = PrimalSA，行為與以前完全相同**。例：`PSA_CLIENT=PrimalSA2 bash tools/gui/gui.sh info`、`PSA_CLIENT=PrimalSA2 bash tools/gui/mirror.sh`、`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/walk.py ...`。
   精確比對程序名稱（`psawin.ps1` 的 `Find-PsaProcess`；gui / stat / ocr / findmark / titlematch / digitmatch / mirror 共用）：沒在執行 → `gui.ps1` exit 1「PrimalSA2 沒有在執行」、讀圖腳本回 `{"ok":false,"error":"遊戲沒有在執行（PrimalSA2）"}`；**同名程序多個或名稱不合法 → exit 6，不操作**。
@@ -106,9 +106,16 @@ uv run --no-project python tools/gui/errlog.py list
 - **多視窗不自動登錄**（使用者 2026-10-15）：非主視窗一律不按「登錄」；主視窗看到還有別的 PrimalSA* 程序在跑也不按（記住的帳號共用，可能登錯帳號互踢）→ 只點「網路異常」確定、回登入畫面就 halt 通知人；`relogin.py` 多視窗時 109 不動。詳見 [ui/network.md](ui/network.md)「多視窗時不自動登錄」。
 - **全視窗驗證停手**：多視窗時任一視窗疑似驗證視窗（uikit 回 9、watch verify_suspect、quest 警報）→ 寫 `tools/.cache/verify-halt.json`，**所有視窗**的 preflight / netwatch.guard / VerifyGuard / gui.ps1 輸入指令都停（9）；人處理完 `uv run --no-project python tools/gui/verifyhalt.py clear`。單一視窗不寫，行為不變。詳見 ui/network.md。
 - `gui.sh` 退出碼 = gui.ps1 的退出碼（2026-10-15 修：以前 `| tr` 吃掉、失敗也回 0）。
-- **PrimalSA2 現在能用的**：gui.sh、mirror.sh、讀圖 .ps1、`walk.py`（自己的 maphist）、`watch.py`（自己的 state.json；角色名白名單還是 DKBO，當前角色名認不出）、`netwatch.py --watch --no-team --no-grind`（斷線只點確定 + halt；recover 的組隊 / grind ensure 用 DKBO 名字，3b 前要關）、`verifyhalt.py`、`heal.py`（沒有名字相依，未實機）。
-- **還不能給 PrimalSA2 用的**（第 3b 步，名單相依）：寫死 DKBO 名字的 team / char / pet / bag / ass / quest / questrun / rebirth / petquest / exp / grind（含 follow）/ relogin / charstate 白名單。
-- 離線測試：`test_multiclient.py`、`test_clientctx.py`（假 powershell.exe 守門：路徑快照〔沒設 PSA_CLIENT 時 63 個路徑常數與改版前逐字相同〕、verify-halt、netwatch 多視窗不登錄、gui.sh 退出碼）、`test_psawin.ps1`（真 powershell，只測不存在 / 同名多個的程序名與自用 Mutex，碰不到遊戲）。
+- **名單（第 3b 步，2026-10-15）**：基本工具改依「名單位置」取座標，名字只用來驗證 / 顯示。`clients.roster()` 第 1 個 = 隊長（`clients.leader()`）；面板左欄頭像 y、外掛角色頭像、切換面板卡位都是「第 1～5 個」的固定位置（`clients.by_slot([...])` 配名字）。
+  沒設 PSA_CLIENT 時名單 / 隊長 / 座標表與以前逐字相同（test_roster.py 子程序核對）。`charstate.DEFAULT_CHARS` / `LEAD` / `uikit.CHARS` / `grind.LEADER` / `ROLE_ORDER` / `ass.ROLES` / `petmatch.AVATAR_Y` / `petwatch.CHARS` / `exp.ROLES` 都由名單產生。
+  O / 0：`charname.canon` 照舊（DKBO10 → DKB010，10 個名字正規化後不撞）；`charstate.display` 認所有視窗的名字。team 的尾碼交叉確認改依名單算（主視窗 02～05；PrimalSA2 06～09、010），單獨讀到「10」不認。
+  watch 白名單：主視窗照舊讀 watch-config.json（沒設 = 不 OCR 名牌）；非主視窗沒有設定檔也用名單，設定檔裡不在名單的名字一律濾掉。
+  名字樣板（共用檔）：`namematch.py learn` 第一次學某個名字時要 OCR 精確命中（名字或尾碼）才學，讀不出那張先跳過；存檔保留別視窗的樣板（以前會把不在本視窗白名單的名字洗掉）。寵物 / 背包面板頭像下名字樣板：非主視窗第一次學要 OCR 讀到該名字才學。
+- **帳號特有設定**（主視窗預設不變，其他視窗可覆寫）：隊長人物首次動作（`ass.py battle` / questrun 交接；主視窗 風的精靈，其他視窗預設**不查**首次動作，只查 5 人自動戰鬥；`PSA_LEADER_FIRST=技能名` 或 `ass.py battle all --leader-first 技能名`）；騎寵名單 `uikit.MOUNTS`（存倉保護；`PSA_MOUNTS=物種,物種` 追加）；petwatch 練功寵 / 換回戰寵（`--pet` / `--back`，預設 金布伊 / 朵拉比斯）。
+- **PrimalSA2 現在能用的**（離線測試過，**未實機**）：gui.sh、mirror.sh、讀圖 .ps1、`walk.py`、`heal.py`、`verifyhalt.py`、`team.py`（status / check / form / disband，預設隊長 DKBO6）、`char.py`、`ass.py`、`pet.py`、`bag.py`、`exp.py`、`depot_use.py`、`grind.py start|ensure|check|follow`（依 DKBO6 等級換點）、`petwatch.py`（`--exp-fruit` 吃給隊長）、`watch.py`（認 DKBO6～10）、`netwatch.py --watch`（斷線只點確定 + halt，不自動登錄；人登入回來後 recover 的 team.form / grind ensure 用 PrimalSA2 名單）、`namematch.py learn`。
+  第一次用 PrimalSA2 建議：5 人在線、切換面板開著 → `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/namematch.py learn`（學名字樣板；沒樣板時 team / char 走順序 + OCR，較慢但可用）。
+- **還不能給 PrimalSA2 用的**（第 3c 步，另一批）：quest / questrun / questdetail / rebirth* / postrebirth / petquest / pet_catch / petdrop / pet_turnin / shopbuy / mail / relogin / stuckrecover / bossretry 等任務 / 轉生腳本（寫死 DKBO 名字或帳號設定）。
+- 離線測試：`test_multiclient.py`、`test_roster.py`（第 3b 步：PSA_CLIENT=PrimalSA2 名單情境 + 主視窗常數逐字核對，0 次 powershell 呼叫）、`test_clientctx.py`（假 powershell.exe 守門：路徑快照〔沒設 PSA_CLIENT 時 63 個路徑常數與改版前逐字相同〕、verify-halt、netwatch 多視窗不登錄、gui.sh 退出碼）、`test_psawin.ps1`（真 powershell，只測不存在 / 同名多個的程序名與自用 Mutex，碰不到遊戲）。
 
 ## 移動：先用 walk.py（不要自己算座標點地面）
 - **鏡頭高度一律拉到最左**（設置 → 畫面設置，見 [ui/setting.md](ui/setting.md)）：walk.py 的每格位移只在這個鏡頭下準，與視窗大小無關；滾輪會改鏡頭高度，**不要在遊戲畫面上滾滾輪**。走路 / 補血一直走錯格時先檢查這個。

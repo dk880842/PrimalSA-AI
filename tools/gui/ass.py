@@ -13,7 +13,7 @@
         一次開面板逐人讀、只改不對的、讀回確認（值不對不改，回 13）；不關遇敵、戰鬥中不開（8）。questrun 交接 / bossretry 重打前自動跑（battle_check）
     多人流程（--pause）：關原地遇敵 + 等戰鬥結束 → 一次開面板逐人（讀現值 → 不同才改 → 讀回確認；隊長最後）→ grind.py ensure 恢復掛機。
     預設不暫停遇敵（快速戰鬥中開外掛面板不用停遇敵，2026-10-12 使用者；戰鬥打斷 rc 6 / 12 自動等 3 秒重試 2 次）。旗標：--pause 強制先關遇敵 + 等戰鬥結束、改完 grind ensure 恢復、--no-resume 搭 --pause 時不恢復、--dry-run 只讀不改。只動「一般動作」，首次動作 / 對象都不碰。
-角色：DKBO / DKBO2 / DKBO3 / DKBO4 / DKBO5（真名字母 O；DKB0… 同義；不分大小寫）。
+角色：這個視窗的名單（主視窗 DKBO / DKBO2～DKBO5；PSA_CLIENT=PrimalSA2 為 DKBO6～DKBO10；真名字母 O；DKB0… 同義；不分大小寫）。頭像位置依名單第 1～5 個。
 項目：原地遇敵(encounter) / 快速戰鬥(fast) / 自動戰鬥(auto) / 夥伴助戰(partner)。
 （2026-10-10 起不再支援外掛「自動逃跑」：使用者要求外掛自動逃跑一律不用、不看那個勾選框；逃跑改由 quest.py 手動按戰鬥畫面逃跑鈕。）
 流程：開外掛 → 驗證面板真的開了 → 選角色並驗證 → pixel 讀四項 → （set：只點與目標不同的，再讀確認）→ 關面板（X 1318,90）並驗證。
@@ -45,6 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 import battleguard  # noqa: E402
+import clients  # noqa: E402
 import layout  # noqa: E402
 from walk import gui, log  # noqa: E402
 
@@ -52,7 +53,10 @@ ASS_BTN = (1300, 760)            # 主畫面「外掛」
 CLOSE_BTN = (1318, 90)           # 面板右上 X（不能 ESC）
 HUD_PROBE = (1300, 745, 254, 0, 0)   # 主畫面外掛鈕紅字（同 quest.SIG_HUD；對話框開著時整個 UI 隱藏）
 
-ROLES = {'DKBO': (137, 151), 'DKBO2': (298, 151), 'DKBO3': (461, 151), 'DKBO4': (137, 204), 'DKBO5': (298, 204)}   # 真名字母 O；DKB0 同義（norm_role 容錯）
+# 角色頭像圓鈕：第 1～5 個的位置固定（主視窗 DKBO～DKBO5；PrimalSA2 DKBO6～DKBO10，依 clients.roster() 順序配；真名字母 O；DKB0 同義，norm_role 容錯）
+ROLE_XY = [(137, 151), (298, 151), (461, 151), (137, 204), (298, 204)]
+ROLES = clients.by_slot(ROLE_XY)
+LEADER = clients.leader() or ''
 # 左欄戰鬥設定勾選框（框心）；每個角色各自設定
 ITEMS = {'原地遇敵': (146, 343), '快速戰鬥': (484, 343), '自動戰鬥': (146, 400), '夥伴助戰': (315, 400)}
 ALIASES = {'encounter': '原地遇敵', 'fast': '快速戰鬥', 'quick': '快速戰鬥',
@@ -333,8 +337,8 @@ def norm_item(name: str) -> str | None:
 
 
 def norm_role(name: str) -> str | None:
-    n = name.strip().upper().replace('O', '0')       # O / 0 視為相同
-    return next((r for r in ROLES if r.replace('O', '0') == n), None)
+    i = clients.index_of(name)                       # O / 0、大小寫、空白視為相同（DKBO10 = DKB010）
+    return list(ROLES)[i] if i is not None and i < len(ROLES) else None
 
 
 def _apply_changes(role: str, states: dict, changes: dict | None):
@@ -714,12 +718,33 @@ ROLE_FIRST_CHK = (656, 313)                  # 人物 首次動作 勾選框
 ROLE_FIRST_FIELD = (805, 295, 280, 40)       # 人物 首次動作 欄位文字 OCR 區（= PET_FIELD['first'] 上移 150；**未實機量**）
 ROLE_KNOWN = ('攻擊', '防禦', '逃跑', '滋潤')  # 讀到這些字 = 確定不是想要的精靈技能（其他文字 / 讀不到 = 不確定，只警告）
 EXIT_WRONG_ACTION = 13                       # 人物首次動作的值確定不對（下拉選項依裝備而變，不自動改）
-# 解任務的戰鬥設定（questrun 交接 / bossretry 重打前查）：5 人自動戰鬥開；DKBO 人物首次動作 = 風的精靈Lv.5 且打勾。
+# 解任務的戰鬥設定（questrun 交接 / bossretry 重打前查）：5 人自動戰鬥開；隊長人物首次動作 = 風的精靈Lv.5 且打勾（主視窗 DKBO）。
 # 快速戰鬥 / 原地遇敵不在這裡管（解任務時系統自動關快速戰鬥；遇敵由主畫面鈕關）。隊長放最後（面板結束選在隊長）。
-QUEST_BATTLE = {
-    'DKBO2': {'自動戰鬥': True}, 'DKBO3': {'自動戰鬥': True}, 'DKBO4': {'自動戰鬥': True}, 'DKBO5': {'自動戰鬥': True},
-    'DKBO': {'自動戰鬥': True, 'first': '風的精靈', 'first_on': True},
-}
+# 隊長的人物首次動作是帳號特有設定：主視窗 = 風的精靈；其他視窗沒量過 → 不檢查首次動作（只查 5 人自動戰鬥），
+# 要檢查就設環境變數 PSA_LEADER_FIRST=技能名（或 `ass.py battle all --leader-first 技能名`；空字串 = 不檢查）。
+LEADER_FIRST = {'PrimalSA': '風的精靈'}
+LEADER_FIRST_ENV = 'PSA_LEADER_FIRST'
+
+
+def leader_first() -> str | None:
+    """隊長人物首次動作期望值：環境變數 > 視窗預設；None / 空 = 不檢查首次動作"""
+    import os
+    v = os.environ.get(LEADER_FIRST_ENV)
+    if v is not None:
+        return v.strip() or None
+    return LEADER_FIRST.get(clients.dir_name())
+
+
+def quest_battle(first: str | None = '') -> dict:
+    """解任務戰鬥設定計畫（名單順序、隊長最後）：first='' = 用 leader_first()；None = 不檢查首次動作"""
+    first = leader_first() if first == '' else first
+    plan = {r: {'自動戰鬥': True} for r in clients.leader_last()}
+    if LEADER and first:
+        plan[LEADER] = {'自動戰鬥': True, 'first': first, 'first_on': True}
+    return plan
+
+
+QUEST_BATTLE = quest_battle()
 
 
 def read_role_first(ocr: bool = True) -> dict | None:
@@ -812,9 +837,9 @@ def battle_check(plan: dict | None = None, no_wait: bool = False, dry_run: bool 
 
 
 def ordered_roles(roles) -> list:
-    """隊長 DKBO 放最後（面板結束選在隊長），其他照 ROLES 順序"""
+    """隊長（名單第 1 個，主視窗 DKBO）放最後（面板結束選在隊長），其他照 ROLES 順序"""
     rs = [r for r in ROLES if r in set(roles)]
-    return [r for r in rs if r != 'DKBO'] + [r for r in rs if r == 'DKBO']
+    return [r for r in rs if r != LEADER] + [r for r in rs if r == LEADER]
 
 
 NOPAUSE_RETRY = 2                # 不暫停遇敵時，面板被戰鬥打斷（6）/ 下拉在戰鬥轉場讀不到（12）→ 重試次數
@@ -917,7 +942,8 @@ def _main_battle(a) -> int:
         return EXIT_LAYOUT
     import winenv
     winenv.enable_server()
-    rc, sts, msg, info = battle_check(None, a.no_wait, a.dry_run)
+    plan = quest_battle(a.leader_first) if a.leader_first is not None else None
+    rc, sts, msg, info = battle_check(plan, a.no_wait, a.dry_run)
     for r, st in sts.items():
         ch = info.get('changed', {}).get(r)
         print(f'{r}：{fmt_battle(st)}' + (f'（改了 {"、".join(ch)}）' if ch else ''))
@@ -982,12 +1008,13 @@ def _main_pet_many(a) -> int:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='外掛 ASS 左欄戰鬥設定讀 / 設')
     ap.add_argument('cmd', choices=['get', 'set', 'pet', 'battle'])
-    ap.add_argument('role', help='DKBO / DKBO2~5（DKB0… 同義）')
+    ap.add_argument('role', help='名單內角色：主視窗 DKBO / DKBO2~5、PrimalSA2 DKBO6~10（DKB0… 同義）')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
     ap.add_argument('--dry-run', action='store_true', help='多人 pet：只讀不改')
     ap.add_argument('--pause', action='store_true', help='多人 pet：先關原地遇敵 + 等戰鬥結束、改完 grind ensure 恢復（預設不暫停：快速戰鬥中開面板不用停遇敵）')
     ap.add_argument('--no-pause', action='store_true', help='（相容舊旗標；現為預設，無作用）')
     ap.add_argument('--no-resume', action='store_true', help='多人 pet：改完不跑 grind ensure 恢復掛機（遇敵會維持關閉）')
+    ap.add_argument('--leader-first', default=None, help='battle：隊長人物首次動作期望值（預設主視窗 風的精靈、其他視窗不檢查；空字串 = 不檢查）')
     ap.add_argument('--no-wait', action='store_true', help='戰鬥中不等戰鬥結束，直接退出碼 %d（預設等最多 %d 秒）' % (EXIT_IN_BATTLE, BATTLE_WAIT))
     a = ap.parse_args(argv)
     if a.cmd == 'battle':

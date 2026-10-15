@@ -546,6 +546,8 @@ norm_char = charstate.norm_char
 
 # ---- 寵物名 ----
 MOUNTS = ['瑪斯貝卡', '布拉奇多斯']   # 騎寵名單（2026-10-11 加布拉奇多斯；存倉例外見 pet.py --allow-mount-store）
+# 帳號特有：別的視窗（PrimalSA2…）騎不同物種時用環境變數 PSA_MOUNTS=物種,物種 **追加**（只會多保護，不會少）
+MOUNTS += [m.strip() for m in os.environ.get('PSA_MOUNTS', '').split(',') if m.strip() and m.strip() not in MOUNTS]
 SNAP_CUTOFF = 0.8
 _names_cache: dict = {}
 

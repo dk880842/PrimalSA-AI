@@ -269,7 +269,7 @@ class Watcher:
         self.q_off = self._qlog_size()   # 啟動時記下檔案大小，只看之後新增的行
         self.last_qscan = mono()
         # 人物名 / 寵物名（第 7 階段）
-        self.names = charname.NameTracker(watchstate.load_config().get('chars'))
+        self.names = charname.NameTracker(charstate.watch_chars())   # 主視窗 = watch-config 原樣；非主視窗 = 名單（3b）
         self.side = None                 # current-char.json 內容（旁路）
         self._side_mt = None
         self._cfg_mt = None
@@ -736,7 +736,7 @@ class Watcher:
         mt = self._mtime(watchstate.CONFIG_FILE)
         if mt != self._cfg_mt:
             self._cfg_mt = mt
-            self.names.set_chars(watchstate.load_config().get('chars'))
+            self.names.set_chars(charstate.watch_chars())
         mt = self._mtime(watchstate.PET_AVATARS_FILE)
         if mt != self._pet_mt:
             self._pet_mt = mt
@@ -974,7 +974,7 @@ def cmd_ack() -> int:
 
 def cmd_set_char(name: str) -> int:
     """--set-char：手動 / 切換角色的工具寫旁路檔（當前角色 = name）。有白名單時名字要在白名單內（正規化後比對）"""
-    chars = charstate.chars() if watchstate.load_config().get('chars') else None   # 白名單經 display：舊設定的 DKB0 也轉成真名 DKBO
+    chars = charstate.chars() if charstate.watch_chars() else None   # 白名單經 display：舊設定的 DKB0 也轉成真名 DKBO
     if chars:
         hit = charname.match_texts([name], charname.canon_map(chars))
         if not hit:

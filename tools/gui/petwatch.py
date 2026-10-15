@@ -56,8 +56,8 @@ CACHE = clients.cache_dir()          # 每個視窗一份（主視窗 = tools/.c
 STATE = CACHE / 'petwatch.json'
 LOCK = CACHE / 'petwatch.lock'
 
-CHARS = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']   # 真名字母 O；舊 petwatch.json 的 DKB0… 在 load_state 轉成真名
-AVATAR_Y = {'DKBO': 195, 'DKBO2': 322, 'DKBO3': 450, 'DKBO4': 580, 'DKBO5': 700}   # 寵物面板左欄頭像 x=83
+CHARS = clients.roster()   # 這個視窗的名單（主視窗 DKBO～DKBO5，真名字母 O；舊 petwatch.json 的 DKB0… 在 load_state 轉成真名）
+AVATAR_Y = clients.by_slot([195, 322, 450, 580, 700])   # 寵物面板左欄頭像 x=83（名單第 1～5 個的位置；同 petmatch.AVATAR_YS）
 PET_BTN = (318, 80)
 SLOT_Y = [200, 322, 445, 567, 690]                 # 寵物欄 1～5 格（x=250）
 SLOT_X = 250
@@ -422,7 +422,7 @@ def run_swaps(due: list, done: set, gave: set, tries: dict, st: dict, levels: di
 def eat_exp_fruit() -> int:
     """開練前吃 2倍智慧果：一律交給 depot_use（讀 buff 圖示決定吃不吃，不憑印象 / state.json 判斷）→ 退出碼（0 = 已有 / 吃到）"""
     import depot_use
-    rc, info = depot_use.run('DKBO', '2倍智慧果')
+    rc, info = depot_use.run(charstate.LEAD, '2倍智慧果')
     if rc:
         i = errlog.add(f'petwatch --exp-fruit：depot_use 2倍智慧果 rc={rc}（{info.get("step")}）', source='petwatch')
         log(f'2倍智慧果沒吃到 rc={rc}（errlog #{i}），照常監測')
@@ -451,7 +451,7 @@ def main(argv=None, dry_args: bool = False):
     ap.add_argument('--heal-every', type=int, default=15, help='補血檢查間隔秒數（預設 15）')
     ap.add_argument('--hp', type=int, default=40)
     ap.add_argument('--mp', type=int, default=20)
-    ap.add_argument('--exp-fruit', action='store_true', help='開練前先 depot_use DKBO 2倍智慧果（讀 buff 圖示決定吃不吃）')
+    ap.add_argument('--exp-fruit', action='store_true', help='開練前先 depot_use 隊長（主視窗 DKBO）2倍智慧果（讀 buff 圖示決定吃不吃）')
     ap.add_argument('--for', dest='duration', type=int, default=0, help='跑幾秒後自己結束（測試用）')
     a = ap.parse_args(argv)
     a.no_heal = not heal_on(a)

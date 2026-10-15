@@ -33,9 +33,14 @@ TPL_DIR = clients.SHARED_CACHE / 'pet-tpl'     # 名字 / 等級樣板、species
 # ---- 取樣框（截圖座標 x, y, w, h；P-I5 實測）----
 BOX_NAME = (430, 160, 200, 45)          # 選中寵物名字（奶油色字、棕木牌底）
 BOX_LVL = (490, 620, 110, 34)           # 選中寵物模型下方「0轉N」黃字
-AVATAR_Y = {'DKBO': 195, 'DKBO2': 322, 'DKBO3': 450, 'DKBO4': 580, 'DKBO5': 700}     # 左欄頭像中心（同 petwatch）
+# 左欄頭像是「名單第 1～5 個」的固定位置（主視窗 DKBO～DKBO5；PrimalSA2 DKBO6～DKBO10；clients.roster() 順序）。
+# 名字 → 座標的 dict 依名單產生（第 3b 步）；名字只用於驗證 / 顯示。
+AVATAR_YS = [195, 322, 450, 580, 700]    # 左欄頭像中心（同 petwatch）
+AVATAR_TOP_YS = [156, 285, 413, 542, 671]    # 選中黃框上緣（x=83；各 3 px 高）
+AVATAR_Y = clients.by_slot(AVATAR_YS)
 AVATAR_NAME_DY = 52                      # 頭像名字框 y = 頭像中心 + 52（高 24、寬 54、x 56）；第 5 個頭像的名字在面板外
-AVATAR_TOP_Y = {'DKBO': 156, 'DKBO2': 285, 'DKBO3': 413, 'DKBO4': 542, 'DKBO5': 671}   # 選中黃框上緣（x=83；各 3 px 高）
+AVATAR_NAME_OUT = 4                      # 名字在面板外的頭像位置（第 5 個；主視窗 DKBO5）
+AVATAR_TOP_Y = clients.by_slot(AVATAR_TOP_YS)
 
 # ---- 二值化條件（col = (r, g, b)）----
 PREDS = {

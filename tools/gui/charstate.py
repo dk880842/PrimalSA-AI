@@ -14,17 +14,20 @@
 import time
 
 import charname
+import clients
 import watchstate
 
 # 角色真名是英文字母 O：DKBO、DKBO2～5（文件舊寫法 DKB0～DKB05 同義）；程式比對一律經 charname.canon（O / 0 視為相同）
-DEFAULT_CHARS = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
-LEAD = DEFAULT_CHARS[0]
+# 多視窗（第 3b 步）：預設名單 = 這個視窗（PSA_CLIENT）的 clients.roster()；主視窗 = DKBO～DKBO5（與以前相同），
+# PrimalSA2 = DKBO6～DKBO10。沒有寫死名單的視窗 → 空名單（LEAD = ''），名字一律對不上 → 各腳本拒跑，不套用 DKBO。
+DEFAULT_CHARS = clients.roster()
+LEAD = DEFAULT_CHARS[0] if DEFAULT_CHARS else ''
 
 
 def display(name):
-    """任何寫法（DKB0 / DKBO / dkb02…）→ 預設五人的真名；不是五人之一原樣回傳"""
+    """任何寫法（DKB0 / DKBO / dkb02 / DKB010…）→ 名單真名（所有視窗的名單都認）；不是名單內的原樣回傳"""
     k = charname.canon(name)
-    for d in DEFAULT_CHARS:
+    for d in clients.all_names():
         if charname.canon(d) == k:
             return d
     return name
@@ -36,9 +39,22 @@ def same(a, b) -> bool:
 
 
 def chars() -> list:
-    """白名單：watch-config.json 的 chars（不進 git），沒有就用預設五人"""
+    """白名單：watch-config.json 的 chars（不進 git，每視窗一份），沒有就用這個視窗的名單。
+    非主視窗：設定檔的名字只留名單內的（白名單一律來自 roster；設定檔寫了別視窗的名字也不認）；留不下任何一個 → 名單"""
     c = watchstate.load_config().get('chars')
-    return [display(str(x)) for x in c] if isinstance(c, list) and c else list(DEFAULT_CHARS)
+    got = [display(str(x)) for x in c] if isinstance(c, list) and c else []
+    if not clients.is_default():
+        got = [x for x in got if x in DEFAULT_CHARS]
+    return got or list(DEFAULT_CHARS)
+
+
+def watch_chars():
+    """watch 頭頂名牌 OCR 的白名單：主視窗 = watch-config.json 的 chars 原樣（沒設 = None = 不 OCR，與以前相同）；
+    非主視窗 = chars()（沒設定檔也用名單，watch 才認得 DKBO6～10）"""
+    if clients.is_default():
+        c = watchstate.load_config().get('chars')
+        return c if isinstance(c, list) and c else None
+    return chars()
 
 
 def norm_char(text, names=None):

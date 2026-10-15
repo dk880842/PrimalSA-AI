@@ -18,7 +18,7 @@
   44 form 專用：快速組隊提示視窗沒出現 / 隊長卡名字讀不出 / 隊長或隊員標籤點了沒亮（在按「組隊」前就停，關提示、不按組隊）
 
 判斷依據（P-I1 / P-I4 實測，2026-10-11；座標 = 截圖座標）：
-- 卡片存在：卡片米色 (249,231,203) vs 空位棕 (169,127,84)，看卡片左緣 (416 / 726, y)。順序固定 DKBO, DKBO2, DKBO3, DKBO4, DKBO5（真名是字母 O；DKB0 同義）
+- 卡片存在：卡片米色 (249,231,203) vs 空位棕 (169,127,84)，看卡片左緣 (416 / 726, y)。順序固定 = 視窗名單順序（主視窗 DKBO, DKBO2～DKBO5；PrimalSA2 DKBO6～DKBO10；clients.roster()；真名是字母 O；DKB0 同義）
   （左欄 y 300 / 385 / 470、右欄 +310；有人離線時卡片會往前補位 → 卡片數 < 5 就不能靠順序，只能靠 OCR 名字）。
 - 當前 / 線上：卡片左側狀態框 (x+6, y)、(x+30, y)：藍（B>150、G<200、R<60）= 當前、綠（G>160、B<60）= 線上；用門檻不比精確值。
 - 隊伍標籤：框左上角（左欄 452,y-25、右欄 762,y-25）內 x+4..+34、y+4..+34 全像素掃描計數：紅 (255,0,7)「隊長」/ 黃 (255,210,0)「隊員」；
@@ -31,6 +31,7 @@
 """
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -39,6 +40,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import charname  # noqa: E402
 import charstate  # noqa: E402
 import namematch  # noqa: E402
 import uikit  # noqa: E402
@@ -88,12 +90,31 @@ def classify_label(cols) -> str:
     return 'other'
 
 
+def suffix_tails(known) -> dict:
+    """白名單 → {尾碼: 名字}：去掉共同字首（保留共同字首最後一個字）後的尾碼，例 DKBO2 → '02'、DKBO10 → '010'。
+    隊長（第 1 個）不列（它就是共同字首本身，尾碼太短；單獨讀到另外處理）；尾碼互為後綴的（會誤認）兩個都不列"""
+    ks = [charname.canon(k) for k in known]
+    if len(ks) < 2:
+        return {}
+    pre = os.path.commonprefix(ks)
+    cut = max(0, len(pre) - 1)
+    tails = {}
+    for k, name in zip(ks[1:], list(known)[1:]):
+        t = k[cut:]
+        if len(t) >= 2:
+            tails[t] = name
+    bad = {a for a in tails for b in tails if a != b and b.endswith(a)}
+    return {t: n for t, n in tails.items() if t not in bad}
+
+
 def name_hits(texts) -> tuple:
-    """OCR 各行文字 → (強證據名字集合, 是否讀到單獨的 DKBO)。
-    強證據 = norm_char 命中 DKBO2～5（含 OCR 常見錯字還原），或尾碼 0[2-5]（D02 / 03 / B04 / 05；O / 0 視為相同）。
-    單獨的 DKBO（norm_char 命中 DKBO）可能是 DKBO5 被截斷，另外回傳，不當矛盾證據。"""
+    """OCR 各行文字 → (強證據名字集合, 是否讀到單獨的隊長名)。
+    強證據 = norm_char 命中隊長以外的名單名字（含 OCR 常見錯字還原），或尾碼命中（主視窗 0[2-5]：D02 / 03 / B04 / 05；
+    PrimalSA2 06～09 / 010；O / 0 視為相同；尾碼表見 suffix_tails）。
+    單獨的隊長名（主視窗 DKBO，可能是 DKBO5 被截斷）另外回傳，不當矛盾證據。"""
     strong, bare = set(), False
     known = charstate.chars()
+    tails = suffix_tails(known)
     for t in texts:
         t = str(t or '')
         hit = charstate.norm_char(t)
@@ -103,12 +124,10 @@ def name_hits(texts) -> tuple:
             else:
                 strong.add(hit)
             continue
-        m = re.search(r'0([2-5])\s*$', t.replace('O', '0').replace('o', '0').strip())
-        if m:
-            cand = charstate.LEAD + m.group(1)
-            hit = next((k for k in known if charstate.same(k, cand)), None)
-            if hit:
-                strong.add(hit)
+        tc = t.replace('O', '0').replace('o', '0').strip()
+        cands = {n for tail, n in tails.items() if tc.endswith(tail)}
+        if len(cands) == 1:
+            strong.add(next(iter(cands)))
     return strong, bare
 
 
@@ -653,7 +672,7 @@ def main() -> int:
     p.add_argument('--leader', help='隊長必須是這個角色（名字）')
     p.add_argument('--no-ocr', action='store_true')
     p = sub.add_parser('form', help='快速組隊（已組好 = 0 不點）')
-    p.add_argument('--leader', help='隊長角色（預設 DKBO）')
+    p.add_argument('--leader', help='隊長角色（預設這個視窗名單的第 1 個：主視窗 DKBO、PrimalSA2 DKBO6）')
     p.add_argument('--size', type=int, default=5)
     p.add_argument('--login-all', action='store_true', help='有角色離線時按「全部登錄」（預設不按，回 42）')
     p.add_argument('--regroup', action='store_true', help='已有不完整隊伍時解散重組（預設回 41）')
