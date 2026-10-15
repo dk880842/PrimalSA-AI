@@ -573,62 +573,81 @@ go(2016, s, confirm_drop=True, from_stage='turnin', reset=False)
 check('rested 超過 RESTED_S 才續跑交件 → 不帶 --rested（questrun 自己 rest-all）', not any('--rested' in a for a in names(s, 'questrun.py') if '--pet-turnin' in a), str(names(s, 'questrun.py')))
 need = {'魯尼帖斯': 18}
 base = {'DKBO': [{'slot': 1, 'name': '布拉奇多斯'}, {'slot': 2, 'name': '魯尼帖斯', 'level': 3, 'nh': 'a'}]}
-m, why = pq.merge_levels(base, {'DKBO': [{'slot': 2, 'level': 9, 'nh': 'a'}]}, need)
-check('merge_levels：nh 相同 → 等級換新、其他格照舊', why is None and m['DKBO'][1]['level'] == 9 and m['DKBO'][0]['name'] == '布拉奇多斯')
-check('merge_levels：nh 不同 / 變空格 / 沒讀到 → 不合併（改讀完整 list）', pq.merge_levels(base, {'DKBO': [{'slot': 2, 'level': 9, 'nh': 'b'}]}, need)[0] is None
-      and pq.merge_levels(base, {'DKBO': [{'slot': 2, 'empty': True}]}, need)[0] is None and pq.merge_levels(base, {'DKBO': []}, need)[0] is None)
-check('task_slots：各角色任務寵格聯集', pq.task_slots({'A': [{'slot': 2, 'name': '魯尼帖斯'}], 'B': [{'slot': 3, 'name': '魯尼帖斯'}, {'slot': 1, 'name': 'x'}]}, need) == [2, 3])
+smap = pq.task_slot_map({'A': [{'slot': 2, 'name': '魯尼帖斯'}, {'slot': 1, 'name': 'x'}], 'B': [{'slot': 3, 'name': '魯尼帖斯'}]}, need)
+check('task_slot_map：(角色, 物種) → 格號；只含任務寵', smap == {('A', '魯尼帖斯'): [2], ('B', '魯尼帖斯'): [3]})
+check('levels_of：讀到的格取等級；變空 / 沒讀到 = None', pq.levels_of({'A': [{'slot': 2, 'level': 9}], 'B': [{'slot': 3, 'empty': True}]}, smap) == {('A', '魯尼帖斯'): 9, ('B', '魯尼帖斯'): None}
+      and pq.levels_of({}, smap) == {('A', '魯尼帖斯'): None, ('B', '魯尼帖斯'): None})
 k = ('DKBO', '魯尼帖斯')
 def _tc(need_, *rounds):
     t = pq.TrainConfirm(need_)
-    outs = [t.update(r) for r in rounds]
-    return t, outs
-t, o = _tc(need, {k: 18}, {k: 20})
-check('TrainConfirm：第一次 ≥ 門檻 → pending；連兩次 ≥ → 鎖定', o[0] == ([], [k]) and o[1] == ([k], []) and t.done([k]))
-t, _ = _tc(need, {k: 18}, {k: 17}, {k: 18})
-check('TrainConfirm：中間掉到 < 門檻 → 連續次數歸零', not t.locked)
-t, _ = _tc(need, {k: 128}, {k: 128}, {k: 200})
-check('TrainConfirm：誤讀（> 門檻+60 / > 140）忽略、不鎖定', not t.locked)
-t, _ = _tc(need, {k: 18}, {k: None}, {k: 19})
-check('TrainConfirm：讀不到不清第一次讀值 → 下一次 ≥ 就鎖定', t.done([k]))
-t, _ = _tc(need, {k: 18}, {k: 40})
-check('TrainConfirm：高速升級（一輪升 22 級）仍鎖定（舊 TRAIN_STABLE_UP=10 會卡）', t.done([k]))
-# 重現 10-14 卡坦：5 人 13 隻，每輪讀到的子集不同（浮字蓋住 → None / 改讀 list）、N 每輪不同
+    for r in rounds:
+        t.update(r)
+    return t
+check('TrainConfirm：第一次 ≥ 門檻不算、連兩次 ≥ 才鎖定', not _tc(need, {k: 18}).locked and _tc(need, {k: 18}, {k: 20}).done([k]))
+check('TrainConfirm：中間掉到 < 門檻 → 連續次數歸零', not _tc(need, {k: 18}, {k: 17}, {k: 18}).locked)
+check('TrainConfirm：讀不到不清第一次讀值；高速升級（一輪升 22 級）仍鎖定', _tc(need, {k: 18}, {k: None}, {k: 19}).done([k]) and _tc(need, {k: 18}, {k: 40}).done([k]))
 need13 = {'加克拉': 25, '加格': 25, '邦恩吉': 25}
 keys = [(r, sp) for r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5') for sp in need13]
 t = pq.TrainConfirm(need13)
-rounds = [{kk: (30 + i if (i + j) % 3 else None) for i, kk in enumerate(keys)} for j in range(5)]
-for r in rounds:
-    t.update(r)
-    if t.done(keys):
-        break
-check('TrainConfirm：每輪子集不同（浮字干擾）→ 逐隻累積，5 輪內全部鎖定（舊邏輯永遠重置）', t.done(keys), str(len(t.locked)))
-t = pq.TrainConfirm(need13)
-t.update({kk: 30 for kk in keys})
-t.update({keys[0]: 30})
+for j in range(5):
+    t.update({kk: (30 + i if (i + j) % 3 else None) for i, kk in enumerate(keys)})
+check('TrainConfirm：每輪子集不同（浮字干擾）→ 逐隻累積，5 輪內全部鎖定', t.done(keys), str(len(t.locked)))
 t.update({keys[0]: None})
-check('TrainConfirm：鎖定後讀不到 / 只讀部分都不清', keys[0] in t.locked and not t.over({keys[0]: 80}))
-t = pq.TrainConfirm(need13)
-check('TrainConfirm.over：未鎖定且超過門檻+15 → True；剛好 +15 / 已鎖定 / > 140 → False',
-      t.over({keys[0]: 41}) and not t.over({keys[0]: 40}) and not t.over({keys[0]: 141}))
+check('TrainConfirm：鎖定後讀不到不清', keys[0] in t.locked)
+check('已拿掉：merge_levels / task_levels / TRAIN_OVER / TRAIN_MISREAD_UP / skip_done_rounds',
+      not any(hasattr(pq, x) for x in ('merge_levels', 'task_levels', 'TRAIN_OVER', 'TRAIN_MISREAD_UP')) and not hasattr(pq.Run, 'skip_done_rounds'))
+
+# 恐龍博士練寵：list 只讀一次、之後只 levels --slots；不跑 verify-battle；autoswap on / off 各 1；讀失敗下一輪再讀（不改讀 list）
 s = grow(Sim(2016))
 _lv = s.pet
 _bad = [1]
 
 
 def _pet(a):
-    rc, ls = _lv(a)
-    if a[0] == 'levels' and _bad:                            # 第一次 levels：魯尼帖斯那格指紋變了（被浮字蓋住）
+    if a[0] == 'levels' and _bad:                            # 第一次 levels 讀取失敗
         _bad.pop()
-        ls = [ls[0].replace('"nh": "魯尼帖斯"', '"nh": "x"')]
-    return rc, ls
+        return s.out(1)
+    return _lv(a)
 
 
 s.pet = _pet
 rc = go(2016, s, confirm_drop=True)
 tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
-seq = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels')]
-check('levels 指紋對不上 → 那一輪改讀完整 list，之後回到只讀等級，仍練完', rc == 0 and seq[:3] == ['list', 'levels', 'list'] and seq[3] == 'levels', f'rc={rc} {seq[:6]}')
+ra = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'rest-all'][0]
+seq = [c[1][0] for c in s.calls[tr[0]:ra] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels')]
+check('練寵讀等級：第一次 list、之後只 levels（讀失敗下一輪再讀 levels，不改讀 list），仍練完', rc == 0 and seq[0] == 'list' and set(seq[1:]) == {'levels'} and len(seq) >= 4, f'rc={rc} {seq[:8]}')
+pc = names(s, 'pet_catch.py')
+check('不跑 pet_catch --verify-battle；autoswap on 1 次、off 1 次（恐龍博士沒帶 --keep-autoswap 練完就關）',
+      not any('--verify-battle' in a for a in pc) and len([a for a in pc if a[:2] == ('--autoswap', 'on')]) == 1 and len([a for a in pc if a[:2] == ('--autoswap', 'off')]) == 1, str(pc))
+
+# 卡坦兩輪：autoswap on 只 1 次（第 2 輪不再勾）、off 只 1 次（第 2 輪練完才關）；accept 不讀追蹤步號
+s = grow(Sim(2019))
+_rs = s.read_step
+s.read_step = lambda t: (s.calls.append(('read_step',)), _rs(t))[1]
+rc = go(2019, s, confirm_drop=True)
+pcs = [(i, c[1]) for i, c in enumerate(s.calls) if c[0] == 'pet_catch.py' and c[1][:1] == ('--autoswap',)]
+gr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
+check('卡坦：autoswap on 只 1 次、off 只 1 次；on 在第 1 輪 grind 前、off 在第 2 輪 grind 之後',
+      rc == 0 and [a[1] for _, a in pcs] == ['on', 'off'] and pcs[0][0] < gr[0] and pcs[1][0] > gr[-1], f'rc={rc} {pcs} grind={gr}')
+acc = [i for i, c in enumerate(s.calls) if c[0] == 'questrun.py' and '--pet-turnin' not in c[1]][0]
+nxt = [i for i, c in enumerate(s.calls) if c[0] == 'questrun.py' and i > acc][0]
+check('卡坦 accept 後不讀追蹤步號（accept 到第 1 輪交件之間沒有 read_step）', not any(c == ('read_step',) for c in s.calls[acc:nxt]), str(s.calls[acc:nxt]))
+check('卡坦進度檔：autoswap_on 關掉後清除', 'autoswap_on' not in json.loads(pq.PROGRESS.read_text(encoding='utf-8')))
+
+# 進度檔已有 autoswap_on（恐龍博士 --keep-autoswap 留下）→ 卡坦不再 on、train2 結束才 off
+s = grow(Sim(2019))
+go(2019, s, to_stage='prep')
+_pg = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))
+_pg['autoswap_on'] = {'qid': 2016, 'ts': 10 ** 9}
+pq.PROGRESS.write_text(json.dumps(_pg), encoding='utf-8')
+s.t = 10 ** 9                                              # 假時鐘接在 autoswap_on 時間戳之後（24 小時內）
+rc = go(2019, s, confirm_drop=True, reset=False, from_stage='catch1')
+pc = names(s, 'pet_catch.py')
+check('接卡坦（進度檔 autoswap_on）：不再 on、練完第 2 輪才 off 1 次、進度檔清掉',
+      rc == 0 and not any(a[:2] == ('--autoswap', 'on') for a in pc) and len([a for a in pc if a[:2] == ('--autoswap', 'off')]) == 1
+      and 'autoswap_on' not in json.loads(pq.PROGRESS.read_text(encoding='utf-8')), f'rc={rc} {pc}')
+check('恐龍博士 --keep-autoswap：進度檔記 autoswap_on', go(2016, grow(Sim(2016)), confirm_drop=True, keep_autoswap=True) == 0
+      and 'autoswap_on' in json.loads(pq.PROGRESS.read_text(encoding='utf-8')))
 
 # ---------------- 2026-10-16 最簡流程：抓 → 改名 → 存公共 → 取個人溢出改名 → 取公共 → 只驗格數
 def pets_of(s, r, sp=None):
