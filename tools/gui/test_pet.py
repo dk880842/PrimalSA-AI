@@ -891,6 +891,20 @@ check('store-many all × 2 隻：rc 0、10 次存入、每人倉庫各多 2 張�
       and all([x['name'] for x in g.pets[r] if x] == ['瑪斯貝卡'] for r in fake_pet.ROLES), f'rc={rc} {err[-300:]}')
 check('  面板只開關一次（只有 1 次 ✕）、5 個頭像都點過', g.clicks.count(uikit.PET.close_xy) == 1 and all((83, petmatch.AVATAR_Y[r]) in g.clicks for r in fake_pet.ROLES))
 check('  瑪斯貝卡 5 人都沒動（沒點狀態鈕）', g.state_clicks == [])
+# store-many --plan：每人存不同的寵物、面板只開一次
+check('parse_store_plan：×N / 同角色合併 / 壞輸入', pet.parse_store_plan('DKBO2:迪基格斯×2,DKBO3:魯尼帖斯') == [('DKBO2', ['迪基格斯'] * 2), ('DKBO3', ['魯尼帖斯'])]
+      and pet.parse_store_plan('DKBO2:迪基格斯x1,DKBO2:魯尼帖斯') == [('DKBO2', ['迪基格斯', '魯尼帖斯'])]
+      and pet.parse_store_plan('DKBO9:迪基格斯') is None and pet.parse_store_plan('DKBO2:迪基格斯×0') is None and pet.parse_store_plan('') is None)
+g = new(pets=mk(), depot=mkdp())
+rc, out, err = run(pet.store_many, '', [], 'personal', per_role=[('DKBO2', ['迪基格斯']), ('DKBO3', ['魯尼帖斯']), ('DKBO4', ['迪基格斯', '魯尼帖斯'])])
+nm_of = lambda r: [c['name'] for c in g.depot[r]['personal'] if c]    # noqa: E731
+check('store-many --plan：每人存各自的寵物（DKBO2 迪基格斯 / DKBO3 魯尼帖斯 / DKBO4 兩隻）、其餘人不動', rc == 0 and '迪基格斯' in nm_of('DKBO2') and '魯尼帖斯' not in nm_of('DKBO2')
+      and '魯尼帖斯' in nm_of('DKBO3') and '迪基格斯' not in nm_of('DKBO3') and '迪基格斯' in nm_of('DKBO4') and '魯尼帖斯' in nm_of('DKBO4') and depot_free(g) == 4
+      and nm_of('DKBO') == ['朵拉比斯'], f'rc={rc} {err[-300:]}')
+check('  面板只開關一次、3 個頭像各點過、沒點的角色頭像不點', g.clicks.count(uikit.PET.close_xy) == 1 and all((83, petmatch.AVATAR_Y[r]) in g.clicks for r in ('DKBO2', 'DKBO3', 'DKBO4'))
+      and (83, petmatch.AVATAR_Y['DKBO5']) not in g.clicks)
+g = new(pets=mk(), depot=mkdp())
+check('store-many --plan 寵物名不在 Monster 表 → 1 零點擊', run(pet.store_many, '', [], 'personal', per_role=[('DKBO2', ['亂碼寵'])])[0] == 1 and g.clicks == [])
 g = new(pets=mk(), depot=mkdp())
 rc, out, err = run(pet.store_many, 'DKBO,DKBO3', ['瑪斯貝卡'], 'personal')
 check('store-many 騎寵沒在 --allow-mount-store 名單 → 73 零點擊', rc == 73 and g.clicks == [], f'rc={rc}')

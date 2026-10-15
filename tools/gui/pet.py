@@ -10,6 +10,7 @@
   uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N --expect 迪基格斯|--expect-growth 35/7/3/8|--expect-level 126   # --index 一定要配 --expect-*（不准盲取）
   uv run --no-project python tools/gui/pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 瑪斯貝卡] [--skip-missing] [--pick first|last]
   uv run --no-project python tools/gui/pet.py take DKBO --depot public --pet 朵拉比斯        # 不給格號：現場逐張選卡讀名字找（沒名字的卡靠成長字串登錄檔）
+  uv run --no-project python tools/gui/pet.py store-many --plan "DKBO2:克邦凱斯×4,DKBO3:加克拉×4" --depot public --pick last   # 每人存不同寵物：面板開一次、左欄頭像連續換人（petquest catch 存公共用）
   uv run --no-project python tools/gui/pet.py take-many --role all --pets 朵拉比斯 [--depot personal|public] [--skip-missing]
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"   # 每人不同目標
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO4:#34/7/4/8~7,DKBO5:#31/7/4/8~8"   # ~N = 格號提示（撞號 / 同字串多張時指定哪張）
@@ -2555,15 +2556,25 @@ def _many_prologue(role_arg: str, pets_text, depot: str, cmd: str, t0: float):
 
 
 def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_slot1: bool = False, allow_mount_store: list | None = None,
-               skip_missing: bool = False, pause: bool = False, learn: bool = True, pick: str | None = None) -> int:
-    """多角色 × 多寵物連續存倉：同一個 Session（面板只開一次）、每次直接點左欄頭像換角色（黃框 + 頭像名字驗證在 select_role）；
+               skip_missing: bool = False, pause: bool = False, learn: bool = True, pick: str | None = None, per_role: list | None = None) -> int:
+    """多角色 × 多寵物連續存倉（per_role = [(角色, [寵物名…])] 時每人存不同的寵物，= --plan；此時 role_arg / pets_text 忽略）：同一個 Session（面板只開一次）、每次直接點左欄頭像換角色（黃框 + 頭像名字驗證在 select_role）；
     每隻都走 store 同一套驗證（名字 / 縮圖 / 按鈕 / 計數 / 倉庫逐張找得到），失敗立即停（不重點）。
     騎寵只放行 allow_mount_store 名單內的名字（名字必須完全相同、且已是等待；第 1 格另需 allow_slot1）；其他規則同 store"""
     t0 = time.time()
-    prep, info = _many_prologue(role_arg, pets_text, depot, 'store-many', t0)
-    if prep is None:
-        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
-    roles, names = prep
+    if per_role:
+        names_all = [uikit.snap_pet(x) for _, ns in per_role for x in ns]
+        info = {'cmd': 'store-many', 'depot': depot, 'roles': [r for r, _ in per_role], 'pets': names_all, 'ops': []}
+        if depot not in ('personal', 'public') or None in names_all:
+            print(f'pet：store-many --plan 參數不對（倉庫 {depot!r}、寵物名對不到 Monster 表）', file=sys.stderr)
+            return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+        plan_roles = [(r, [uikit.snap_pet(x) for x in ns]) for r, ns in per_role]
+        names = names_all
+    else:
+        prep, info = _many_prologue(role_arg, pets_text, depot, 'store-many', t0)
+        if prep is None:
+            return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+        roles, names = prep
+        plan_roles = [(r, names) for r in roles]
     ams = [uikit.snap_pet(x) or x for x in (allow_mount_store or [])]
     for nm in names:
         if (nm in uikit.MOUNTS or uikit.is_mount_like(nm)) and nm not in ams:
@@ -2575,7 +2586,7 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
         if s.rc:
             return _out(s.rc, info, t0)
         try:
-            for r in roles:
+            for r, names in plan_roles:
                 slots, predicted = None, False                         # 每個角色只完整讀一次寵物欄（每格約 3.5 s）；存走一隻後用 shift_slots 推算，_store_body 選格後會重讀核對
                 for nm in names:
                     op = {'role': r, 'pet': nm, 'depot': depot, 'clicked': False}
@@ -2635,6 +2646,26 @@ def parse_plan(text: str) -> list | None:
             return None
         out.append((roles[0], t))
     return out or None
+
+
+def parse_store_plan(text: str) -> list | None:
+    """'DKBO2:克邦凱斯×4,DKBO3:加克拉×4,DKBO4:迪基格斯' → [(角色, [名字…])]（×N / xN / *N = 重複 N 隻；純函式）；
+    同角色可出現多次（依序合併）；角色不認得 / N 不是正整數 → None"""
+    import re
+    out = {}
+    for part in [p.strip() for p in str(text or '').split(',') if p.strip()]:
+        if ':' not in part:
+            return None
+        r, tt = part.split(':', 1)
+        roles = role_list(r.strip())
+        m = re.fullmatch(r'(.+?)\s*(?:[×xX*]\s*(\d+))?', tt.strip())
+        if not roles or len(roles) != 1 or not m or not m.group(1).strip():
+            return None
+        n = int(m.group(2)) if m.group(2) else 1
+        if n < 1:
+            return None
+        out.setdefault(roles[0], []).extend([m.group(1).strip()] * n)
+    return list(out.items()) or None
 
 
 def group_ops(ops: list) -> list:
@@ -3391,8 +3422,9 @@ def main() -> int:
     p.add_argument('--allow-slot1', action='store_true', help='允許存第 1 格的寵物（仍擋騎寵 / 騎乘中）')
     p.add_argument('--allow-mount-store', default=None, metavar='名字', help='只放行名字完全等於此值的騎寵存倉（須已是等待；第 1 格另加 --allow-slot1）；只有使用者當次明講才用')
     p = sub.add_parser('store-many', help='多角色 × 多寵物連續存倉（同一個面板 session，直接換頭像）', parents=[cp])
-    p.add_argument('--role', required=True, help='all 或逗號分隔 DKBO,DKBO3')
-    p.add_argument('--pets', required=True, help='寵物名（逗號分隔）；沒名字的新寵物用物種名（須已 learn-species）')
+    p.add_argument('--role', default=None, help='all 或逗號分隔 DKBO,DKBO3（配 --pets：每人存同樣的寵物）')
+    p.add_argument('--pets', default=None, help='寵物名（逗號分隔）；沒名字的新寵物用物種名（須已 learn-species）')
+    p.add_argument('--plan', default=None, help='每人不同寵物：DKBO2:克邦凱斯×4,DKBO3:加克拉×4（面板只開一次、左欄頭像連續換人）；與 --role / --pets 擇一')
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
     p.add_argument('--allow-slot1', action='store_true')
     p.add_argument('--allow-mount-store', default=None, metavar='名,名', help='放行存倉的騎寵名單（名字完全相同、須已是等待）；只有使用者當次明講才用')
@@ -3471,6 +3503,15 @@ def main() -> int:
         return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn, a.pet, a.expect_growth, a.expect_level)
     csv = lambda t: [x.strip() for x in (t or '').split(',') if x.strip()]    # noqa: E731
     if a.cmd == 'store-many':
+        if a.plan:
+            pr = parse_store_plan(a.plan)
+            if pr is None:
+                print(f'pet：--plan {a.plan!r} 看不懂（角色:名字×N,角色:名字×N）', file=sys.stderr)
+                return _out(uikit.EXIT_USAGE, {'cmd': 'store-many'}, time.time(), '--plan 不對')
+            return store_many('', [], a.depot, a.allow_slot1, csv(a.allow_mount_store), a.skip_missing, a.pause_encounter, learn, a.pick, per_role=pr)
+        if not a.role or not a.pets:
+            print('pet：store-many 要 --plan，或 --role + --pets', file=sys.stderr)
+            return _out(uikit.EXIT_USAGE, {'cmd': 'store-many'}, time.time(), '參數不對')
         return store_many(a.role, csv(a.pets), a.depot, a.allow_slot1, csv(a.allow_mount_store), a.skip_missing, a.pause_encounter, learn, a.pick)
     if a.cmd == 'take-many':
         if a.plan:

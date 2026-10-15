@@ -4,6 +4,7 @@
 import contextlib
 import io
 import json
+import time
 import os
 import sys
 import tempfile
@@ -238,20 +239,35 @@ class Sim:
             return self.out(0, js={'roles': {r: [{'slot': i + 1, 'level': p['level'], 'nh': p['name']} for i, p in enumerate(self.bar[r]) if not sl or i + 1 in sl]
                                              for r in ROLES}, 'rc': 0})
         if cmd == 'store-many':
-            roles = ROLES if self.opt(args, '--role') == 'all' else self.opt(args, '--role').split(',')
             depot = self.opt(args, '--depot')
-            for r in roles:
-                for name in self.opt(args, '--pets').split(','):
-                    hits = [p for p in self.bar[r] if p['name'] == name and p['state'] != '騎乘']
-                    if not hits:
-                        if '--skip-missing' in args:
-                            continue
-                        return self.out(72)
-                    p = hits[-1]
-                    self.bar[r].remove(p)
-                    p['state'] = '等待'
-                    (self.public if depot == 'public' else self.personal[r]).append(p)
-            return self.out(0)
+            if '--plan' in args:                         # 每人不同寵物：DKBO2:克邦凱斯×4,…（一次呼叫 = 面板開一次）
+                work = []
+                for part in self.opt(args, '--plan').split(','):
+                    r, t = part.split(':')
+                    nm, n = t.split('×') if '×' in t else (t, '1')
+                    work += [(r, nm)] * int(n)
+            else:
+                roles = ROLES if self.opt(args, '--role') == 'all' else self.opt(args, '--role').split(',')
+                work = [(r, nm) for r in roles for nm in self.opt(args, '--pets').split(',')]
+            self.store_calls = getattr(self, 'store_calls', 0) + 1
+            ops = []
+            for r, name in work:
+                if getattr(self, 'store_fail_op', None) is not None and depot == 'public' and len(ops) == self.store_fail_op:      # 模擬存到一半失敗（前面的人已存完）
+                    self.store_fail_op = None
+                    ops.append({'role': r, 'pet': name, 'rc': 72})
+                    return self.out(72, js={'ops': ops})
+                hits = [p for p in self.bar[r] if p['name'] == name and p['state'] != '騎乘']
+                if not hits:
+                    if '--skip-missing' in args:
+                        continue
+                    ops.append({'role': r, 'pet': name, 'rc': 72})
+                    return self.out(72, js={'ops': ops})
+                p = hits[-1]
+                self.bar[r].remove(p)
+                p['state'] = '等待'
+                (self.public if depot == 'public' else self.personal[r]).append(p)
+                ops.append({'role': r, 'pet': name, 'rc': 0})
+            return self.out(0, js={'ops': ops})
         if cmd == 'take-many':
             depot = self.opt(args, '--depot')
             ops = []
@@ -637,15 +653,15 @@ check('sub_at / bar_count_bad 純函式', pq.sub_at({'step': 'stored'}, 'renamed
 s = grow(Sim(2016))
 rc = go(2016, s, to_stage='distribute')
 cn = [x for x in seq_of(s) if x.startswith(('catch', 'reset', 'store', 'take')) and not x.endswith('personal') or x == 'take-many-personal']
-check('恐龍博士 catch+distribute（空格 4、溢出 1）子指令：bait → setup,wait → reset-name(2 抓寵者) → store-many 公共 ×2 → take-many 個人 ×1 → reset-name(取回者) → take-many 公共 ×1',
-      rc == 0 and cn == ['catch:bait', 'catch:setup,wait', 'reset-name', 'store-many-public', 'store-many-public', 'take-many-personal', 'reset-name', 'take-many-public'], f'rc={rc} {cn}')
+check('恐龍博士 catch+distribute（空格 4、溢出 1）子指令：bait → setup,wait → reset-name(2 抓寵者) → store-many 公共 ×1（--plan 一次）→ take-many 個人 ×1 → reset-name(取回者) → take-many 公共 ×1',
+      rc == 0 and cn == ['catch:bait', 'catch:setup,wait', 'reset-name', 'store-many-public', 'take-many-personal', 'reset-name', 'take-many-public'], f'rc={rc} {cn}')
 check('抓寵者各 5 隻：公共每種 4 隻、抓寵者個人倉庫的溢出取回（只剩原戰寵）、每人寵物欄 = 騎寵 + 魯尼帖斯 + 貝魯卡 剛好 3 格',
       not s.public and all(len(pets_of(s, r)) == 3 and pets_of(s, r, '魯尼帖斯') and pets_of(s, r, '貝魯卡') for r in ROLES)
       and all(p['name'] != '35/7/3/8' for r in ROLES for p in s.bar[r]) and all(p['name'] == '朵拉比斯' for r in ROLES[1:3] for p in s.personal[r]), f'{[len(s.bar[r]) for r in ROLES]} {len(s.public)}')
-check('不再呼叫 depot-list / 不傳 --expect-bar / 不跑 rename / register 階段；抓寵 pet.py list 只在抓前讀 1 次（distribute 驗證 1 次）',
+check('不再呼叫 depot-list / 不傳 --expect-bar / 不跑 rename / register 階段；prep 接 catch 不重複 solo（disband 只 1 次）；pet.py list 只有 prep 記戰寵 1 次 + distribute 驗證 1 次（catch 前不讀欄）',
       not any(a[0] == 'depot-list' for a in names(s, 'pet.py')) and not any('--expect-bar' in a for a in names(s, 'pet_catch.py'))
       and not any(x in ' '.join(a) for a in names(s, 'pet_catch.py') if '--stages' in a for x in ('rename', 'register'))
-      and len([a for a in names(s, 'pet.py') if a[0] == 'list']) == 3, f'{[a[0] for a in names(s, "pet.py")]}')
+      and len([a for a in names(s, 'pet.py') if a[0] == 'list']) == 2 and len([c for c in s.calls if c[0] == 'team.py' and c[1][0] == 'disband']) == 1, f'{[a[0] for a in names(s, "pet.py")]}')
 pr = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']
 check('進度檔小步：sub_r1 = distributed、in_bar 記下每人在欄隻數', pr['sub_r1']['step'] == 'distributed' and pr['sub_r1']['in_bar'] == {'DKBO2': 4, 'DKBO3': 4}, str(pr.get('sub_r1')))
 tk = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and a[a.index('--depot') + 1] == 'personal'][0]
@@ -654,21 +670,18 @@ tk = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and a[a.index('--depo
 check('取公共：--plan 只有 distribute（抓寵者自己那種不取）、不帶 --candidates；每人每種 1 隻（8 隻）', len(tk[tk.index('--plan') + 1].split(',')) == 8 and '--candidates' not in tk
       and 'DKBO2:魯尼帖斯' not in tk[tk.index('--plan') + 1], str(tk))
 
-# 寵物欄只有 3 空格（獎勵寵沒丟）→ 在欄 3 存公共、溢出 2 取回改名、多的 1 隻再存公共
+# 不讀寵物欄：catch 前沒有 pet.py list；上次抓到一半（catch_started 旗標、沒 caught）→ 164 不讀欄不抓
 s = grow(Sim(2016))
 for r in ROLES:
-    s.bar[r] = s.bar[r][:1] + [P('巴朵蘭恩')]
+    s.bar[r] = s.bar[r][:1]
 rc = go(2016, s, from_stage='catch', to_stage='catch')
-st_pub = [a for a in names(s, 'pet.py') if a[0] == 'store-many' and a[a.index('--depot') + 1] == 'public']
-tk = [a for a in names(s, 'pet.py') if a[0] == 'take-many'][0]
-check('空格 3：在欄 3 存公共（各 3 隻）、溢出 2 取回（plan 各 2 隻）、reset-name、多的 1 隻再存公共 → 公共每種 4 隻、抓寵者欄 = 騎寵 + 巴朵蘭恩 + 自己 1 隻',
-      rc == 0 and [a[a.index('--pets') + 1].count(',') + 1 for a in st_pub] == [3, 3, 1, 1] and tk[tk.index('--plan') + 1] == 'DKBO2:魯尼帖斯,DKBO2:魯尼帖斯,DKBO3:貝魯卡,DKBO3:貝魯卡'
-      and sum(1 for p in s.public if p['name'] == '魯尼帖斯') == 4 and [p['name'] for p in s.bar['DKBO2']] == ['布拉奇多斯', '巴朵蘭恩', '魯尼帖斯'], f'rc={rc} {st_pub} {tk} {pq.LAST.get("info")}')
+check('catch 單獨續跑（prep 不是本次 run 做的）→ 先 solo（team disband）、沒有 pet.py list、不在 catch 前讀欄', rc == 0 and ('disband',) in names(s, 'team.py')
+      and not any(a[0] == 'list' for a in names(s, 'pet.py')), f'rc={rc} {[a[0] for a in names(s, "pet.py")]}')
 s = grow(Sim(2016))
-for r in ROLES:
-    s.bar[r] = s.bar[r][:1] + [P('a'), P('b'), P('c')]
-rc = go(2016, s, from_stage='catch', to_stage='catch')
-check('空格太少（只剩 1 格，溢出 4 無法一次取回）→ 164、沒抓', rc == pq.EXIT_CATCH and '空格不夠' in pq.LAST['info']['msg'] and not names(s, 'pet_catch.py'), f'rc={rc}')
+pq.PROGRESS.write_text(json.dumps({'2016': {'ts': time.time(), 'done': [], 'catch_started_catch': True}}), encoding='utf-8')
+rc = go(2016, s, from_stage='catch', to_stage='catch', reset=False)
+check('上次抓到一半（catch_started 旗標、沒 caught）→ 164、沒讀欄、沒抓', rc == pq.EXIT_CATCH and '上次抓寵中斷' in pq.LAST['info']['msg'] and not names(s, 'pet_catch.py')
+      and not any(a[0] == 'list' for a in names(s, 'pet.py')), f'rc={rc} {pq.LAST.get("info")}')
 
 # 3 格不符 → 165、訊息帶實際格數
 s = grow(Sim(2016))
@@ -688,8 +701,8 @@ for r in ROLES:
 rc = go(2019, s, from_stage='catch1', to_stage='distribute1')
 tk = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and a[a.index('--depot') + 1] == 'public'][0]
 cn = [x for x in seq_of(s) if x.startswith(('catch', 'reset', 'store', 'take'))]
-check('卡坦第 1 輪：4 抓寵者各 5 隻（空格 4、溢出 1）→ reset-name → store-many 公共 ×4 → take-many 個人 → reset-name → take-many 公共；每人 5 格（騎寵 + 4 種）',
-      rc == 0 and all(len(pets_of(s, r)) == 5 for r in ROLES) and not s.public and cn.count('store-many-public') == 4 and len(tk[tk.index('--plan') + 1].split(',')) == 16, f'rc={rc} {cn} {[len(s.bar[r]) for r in ROLES]} {pq.LAST.get("info")}')
+check('卡坦第 1 輪：4 抓寵者各 5 隻（空格 4、溢出 1）→ reset-name → store-many 公共 ×1（--plan 一次、4 人）→ take-many 個人 → reset-name → take-many 公共；每人 5 格（騎寵 + 4 種）',
+      rc == 0 and all(len(pets_of(s, r)) == 5 for r in ROLES) and not s.public and cn.count('store-many-public') == 1 and len(tk[tk.index('--plan') + 1].split(',')) == 16, f'rc={rc} {cn} {[len(s.bar[r]) for r in ROLES]} {pq.LAST.get("info")}')
 
 # ---- 續跑：每個小步中斷後從下一小步接，不重新盤點
 def fail_once(s, pred, rc):
@@ -713,8 +726,10 @@ s = grow(Sim(2016))
 fail_once(s, lambda sc, a: sc == 'pet_catch.py' and '--stages' in a and a[a.index('--stages') + 1] == 'setup,wait', 14)
 rc = go(2016, s, to_stage='distribute')
 check('抓寵（setup,wait）失敗 → 164', rc == pq.EXIT_CATCH and 'sub_r1' not in json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016'], f'rc={rc}')
+s.calls.clear()
 rc = go(2016, s, to_stage='distribute', reset=False)
-check('→ 重跑（寵物欄沒任務寵）從頭抓，完成', rc == 0 and after_ok(s, 0), f'rc={rc} {pq.LAST.get("info")}')
+check('→ 重跑：catch_started 旗標有、沒 caught → 164 請人處理，不讀寵物欄、不重抓（使用者 2026-10-16）', rc == pq.EXIT_CATCH and not any(a[0] == 'list' for a in names(s, 'pet.py'))
+      and not names(s, 'pet_catch.py') and not names(s, 'pet.py'), f'rc={rc} {pq.LAST.get("info")}')
 # 抓到一半失敗、寵物欄已有任務寵 → 164 請人處理（不自動盤點、不重抓）
 s = grow(Sim(2016))
 fail_once(s, lambda sc, a: sc == 'pet_catch.py' and '--stages' in a and a[a.index('--stages') + 1] == 'setup,wait', 14)
@@ -739,14 +754,13 @@ check('重跑從 renamed 接：不 pet_catch、不 solo / list 盤點、直接 r
 
 # stored 中途失敗（第 2 個抓寵者 store-many 公共失敗）→ 重跑只補沒存的那個
 s = grow(Sim(2016))
-n = [0]
-fail_once(s, lambda sc, a: sc == 'pet.py' and a[0] == 'store-many' and '--depot' in a and a[a.index('--depot') + 1] == 'public' and (n.__setitem__(0, n[0] + 1) or n[0] == 2), 72)
+s.store_fail_op = 4                                                  # 一次 --plan 內：DKBO2 的 4 隻存完、DKBO3 第 1 隻失敗
 rc = go(2016, s, to_stage='distribute')
 check('第 2 個抓寵者存公共失敗 → 165；進度檔 stored_roles = [第 1 個]', rc == pq.EXIT_DIST and json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']['sub_r1']['stored_roles'] == ['DKBO2'], f'rc={rc}')
 s.calls.clear()
 rc = go(2016, s, to_stage='distribute', reset=False)
 sp_ = [a for a in names(s, 'pet.py') if a[0] == 'store-many' and a[a.index('--depot') + 1] == 'public']
-check('重跑：reset-name 不重做（renamed 已記）、store-many 公共只補 DKBO3，之後取個人 → 取公共 → 驗 3 格', rc == 0 and after_ok(s, 0) and len(sp_) == 1 and sp_[0][sp_[0].index('--role') + 1] == 'DKBO3'
+check('重跑：reset-name 不重做（renamed 已記）、store-many 公共只補 DKBO3，之後取個人 → 取公共 → 驗 3 格', rc == 0 and after_ok(s, 0) and len(sp_) == 1 and sp_[0][sp_[0].index('--plan') + 1].startswith('DKBO3:') and 'DKBO2' not in sp_[0][sp_[0].index('--plan') + 1]
       and seq_of(s)[0] == 'store-many-public' and not names(s, 'pet_catch.py'), f'rc={rc} {seq_of(s)}')
 
 # taken_personal 之前失敗（take-many 個人）→ 重跑只做取個人以後，不重存
