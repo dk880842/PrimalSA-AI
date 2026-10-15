@@ -21,8 +21,24 @@
 - **主視窗**（沒設 PSA_CLIENT）：查目前在跑的遊戲程序（`clients.running()`，PowerShell 列 `PrimalSA\d*` 程序名，只讀）；**還有別的 PrimalSA* 在跑 → 不按登錄**。查不到程序清單 = 讀取失敗：本輪不點，連續 5 輪（`read_fails`）才 halt。
 - 只有單一視窗時維持上面的自動登錄（行為不變）。
 擋下時照樣偵測斷線、點「網路異常」提示的確定 715,557，回到登入畫面就 **halt**（errlog / halt 檔「多視窗不自動按登錄：…」，退出碼 10）→ 請人登入；人登入回來後 HUD 出現，下一次 netwatch 檢查會自己清 halt、做 recover（隊伍 / grind ensure，跟人類登入回來相同）。
-`relogin.py`（主動全員重登，含 questrun / rebirth 卡住時的 `--stuck` 自動重登）多視窗時一開始就 **109**、什麼都不點（登出後回不來）。
+`relogin.py`（主動全員重登，含 questrun / rebirth 卡住時的 `--stuck` 自動重登）多視窗時一開始就 **109**、什麼都不點（登出後回不來）；有帳號對照設定檔時不擋（見下節）。
 各視窗的 halt / 狀態檔各自一份：主視窗 `tools/.cache/netwatch.*`，其他 `tools/.cache/clients/<程序名>/netwatch.*`。
+**以上是「沒有帳號對照設定檔」時的行為**；有設定檔時改走下一節。
+
+## 帳號核對（2026-10-15 使用者新規則；離線測試 test_accounts.py，**未實機**）
+每個視窗有固定帳號；登入畫面帳號欄對得上才自動按「登錄」。兩個帳號密碼相同，**密碼欄絕對不碰**。
+- **設定檔**：`tools/gui/accounts.local.json`（`.gitignore` 的 `tools/gui/*.local.json`；repo 公開，帳號名不得出現在程式 / 測試 / 文件 / log）。格式：`{"PrimalSA": "<主視窗帳號>", "PrimalSA2": "<第二視窗帳號>"}`（鍵 = 程序名稱同 PSA_CLIENT，值只收英數 / 底線 1～32 字）。`accounts.py check` 印哪些視窗有設定（只印長度）；兩個帳號在容錯正規化後相同 = 設定檔無效。測試用 `PSA_ACCOUNTS_FILE` 換路徑（testenv 固定指到不存在的檔）。worktree 裡沒有這個檔 → 照舊行為。
+- **判斷誰來管**（`netwatch.login_mode()`）：設定檔有本視窗 → 帳號核對（**單 / 多視窗一樣，不看程序清單**）；沒設定檔 / 本視窗不在對照表 / 格式錯 → `auto_login_check()` 舊行為逐字不變。
+- **讀帳號欄**：`ocr.ps1` 框 `610,392,360,40`、`-Dark 120 -Zooms 2,3,4`，三個倍數各自的整欄文字正規化後**全部一致**（至少 2 個有字）才算讀得出，讀不出重讀一次（`accounts.classify`）。正規化只合併「字母 ↔ 數字」易混字（小寫、去空白、o→0、i / l / | → 1），**數字之間不合併**，所以只差尾碼 1 / 2 的兩個帳號不會混淆。實測（fixture `tools/.cache/net5.png`，主視窗登入畫面）：Windows OCR 把帳號的 o 讀成 0，2～6 倍、Dark 0 / 100 / 120 / 150 結果都一樣。
+- **流程**（`netwatch.relogin`，netwatch 自動登錄、`relogin.py`、questrun / rebirth `--stuck` 共用）：帳密欄都有字（舊規則）→ 讀帳號欄：
+  - 符合 → 按登錄 590,585（之後同舊流程：一鍵全登 → 等進遊戲 → recover）。
+  - 不符（帳號記憶共用，常態）→ 拿全視窗共用輸入鎖 `tools/.cache/login-input.lock`（等最多 90 秒，120 秒沒放視為持有者死了）→ 確認還是登入畫面、密碼欄有字 → 點帳號欄右段空白 **930,411** → `{END}{BS}×40{HOME}{DEL}×40` 清空 → 數深色點確認空（< 10）→ `gui.ps1 typeq <本視窗帳號>` → 再讀一次 = 符合、密碼欄仍有字、仍是登入畫面 → 按登錄 → 放鎖。
+  - 讀不出 / 清不掉 / 重打後不符或讀不出 / 密碼欄變空 / 畫面變了 / 輸入鎖等不到 → **halt**（退出碼 10），不按登錄。
+  - log / errlog / halt 檔只寫「帳號欄核對：符合 / 不符 / 讀不出」「（重打後）：…」，不寫帳號名、不寫 OCR 讀到的字。
+- **打字只進本視窗**：`gui.ps1 typeq` 逐字 PostMessage `WM_CHAR` 到 `$h`（`Find-PsaProcess` 依 PSA_CLIENT 找到的 hwnd；常駐 server 每個請求帶 client，hwnd 快取鍵含 client），fg 模式也不用 SendKeys（SendKeys 送前景視窗）；操作 log 只記「typeq（N 字，內容不記錄）」；`winenv.redact` 讓 server 逾時的 errlog 也遮掉內容；驗證停手旗標同樣擋 typeq。key（PostMessage）本來就不需要點擊鎖，跨視窗的序列化靠上面的登入輸入鎖。
+- `relogin.py`：有設定檔時多視窗也照跑（`login_mode` 回 account），否則照舊 109。
+- **未實機的地方**：點帳號欄後 Unity 輸入框的游標位置 / 是否全選、`{END}` / `{HOME}` / `{DEL}` 在背景 PostMessage 下是否有效（`{BS}` 已實測一次刪一字）、點欄位會不會跳出帳號下拉清單、背景視窗的 InputField 收不收 WM_CHAR。這些不符時都會停在「清不掉」或「重打後核對不符」而 halt，不會按登錄。
+- **安全實測法（不用真的斷線）**：①人在某個視窗自己登出到登入畫面（或剛開的遊戲停在登入畫面），跑 `PSA_CLIENT=<程序名> uv run --no-project python -c "import sys; sys.path.insert(0,'tools/gui'); import netwatch, accounts; print(netwatch.read_account(accounts.for_client()[1]))"`（唯讀，只印 self / other / unreadable）；②人把帳號欄改成另一個帳號再跑一次應得 other；③在 ② 的狀態下改呼叫 `netwatch.retype_account(...)`（會點帳號欄 / 清空 / 打字，不按登錄），回空字串 = 重打成功，人看畫面確認；④最後才 `netwatch.py --once` 整套（會按登錄）。
 
 ## 全視窗驗證停手旗標（verifyhalt.py，2026-10-15）
 任一視窗疑似驗證 / 答題視窗（`uikit.preflight` / `uikit.fail` 回 9、watch 的 unknown_long / quest 警報轉述、quest.py 連 3 次不認得、follow 不認得超過 10 分鐘）時，**多視窗情境**（同上判斷）會寫 `tools/.cache/verify-halt.json`（全部視窗共用一份）。

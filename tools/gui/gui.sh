@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WSL / Git Bash 手打用包裝：bash tools/gui/gui.sh <shot|click|dclick|drag|key|info> ...
+# WSL / Git Bash 手打用包裝：bash tools/gui/gui.sh <shot|click|dclick|drag|key|typeq|info> ...
 # （Python 腳本 walk.py / heal.py 不經過這支，直接呼叫 powershell.exe，見 winenv.py）
 # 動到遊戲的指令（click / drag / key / max / end…）gui.ps1 會寫操作 log（tools/.cache/actions.log，pane 顯示）；
 # 想附註用途：PSA_NOTE="對話確認" bash tools/gui/gui.sh click 948 461

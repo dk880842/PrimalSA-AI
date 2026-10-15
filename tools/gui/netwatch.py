@@ -3,11 +3,16 @@
 
 實測（2026-10-10）：點確定後遊戲**直接回到登入畫面**（帳號 / 密碼欄由遊戲自動帶入、登錄 / 註冊鈕），不會自動重連。
 使用者授權（2026-10-10，AGENTS.md 鐵則 2 的例外，只限這樣）：登入畫面**只點「登錄」**（用遊戲自動帶入的帳密），
-之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。絕不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、
+之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。密碼欄絕不碰（帳號欄只在下面「帳號核對」時重打）、不點鑰匙 / 註冊、
 不讀 savepwd.txt 或登錄檔、不把帳號寫進任何 log。帳密欄空的 / 登錄後出現提示視窗 / 連續 3 次登錄失敗 / 看不懂的畫面 → halt 停手通知使用者。
 多視窗（2026-10-15 使用者決定，auto_login_check）：非主視窗（PSA_CLIENT ≠ PrimalSA）一律不按登錄；主視窗偵測到還有別的 PrimalSA* 程序在跑也不按
 （遊戲記住的帳號是所有視窗共用的，自動登錄可能登錯帳號、互踢）→ 照樣偵測斷線、點「網路異常」的確定，回到登入畫面就 halt 通知使用者。
 只有單一視窗時維持自動登錄。查不到程序清單 = 讀取失敗：本輪不點，連續 5 輪才 halt。
+帳號核對（2026-10-15 使用者新規則，accounts.py；未實機）：本機設定檔 tools/gui/accounts.local.json（不進 git）有「本視窗 → 帳號」時，
+不管單 / 多視窗都改走帳號核對、不看程序清單：OCR 讀帳號欄（多倍數一致才算讀得出）→ = 本視窗帳號 → 按登錄；
+≠（帳號記憶共用，常態）→ 拿全視窗共用的登入輸入鎖 login-input.lock → 點帳號欄 → 清空 → 確認空 → 只打帳號（gui typeq，PostMessage 到本視窗 hwnd、
+log 只記字數）→ 再讀一次 = 本視窗帳號才按登錄、放鎖；重打後仍不符 / 讀不出 / 清不掉 / 密碼欄變空 / 畫面不是登入畫面 → halt。密碼欄絕對不碰。
+沒設定檔 / 本視窗不在對照表 / 設定檔格式錯 → 上面的舊行為逐字不變。log / errlog 只寫「帳號欄核對：符合 / 不符 / 讀不出」，不寫帳號名。
 全視窗驗證停手旗標（verifyhalt.py）存在 → check_and_reconnect 回 status 'verify'、guard sys.exit(9)，什麼都不點。
 
   import netwatch
@@ -31,6 +36,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import accounts  # noqa: E402
 import actlog  # noqa: E402
 import clients  # noqa: E402
 import errlog  # noqa: E402
@@ -66,7 +72,16 @@ LOGIN_BOX = (460, 380, 520, 130)     # 登入畫面「帳號 / 密碼」標籤�
 SWITCH_BTN = (763, 760)
 # 登錄流程（2026-10-10 實測）
 LOGIN_BTN = (590, 585)               # 登入畫面橘色「登錄」（唯一允許在登入畫面點的東西）
-ACCT_BOX = (700, 900, 400, 425)      # 帳號欄 x0,x1,y0,y1（只數深色像素判斷「非空」，不讀內容）
+ACCT_BOX = (700, 900, 400, 425)      # 帳號欄 x0,x1,y0,y1（數深色像素判斷「非空 / 清空了沒」；帳號樣本 93 點、空欄 0 點）
+# 帳號核對（accounts.local.json 有本視窗帳號時才用；fixture net5.png 量：欄位 610～970 × 392～432，置中深棕粗字 742～834）
+ACCT_OCR = (610, 392, 360, 40)       # 帳號欄 OCR 框（ocr.ps1 -Dark 120，2 / 3 / 4 倍各讀一次，三者一致才算讀得出）
+ACCT_OCR_OPTS = ('-Zooms', '2,3,4', '-Dark', '120')
+ACCT_FIELD = (930, 411)              # 點帳號欄的位置（欄位右段空白處：游標落在字尾；不點左邊「帳號」標籤、不碰密碼欄 / 鑰匙）
+ACCT_CLEAR_N = 40                    # 清空：{END} + {BS}×N 再 {HOME} + {DEL}×N（游標在哪都清得乾淨；帳號最長 32 字）
+EMPTY_MAX = 10                       # 深色點 < 10 = 空（同 login_fields_filled；游標細線最多約 9 點）
+LOGIN_INPUT_LOCK = clients.SHARED_CACHE / 'login-input.lock'   # 全視窗共用：同一時間只有一個視窗在登入畫面打字（點欄位 → 清空 → 打字 → 核對 → 登錄）
+LOGIN_INPUT_STALE = 120              # 鎖超過幾秒沒放 = 持有者死了，接手
+LOGIN_INPUT_WAIT = 90                # 最多等別的視窗打完幾秒
 PWD_BOX = (690, 880, 484, 502)       # 密碼欄（星號）
 ALL_LOGIN_BTN = (740, 640)           # 選擇角色面板「一鍵全登」
 # 選擇角色面板：全登鈕橘、面板米色、右上紅 X、角色列棕
@@ -131,13 +146,21 @@ def _match(sig: str) -> bool | None:
     return None
 
 
-def _ocr(box, *opts) -> list:
-    r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts))
+def _ocr_lines(box, *opts) -> list:
+    """ocr.ps1 的 lines（每行 dict：text / x / y / zoom）；PS 失敗 / 逾時 / 輸出異常 → []"""
+    try:
+        r = winenv.run_ps('ocr.ps1', *map(str, box), *map(str, opts), timeout=PS_TIMEOUT)
+    except (OSError, subprocess.SubprocessError):
+        return []
     try:
         d = json.loads((r.stdout.strip().splitlines() or [''])[-1])
     except ValueError:
         return []
-    return [l['text'] for l in d.get('lines', [])] if d.get('ok') else []
+    return [l for l in d.get('lines', []) if isinstance(l, dict)] if d.get('ok') else []
+
+
+def _ocr(box, *opts) -> list:
+    return [l.get('text', '') for l in _ocr_lines(box, *opts)]
 
 
 def hud_ok() -> bool:
@@ -181,7 +204,7 @@ def _save(d: dict) -> None:
 
 def _take(lock: Path, stale: int) -> bool:
     """O_EXCL 建鎖檔；超過 stale 秒的舊鎖直接接手"""
-    CACHE.mkdir(parents=True, exist_ok=True)
+    lock.parent.mkdir(parents=True, exist_ok=True)
     for _ in range(2):
         try:
             fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
@@ -243,7 +266,7 @@ def login_fields_filled() -> bool | None:
 
 
 def halt(reason: str, src: str) -> dict:
-    """停手：寫 halt 檔、errlog、大聲警告。絕不輸入帳密"""
+    """停手：寫 halt 檔、errlog、大聲警告。密碼欄絕不碰"""
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
         HALT.write_text(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {reason}\n', encoding='utf-8')
@@ -253,7 +276,7 @@ def halt(reason: str, src: str) -> dict:
     actlog.add('netwatch', f'HALT {reason}')
     bar = '!' * 64
     print(f'\n{bar}\n!!! 遊戲回到登入畫面 / 需要人類登入：{reason}\n'
-          f'!!! 所有自動化已停止（退出碼 {EXIT_HALT}）。請使用者自己登入並進入遊戲，不要讓 AI 輸入帳密（鐵則 2）。\n'
+          f'!!! 所有自動化已停止（退出碼 {EXIT_HALT}）。請使用者自己登入並進入遊戲（鐵則 2：AI 絕不碰密碼欄；帳號欄只在本機帳號對照核對時重打）。\n'
           f'!!! 人類登入後恢復：確認 5 人同隊（/psa-quick-team）、原地遇敵開著，再重新啟動腳本。\n{bar}\n', flush=True)
     return {'status': 'halt', 'reason': reason}
 
@@ -390,6 +413,97 @@ def auto_login_check(procs=None) -> tuple:
     return 'ok', ''
 
 
+# ---------------- 帳號核對（accounts.local.json；2026-10-15，未實機）----------------
+VERDICT_TXT = {'self': '符合', 'other': '不符', 'unreadable': '讀不出'}
+
+
+def login_mode(procs=None) -> tuple:
+    """斷線重登要走哪一套 → (how, why, 帳號)：
+    ('account', '', 帳號)：本機設定檔有本視窗帳號 → 帳號核對（單 / 多視窗都一樣，不看程序清單）；
+    否則 auto_login_check() 的 ('ok' | 'block' | 'unknown', 理由, '')（舊行為逐字不變）。理由不含帳號名"""
+    st, acct = accounts.for_client()
+    if st == 'ok':
+        return 'account', '', acct
+    if st == 'invalid':
+        log(f'netwatch：帳號對照設定檔格式錯（{acct}），照舊規則', act=False)
+    how, why = auto_login_check(procs)
+    return how, why, ''
+
+
+def read_account(mine: str, tries: int = 2) -> str:
+    """OCR 帳號欄 → 'self' / 'other' / 'unreadable'（accounts.classify：2 / 3 / 4 倍各自的整欄文字一致才算讀得出）。
+    讀不出時重讀一次。只回判定，**讀到的字不回傳、不 log**"""
+    v = 'unreadable'
+    for _ in range(tries):
+        by_zoom: dict = {}
+        for l in _ocr_lines(ACCT_OCR, *ACCT_OCR_OPTS):
+            by_zoom.setdefault(l.get('zoom'), []).append(l)
+        texts = [''.join(str(l.get('text', '')) for l in sorted(ls, key=lambda l: l.get('x', 0))) for ls in by_zoom.values()]
+        v = accounts.classify(texts, mine)
+        if v != 'unreadable':
+            return v
+        time.sleep(0.5)
+    return v
+
+
+def _log_verdict(v: str, stage: str = '') -> None:
+    msg = f'帳號欄核對{stage}：{VERDICT_TXT.get(v, v)}'
+    log(f'netwatch：{msg}')                 # walk.log 會寫 actions.log（只有判定，沒有帳號名）
+
+
+def _take_wait(lock: Path, stale: int, wait: float) -> bool:
+    """等鎖（每秒試一次）最多 wait 秒"""
+    end = time.time() + wait
+    while True:
+        if _take(lock, stale):
+            return True
+        if time.time() >= end:
+            return False
+        time.sleep(1)
+
+
+def retype_account(mine: str) -> str:
+    """登入畫面帳號欄是別的帳號：點帳號欄 → 清空 → 確認空 → 只打本視窗帳號 → 再讀核對。回 '' = 成功（帳號欄 = 本視窗帳號），
+    否則回 halt 理由（不含帳號名）。呼叫端必須已拿 LOGIN_INPUT_LOCK。密碼欄不點、不清、不打；每步前確認還是登入畫面、密碼欄還有字"""
+    def still_login() -> str:
+        if _match(SIG_LOGIN) is not True:
+            return '畫面不是 / 讀不到登入畫面'
+        p = _dark_count(PWD_BOX)
+        if p is None:
+            return '讀不到密碼欄'
+        if p < EMPTY_MAX:
+            return '密碼欄變成空的'
+        return ''
+    why = still_login()
+    if why:
+        return f'重打帳號前{why}，不動'
+    try:
+        gui('click', str(ACCT_FIELD[0]), str(ACCT_FIELD[1]), note='點帳號欄（重打帳號）')
+        time.sleep(0.4)
+        gui('key', '{END}' + '{BS}' * ACCT_CLEAR_N + '{HOME}' + '{DEL}' * ACCT_CLEAR_N, note='清空帳號欄')
+        time.sleep(0.4)
+        d = _dark_count(ACCT_BOX)
+        if d is None:
+            return '清空後讀不到帳號欄，不打字'
+        if d >= EMPTY_MAX:
+            return '帳號欄清不掉（清空後仍有字），不打字'
+        why = still_login()
+        if why:
+            return f'清空帳號欄後{why}，不打字'
+        gui('typeq', mine, note='重打帳號欄')
+        time.sleep(0.6)
+    except Exception as e:          # noqa: BLE001  例外訊息可能帶指令參數（帳號）→ 只留型別
+        return f'重打帳號時出錯（{type(e).__name__}），停手'
+    v = read_account(mine)
+    _log_verdict(v, '（重打後）')
+    if v != 'self':
+        return f'重打帳號後核對{VERDICT_TXT.get(v, v)}，不按登錄'
+    why = still_login()
+    if why:
+        return f'重打帳號後{why}，不按登錄'
+    return ''
+
+
 def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: bool = True) -> dict:
     """登入畫面 → 檢查帳密欄有內容 → 點「登錄」→ 處理選擇角色 / 載入 → 回到遊戲 → recover。
     失敗規則：欄位空 / 出現提示視窗（密碼錯誤、封停、維護、驗證）/ 看不懂的畫面逾時 / 連續 3 次 → halt（不重試）"""
@@ -399,7 +513,7 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
         st = _load()
         if st.get('login_fails', 0) >= MAX_FAILS:
             return halt(f'連續 {MAX_FAILS} 次登錄失敗', src) | {'status': 'fatal'}
-        how, why = auto_login_check()
+        how, why, acct = login_mode()
         if how == 'block':
             return halt(why, src)
         if how == 'unknown':
@@ -424,9 +538,27 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
             _save(st)
         if not filled:
             return halt('登入畫面的帳號 / 密碼欄是空的（遊戲沒自動帶入），不自己填', src)
-        i = errlog.add('斷線回到登入畫面，自動按「登錄」重新登入（使用者授權）', source=src)
-        log('netwatch：登入畫面，帳密欄已有內容 → 按登錄')
-        gui('click', str(LOGIN_BTN[0]), str(LOGIN_BTN[1]), note='按登錄')
+        held = False                     # 帳號重打時拿的全視窗登入輸入鎖（按完登錄就放）
+        try:
+            if how == 'account':
+                v = read_account(acct)
+                _log_verdict(v)
+                if v == 'unreadable':
+                    return halt('帳號欄讀不出（OCR 各倍數不一致 / 讀不到），不自動登錄', src)
+                if v == 'other':
+                    if not _take_wait(LOGIN_INPUT_LOCK, LOGIN_INPUT_STALE, LOGIN_INPUT_WAIT):
+                        return halt(f'別的視窗佔著登入輸入鎖超過 {LOGIN_INPUT_WAIT} 秒，不重打帳號', src)
+                    held = True
+                    why = retype_account(acct)
+                    if why:
+                        return halt(why, src)
+            i = errlog.add('斷線回到登入畫面，自動按「登錄」重新登入（使用者授權'
+                           + ('；帳號欄核對符合' if how == 'account' else '') + '）', source=src)
+            log('netwatch：登入畫面，' + ('帳號欄核對符合' if how == 'account' else '帳密欄已有內容') + ' → 按登錄')
+            gui('click', str(LOGIN_BTN[0]), str(LOGIN_BTN[1]), note='按登錄')
+        finally:
+            if held:
+                _release(LOGIN_INPUT_LOCK)
         deadline = time.time() + LOGIN_TIMEOUT
         picked = 0                       # 一鍵全登最多點 2 次
         t0 = time.time()
