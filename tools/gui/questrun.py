@@ -1338,6 +1338,9 @@ class Run:
                 return self.fail(EXIT_HANDOVER, f'接取後 team.form 失敗 rc={rc}')
             event(f'任務 {tid} 已接取（不重開詳情，直接點追蹤欄卡片）')
         if solo:
+            self.solo_hint = 1 if state == 'accepted' else None        # 步 1～5 說明行都是「尋找薩姆吉爾」讀不出步號 → 剛接取 = 步 1，之後每完成一個對話步 +1
+            if self.solo_hint is None and os.environ.get('QUESTRUN_SOLO_STEP', '').isdigit():
+                self.solo_hint = int(os.environ['QUESTRUN_SOLO_STEP'])  # 續跑（任務已在進行中）時人工指定目前步號
             return self.run_solo(d, ts, t0)
         if self.o.get('pet_turnin') and self.o.get('rested') and self.rested != tid:
             self.rested = tid                                          # --rested：呼叫端（petquest 練完）剛 rest-all 過且驗過 → 接取後 / 交寵物前都不重做（review 1013b §2.2）
@@ -1621,6 +1624,9 @@ class Run:
             step = T.read_step(track)
             if step == T.gone():
                 return self.solo_done(d, ts, t0, k)
+            if (not isinstance(step, int) or step <= 0) and getattr(self, 'solo_hint', None):
+                event(f'任務 {tid}（單人逃跑）追蹤步號讀不到（同文字多步）→ 用內部計數步 {self.solo_hint}')
+                step = self.solo_hint
             if not isinstance(step, int) or step <= 0:
                 unread += 1
                 if unread >= 3:
@@ -1634,6 +1640,8 @@ class Run:
                     return self.fail(EXIT_STEP, f'任務 {tid}（單人逃跑）步 {step} 做了 {SOLO_SAME_MAX + 1} 次都沒前進，停手交人', step=step)
             else:
                 last, same = step, 0
+            if getattr(self, 'solo_hint', None) and isinstance(step, int):
+                self.solo_hint = step                                  # 讀得到就以讀到的為準
             sd = (d.get('steps') or {}).get(step) or {}
             event(f'任務 {tid}（單人逃跑）第 {k + 1} 輪：步 {step}' + (f'（{sd.get("kind")}）' if sd else ''))
             if sd.get('kind') == 'fight':
@@ -1668,7 +1676,10 @@ class Run:
             if step >= group_from:
                 rc = self.solo_group_step(d, step)
             else:
+                self.solo_adv = False
                 rc, knocked = self.solo_run_step(d, step, knocked)
+                if not rc and getattr(self, 'solo_adv', False) and getattr(self, 'solo_hint', None):
+                    self.solo_hint += 1
             if rc == 'gone':
                 return self.solo_done(d, ts, t0, k)
             if rc:
@@ -1728,11 +1739,13 @@ class Run:
         r = self.solo_quest_rc(tid, step, qrc, '組隊對話')
         if r is not None:
             return r, knocked
-        if qrc in (0, 24, 26):                                          # 24 = 對話完遊戲自己又巡路（已解散）；26 = 解散沒做成（下一步開頭會再 team.disband）
+        if qrc in (0, 24, 26):
+            self.solo_adv = True                                        # 24 = 對話完遊戲自己又巡路（已解散）；26 = 解散沒做成（下一步開頭會再 team.disband）
             return 0, knocked
         if qrc == 18:
             rr = T.reward_retry()
             if rr != 'stuck':
+                self.solo_adv = True
                 return 0, knocked
             T.snap('questrun-reward-stuck')
             return self.fail(EXIT_REWARD, f'任務 {tid} 步 {step}：領獎視窗關不掉，請人工處理', quest_rc=qrc), knocked
