@@ -194,9 +194,11 @@ class Sim:
             have = self.bag_bait.get(r, 0) + self.plus.get(r, 0)
             if have < k:
                 return self.out(4, f'{r} 可抓捕數 {have} < {k}')
-            if len(self.bar[r]) + k > 5:
-                return self.out(103, '寵物欄放不下（模擬：會進個人倉庫）')
-            self.bar[r] += [P(sp) for _ in range(k)]
+            fit = min(k, 5 - len(self.bar[r]))                       # 外掛「自動存倉庫」：欄放不下的自動進個人倉庫（一次抓滿，使用者 2026-10-15）
+            if '--expect-bar' in args and dict(x.split(':') for x in self.opt(args, '--expect-bar').split(','))[r] != str(fit):
+                return self.out(17, '在欄新寵物數量不對')
+            self.bar[r] += [P(sp) for _ in range(fit)]
+            self.personal[r] += [P(sp) for _ in range(k - fit)]
             use = min(self.bag_bait.get(r, 0), k)
             self.bag_bait[r] = self.bag_bait.get(r, 0) - use
             self.plus[r] = 0
@@ -297,8 +299,6 @@ def names(sim, script):
 
 
 # ---------------- 純函式
-check('batches：5 隻 / 4 空格 → [4, 1]；3 空格 → [3, 2]；0 → []', pq.batches(5, 4) == [4, 1] and pq.batches(5, 3) == [3, 2] and pq.batches(0, 4) == [])
-check('store_after_batch：非最後一批全存、最後一批留 1', pq.store_after_batch(4, False) == 4 and pq.store_after_batch(1, True) == 0 and pq.store_after_batch(3, True) == 2)
 tp = pq.take_plan([('DKBO2', 'x', '魯尼帖斯'), ('DKBO3', 'y', '貝魯卡')])
 check('take_plan：抓寵者自己那種不取、其他人每種 1 隻', ('DKBO2', '魯尼帖斯') not in tp and ('DKBO2', '貝魯卡') in tp and ('DKBO', '魯尼帖斯') in tp and len(tp) == 8)
 check('parse_money：依 x 排序，第一個石幣、第二個鑽石（逗號去掉）', pq.parse_money([('0', 520, 23), ('3,264,500', 335, 23)]) == (3264500, 0)
@@ -317,7 +317,7 @@ rc = go(2016, s, confirm_drop=True)
 check('恐龍博士 happy：rc 0', rc == 0, f'rc={rc} {pq.LAST.get("info")}')
 check('每人寵物欄 = 騎寵 + 原朵拉比斯出戰（等級 = 原等級）、布克布克已丟', all([p['name'] for p in s.bar[r]] == ['布拉奇多斯', '朵拉比斯'] and s.bar[r][1]['state'] == '出戰'
       and s.bar[r][1]['level'] == 125 + i for i, r in enumerate(ROLES)), str(s.bar))
-check('分批抓 [4, 1]：bait 只取 / 拆一次（count 5，每人一次）、第二批不取、setup 兩次、最後 baitback 一次；誘餌 50 → 40', [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait'] == ['5']
+check('一次抓滿 5（不分批）：bait 只取 / 拆一次（count 5，每人一次）、setup 一次、最後 baitback 一次；誘餌 50 → 40', [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait'] == ['5']
       and getattr(s, 'bait_takes', 0) == len(pq.ALL_ROLES[1:5]) * 0 + getattr(s, 'bait_takes', 0) and s.bait == 40 and getattr(s, 'baitback', 0) == 1, f'{s.bait} {getattr(s, "bait_takes", 0)}')
 check('抓前關遇敵 + 解散；收尾鎖定戰寵 + 一般動作攻擊', ('enc_off',) in s.calls and ('team.py', ('disband',)) in s.calls
       and any(a[:2] == ('--lock', '戰寵') for a in names(s, 'pet_catch.py')) and ('pet', 'all', 'normal', '攻擊', '--no-resume') in names(s, 'ass.py'))
@@ -330,18 +330,28 @@ in_train = in_train[:in_train.index('rest-all')]
 check('練寵輪詢：第一次 list（身分）、之後只 levels --slots 任務寵格', in_train[0] == 'list' and in_train[1:] and set(in_train[1:]) == {'levels'}
       and all('--slots' in a for a in names(s, 'pet.py') if a[0] == 'levels'), str(in_train))
 pc = [a for a in names(s, 'pet_catch.py') if '--stages' in a and 'setup' in a[a.index('--stages') + 1]]
-check('抓寵第 1 批不帶 --reuse-setup、第 2 批帶（沿用捉寵設置）', len(pc) == 2 and '--reuse-setup' not in pc[0] and '--reuse-setup' in pc[1], str(pc))
+check('一次抓滿：pet_catch setup 只一次、--count 5、不帶 --reuse-setup、--expect-bar = 各人 min(5, 空格 4) = 4（溢出 1 隻進個人倉庫不算在欄）',
+      len(pc) == 1 and pc[0][pc[0].index('--count') + 1] == '5' and '--reuse-setup' not in pc[0]
+      and pc[0][pc[0].index('--expect-bar') + 1] == 'DKBO2:4,DKBO3:4', str(pc))
+sp = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and '--depot' in a and a[a.index('--depot') + 1] == 'personal' and ':魯尼帖斯' in a[a.index('--plan') + 1]]
+check('空格 4 → 溢出 1 隻：先存公共騰位 → 從個人倉庫取回 DKBO2:魯尼帖斯 一次 → reset-name 取回者 → 名字驗證後欄內剛好 1 隻、總 5 隻（欄 1 + 公共 4）',
+      len(sp) == 1 and sp[0][sp[0].index('--plan') + 1] == 'DKBO2:魯尼帖斯' and any(a[0] == 'reset-name' and 'DKBO2' in a[a.index('--role') + 1] for a in names(s, 'pet.py')), str(sp))
 check('沒給 --verify-defer → questrun 不帶 --verify', not any('--verify' in a for a in names(s, 'questrun.py')))
 check('原朵拉比斯先存個人、最後 @原等級 取回', any(a[0] == 'take-many' and '朵拉比斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py')))
 check('完成後進度檔清空（下一轉從頭）', json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']['done'] == [])
 
-# ---------------- 寵物欄只有 3 空格（獎勵寵沒丟）→ 分批 [3, 2]
+# ---------------- 寵物欄只有 3 空格（獎勵寵沒丟）→ 一次抓 5、溢出 2 隻進個人倉庫再取回
 s = grow(Sim(2016))
 for r in pq.ALL_ROLES:
     s.bar[r].append(P('巴朵蘭恩'))
 rc = go(2016, s, confirm_drop=True)
 counts = [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait']
-check('抓寵者寵物欄空格 3 → 分批 [3, 2]（不讓寵物溢到個人倉庫）；誘餌一次取 5', rc == 0 and counts == ['5'], f'rc={rc} {counts} {pq.LAST.get("info")}')
+pc = [a for a in names(s, 'pet_catch.py') if '--stages' in a and 'setup' in a[a.index('--stages') + 1]]
+tp2 = [a for a in names(s, 'pet.py') if a[0] == 'take-many' and '--depot' in a and a[a.index('--depot') + 1] == 'personal' and '朵拉比斯' not in a[a.index('--plan') + 1]]
+check('抓寵者寵物欄空格 3 → 一次抓 5（不分批）、--expect-bar 各 3、溢出 2 隻從個人倉庫取回並驗名字（欄剩 1 隻、個人倉庫已空）；誘餌一次取 5',
+      rc == 0 and counts == ['5'] and len(pc) == 1 and pc[0][pc[0].index('--expect-bar') + 1] == 'DKBO2:3,DKBO3:3'
+      and len(tp2) == 2 and all(a[a.index('--plan') + 1].count(':') == 2 for a in tp2)   # 每人 2 隻
+      and not any(p['name'] in ('魯尼帖斯', '貝魯卡') for r in ('DKBO2', 'DKBO3') for p in s.personal[r]), f'rc={rc} {counts} {pc} {tp2} {pq.LAST.get("info")}')
 check('free_slots：empty 格 / 沒列到的都算空', pq.free_slots([P('a'), {'empty': True}, P('b')]) == 3 and pq.free_slots(None) == 5)
 
 # ---------------- 沒 --confirm-drop → 168 停在 drop
@@ -358,7 +368,7 @@ check('誘餌不夠沒 --confirm-buy-bait → 163、沒按「+」', rc == pq.EXI
 s = grow(Sim(2016, bait=6))
 rc = go(2016, s, confirm_drop=True, confirm_buy=True)
 plus = [c for c in s.calls if c[0] == 'plus']
-check('--confirm-buy-bait：誘餌 6 個 → DKBO2 一次拆 5（餘 1 存回）、DKBO3 沒誘餌每批買 k 次（4 + 1 = 5 次）；石幣每次扣 50,000', rc == 0 and plus == [('plus', 'DKBO3')] * 5
+check('--confirm-buy-bait：誘餌 6 個 → DKBO2 一次拆 5（餘 1 存回）、DKBO3 沒誘餌買 5 次（一次抓滿）；石幣每次扣 50,000', rc == 0 and plus == [('plus', 'DKBO3')] * 5
       and s.stone == 3_000_000 - 5 * pq.PLUS_COST and s.bait == 1, f'rc={rc} plus={plus} {pq.LAST.get("info")}')
 s = grow(Sim(2016, bait=0))
 s.plus_cost = 100000
@@ -561,12 +571,12 @@ rc = go(2016, s, confirm_drop=True)
 check('抓寵中途失敗 → 164', rc == pq.EXIT_CATCH, f'rc={rc}')
 rc = go(2016, s, confirm_drop=True, reset=False)
 caught = [int(a[a.index('--count') + 1]) for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait']
-check('續跑：先 depot-list 數實際數量，DKBO2 只補 2 隻、DKBO3 補 4 隻（不重抓）且照樣完成', rc == 0 and getattr(s, 'depot_lists', 0) == 1
+check('續跑：先 depot-list 數實際數量，DKBO2 只補 2 隻、DKBO3 補 4 隻（不重抓）且照樣完成', rc == 0 and getattr(s, 'depot_lists', 0) == 3      # 續跑先數一次、之後兩組抓寵者各抓完整理再數一次
       and caught[1:] == [4, 2] and all([p['name'] for p in s.bar[r]] == ['布拉奇多斯', '朵拉比斯'] for r in ROLES), f'rc={rc} {caught} {pq.LAST.get("info")}')
 check('續跑後 DKBO3 個人倉庫溢出的貝魯卡被取回分配（個人倉庫只剩朵拉比斯）', not any(p['name'] == '貝魯卡' for p in s.personal['DKBO3']), str(s.personal['DKBO3']))
 s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
-check('全新開跑（寵物欄沒任務寵、沒開始標記）→ 不數倉庫', rc == 0 and getattr(s, 'depot_lists', 0) == 0)
+check('全新開跑（寵物欄沒任務寵、沒開始標記）→ 抓前不數倉庫，只在抓完整理時數一次', rc == 0 and getattr(s, 'depot_lists', 0) == 1)
 
 # ---------------- distribute 冪等（2026-10-14 恐龍博士：重跑重複取、DKBO5 取不到 72）
 AS16 = pq.QUESTS[2016]['rounds'][0]['assign']
@@ -644,15 +654,13 @@ seq = [(c[0], c[1][0] if c[0] == 'pet.py' else c[1][c[1].index('--stages') + 1] 
 i_cr = [i for i, x in enumerate(seq) if x == ('pet_catch.py', 'setup,wait,rename,register')]
 i_st = [i for i, x in enumerate(seq) if x[0] == 'pet.py' and x[1] == 'store-many']
 st_pub = [a for a in names(s, 'pet.py') if a[0] == 'store-many' and a[a.index('--depot') + 1] == 'public']
-check('每批 pet_catch 都是 setup,wait,rename,register（還原名字在名字驗證之前），且在該批 store-many 之前；沒有另外的 reset-name 子程序',
-      rc == 0 and len(i_cr) == 2 and s.rename_calls == 2 and any(i_cr[0] < st < i_cr[1] for st in i_st) and not any(a[0] == 'reset-name' for a in names(s, 'pet.py'))
-      and st_pub and not any('--no-rename' in a for a in st_pub), f'rc={rc} {seq}')
+check('pet_catch 一次 setup,wait,rename,register（還原名字在名字驗證之前），整理的 store-many 都在它之後；只有溢出取回後才另外 reset-name（取回者）',
+      rc == 0 and len(i_cr) == 1 and s.rename_calls == 1 and i_st and any(i > i_cr[0] for i in i_st) and st_pub, f'rc={rc} {seq}')
 s = grow(Sim(2016))
 s.rename_rc = 66
 rc = go(2016, s, confirm_drop=True)
 st_pub = [a for a in names(s, 'pet.py') if a[0] == 'store-many' and a[a.index('--depot') + 1] == 'public']
-check('還原名字一般失敗（66，pet_catch 走成長字串登錄備援）→ 記事件、這批存公共加 --no-rename、照常跑完', rc == 0 and st_pub and all('--no-rename' in a for a in st_pub)
-      and '還原名字沒全部成功' in pq.EVENT_LOG.read_text(encoding='utf-8'), f'rc={rc} {st_pub}')
+check('還原名字一般失敗（66，pet_catch 走成長字串登錄備援）→ 記事件、照常跑完', rc == 0 and '還原名字沒全部成功' in pq.EVENT_LOG.read_text(encoding='utf-8'), f'rc={rc}')
 s = grow(Sim(2016))
 s.rename_rc = pq.PET_FEE
 rc = go(2016, s, confirm_drop=True)

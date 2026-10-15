@@ -231,10 +231,10 @@ def plan_verify(assign: list, pets: dict, pre: dict | None = None) -> tuple:
     return named, wrong, rest, fresh
 
 
-def register_catches(assign: list, tools=None, expect: int | None = None) -> int:
+def register_catches(assign: list, tools=None, expect: int | dict | None = None) -> int:
     """抓完驗證（見檔頭 register）：寵物面板只開一次讀抓寵者 → plan_verify（名字為主）→ 名字讀不出的才 plan_register 登錄成長字串（備援：
     登錄檔 v2 growth_add，附抓寵者 / 時間 / 縮圖分數）+ catch-src.json。
-    每隻新寵物都要有交代：名字對、或備援登錄、或列進矛盾 / 讀不出 / 漏登並回非 0。expect = 每人這批抓幾隻（有快照時核對新寵物數，不符 = 漏 17）。
+    每隻新寵物都要有交代：名字對、或備援登錄、或列進矛盾 / 讀不出 / 漏登並回非 0。expect = 每人這批在寵物欄新增幾隻（int = 每人同數、dict {角色: 隻數}；寵物欄放不下的自動進個人倉庫不算，petquest 傳 min(抓幾隻, 空格)；有快照時核對新寵物數，不符 = 漏 17）。
     → 0 / 15 / 17 / 16 / 讀取失敗退出碼"""
     import petmatch
     T = tools or rp.Tools()
@@ -269,9 +269,10 @@ def register_catches(assign: list, tools=None, expect: int | None = None) -> int
         gs = [g for g, s2, r2, _ in todo if r2 == role]
         print(f'pet_catch：register {role} 抓的 {sp}：名字驗證 {named.get(role, 0)} 隻' + (f'、名字讀不出改登錄成長字串 {len(gs)} 隻 {gs}' if rest.get(role) else ''))
         n = fresh.get(role)
-        if expect is not None and n is not None and n != expect:
-            print(f'pet_catch：register {role} 寵物欄新寵物 {n} 隻，這批應抓 {expect} 隻（進了倉庫 / 快照不準？）→ 數量不對')
-            missed.append((role, None, None, f'新寵物 {n} 隻 ≠ 這批 {expect} 隻', 'count'))
+        ex = expect.get(role) if isinstance(expect, dict) else expect          # expect 可以是每人不同（寵物欄空格不同、多抓的進個人倉庫）
+        if ex is not None and n is not None and n != ex:
+            print(f'pet_catch：register {role} 寵物欄新寵物 {n} 隻，這批應抓 {ex} 隻（進了倉庫 / 快照不準？）→ 數量不對')
+            missed.append((role, None, None, f'新寵物 {n} 隻 ≠ 這批 {ex} 隻', 'count'))
     for role, slot, nm, sp in wrong:
         print(f'pet_catch：register {role} 第 {slot} 格新寵物名字是「{nm}」，但他抓的是 {sp}（請人看）')
     for role, slot, ocr in unread:
@@ -358,7 +359,7 @@ def first_poll_s(count: int) -> float:
 
 
 def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'rename', 'register'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S,
-        poll: float | None = None, reuse_setup: bool = False) -> int:
+        poll: float | None = None, reuse_setup: bool = False, expect_bar: dict | None = None) -> int:
     """poll = None（預設）：第一次輪詢 first_poll_s(count)、之後每 NEXT_POLL_S；給值 = 每次都等這麼久（舊行為）。
     reuse_setup = 沿用上一批的捉寵設置（petquest 第 2 批起；見 rebirth_pets.catch_setup_many reuse）"""
     T = tools or rp.Tools()
@@ -429,7 +430,7 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'rename',
         if rc:
             return rc
     if 'register' in stages:
-        return register_catches(assign, T, count if 'wait' in stages else None)
+        return register_catches(assign, T, (expect_bar or count) if 'wait' in stages else None)
     return 0
 
 
@@ -529,6 +530,7 @@ def main(argv=None) -> int:
     ap.add_argument('--roles', default=','.join(rp.ALL_ROLES), help='預設 = 這個視窗（PSA_CLIENT）的名單（主視窗 DKBO,DKBO2～5）')
     ap.add_argument('--count', type=int, default=len(rp.ALL_ROLES) or 5)
     ap.add_argument('--stages', default='bait,setup,wait,rename,register')
+    ap.add_argument('--expect-bar', default=None, metavar='角色:隻數,…', help='register 核對各人寵物欄新增隻數（預設 = --count；一次抓滿時寵物欄放不下的會自動進個人倉庫，petquest 傳 min(count, 空格)）')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--timeout', type=float, default=rp.CATCH_TIMEOUT_S)
     ap.add_argument('--poll', type=float, default=None, help='wait 階段輪詢間隔秒（預設：第一次 k×20+20、之後 60；每次要開外掛面板）')
@@ -567,7 +569,8 @@ def main(argv=None) -> int:
         return 2
     import winenv
     winenv.enable_server()
-    return run(assign, a.count, tuple(a.stages.split(',')), a.dry_run, timeout=a.timeout, poll=a.poll, reuse_setup=a.reuse_setup)
+    return run(assign, a.count, tuple(a.stages.split(',')), a.dry_run, timeout=a.timeout, poll=a.poll, reuse_setup=a.reuse_setup,
+               expect_bar=dict((x.split(':')[0], int(x.split(':')[1])) for x in a.expect_bar.split(',')) if a.expect_bar else None)
 
 
 if __name__ == '__main__':

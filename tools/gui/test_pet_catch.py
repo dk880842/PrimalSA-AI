@@ -450,6 +450,9 @@ check('register_catches 名字為主：全對 + 名字讀不出的 1 隻走成�
 check('register_catches 名字為主：名字是別的物種 → 15', pet_catch.register_catches(SH[2:3], FR(pets5)) == pet_catch.EXIT_CATCH_SPECIES)
 check('register_catches 名字為主：數量 = expect → 0；少一隻 → 17',
       pet_catch.register_catches(SH[:1], FR(pets5), expect=2) == 0 and pet_catch.register_catches(SH[:1], FR(pets5), expect=3) == pet_catch.EXIT_CATCH_MISSED)
+# 一次抓滿（使用者 2026-10-15）：寵物欄空格 < count，多的自動進個人倉庫 → expect 傳每人在欄新增數（dict），不是 count
+check('register_catches expect 可傳 dict {角色: 在欄新增隻數}（溢出進個人倉庫的不算）：對 → 0、不對 → 17',
+      pet_catch.register_catches(SH[:1], FR(pets5), expect={'DKBO2': 2}) == 0 and pet_catch.register_catches(SH[:1], FR(pets5), expect={'DKBO2': 5}) == pet_catch.EXIT_CATCH_MISSED)
 
 
 class FRN(FR):
