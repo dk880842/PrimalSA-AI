@@ -17,6 +17,7 @@ AI 只透過「截圖 → 看圖 → 點擊 / 按鍵 → 再截圖確認」操�
 - **使用者怎麼動都不影響自動操作**：點擊那 0.15 秒用低階滑鼠鉤子吞掉使用者實體滑鼠的移動 / 按下（放開放行），游標一定停在目標上；鍵盤訊息直接送遊戲視窗，使用者打字、切視窗都不干擾。不用等使用者閒置。
   - 鉤子執行緒各自保存自己的 hook（自己裝自己拆）、最多活 2 秒自動解除；click / dclick / drag 的 BgBegin…BgEnd 在 try/finally 內，出錯也會還原游標並停 Guard；Stop Join 逾時寫 actions.log。離線測試：`powershell.exe -NoProfile -ExecutionPolicy Bypass -File tools\gui\test_guard.ps1`。
 - 背景點擊沒反應時改用 `fg click ...`（舊的前景模式：把遊戲拉到前景並留著，**用過 `fg` / `max` 一定要跑 `end`** 還原）。
+- **所有點擊都沒反應、面板全打不開**（ass 2「外掛面板打不開」、char 58「切換面板打不開」連發）先看 `gui.sh info` 行尾：`input=blocked` = Windows 輸入桌面被螢幕保護程式 / 鎖定畫面 / UAC 佔走（GetCursorPos 拒絕存取，背景與 fg 點擊都無效）。此時 click / dclick / drag **不點、exit 8**，actions.log 記「輸入桌面無法使用」。agent 解不了（不准殺螢幕保護程式 / 碰鎖定畫面），停手請人類回到電腦前解除；解除後 `info` 變 `input=ok` 再 `grind.py start`。2026-10-15 實例：OLED Care Screensaver 09:15 啟動、掛機無人點擊，09:24 起全部點擊失效。對策：電源 / 螢幕保護設定關掉或拉長（使用者處理）。
 按鈕位置與每個畫面的內容見同資料夾 [ui/README.md](ui/README.md)（索引，依功能拆檔）。
 
 ## 工具

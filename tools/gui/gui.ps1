@@ -20,6 +20,7 @@
 #   操作 log：click / dclick / drag / key / max / end 會寫一行到 tools/.cache/actions.log（只留最新 2000 行；另有按小時分檔 tools/.cache/actions/，保留 14 天）；shot / pixel / wait* 不記
 #   多視窗：環境變數 PSA_CLIENT = 遊戲程序名稱（PrimalSA2 …；不設 = PrimalSA），見 psawin.ps1。找不到 exit 1；同名多個 / 名稱不合法 exit 6；
 #           點擊鎖（具名 Mutex，click / dclick / drag 移游標那段）5 秒內拿不到 → 不點、exit 7
+#   輸入桌面無法使用（螢幕保護程式 / 鎖定畫面 / UAC，GetCursorPos 失敗）→ click / dclick / drag 不點、exit 8（actions.log 記原因）；info 行尾 input=ok|blocked
 #   gui.ps1 fg <指令> ...             用舊的前景模式執行（背景模式失靈時的備案），例：fg click 763 760、seq "fg; click ..."
 # 座標系：縮圖座標 × Scale = 客戶區像素座標。Scale 預設 2。
 # 背景模式（預設，2026-10-09 實測可用）：不把遊戲拉到前景，使用者可以繼續用其他視窗。
@@ -195,7 +196,13 @@ function LockInput {
   if (-not $script:lk.ok) { ActLog "點擊鎖逾時（等 $($script:lk.waitMs) ms），$Cmd 未執行"; Write-Error "點擊鎖逾時：其他視窗的點擊佔住游標超過 $PsaInputLockTimeoutMs ms，這次沒點"; exit 7 }
   if ($script:lk.abandoned) { ActLog '點擊鎖：前一個持有者沒放就結束（已接手）' }
   if ($script:lk.waitMs -gt 300) { ActLog "點擊鎖等了 $($script:lk.waitMs) ms" }
+  # 輸入桌面不是使用者桌面（螢幕保護程式 / 鎖定畫面 / UAC）：GetCursorPos 回 false（錯誤 5），SetCursorPos 也無效，
+  # PostMessage 照送但 Unity 讀不到游標 → 點了沒反應。2026-10-15 實例：OLED Care Screensaver 09:15 啟動後所有點擊都沒效（面板打不開 ass 2 / char 58）。
+  # 這時不點、exit 8，讓 log 留下真正原因；要人類回到電腦前解除螢幕保護 / 解鎖。
+  if (-not (InputDesktopOk)) { ActLog "輸入桌面無法使用（螢幕保護程式 / 鎖定畫面），$Cmd 未執行"; Write-Error "輸入桌面無法使用（螢幕保護程式 / 鎖定畫面 / UAC）：游標動不了，這次沒點；請人類解除螢幕保護或解鎖"; exit 8 }
 }
+# 目前的輸入桌面能不能用：GetCursorPos 成功 = 是使用者桌面
+function InputDesktopOk { $t = New-Object W+POINT; return [W]::GetCursorPos([ref]$t) }
 function UnlockInput { Exit-PsaInputLock $script:lk; $script:lk = $null }
 function BgBegin { LockInput; [Guard]::Start(); $script:saved = New-Object W+POINT; [W]::GetCursorPos([ref]$script:saved) | Out-Null; Wake }
 # BgEnd 放在 finally 裡跑：$script:saved 有值才還原游標；Guard 一定 Stop，Join 逾時寫 actions.log
@@ -280,7 +287,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     Invoke-Gui $A1 $A2 $A3 $A4 $A5
     $script:Fg = $old
   }
-  'info' { "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) scale=$Scale shot=$([int]($r.R/$Scale))x$([int]($r.B/$Scale)) foreground=$([W]::GetForegroundWindow() -eq $h)" }
+  'info' { "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) scale=$Scale shot=$([int]($r.R/$Scale))x$([int]($r.B/$Scale)) foreground=$([W]::GetForegroundWindow() -eq $h) input=$(if (InputDesktopOk) { 'ok' } else { 'blocked' })" }
   'shot' {
     if (-not $A1) { $A1 = 'shot.png' }
     # 相對路徑一律解析到 tools/.cache/ 底下（單獨 shot 與 seq 內的 shot 一致；絕對路徑照用）
