@@ -250,18 +250,17 @@ f3.sleep = slept.append
 pet_catch.run(A, stages=('wait',), tools=f3, poll=77)
 check('wait：--poll 秒數有帶進 sleep', slept == [77])
 # review 1013b §2.4：第一次輪詢依隻數估、之後 60 秒
-check('first_poll_s：4 隻 100、1 隻 40、5 隻 120（夾在 [40, 120]）', pet_catch.first_poll_s(4) == 100 and pet_catch.first_poll_s(1) == 40
-      and pet_catch.first_poll_s(5) == 120 and pet_catch.first_poll_s(9) == rp.CATCH_POLL_S)
+check('first_poll_s：固定 30 秒、之後 15 秒（使用者 2026-10-16）', all(pet_catch.first_poll_s(k) == 30 for k in (1, 4, 5, 9)) and pet_catch.NEXT_POLL_S == 15)
 f3 = FT3({}, polls=[{'DKBO2': (2, True), 'DKBO3': (1, True)}, {'DKBO2': (1, True), 'DKBO3': (0, False)}, {'DKBO2': (0, False)}])
 slept = []
 f3.sleep = slept.append
 rc = pet_catch.run(A, count=4, stages=('wait',), tools=f3)
-check('wait 預設：4 隻第一次等 100 秒、之後每 60 秒', rc == 0 and slept == [100.0, 60.0, 60.0], str(slept))
+check('wait 預設：第一次等 30 秒、之後每 15 秒', rc == 0 and slept == [30.0, 15.0, 15.0], str(slept))
 f3 = FT3({}, polls=[{'DKBO2': (0, False), 'DKBO3': (0, False)}])
 slept = []
 f3.sleep = slept.append
 pet_catch.run(A, count=1, stages=('wait',), tools=f3)
-check('wait 預設：第 2 批只抓 1 隻 → 40 秒就讀（舊版固定 120）', slept == [40.0], str(slept))
+check('wait 預設：只抓 1 隻也是 30 秒就讀', slept == [30.0], str(slept))
 # review 1013b §2.5-A：第 2 批沿用捉寵設置
 f = FakeT()
 pet_catch.run(A, count=1, stages=('setup',), tools=f, reuse_setup=True)

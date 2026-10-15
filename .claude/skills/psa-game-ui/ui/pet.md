@@ -257,7 +257,7 @@ NPC 對話按「完成」後跳「選擇」視窗：標題 706,218、卡片清�
 ## 抓寵設定程式（pet_catch.py / rebirth_pets.py，2026-10-13）
 - 取誘餌：`bait_take_many` 背包面板只開一次；`bag.select_role` 頭像已選著不再點；`bag.find_item(hint=)` / `depot_take(hint=)` 先點上一人找到的倉庫格核對名稱（`bag.LAST['depot_slot']`）。 `bait_take` 先讀背包誘餌各疊疊數（`bag.stacks_of`）再決定：已剛好 keep → 不取不拆（重跑冪等）、多疊 / 拆分後依疊數存回（`depot_store(want_count=)`），見 bag.md「同名多疊」。
 - 捉寵設置：系別下拉（捲動）→ 物種下拉（不捲動，空白 / 沒目標列重試 `PICK_RETRY`=3 次、空白時重點下拉、失敗收起並記 `pick_why`）→ 讀可抓捕數 = N → 勾自動存倉庫 / 自動抓寵 → `_catch_verify` 讀回兩個欄位文字與兩個勾選。失敗退出碼 14，不默默關面板。
-- 輪詢：`catch_poll_many` 一次開外掛面板讀全部人；開面板前 `ass._many` → `wait_not_battle` 等戰鬥結束。間隔（2026-10-13 review 1013b §2.4）：`pet_catch.run` 沒給 `--poll` 時第一次等 `first_poll_s(k)` = k×20+20 秒（夾 40～`CATCH_POLL_S` 120；實測約 15 秒 / 隻）、之後每 `NEXT_POLL_S`=60 秒；給 `--poll` = 每次都等那麼久（舊行為）。
+- 輪詢：`catch_poll_many` 一次開外掛面板讀全部人；開面板前 `ass._many` → `wait_not_battle` 等戰鬥結束。間隔（2026-10-13 review 1013b §2.4）：`pet_catch.run` 沒給 `--poll` 時第一次等 `FIRST_POLL_S` = 30 秒、之後每 `NEXT_POLL_S` = 15 秒（使用者 2026-10-16；舊版 k×20+20、之後 60）；給 `--poll` = 每次都等那麼久（舊行為）。
 - 沿用設置（`--reuse-setup`，rebirth_pets 分批時用；petquest 2026-10-15 起一次抓滿、不再用； / `catch_setup_many(reuse=True)`，review 1013b §2.5-A）：系別 / 物種欄位 OCR 讀不到字（鯊魚系常讀不出）不重選下拉，讀到別的字才重選；可抓捕數 = N 檢查、兩個勾選、`_catch_verify` 讀回都照做。
 
 ## 身分跨程序快取 / 只讀等級（2026-10-13 review 1013b §1.1 / §2.3；離線測試通過，實機未驗證）

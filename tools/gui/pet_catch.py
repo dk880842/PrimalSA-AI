@@ -20,7 +20,7 @@
     交叉驗證：縮圖只在本次 --assign 的物種之間相對比較（petimg_match.rank_among，inlier + 主色都同意才算有把握）：
     有把握且是別的物種 → 矛盾，不登錄這隻、退出碼 15（EXIT_CATCH_SPECIES，印出哪人哪格）；沒把握 → 照來源登錄。
     之後 store-many / take-many 加 `--candidates <同一組物種>`：沒名字的寵物 / 倉庫卡先看登錄檔，認不得再用同一套相對比較，仍沒把握就 72 不取（不亂分）。
-    --poll 秒                  wait 輪詢間隔（預設：第一次依隻數 k×20+20 秒〔40～120〕、之後每 60 秒，review 1013b §2.4；給值 = 每次都等這麼久。每次要開外掛面板，開前會先等戰鬥結束）
+    --poll 秒                  wait 輪詢間隔（預設：第一次 30 秒、之後每 15 秒，使用者 2026-10-16；給值 = 每次都等這麼久。每次要開外掛面板，開前會先等戰鬥結束）
     --reuse-setup              沿用上一批的捉寵設置（petquest 同一輪第 2 批起）：系別 / 物種欄位 OCR 讀不到字就不重選下拉（讀到別的字才重選），可抓捕數 / 勾選照做，讀回驗證照舊
     --dry-run                  只印計畫
   register 的排除（2026-10-14 恐龍博士：第 1 格騎寵布拉奇多斯 51/9/8/1 被登錄成魯尼帖斯）：第 1 格、騎乘中、騎寵（名字 / 物種 / 縮圖）、
@@ -350,12 +350,13 @@ def ensure_pre(roles: list, T) -> int:
     return 0
 
 
-NEXT_POLL_S = 60.0                # 第一次輪詢之後的間隔（review 1013b §2.4）
+NEXT_POLL_S = 15.0                # 第一次輪詢之後的間隔（使用者 2026-10-16：15 秒；舊 60）
+FIRST_POLL_S = 30.0               # 第一次輪詢（使用者 2026-10-16：固定 30 秒；舊版依隻數 k×20+20、40～120）
 
 
 def first_poll_s(count: int) -> float:
-    """第一次輪詢等多久：依隻數估（實測自動抓寵約 15 秒 / 隻）k × 20 + 20，夾在 [40, CATCH_POLL_S]（4 隻 100 秒、1 隻 40 秒）"""
-    return float(max(40, min(int(rp.CATCH_POLL_S), int(count) * 20 + 20)))
+    """第一次輪詢等多久：固定 FIRST_POLL_S（count 保留參數相容）"""
+    return FIRST_POLL_S
 
 
 def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'rename', 'register'), dry_run: bool = False, tools=None, timeout: float = rp.CATCH_TIMEOUT_S,
@@ -534,7 +535,7 @@ def main(argv=None) -> int:
     ap.add_argument('--keep-short-bait', action='store_true', help='bait 階段誘餌不夠時現有的留背包（不存回），印「背包誘餌不足 = n」回 92，由 petquest 買缺額（--confirm-buy-bait）')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--timeout', type=float, default=rp.CATCH_TIMEOUT_S)
-    ap.add_argument('--poll', type=float, default=None, help='wait 階段輪詢間隔秒（預設：第一次 k×20+20、之後 60；每次要開外掛面板）')
+    ap.add_argument('--poll', type=float, default=None, help='wait 階段輪詢間隔秒（預設：第一次 30、之後 15；每次要開外掛面板）')
     ap.add_argument('--reuse-setup', action='store_true', help='沿用上一批的捉寵設置（欄位讀不到字不重選下拉；讀回驗證照舊）')
     a = ap.parse_args(argv)
     if a.catch_off:
