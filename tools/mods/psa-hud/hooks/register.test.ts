@@ -586,3 +586,236 @@ test('levelText / format：等級沒有數字（OCR 讀成 o級）顯示 ?級', 
   expect(levelText(undefined)).toBeUndefined()
   expect(format({ ok: true, level: '2轉125級', hp: 475, mp: 90, petLevel: 'o級', petHp: 909, petName: '?' })).toBe('2轉125級  HP 475  MP 90  |  寵 ? ?級 HP 909')
 })
+
+// ───────────── 多視窗（第 3d 步）：共用情境 ─────────────
+const p2 = (n: number) => String(n).padStart(2, '0')
+const HMS = (ms: number) => { const d = new Date(ms); return `${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}` }
+const T0 = NOW_S * 1000
+// 單視窗情境的檔案（沒有任何 [程序名] 標籤的行 → 新舊版本畫面必須逐字相同）
+const SINGLE_FILES: Record<string, string> = {
+  'tools/.cache/state.json': STATE_ALERT,
+  'tools/.cache/psa-hud.json': '{"watch":true}',
+  'notes/quest-events.log': '2026-10-15 10:00:00 [questrun] 開始：任務 [2000]，選項 {}\n2026-10-15 10:00:05 [questrun] 任務 2000「琉璃洞窟」詳情結果：accepted\n',
+  'tools/.cache/actions.log': `${HMS(T0 - 50000)} grind 傳送到 地雷區 60049:30,25\n${HMS(T0 - 5000)} click 120,80\n`,
+  'tools/.cache/errlog.jsonl': JSON.stringify({ id: 3, ts: T0 - 60000, error: '主視窗錯誤', fix: null, source: 'quest' }) + '\n',
+}
+type ScOpts = { running?: string; files?: Record<string, string> }
+// 假 host：clients.py running → opts.running（undefined = 查詢失敗）；uv python find → Linux 直譯器；stat.ps1 → 失敗；
+// watch 子程序記下 env 後以退出碼 3 結束（只讀）
+function scenarioHost(on: TestOn, o: ScOpts) {
+  const log = { spawnEnv: [] as Record<string, string>[], runs: [] as { argv: string[]; env?: Record<string, string> }[] }
+  const files = o.files ?? SINGLE_FILES
+  on('session.cwd', () => ({ value: ROOT }))
+  on('clock.now', () => ({ value: T0 }))
+  on('clock.every', () => ({ value: undefined }) as never)
+  on('clock.sleep', () => ({ value: undefined }) as never)
+  on('ui.status', () => ({ value: undefined }) as never)
+  on('ui.open', () => ({ value: { isPlaced: true } }))
+  on('ui.close', () => ({ value: undefined }) as never)
+  on('fs.read', (_$, e) => {
+    const p = String((e as { path: string }).path).replace(`${ROOT}/`, '')
+    if (p in files) return { value: files[p]! }
+    throw new Error(`ENOENT ${p}`)
+  })
+  on('fs.write', () => ({ value: undefined }) as never)
+  on('process.run', (_$, e) => {
+    const argv = [...(e as { argv: string[] }).argv]
+    log.runs.push({ argv, env: (e as { init?: { env?: Record<string, string> } }).init?.env })
+    const r = (code: number, stdout: string) => ({ value: { exitCode: code, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
+    if (argv[0] === 'uv' && argv[1] === 'python') return r(0, '/usr/bin/python3\n')
+    if (argv.some(a => a.endsWith('clients.py'))) return o.running === undefined ? r(1, '') : r(0, o.running)
+    return r(1, '')
+  })
+  on('process.spawn', async function* (_$, e) {
+    log.spawnEnv.push({ ...((e as { env?: Record<string, string> }).env ?? {}) })
+    return { value: { code: 3 } } as never
+  })
+  return log
+}
+const flush = async () => { for (let i = 0; i < 5000; i++) await Promise.resolve() }
+async function paneTexts($: Parameters<Extract<Parameters<typeof test>[1], (...a: never[]) => unknown>>[0]): Promise<string[]> {
+  const ui = await $.ui.mount({ plugin: 'psa-hud', surface: 'terminal', ...PANE_SITE } as never)
+  const t = (await ui.findAll({ type: 'Text' })).map(x => String(x.text ?? ''))
+  await ui.unmount()
+  return t
+}
+
+import {
+  MAIN_CLIENT, actionsFor, bannerLines, clientEnv, diffClients, hudCfgFromCwd, isMainClient, parseRunning, pickTargets,
+  questLogFromCwd, stateFileFromCwd, verifyHaltFromCwd, winSuffix,
+} from './register'
+
+const YMD = (ms: number) => { const d = new Date(ms); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}` }
+const STAMP = (ms: number) => { const d = new Date(ms); return `${p2(d.getMonth() + 1)}/${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}` }
+// 改版前（cddb511）同一情境的 pane 文字（scratchpad 用舊 register.tsx 實跑擷取；時間部分依本機時區算）
+const SINGLE_TEXTS = () => [
+  '戰鬥中（完整・演出中）', '已有 watch 在跑（不是這個 HUD 啟動的），只讀', '疑似答題 / 驗證視窗，請人工處理', '警告：連續 3 次遇到不認得的畫面', '警告：第二筆',
+  'DKBO  2轉125級  HP 475  MP 90  |  寵 ? ?級 HP 909  |  柯奧的民家 1112:15,15（戰鬥前 · 3s 前）',
+  '────────────────────', '任務：四大洞窟：琉璃洞窟 進行中', ' 10:00:00 開始：任務 [2000]，選項 {}', ' 10:00:05 任務 2000「琉璃洞窟」詳情結果：accepted',
+  `動作 ${HMS(T0 - 5000)} click 120,80（5 秒前）`, '警報：疑似答題 / 驗證視窗，請人工處理',
+  '────────────────────', '錯誤 / 改進紀錄（新→舊，最多 100 筆）', `${STAMP(T0 - 60000)} #3 [quest] 主視窗錯誤`, '   → 待改進',
+]
+const RO3 = '監看：已有 watch 在跑（只讀）｜spawn 2 次｜卡住重開 0 次｜最後退出碼 3'
+
+// clients.py running --rostered 只列 ROSTERS 有登錄的（PrimalSA3 沒名單 → 不出現，Python 端已濾）；查不到（undefined）= 維持單視窗
+for (const running of ['PrimalSA\n', '', 'PrimalSA\r\n', undefined]) {
+  test(`單視窗（running=${JSON.stringify(running)}）：pane / 指令 / watch spawn 與改版前逐字相同`, async ($, on) => {
+    const log = scenarioHost(on, { running })
+    const a = await $.command.run({ command: 'psa-hud', args: 'on' } as never)
+    await flush()
+    const b = await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
+    await flush()
+    const d = await $.command.run({ command: 'psa-hud', args: 'watch bogus' } as never)
+    expect(a.text).toBe('上一次讀取還在進行中\n監看：執行中｜spawn 0 次｜卡住重開 0 次｜最後退出碼 無')
+    expect(b.text).toBe(RO3)
+    expect(d.text).toBe('用法：/psa-hud watch on|off|status')
+    expect(await paneTexts($)).toEqual(SINGLE_TEXTS())
+    expect(log.spawnEnv).toEqual([{ PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8' }, { PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8' }])
+    expect(log.runs.some(r => r.argv.some(x => x.endsWith('clients.py')))).toBe(true)          // 有偵測（背景、不在繪製時）
+    expect(log.runs.filter(r => r.argv.includes('--stop')).length).toBe(0)
+  })
+}
+
+// 多視窗情境：PrimalSA2 有自己的 state / 事件 log；actions.log 共用、帶 [PrimalSA2] 標籤；errlog 有 client 欄
+const ST2 = JSON.stringify({
+  v: 1, seq: 3, phase: 'run', ts: NOW_S, watcher: { token: 't2', running: true, interval: 0.5 },
+  screen: { label: '主畫面', age_s: 0.2, state: 'idle', annot: [], enc_on: true },
+  hud: { stale: false, age_s: 0.2, level: { v: '1轉60級' }, hp: { v: 300 }, mp: { v: 50 }, name: { v: 'DKBO6' }, map: { v: '庫塔伊洞窟地下一樓', id: 60049 }, pos: { v: [30, 25] }, buffs: { v: ['exp'] } },
+  flags: {}, alerts: [],
+})
+const MULTI_FILES: Record<string, string> = {
+  ...SINGLE_FILES,
+  'tools/.cache/clients/PrimalSA2/state.json': ST2,
+  'tools/.cache/clients/PrimalSA2/psa-hud.json': '{"watch":true}',
+  'notes/clients/PrimalSA2/quest-events.log': `${YMD(T0 - 3600000)} ${HMS(T0 - 3600000)} [questrun] 結束 rc=0，完成 [3003]\n`,
+  'tools/.cache/actions.log': SINGLE_FILES['tools/.cache/actions.log']! +
+    `${HMS(T0 - 40000)} [PrimalSA2] grind 傳送到 地雷區 60049:30,25\n${HMS(T0 - 30000)} [PrimalSA2] grind ass：DKBO6 快速戰鬥 → 開（已確認）\n${HMS(T0 - 20000)} [PrimalSA2] depot_use 原地遇敵：開\n${HMS(T0 - 2000)} [PrimalSA2] click 9,9\n`,
+  'tools/.cache/errlog.jsonl': SINGLE_FILES['tools/.cache/errlog.jsonl']! + JSON.stringify({ id: 4, ts: T0 - 30000, error: '二號錯誤', fix: null, source: 'grind', client: 'PrimalSA2' }) + '\n',
+}
+
+test('多視窗：偵測到 PrimalSA2 → 第二支 watch 帶 PSA_CLIENT；pane 每視窗一段、練功中 / 遇敵 / buff 分開、警示醒目、errlog 有 client', async ($, on) => {
+  const log = scenarioHost(on, { running: 'PrimalSA\nPrimalSA2\n', files: MULTI_FILES })
+  await $.command.run({ command: 'psa-hud', args: 'on' } as never)
+  await flush()
+  const st = await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
+  await flush()
+  expect(log.spawnEnv.filter(e => !e.PSA_CLIENT).length).toBe(2)                  // 主視窗 env 不變（不帶 PSA_CLIENT）
+  expect(log.spawnEnv.filter(e => e.PSA_CLIENT === 'PrimalSA2')).toEqual([
+    { PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8', PSA_CLIENT: 'PrimalSA2' }, { PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8', PSA_CLIENT: 'PrimalSA2' },
+  ])
+  expect(st.text).toBe(`[PrimalSA] ${RO3}\n[PrimalSA2] ${RO3}`)
+  const t = await paneTexts($)
+  expect(t[0]).toBe('[PrimalSA] 疑似答題 / 驗證視窗，請人工處理（全部視窗停手）')
+  expect(t).toContain('[PrimalSA] 戰鬥中（完整・演出中）')
+  expect(t).toContain('[PrimalSA2] 主畫面')
+  expect(t).toContain('  DKBO6  1轉60級  HP 300  MP 50  |  庫塔伊洞窟地下一樓 60049:30,25  |  EXP×2')
+  expect(t).toContain('  遇敵中')
+  expect(t).toContain('[PrimalSA] 任務：四大洞窟：琉璃洞窟 進行中')
+  expect(t).toContain('[PrimalSA2] 練功中：地雷區（快速戰鬥）＋EXP×2')
+  expect(t).toContain(`  動作 ${HMS(T0 - 5000)} click 120,80（5 秒前）`)          // 主視窗最後動作 = 沒標籤的行
+  expect(t).toContain(`  動作 ${HMS(T0 - 2000)} click 9,9（2 秒前）`)             // PrimalSA2 最後動作（標籤去掉）
+  expect(t).toContain(`${STAMP(T0 - 30000)} #4 [PrimalSA2] [grind] 二號錯誤`)
+  // 指令：只關 PrimalSA2 的監看 → 只有它送 --stop（帶 PSA_CLIENT）
+  const off = await $.command.run({ command: 'psa-hud', args: 'watch off PrimalSA2' } as never)
+  expect(String(off.text).startsWith('[PrimalSA2] 監看：已關閉')).toBe(true)
+  expect(off.text).not.toContain('[PrimalSA] ')
+  const stops = log.runs.filter(r => r.argv.includes('--stop'))
+  expect(stops.length).toBe(1)
+  expect(stops[0]!.env?.PSA_CLIENT).toBe('PrimalSA2')
+  expect((await $.command.run({ command: 'psa-hud', args: 'watch on PrimalSA9' } as never)).text).toContain('找不到視窗 PrimalSA9')
+  expect((await $.command.run({ command: 'psa-hud', args: 'watch bogus' } as never)).text).toBe('用法：/psa-hud watch on|off|status [程序名|all]')
+  // ack（不給 = 全部）：兩個視窗各送一次，PrimalSA2 帶 PSA_CLIENT
+  const ack = await $.command.run({ command: 'psa-hud', args: 'ack' } as never)
+  expect(String(ack.text).split('\n').length).toBe(2)
+  const acks = log.runs.filter(r => r.argv.includes('--ack'))
+  expect(acks.map(r => r.env?.PSA_CLIENT ?? '')).toEqual(['', 'PrimalSA2'])
+})
+
+test('verify-halt.json 存在：單視窗也在最上面紅字警示（沒有檔案時畫面不變）', async ($, on) => {
+  scenarioHost(on, { running: 'PrimalSA\n', files: { ...SINGLE_FILES, 'tools/.cache/verify-halt.json': JSON.stringify({ ts: NOW_S - 60, client: 'PrimalSA2', src: 'uikit', reason: '連 3 次不認得' }) } })
+  await $.command.run({ command: 'psa-hud', args: 'on' } as never)
+  await flush()
+  await $.command.run({ command: 'psa-hud', args: 'watch status' } as never)
+  const t = await paneTexts($)
+  expect(t[0]).toBe(`全部視窗停手：驗證旗標 ${STAMP((NOW_S - 60) * 1000)} PrimalSA2 uikit：連 3 次不認得`)
+  expect(t[1]).toContain('verifyhalt.py clear')
+  expect(t.slice(2)).toEqual(SINGLE_TEXTS())
+})
+
+test('路徑函式：主視窗 = 舊路徑；其他視窗在 clients/<程序名>', () => {
+  expect(stateFileFromCwd(ROOT)).toBe(`${ROOT}/tools/.cache/state.json`)
+  expect(stateFileFromCwd(ROOT, 'PrimalSA')).toBe(`${ROOT}/tools/.cache/state.json`)
+  expect(stateFileFromCwd(ROOT, 'PrimalSA2')).toBe(`${ROOT}/tools/.cache/clients/PrimalSA2/state.json`)
+  expect(hudCfgFromCwd(ROOT, 'PrimalSA2')).toBe(`${ROOT}/tools/.cache/clients/PrimalSA2/psa-hud.json`)
+  expect(hudCfgFromCwd(ROOT)).toBe(`${ROOT}/tools/.cache/psa-hud.json`)
+  expect(questLogFromCwd(ROOT)).toBe(`${ROOT}/notes/quest-events.log`)
+  expect(questLogFromCwd(ROOT, 'PrimalSA2')).toBe(`${ROOT}/notes/clients/PrimalSA2/quest-events.log`)
+  expect(verifyHaltFromCwd('C:\\games\\PrimalSA-AI\\tools')).toBe('C:\\games\\PrimalSA-AI/tools/.cache/verify-halt.json')
+  expect([isMainClient(undefined), isMainClient('primalsa'), isMainClient('PrimalSA2')]).toEqual([true, true, false])
+  expect(MAIN_CLIENT).toBe('PrimalSA')
+})
+
+test('actionsFor：主視窗 = 沒標籤的行；其他視窗只取自己的標籤行並去掉標籤；undefined 原樣', () => {
+  const a = '10:00:00 walk a\n10:00:01 [PrimalSA2] walk b\n10:00:02 [PrimalSA3] walk c\n10:00:03 ass：DKBO [x] 快速戰鬥\n'
+  expect(actionsFor(a)).toBe('10:00:00 walk a\n10:00:03 ass：DKBO [x] 快速戰鬥\n')
+  expect(actionsFor(a, 'PrimalSA2')).toBe('10:00:01 walk b')
+  expect(actionsFor(a, 'primalsa3')).toBe('10:00:02 walk c')
+  expect(actionsFor(undefined, 'PrimalSA2')).toBeUndefined()
+  expect(actionsFor('10:00:00 walk a\n')).toBe('10:00:00 walk a\n')           // 沒有標籤行 = 原文
+})
+
+test('parseRunning / diffClients：主視窗永遠第一；查不到維持現狀；連 2 次偵測不到才移除', () => {
+  expect(parseRunning(0, 'PrimalSA2\r\nPrimalSA\n\n')).toEqual(['PrimalSA', 'PrimalSA2'])
+  expect(parseRunning(0, '')).toEqual(['PrimalSA'])
+  expect(parseRunning(1, 'PrimalSA2')).toBeUndefined()
+  expect(parseRunning(0, 'bad name!\nPrimalSA2')).toEqual(['PrimalSA', 'PrimalSA2'])
+  const cur = [{ name: 'PrimalSA', misses: 0 }, { name: 'PrimalSA2', misses: 0 }]
+  expect(diffClients(cur, ['PrimalSA', 'PrimalSA2', 'PrimalSA3'])).toEqual({ add: ['PrimalSA3'], drop: [], misses: { PrimalSA: 0, PrimalSA2: 0 } })
+  expect(diffClients(cur, ['PrimalSA'])).toEqual({ add: [], drop: [], misses: { PrimalSA: 0, PrimalSA2: 1 } })
+  expect(diffClients([cur[0]!, { name: 'PrimalSA2', misses: 1 }], ['PrimalSA']).drop).toEqual(['PrimalSA2'])
+  expect(diffClients([cur[0]!, { name: 'PrimalSA2', misses: 1 }], ['PrimalSA', 'PrimalSA2']).misses.PrimalSA2).toBe(0)
+  expect(diffClients([{ name: 'PrimalSA', misses: 5 }], []).drop).toEqual([])        // 主視窗永不移除
+})
+
+test('pickTargets / clientEnv / winSuffix / bannerLines', () => {
+  expect(pickTargets(['PrimalSA', 'PrimalSA2'], undefined)).toEqual(['PrimalSA', 'PrimalSA2'])
+  expect(pickTargets(['PrimalSA', 'PrimalSA2'], 'ALL')).toEqual(['PrimalSA', 'PrimalSA2'])
+  expect(pickTargets(['PrimalSA', 'PrimalSA2'], 'primalsa2')).toEqual(['PrimalSA2'])
+  expect(typeof pickTargets(['PrimalSA'], 'PrimalSA2')).toBe('string')
+  const base = { PSA_WATCH_OWNER: 'hud' }
+  expect(clientEnv('PrimalSA', base, '/usr/bin/python3', ROOT)).toBe(base)
+  expect(clientEnv('PrimalSA2', base, '/usr/bin/python3', ROOT)).toEqual({ PSA_WATCH_OWNER: 'hud', PSA_CLIENT: 'PrimalSA2' })
+  expect(clientEnv('PrimalSA2', base, 'C:\\py\\python.exe', ROOT)).toEqual({ PSA_WATCH_OWNER: 'hud', PSA_CLIENT: 'PrimalSA2', WSLENV: 'PSA_WATCH_OWNER:PSA_CLIENT' })
+  expect(clientEnv('PrimalSA2', base, 'C:\\py\\python.exe', 'C:\\games\\PrimalSA-AI')).toEqual({ PSA_WATCH_OWNER: 'hud', PSA_CLIENT: 'PrimalSA2' })   // Windows 原生直接繼承
+  expect([winSuffix(1), winSuffix(2), winSuffix(3)]).toEqual(['', '（2 視窗）', '（3 視窗）'])
+  const vs = { v: 1, flags: { verify_suspect: true } } as never
+  expect(bannerLines(undefined, [{ client: 'PrimalSA', state: vs }])).toEqual([])          // 單視窗：verify_suspect 已在提示行，不重複
+  expect(bannerLines(undefined, [{ client: 'PrimalSA', state: null }, { client: 'PrimalSA2', state: vs }])).toEqual([{ text: '[PrimalSA2] 疑似答題 / 驗證視窗，請人工處理（全部視窗停手）', tone: 'red' }])
+  expect(bannerLines('not json', [])[0]?.text).toBe('全部視窗停手：驗證旗標 ? ：')
+})
+
+test('autoTitle：多視窗加「（N 視窗）」；練功判斷只看主視窗沒標籤的行', async () => {
+  const log = '[questrun] 任務 2000「琉璃洞窟」詳情結果：accepted\n'
+  const root = '/mnt/c/games/PrimalSA-AI'
+  const rd = (acts: string) => async (p: string) => {
+    if (p.endsWith('quest-events.log')) return log
+    if (p.endsWith('actions.log')) return acts
+    if (p.endsWith('questdefs.py')) return "dict(id=2000, detail='琉璃洞窟')"
+    throw new Error('ENOENT')
+  }
+  const mk = (acts: string) => ({ clock: { now: async () => gnow }, fs: { read: rd(acts) } }) as never
+  expect(await autoTitle(mk(''), root, undefined, 1)).toBe('PSA｜四大洞窟：琉璃洞窟 進行中')
+  expect(await autoTitle(mk(''), root, undefined, 2)).toBe('PSA｜四大洞窟：琉璃洞窟 進行中（2 視窗）')
+  expect(await autoTitle(mk(''), root, 'PSA｜四大洞窟：琉璃洞窟 進行中（2 視窗）', 2)).toBeUndefined()
+  // PrimalSA2 在練功（帶標籤）→ 主視窗標題不受影響
+  const tagged = GA.split('\n').filter(Boolean).map(l => `${l.slice(0, 8)} [PrimalSA2] ${l.slice(9)}`).join('\n') + '\n'
+  expect(await autoTitle(mk(tagged), root, undefined, 2)).toBe('PSA｜四大洞窟：琉璃洞窟 進行中（2 視窗）')
+  expect(await autoTitle(mk(GA), root, undefined, 3)).toBe('PSA｜練功中 地雷區（3 視窗）')
+})
+
+test('Supervisor.dispose：收掉子程序、不寫設定、不送 --stop、不重開', async () => {
+  const h = harness([{ hang: true }, { hang: true }])
+  h.sup.start(); await settle()
+  h.sup.dispose(); await settle()
+  expect([h.log.returned, h.log.stops, h.log.cfg, h.sup.status, h.log.spawns]).toEqual([1, 0, [], 'off', 1])
+})

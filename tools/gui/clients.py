@@ -27,6 +27,8 @@ PowerShell 端的同一套規則在 psawin.ps1（Get-PsaClient / Find-PsaProcess
 路徑在 import 時依 PSA_CLIENT 決定（一個程序只操作一個視窗）；沒設 PSA_CLIENT 時所有路徑與改版前逐字相同。
 
 命令列：python tools/gui/clients.py   → 印目前 PSA_CLIENT 對應的名稱、名單、狀態資料夾
+       python tools/gui/clients.py running [--rostered]   → 正在執行的遊戲程序名稱一行一個（--rostered 只列 ROSTERS 有登錄的，
+                                                            印資料夾名寫法）；查不到程序清單退出碼 1（psa-hud 多視窗偵測用，第 3d 步）
 """
 import os
 import re
@@ -215,8 +217,24 @@ def proc_client(pid) -> str | None:
     return DEFAULT
 
 
+def rostered_running(procs: list | None = None) -> list[str] | None:
+    """正在執行、且 ROSTERS 有登錄的視窗（資料夾名寫法，照 ROSTERS 順序）；查不到 None。psa-hud 依此決定要開幾支 watch"""
+    procs = running() if procs is None else procs
+    if procs is None:
+        return None
+    low = {p.lower() for p in procs}
+    return [k for k in ROSTERS if k.lower() in low]
+
+
 if __name__ == '__main__':
     sys.stdout.reconfigure(encoding='utf-8')
+    if sys.argv[1:2] == ['running']:
+        r = rostered_running() if '--rostered' in sys.argv[2:] else running()
+        if r is None:
+            print('查不到程序清單', file=sys.stderr)
+            sys.exit(1)
+        print('\n'.join(r))
+        sys.exit(0)
     n = name()
     print(f'PSA_CLIENT → {n}{"（主視窗）" if is_default(n) else ""}{"" if valid(n) else "（名稱不合法）"}')
     print('名單：', ' '.join(roster(n)) or '（沒有寫死的名單）')

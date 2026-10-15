@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { BoxProps, ElementConstructor, EngineInterface, Register, RenderElement, TextProps } from 'claude-code'
 
-import type { ErrEntry, ProgLine, Stat, WatchLine, WatchTone } from '../types'
+import type { Banner, ErrEntry, ProgLine, Stat, WatchLine, WatchTone, WinProg, WinView } from '../types'
 
 // 讀 HUD 的腳本：背景截圖 + Windows OCR，印一行 JSON（見 tools/gui/stat.ps1）
 // 遊戲畫面由獨立的鏡像視窗顯示（tools/gui/mirror.sh），pane 只放文字
@@ -45,7 +45,7 @@ export function errEntries(text: string): ErrEntry[] {
     if (!l.trim()) continue
     try {
       const r = JSON.parse(l) as ErrEntry
-      if (typeof r.error === 'string') out.push({ id: r.id, ts: r.ts, error: r.error, fix: r.fix ?? null, source: r.source ?? null })
+      if (typeof r.error === 'string') out.push({ id: r.id, ts: r.ts, error: r.error, fix: r.fix ?? null, source: r.source ?? null, ...(r.client ? { client: String(r.client) } : {}) })
     } catch {
       // 壞行略過
     }
@@ -55,7 +55,7 @@ export function errEntries(text: string): ErrEntry[] {
 
 // 一筆紀錄的顯示文字：[錯誤] 與 [改進]（沒改進 = 待改進）
 export function errLine(e: ErrEntry): { head: string; fix: string; pending: boolean } {
-  return { head: `${stamp(e.ts)} #${e.id}${e.source ? ` [${e.source}]` : ''} ${e.error}`, fix: e.fix ? `→ 改進：${e.fix}` : '→ 待改進', pending: !e.fix }
+  return { head: `${stamp(e.ts)} #${e.id}${e.client ? ` [${e.client}]` : ''}${e.source ? ` [${e.source}]` : ''} ${e.error}`, fix: e.fix ? `→ 改進：${e.fix}` : '→ 待改進', pending: !e.fix }
 }
 
 // ───────────────────────── 即時狀態監看（watch.py）：路徑 / 解析 / 顯示 / 監督 ─────────────────────────
@@ -66,22 +66,91 @@ export function rootFromCwd(cwd: string): string | undefined {
   const i = cwd.indexOf(PROJECT)
   return i < 0 ? undefined : cwd.slice(0, i + PROJECT.length)
 }
-export const stateFileFromCwd = (cwd: string) => { const r = rootFromCwd(cwd); return r ? `${r}/tools/.cache/state.json` : undefined }
-export const hudCfgFromCwd = (cwd: string) => { const r = rootFromCwd(cwd); return r ? `${r}/tools/.cache/psa-hud.json` : undefined }
+
+// ── 多視窗（第 3d 步，2026-10-15 使用者定案 D5：一個 session 顯示全部視窗）──
+// 視窗身分 = 遊戲程序名稱（tools/gui/clients.py）。主視窗 PrimalSA 沿用舊路徑；其他視窗的狀態檔在 tools/.cache/clients/<程序名>/、
+// 事件 log 在 notes/clients/<程序名>/（與 clients.cache_dir / notes_dir 相同規則；名稱由 clients.py running --rostered 給，已是資料夾名寫法）
+export const MAIN_CLIENT = 'PrimalSA'
+export const isMainClient = (c?: string | null) => !c || c.toLowerCase() === MAIN_CLIENT.toLowerCase()
+export const cacheRel = (c?: string | null) => (isMainClient(c) ? 'tools/.cache' : `tools/.cache/clients/${c}`)
+export const notesRel = (c?: string | null) => (isMainClient(c) ? 'notes' : `notes/clients/${c}`)
+export const stateFileFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/state.json` : undefined }
+export const hudCfgFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/psa-hud.json` : undefined }
+export const questLogFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${notesRel(client)}/quest-events.log` : undefined }
+export const verifyHaltFromCwd = (cwd: string) => { const r = rootFromCwd(cwd); return r ? `${r}/tools/.cache/verify-halt.json` : undefined }   // 全部視窗共用
+
+// actions.log 是全部視窗共用的一份：非主視窗的行是「HH:MM:SS [程序名] …」（actlog.py / gui.ps1），主視窗沒有標籤。
+// 取出某個視窗的行；非主視窗的行去掉標籤（後面的解析照單視窗格式）。undefined（讀不到）原樣回
+const ACT_TAG = /^(\d\d:\d\d:\d\d) \[(PrimalSA\d*)\] /i
+export function actionsFor(text: string | undefined, client?: string): string | undefined {
+  if (text === undefined) return undefined
+  const main = isMainClient(client)
+  const out: string[] = []
+  for (const l of text.split(/\r?\n/)) {
+    const m = ACT_TAG.exec(l)
+    if (main) { if (!m) out.push(l) }
+    else if (m && m[2]!.toLowerCase() === client!.toLowerCase()) out.push(`${m[1]} ${l.slice(m[0].length)}`)
+  }
+  return out.join('\n')
+}
+
+// clients.py running --rostered 的輸出 → 要顯示的視窗（主視窗永遠在第一個，其他照輸出順序、去重）；退出碼非 0 = 查不到 → undefined（維持現狀）
+export function parseRunning(exitCode: number, stdout: string): string[] | undefined {
+  if (exitCode !== 0) return undefined
+  const out = [MAIN_CLIENT]
+  for (const l of stdout.split(/\r?\n/)) {
+    const n = l.trim()
+    if (/^[A-Za-z0-9_.-]{1,64}$/.test(n) && !out.some(x => x.toLowerCase() === n.toLowerCase())) out.push(n)
+  }
+  return out
+}
+
+// 視窗清單變化（純函式）：要新增的、要移除的（連續 MISS_LIMIT 次偵測不到才移除，避免一次查詢失誤就殺掉 watch；主視窗永不移除）
+export const MISS_LIMIT = 2
+export function diffClients(cur: { name: string; misses: number }[], want: string[]): { add: string[]; drop: string[]; misses: Record<string, number> } {
+  const has = (l: string[], n: string) => l.some(x => x.toLowerCase() === n.toLowerCase())
+  const add = want.filter(n => !cur.some(c => c.name.toLowerCase() === n.toLowerCase()))
+  const drop: string[] = []
+  const misses: Record<string, number> = {}
+  for (const c of cur) {
+    if (isMainClient(c.name) || has(want, c.name)) { misses[c.name] = 0; continue }
+    const m = c.misses + 1
+    if (m >= MISS_LIMIT) drop.push(c.name)
+    else misses[c.name] = m
+  }
+  return { add, drop, misses }
+}
+
+// /psa-hud watch|ack 的對象：不給 / all = 全部偵測到的視窗；程序名（大小寫不分）= 那一個；找不到 → 錯誤訊息字串
+export function pickTargets(names: string[], arg: string | undefined): string[] | string {
+  if (!arg || arg.toLowerCase() === 'all') return [...names]
+  const hit = names.find(n => n.toLowerCase() === arg.toLowerCase())
+  return hit ? [hit] : `找不到視窗 ${arg}（目前偵測到：${names.join('、')}；偵測每 30 秒一次，視窗要在 clients.py ROSTERS 登錄）`
+}
+
+// spawn 子程序的環境變數：主視窗與改版前逐字相同；其他視窗加 PSA_CLIENT。
+// WSL 上用 Windows 直譯器（python.exe）時，WSL → Windows 只傳 WSLENV 列出的變數 → 一併列進 WSLENV（與 winenv.client_env / gui.sh 同規則）。
+// 取捨：$.process 的 env 是「蓋在 host 環境上」，讀不到 host 原本的 WSLENV，所以這種情況會蓋掉它（只影響 watch 子程序；Linux 直譯器時 watch 自己的 winenv 會處理）
+export function clientEnv(client: string | undefined, base: Record<string, string>, pythonPath: string | undefined, cwd: string): Record<string, string> {
+  if (isMainClient(client)) return base
+  const env: Record<string, string> = { ...base, PSA_CLIENT: client! }
+  if (pythonPath && /^[a-zA-Z]:|\.exe$/i.test(pythonPath) && cwd.startsWith('/mnt/')) env.WSLENV = Object.keys(env).join(':')
+  return env
+}
 
 // watch.py 的絕對路徑：直譯器是 Windows 的（C:\...\python.exe、.exe）→ Windows 路徑；Linux 直譯器 → /mnt/<磁碟>/ 原生路徑。
 // 不給直譯器（uv run 退路）時由 cwd 的形式推斷：/mnt/c/... 當 WSL（Linux 路徑），其他當 Windows
-export function watchPathFromCwd(cwd: string, pythonPath?: string): string | undefined {
+export function watchPathFromCwd(cwd: string, pythonPath?: string, file = 'watch.py'): string | undefined {
   const root = rootFromCwd(cwd)
   if (!root) return undefined
   const m = /^(?:\/(?:mnt\/|cygdrive\/)?([a-zA-Z])\/|([a-zA-Z]):[\\/])(.*)$/.exec(root)
-  if (!m) return `${root}/tools/gui/watch.py`           // 純 Linux 路徑（不是 /mnt/c 之類）
+  if (!m) return `${root}/tools/gui/${file}`           // 純 Linux 路徑（不是 /mnt/c 之類）
   const drive = (m[1] ?? m[2])!
   const rest = m[3]!.replace(/\\/g, '/')
   const isWin = pythonPath !== undefined ? /^[a-zA-Z]:|\.exe$/i.test(pythonPath) : !cwd.startsWith('/mnt/')
   return isWin
-    ? `${drive.toUpperCase()}:\\${rest.replace(/\//g, '\\')}\\tools\\gui\\watch.py`
-    : `/mnt/${drive.toLowerCase()}/${rest}/tools/gui/watch.py`
+    ? `${drive.toUpperCase()}:\\${rest.replace(/\//g, '\\')}\\tools\\gui\\${file}`
+    : `/mnt/${drive.toLowerCase()}/${rest}/tools/gui/${file}`
 }
 
 // state.hud（第 3 階段）：欄位級 {v, ts}；ok = 最近一次讀到資料；stale = 被蓋住 / 太久沒更新（欄位值保留舊的）
@@ -279,6 +348,13 @@ export class Supervisor {
     this.status = 'off'
   }
 
+  // 視窗關掉了（偵測不到程序）：作廢迴圈、收掉子程序；不寫設定、不送 --stop（遊戲再開時照設定重新 spawn）
+  dispose(): void {
+    this.epoch++
+    this.abortRun?.()
+    this.status = 'off'
+  }
+
   // /psa-hud watch on：寫設定、計數歸零、立即啟動（watch.stop 由 stopCli 對面清；on 時 watch.py 自己忽略早於啟動的 stop 檔）
   async setOn(): Promise<void> {
     await this.d.saveCfg(true).catch(() => undefined)
@@ -336,9 +412,11 @@ const acts = atom({ plugin: 'psa-hud', key: 'errs' } as const, [] as ErrEntry[])
 const at = atom({ plugin: 'psa-hud', key: 'at' } as const, 0)
 const hudAtom = atom({ plugin: 'psa-hud', key: 'hud' } as const, null as string | null)
 const encAtom = atom({ plugin: 'psa-hud', key: 'enc' } as const, null as { text: string; warn: boolean } | null)
-let lastEnc: boolean | undefined
 const prog = atom({ plugin: 'psa-hud', key: 'prog' } as const, [] as ProgLine[])
 const line = atom({ plugin: 'psa-hud', key: 'line' } as const, { main: '（沒有狀態）', hints: [] } as WatchLine)
+const winsAtom = atom({ plugin: 'psa-hud', key: 'wins' } as const, [] as WinView[])       // 多視窗：每視窗一份（單視窗 = 空）
+const progsAtom = atom({ plugin: 'psa-hud', key: 'progs' } as const, [] as WinProg[])
+const bannerAtom = atom({ plugin: 'psa-hud', key: 'banner' } as const, [] as Banner[])
 
 // 等級字串沒有任何數字（例：寵物等級 OCR 把數字讀成 'o級'）→ 數字部分換成 ?（'?級'），不顯示怪字
 export function levelText(l: string | undefined): string | undefined {
@@ -470,14 +548,19 @@ function clock(ms: number): string {
 }
 
 // ── 與引擎接起來 ──
+// 每個視窗一份：監督（自己 spawn 的 watch）+ 遇敵最後已知值 + 偵測不到的次數。ctls[0] 永遠是主視窗（sup = ctls[0].sup，舊程式照用）
+type Ctl = { name: string; sup: Supervisor; lastEnc?: boolean; misses: number }
+let ctls: Ctl[] = []
 let sup: Supervisor | undefined
 let projCwd = ''
 let argvPrefix: string[] | undefined     // [python] 或 ['uv','run','--no-project','python']
+let pyPath: string | undefined           // uv python find 找到的直譯器（沒有 = uv run 退路）
 let watchScript = ''
 let tickBusy = false
+export const winCount = () => Math.max(1, ctls.length)
 
 // 取得直譯器：uv python find；失敗退回 uv run（推測 uv 會轉發 SIGTERM，待驗）
-async function watchArgv($: EngineInterface, extra: string[] = []): Promise<string[]> {
+async function pyArgv($: EngineInterface, file: string, extra: string[] = []): Promise<string[]> {
   if (!argvPrefix) {
     let py: string | undefined
     try {
@@ -487,25 +570,38 @@ async function watchArgv($: EngineInterface, extra: string[] = []): Promise<stri
     } catch {
       // 找不到 uv python：走退路
     }
+    pyPath = py
     watchScript = watchPathFromCwd(projCwd, py) ?? ''
     argvPrefix = py ? [py] : ['uv', 'run', '--no-project', 'python']
   }
-  return [...argvPrefix, watchScript, ...extra]
+  return [...argvPrefix, file === 'watch.py' ? watchScript : (watchPathFromCwd(projCwd, pyPath, file) ?? ''), ...extra]
 }
+const watchArgv = ($: EngineInterface, extra: string[] = []) => pyArgv($, 'watch.py', extra)
 
-function makeSup($: EngineInterface): Supervisor {
+// 主視窗：env 與改版前逐字相同（不帶 PSA_CLIENT）；其他視窗加 PSA_CLIENT（WSL + Windows 直譯器另列 WSLENV）
+const runEnv = (client: string, base: Record<string, string> = {}) => clientEnv(client, base, pyPath, projCwd)
+
+function makeSup($: EngineInterface, client: string = MAIN_CLIENT): Supervisor {
+  const main = isMainClient(client)
   return new Supervisor({
-    spawn: async () => $.process.spawn({
-      argv: await watchArgv($),
-      cwd: rootFromCwd(projCwd),
-      env: { PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8' },
-    }) as unknown as Streamer,
+    spawn: async () => {
+      const argv = await watchArgv($)
+      return $.process.spawn({
+        argv,
+        cwd: rootFromCwd(projCwd),
+        env: runEnv(client, { PSA_WATCH_OWNER: 'hud', PYTHONIOENCODING: 'utf-8' }),
+      }) as unknown as Streamer
+    },
     now: () => $.clock.now(),
     sleep: ms => $.clock.sleep(ms),
     rnd: () => Math.random(),
-    stopCli: async () => { await $.process.run(await watchArgv($, ['--stop']), { timeoutMs: 15000 }) },
+    stopCli: async () => {
+      const argv = await watchArgv($, ['--stop'])
+      if (main) await $.process.run(argv, { timeoutMs: 15000 })
+      else await $.process.run(argv, { timeoutMs: 15000, env: runEnv(client) })
+    },
     saveCfg: async on => {
-      const f = hudCfgFromCwd(projCwd)
+      const f = hudCfgFromCwd(projCwd, client)
       if (!f) return
       let cfg: Record<string, unknown> = {}
       try {
@@ -520,9 +616,9 @@ function makeSup($: EngineInterface): Supervisor {
   })
 }
 
-// psa-hud.json 的 watch 欄位是 on / off 唯一依據；沒檔 / 壞檔 = on
-async function cfgWatchOn($: EngineInterface): Promise<boolean> {
-  const f = hudCfgFromCwd(projCwd)
+// psa-hud.json 的 watch 欄位是 on / off 唯一依據；沒檔 / 壞檔 = on（每個視窗各一份，在自己的狀態資料夾）
+async function cfgWatchOn($: EngineInterface, client: string = MAIN_CLIENT): Promise<boolean> {
+  const f = hudCfgFromCwd(projCwd, client)
   if (!f) return true
   try {
     const d = JSON.parse(await $.fs.read(f)) as { watch?: unknown }
@@ -532,35 +628,105 @@ async function cfgWatchOn($: EngineInterface): Promise<boolean> {
   }
 }
 
-// 每秒：讀 state.json → 餵給監督（存活 / 卡住）→ 顯示文字變了才更新 atom
+async function addClient($: EngineInterface, name: string): Promise<Ctl> {
+  const c: Ctl = { name, sup: makeSup($, name), misses: 0 }
+  ctls.push(c)
+  if (await cfgWatchOn($, name)) c.sup.start()
+  else c.sup.status = 'off'
+  return c
+}
+
+// ── 視窗偵測（第 3d 步）──
+// 取捨：不在每次 render / 每秒 tick 跑 powershell。每 DETECT_PERIOD_MS 在背景跑一次 `clients.py running --rostered`
+// （同 clients.running() 的程序清單查詢，只讀；ROSTERS 有登錄的才算），結果存在模組變數，繪製只讀 atom。
+// 不用「state.json 新鮮」判斷：非主視窗的 state.json 要等我們 spawn watch 之後才會有（雞生蛋）。
+// 查詢失敗 = 維持現狀；偵測不到連續 MISS_LIMIT 次才收掉那個視窗的 watch。主視窗永遠顯示（沒開遊戲時照舊顯示「遊戲未執行」）
+const DETECT_PERIOD_MS = 30000
+let detectBusy = false
+async function detectClients($: EngineInterface): Promise<void> {
+  if (detectBusy || !projCwd) return
+  detectBusy = true
+  try {
+    let want: string[] | undefined
+    try {
+      const r = await $.process.run(await pyArgv($, 'clients.py', ['running', '--rostered']), { timeoutMs: 20000, env: { PYTHONIOENCODING: 'utf-8' } })
+      want = parseRunning(r.exitCode ?? 1, r.stdout ?? '')
+    } catch {
+      want = undefined
+    }
+    if (!want) return
+    const d = diffClients(ctls, want)
+    for (const n of d.drop) ctls.find(x => x.name === n)?.sup.dispose()
+    ctls = ctls.filter(c => !d.drop.includes(c.name))
+    for (const c of ctls) c.misses = d.misses[c.name] ?? 0
+    for (const n of d.add) await addClient($, n)
+    if (d.add.length || d.drop.length) { void tickState($); void tickProg($) }
+  } catch {
+    // 偵測失敗：維持現狀，下一輪再試
+  } finally {
+    detectBusy = false
+  }
+}
+
+// 全視窗驗證停手旗標（tools/.cache/verify-halt.json，verifyhalt.py）+ 多視窗時任一視窗 verify_suspect → 頂端醒目警示（純函式）
+export function bannerLines(halt: string | undefined, wins: { client: string; state: WState | null }[]): Banner[] {
+  const out: Banner[] = []
+  if (halt !== undefined) {
+    let d: { ts?: number; client?: string; src?: string; reason?: string } = {}
+    try { const x = JSON.parse(halt) as unknown; if (x && typeof x === 'object') d = x as typeof d } catch { /* 壞檔也當旗標存在 */ }
+    const when = typeof d.ts === 'number' ? ` ${stamp(d.ts * 1000)}` : ''
+    out.push({ text: `全部視窗停手：驗證旗標${when} ${d.client ?? '?'} ${d.src ?? ''}：${d.reason ?? ''}`.replace(/\s+/g, ' ').trim(), tone: 'red' })
+    out.push({ text: '人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear', tone: 'red' })
+  }
+  if (wins.length > 1) for (const w of wins) if (w.state?.flags?.verify_suspect) out.push({ text: `[${w.client}] 疑似答題 / 驗證視窗，請人工處理（全部視窗停手）`, tone: 'red' })
+  return out
+}
+
+// 每秒：每個視窗讀 state.json → 餵給各自的監督（存活 / 卡住）→ 顯示文字變了才更新 atom。
+// 主視窗照舊更新 line / hud / enc（單視窗 pane 只看這三個）；多視窗另組 wins（每視窗一份）
 async function tickState($: EngineInterface): Promise<void> {
   if (tickBusy || !sup) return
   tickBusy = true
   try {
-    let text: string | undefined
-    let hasFile = true
-    try {
-      text = await $.fs.read(stateFileFromCwd(projCwd) ?? 'tools/.cache/state.json')
-    } catch {
-      hasFile = false
+    const views: WinView[] = []
+    const seen: { client: string; state: WState | null }[] = []
+    for (const c of [...ctls]) {
+      let text: string | undefined
+      let hasFile = true
+      try {
+        text = await $.fs.read(stateFileFromCwd(projCwd, c.name) ?? `${cacheRel(c.name)}/state.json`)
+      } catch {
+        hasFile = false
+      }
+      const { state, badVersion } = parseState(text)
+      const key = state ? `${state.watcher?.token ?? '?'}:${state.seq ?? '?'}` : null
+      await c.sup.observe(key, state?.phase ?? null, state?.watcher?.interval ?? null)
+      const vm = viewModel({ state, badVersion, status: c.sup.status, lastCode: c.sup.lastCode, now: await $.clock.now(), seenAt: c.sup.seenAt, hasFile })
+      const now = await $.clock.now()
+      const alive = watchAlive(state, now, c.sup.seenAt)
+      const ht = alive ? (hudText(state, now, c.sup.seenAt) ?? '（等級 / HP 讀取中…）') : null
+      const et = alive ? encText(state, c.lastEnc) : undefined
+      if (typeof et?.val === 'boolean') c.lastEnc = et.val
+      const eo = et ? { text: et.text, warn: et.warn } : null
+      seen.push({ client: c.name, state })
+      views.push({ client: c.name, wl: vm, ht, en: eo })
+      if (c.sup !== sup) continue
+      const wasAlive = hudAlive
+      hudAlive = alive
+      if ((await read($, hudAtom)) !== ht) await update($, hudAtom, () => ht)
+      if (JSON.stringify(await read($, encAtom)) !== JSON.stringify(eo)) await update($, encAtom, () => eo)
+      if (wasAlive && !alive) void refresh($)       // watch 剛死：馬上用一次性 stat 補上，不等 15 s
+      const old = await read($, line)
+      if (JSON.stringify(old) !== JSON.stringify(vm)) await update($, line, () => vm)
     }
-    const { state, badVersion } = parseState(text)
-    const key = state ? `${state.watcher?.token ?? '?'}:${state.seq ?? '?'}` : null
-    await sup.observe(key, state?.phase ?? null, state?.watcher?.interval ?? null)
-    const vm = viewModel({ state, badVersion, status: sup.status, lastCode: sup.lastCode, now: await $.clock.now(), seenAt: sup.seenAt, hasFile })
-    const now = await $.clock.now()
-    const alive = watchAlive(state, now, sup.seenAt)
-    const wasAlive = hudAlive
-    hudAlive = alive
-    const ht = alive ? (hudText(state, now, sup.seenAt) ?? '（等級 / HP 讀取中…）') : null
-    if ((await read($, hudAtom)) !== ht) await update($, hudAtom, () => ht)
-    const et = alive ? encText(state, lastEnc) : undefined
-    if (typeof et?.val === 'boolean') lastEnc = et.val
-    const eo = et ? { text: et.text, warn: et.warn } : null
-    if (JSON.stringify(await read($, encAtom)) !== JSON.stringify(eo)) await update($, encAtom, () => eo)
-    if (wasAlive && !alive) void refresh($)       // watch 剛死：馬上用一次性 stat 補上，不等 15 s
-    const old = await read($, line)
-    if (JSON.stringify(old) !== JSON.stringify(vm)) await update($, line, () => vm)
+    const wv = views.length > 1 ? views : []
+    if (JSON.stringify(await read($, winsAtom)) !== JSON.stringify(wv)) await update($, winsAtom, () => wv)
+    let halt: string | undefined
+    try { const x = await $.fs.read(verifyHaltFromCwd(projCwd) ?? 'tools/.cache/verify-halt.json'); halt = typeof x === 'string' ? x : undefined } catch { halt = undefined }
+    const bn = bannerLines(halt, seen)
+    if (JSON.stringify(await read($, bannerAtom)) !== JSON.stringify(bn)) await update($, bannerAtom, () => bn)
+  } catch {
+    // 讀檔 / 寫 atom 失敗（例：模組正在卸載）：這一輪略過，保持上一次的畫面，不留未處理的 rejection
   } finally {
     tickBusy = false
   }
@@ -732,12 +898,13 @@ export function actionAgeS(hms: string, now: number): number | undefined {
   return (cur - then + 86400) % 86400
 }
 
-export function progressLines(i: ProgIn, names: Map<number, string> = new Map()): ProgLine[] {
+// events：最近事件行數（單視窗 3；多視窗每視窗 1，pane 才不會太長）
+export function progressLines(i: ProgIn, names: Map<number, string> = new Map(), events = 3): ProgLine[] {
   const out: ProgLine[] = []
   const g = grindActivity(i)
   const t = i.quest === undefined ? undefined : titleFromLog(i.quest, names)
   out.push({ text: g ? `練功中：${g.spot}${g.quick ? '（快速戰鬥）' : ''}${i.state?.hud?.buffs?.v?.includes('exp') ? '＋EXP×2' + (i.state.hud.buffs.stale ? '?' : '') : ''}` : `任務：${t ? t.slice(TITLE_PREFIX.length) : '—'}`, tone: 'plain' })
-  const ev = i.quest === undefined ? [] : i.quest.split(/\r?\n/).filter(l => l.trim()).slice(-3).map(cleanEvent)
+  const ev = i.quest === undefined ? [] : i.quest.split(/\r?\n/).filter(l => l.trim()).slice(-events).map(cleanEvent)
   if (ev.length === 0) out.push({ text: '事件：—', tone: 'gray' })
   for (const e of ev) out.push({ text: cut(` ${e}`), tone: 'gray' })
   const al = i.actions?.split(/\r?\n/).filter(l => l.trim()).pop()
@@ -754,8 +921,10 @@ export function progressLines(i: ProgIn, names: Map<number, string> = new Map())
   return out.slice(0, 6)
 }
 
-// 兩個 hook 共用：回新標題或 undefined（不該改 / 讀檔失敗 / 沒紀錄 / 與現在相同）
-export async function autoTitle($: EngineInterface, cwd: string, cur: string | undefined): Promise<string | undefined> {
+// 兩個 hook 共用：回新標題或 undefined（不該改 / 讀檔失敗 / 沒紀錄 / 與現在相同）。
+// 一律看主視窗（notes/quest-events.log、actions.log 沒標籤的行、tools/.cache/state.json）；多視窗（nWin > 1）結尾加「（N 視窗）」
+export const winSuffix = (n: number) => (n > 1 ? `（${n} 視窗）` : '')
+export async function autoTitle($: EngineInterface, cwd: string, cur: string | undefined, nWin: number = winCount()): Promise<string | undefined> {
   try {
     const root = rootFromCwd(cwd)
     if (!root || !mayRetitle(cur)) return undefined
@@ -768,15 +937,17 @@ export async function autoTitle($: EngineInterface, cwd: string, cur: string | u
     } catch { /* 沒有 questdefs 就只靠 log 內的名字 */ }
     const rd = async (f: string) => { try { const x = await $.fs.read(`${root}/${f}`); return typeof x === 'string' ? x : undefined } catch { return undefined } }
     const [actions, stText] = await Promise.all([rd('tools/.cache/actions.log'), rd('tools/.cache/state.json')])
-    const g = grindActivity({ quest: log, actions, state: parseState(stText).state, now: await $.clock.now() })
-    const t = g ? grindTitle(g) : titleFromLog(log, names)
+    const g = grindActivity({ quest: log, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now: await $.clock.now() })
+    const t0 = g ? grindTitle(g) : titleFromLog(log, names)
+    const t = t0 ? t0 + winSuffix(nWin) : undefined
     return t && t !== cur ? t : undefined
   } catch {
     return undefined
   }
 }
 
-// 每 3 秒：讀三個檔 → progressLines → 有變才更新 atom（任何錯誤都吞掉）
+// 每 3 秒：讀三個檔 → progressLines → 有變才更新 atom（任何錯誤都吞掉）。
+// 多視窗：每個視窗讀自己的 quest-events.log / state.json，actions.log 共用一份、依標籤分視窗 → progs（每視窗事件 1 行）
 let progBusy = false
 let questNameCache: Map<number, string> | undefined
 async function tickProg($: EngineInterface): Promise<void> {
@@ -788,8 +959,18 @@ async function tickProg($: EngineInterface): Promise<void> {
     const rd = async (f: string) => { try { const x = await $.fs.read(`${root}/${f}`); return typeof x === 'string' ? x : undefined } catch { return undefined } }
     const [quest, actions, stText] = await Promise.all([rd('notes/quest-events.log'), rd('tools/.cache/actions.log'), rd('tools/.cache/state.json')])
     if (!questNameCache) { const py = await rd('tools/gui/questdefs.py'); if (py) questNameCache = questNames(py) }
-    const lines = progressLines({ quest, actions, state: parseState(stText).state, now: await $.clock.now() }, questNameCache)
+    const now = await $.clock.now()
+    const lines = progressLines({ quest, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now }, questNameCache)
     if (JSON.stringify(await read($, prog)) !== JSON.stringify(lines)) await update($, prog, () => lines)
+    const ps: WinProg[] = []
+    if (ctls.length > 1) {
+      for (const c of [...ctls]) {
+        if (isMainClient(c.name)) { ps.push({ client: c.name, lines: progressLines({ quest, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now }, questNameCache, 1) }); continue }
+        const [q, st] = await Promise.all([rd(`${notesRel(c.name)}/quest-events.log`), rd(`${cacheRel(c.name)}/state.json`)])
+        ps.push({ client: c.name, lines: progressLines({ quest: q, actions: actionsFor(actions, c.name), state: parseState(st).state, now }, questNameCache, 1) })
+      }
+    }
+    if (JSON.stringify(await read($, progsAtom)) !== JSON.stringify(ps)) await update($, progsAtom, () => ps)
   } catch {
     // 讀檔失敗：保持上一次的畫面
   } finally {
@@ -797,7 +978,7 @@ async function tickProg($: EngineInterface): Promise<void> {
   }
 }
 
-const PSA_HUD_DESC = '打開精靈王石器資訊 pane 並立即更新；/psa-hud off 關 pane；/psa-hud watch on|off 開關即時監看；/psa-hud ack 清掉驗證警報'
+const PSA_HUD_DESC = '打開精靈王石器資訊 pane 並立即更新；/psa-hud off 關 pane；/psa-hud watch on|off [程序名|all] 開關即時監看；/psa-hud ack [程序名|all] 清掉驗證警報'
 
 // 初始化（session.start 呼叫；熱重載後 session.start 沒重發時由 command.run 補呼叫）：
 // 設路徑、開 pane（openPane）、起計時器、建監督並視設定啟動 watch。同一份模組只做一次（inited）
@@ -817,13 +998,15 @@ async function init($: EngineInterface, cwd: string, o: { openPane: boolean }): 
   $.clock.every(LOG_PERIOD_MS, () => void refreshLog($))
   // 即時狀態監看：設定 off 就不啟動；否則 spawn 自己的 watch 並開始每秒讀 state.json
   // （熱重載時舊模組 spawn 的 watch 可能還在收尾：新的會拿到退出碼 3，grace 等 3 s 重試一次，見 decideExit）
-  sup = makeSup($)
-  if (await cfgWatchOn($)) sup.start()
-  else sup.status = 'off'
+  ctls = []
+  sup = (await addClient($, MAIN_CLIENT)).sup
   void tickState($)
   $.clock.every(STATE_PERIOD_MS, () => void tickState($))
   void tickProg($)
   $.clock.every(PROG_PERIOD_MS, () => void tickProg($))
+  // 多視窗：背景偵測其他視窗（30 s 一次；見 detectClients 的取捨說明）
+  void detectClients($)
+  $.clock.every(DETECT_PERIOD_MS, () => void detectClients($))
 }
 
 // pane 內容（純函式，測試直接呼叫）。注意：tsconfig 的 jsxFactory 是 h，
@@ -831,6 +1014,8 @@ async function init($: EngineInterface, cwd: string, o: { openPane: boolean }): 
 export type PaneData = {
   wl?: WatchLine | null; st?: Stat | null; ht?: string | null; en?: { text: string; warn: boolean } | null
   pg?: ProgLine[] | null; lines?: ErrEntry[] | null
+  // 多視窗（第 3d 步）：wins / progs 有 2 個以上才改成每視窗一段；banner 非空就在最上面顯示紅字（單視窗也顯示 verify-halt.json）
+  wins?: WinView[] | null; progs?: WinProg[] | null; banner?: Banner[] | null
 }
 export type PaneEls = { Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps> }
 export function paneTree(els: PaneEls, d: PaneData): RenderElement {
@@ -843,14 +1028,37 @@ export function paneTree(els: PaneEls, d: PaneData): RenderElement {
   const en = d.en ?? null
   const pg = Array.isArray(d.pg) ? d.pg : []
   const lines = Array.isArray(d.lines) ? d.lines : []
+  const wins = Array.isArray(d.wins) && d.wins.length > 1 ? d.wins : null
+  const progs = Array.isArray(d.progs) && d.progs.length > 1 ? d.progs : null
+  const banner = Array.isArray(d.banner) ? d.banner : []
+  const progText = (p: ProgLine, key: string, text: string) => <Text key={key} wrap="truncate-end" color={p.tone === 'red' ? 'red' : p.tone === 'yellow' ? 'yellow' : undefined} dimColor={p.tone === 'gray'} bold={p.tone === 'red'}>{text}</Text>
   return (
     <Box flexDirection="column">
-      <Text wrap="truncate-end" bold>{String(wl.main ?? '')}</Text>
-      {hints.map((hint, i) => <Text key={`hint${i}`} wrap="truncate-end" color={color(hint.tone)} dimColor={hint.tone === 'gray'}>{String(hint.text ?? '')}</Text>)}
-      <Text wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>
-      {en ? <Text wrap="truncate-end" color={en.warn ? 'yellow' : 'green'}>{String(en.text ?? '')}</Text> : null}
+      {banner.map((b, i) => <Text key={`ban${i}`} wrap="truncate-end" color={color(b.tone) ?? 'red'} bold>{String(b.text ?? '')}</Text>)}
+      {wins
+        ? wins.map((w, wi) => {
+            const wh = Array.isArray(w.wl?.hints) ? w.wl.hints : []
+            // 主視窗 watch 不在時退回一次性 stat（與單視窗相同）；其他視窗沒有一次性讀取
+            const wst = isMainClient(w.client) ? st : null
+            return (
+              <Box key={`win${wi}`} flexDirection="column">
+                <Text wrap="truncate-end" bold>{`[${w.client}] ${String(w.wl?.main ?? '')}`}</Text>
+                {wh.map((hint, i) => <Text key={`wh${wi}-${i}`} wrap="truncate-end" color={color(hint.tone)} dimColor={hint.tone === 'gray'}>{`  ${String(hint.text ?? '')}`}</Text>)}
+                <Text wrap="truncate-end" dimColor={!wst && !w.ht}>{`  ${w.ht ?? (wst ? format(wst) : '（等級 / HP 讀取中…）')}`}</Text>
+                {w.en ? <Text wrap="truncate-end" color={w.en.warn ? 'yellow' : 'green'}>{`  ${String(w.en.text ?? '')}`}</Text> : null}
+              </Box>
+            )
+          })
+        : [
+            <Text key="main" wrap="truncate-end" bold>{String(wl.main ?? '')}</Text>,
+            ...hints.map((hint, i) => <Text key={`hint${i}`} wrap="truncate-end" color={color(hint.tone)} dimColor={hint.tone === 'gray'}>{String(hint.text ?? '')}</Text>),
+            <Text key="hud" wrap="truncate-end" dimColor={!st && !ht}>{ht ?? (st ? format(st) : '（等級 / HP 讀取中…）')}</Text>,
+            en ? <Text key="enc" wrap="truncate-end" color={en.warn ? 'yellow' : 'green'}>{String(en.text ?? '')}</Text> : null,
+          ]}
       <Text dimColor>{'─'.repeat(20)}</Text>
-      {pg.map((p, i) => <Text key={`prog${i}`} wrap="truncate-end" color={p.tone === 'red' ? 'red' : p.tone === 'yellow' ? 'yellow' : undefined} dimColor={p.tone === 'gray'} bold={p.tone === 'red'}>{String(p.text ?? '')}</Text>)}
+      {progs
+        ? progs.flatMap((w, wi) => (Array.isArray(w.lines) ? w.lines : []).map((p, i) => progText(p, `wp${wi}-${i}`, i === 0 ? `[${w.client}] ${String(p.text ?? '')}` : `  ${String(p.text ?? '').trimStart()}`)))
+        : pg.map((p, i) => progText(p, `prog${i}`, String(p.text ?? '')))}
       <Text dimColor>{'─'.repeat(20)}</Text>
       <Text dimColor>{`錯誤 / 改進紀錄（新→舊，最多 ${LOG_MAX} 筆）`}</Text>
       {lines.length === 0
@@ -904,27 +1112,47 @@ export const register: Register = on => {
       return { text: 'psa-hud pane 已關閉（監看照跑；/psa-hud 或 /psa-hud on 重開）' }
     }
     if (arg[0] === 'ack') {
-      // 人工確認過 quest 轉述的驗證警報：叫 watch 清掉（unknown_long 靠畫面恢復自動清）
+      // 人工確認過 quest 轉述的驗證警報：叫 watch 清掉（unknown_long 靠畫面恢復自動清）。多視窗：/psa-hud ack [程序名|all]（不給 = 全部）
       if (!sup) return { text: '監看未啟用（只在精靈王石器專案的互動 session 裡啟動）' }
-      try {
-        const r = await $.process.run(await watchArgv($, ['--ack']), { timeoutMs: 15000 })
-        return { text: r.exitCode === 0 ? '已送出 ack：watch 下一輪清掉 quest 轉述的驗證警報（畫面不認得的警報要等畫面恢復才會清）' : `ack 失敗（退出碼 ${r.exitCode}）` }
-      } catch (err) {
-        return { text: `ack 失敗：${String(err).slice(0, 80)}` }
+      const tg = pickTargets(ctls.map(c => c.name), arg[1])
+      if (typeof tg === 'string') return { text: tg }
+      const out: string[] = []
+      for (const n of tg) {
+        const tag = ctls.length > 1 ? `[${n}] ` : ''
+        try {
+          const argv = await watchArgv($, ['--ack'])
+          const r = isMainClient(n) ? await $.process.run(argv, { timeoutMs: 15000 }) : await $.process.run(argv, { timeoutMs: 15000, env: runEnv(n) })
+          out.push(tag + (r.exitCode === 0 ? '已送出 ack：watch 下一輪清掉 quest 轉述的驗證警報（畫面不認得的警報要等畫面恢復才會清）' : `ack 失敗（退出碼 ${r.exitCode}）`))
+        } catch (err) {
+          out.push(`${tag}ack 失敗：${String(err).slice(0, 80)}`)
+        }
       }
+      return { text: out.join('\n') }
     }
     if (arg[0] === 'watch') {
       if (!sup) return { text: '監看未啟用（只在精靈王石器專案的互動 session 裡啟動）' }
-      if (arg[1] === 'off') await sup.setOff()
-      else if (arg[1] === 'on') await sup.setOn()
-      else if (arg[1] !== undefined && arg[1] !== 'status') return { text: '用法：/psa-hud watch on|off|status' }
+      if (arg[1] !== undefined && arg[1] !== 'on' && arg[1] !== 'off' && arg[1] !== 'status') return { text: `用法：/psa-hud watch on|off|status${ctls.length > 1 ? ' [程序名|all]' : ''}` }
+      const tg = pickTargets(ctls.map(c => c.name), arg[2])
+      if (typeof tg === 'string') return { text: tg }
+      const sel = ctls.filter(c => tg.includes(c.name))
+      for (const c of sel) {
+        if (arg[1] === 'off') await c.sup.setOff()
+        else if (arg[1] === 'on') await c.sup.setOn()
+      }
       await tickState($)
-      return { text: `${supSummary(sup)}${sup.tail ? `\n最後輸出：${sup.tail.trim().split('\n').slice(-3).join(' / ')}` : ''}` }
+      const one = (c: Ctl) => `${ctls.length > 1 ? `[${c.name}] ` : ''}${supSummary(c.sup)}${c.sup.tail ? `\n最後輸出：${c.sup.tail.trim().split('\n').slice(-3).join(' / ')}` : ''}`
+      return { text: sel.map(one).join('\n') }
     }
     await $.ui.open({ id: PANE, title: '精靈王石器' })
     const s = await refresh($)
     const ht = hudAlive ? await read($, hudAtom) : null
-    return { text: (ht ?? (s ? format(s) : '上一次讀取還在進行中')) + (sup ? `\n${supSummary(sup)}` : '') }
+    let extra = ''
+    if (ctls.length > 1) {
+      // 多視窗：其他視窗各補一行（HUD 行 + 監看狀態）
+      const wv = await read($, winsAtom)
+      for (const c of ctls.slice(1)) extra += `\n[${c.name}] ${wv.find(w => w.client === c.name)?.ht ?? '（等級 / HP 讀取中…）'}｜${supSummary(c.sup)}`
+    }
+    return { text: (ctls.length > 1 ? `[${MAIN_CLIENT}] ` : '') + (ht ?? (s ? format(s) : '上一次讀取還在進行中')) + (sup ? `\n${supSummary(sup)}` : '') + extra }
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -934,6 +1162,7 @@ export const register: Register = on => {
       return paneTree(els, {
         wl: await read($, line), st: await read($, stat), ht: await read($, hudAtom), en: await read($, encAtom),
         pg: await read($, prog), lines: await read($, acts),
+        wins: await read($, winsAtom), progs: await read($, progsAtom), banner: await read($, bannerAtom),
       })
     } catch (err) {
       // 繪製出錯也要畫一行說明，不讓 pane 空白（hook 拋例外時引擎不畫任何東西）
