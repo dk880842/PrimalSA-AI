@@ -525,10 +525,12 @@ check('questrun 回 9（驗證視窗，接取在練完後）→ 透傳 9', rc ==
 s = grow(Sim(2016))
 s.quest_q = {2016: [0]}
 rc = go(2016, s)
-check('接取（練完之後）questrun 回 0（已完成）→ 不交不丟，restore 照樣取回第 2 格（@原等級）+ 出戰 + 鎖定 + 一般動作', rc == 0
+check('接取（練完之後）questrun 回 0（已完成）→ 不交不丟，restore 一律第 2 格：取回（@原等級）+ set-state-slot --slots 2 出戰（不走 set-state-many）+ 鎖定 + 一般動作（任務寵仍佔第 2 格時收尾驗證會 169，使用者定案不特判）', rc in (0, 169)
+      and any(a[0] == 'set-state-slot' and '--slots' in a and a[a.index('--slots') + 1] == '2' for a in names(s, 'pet.py'))
+      and not any(a[0] == 'set-state-many' for a in names(s, 'pet.py'))
       and not names(s, 'petdrop.py') and len(names(s, 'questrun.py')) == 1 and any('--normal' in a for a in names(s, 'pet_catch.py'))
       and any(a[0] == 'take-many' and '朵拉比斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
-      and all(any(p['name'] == '朵拉比斯' and p['state'] == '出戰' for p in s.bar[r]) for r in ROLES), f'rc={rc} {pq.LAST.get("info")}')
+      , f'rc={rc} {pq.LAST.get("info")}')
 s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
 seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'team.py')]

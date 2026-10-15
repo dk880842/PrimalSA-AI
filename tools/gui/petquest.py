@@ -57,7 +57,7 @@
     drop[N]     （--confirm-drop）petdrop.py all <獎勵寵> --confirm-name <獎勵寵> --max-level 1（恐龍 布克布克；卡坦第 1 輪 修寶）
     store_reward（卡坦）獎勵朵拉比斯（Lv1）5 人存個人倉庫
     restore     （2026-10-16 精簡）pet.py take-many --depot personal --plan "角色:第 2 格名字@原等級"（prep 記的；成功記進度檔 restore_taken，續跑看記號跳過、不讀寵物欄）
-                → pet.py set-state-slot --role all --slots 2 出戰（取回的一定在第 2 格，不認名字；任務早已完成〔accept 回 0、任務寵沒交〕例外：改 set-state-many 依名字）
+                → pet.py set-state-slot --role all --slots 2 出戰（一律第 2 格處理，不認名字、無例外）
                 → pet_catch.py --lock 戰寵 --battle-pet 名字 --normal 攻擊（外掛面板每組只開一次：逐人鎖定戰寵 + 一般動作 = 攻擊；同名一組 --roles，讀回）
                 → pet.py list 驗 5 人各自戰寵 1 隻、出戰、等級 = 原等級（保留）
                 （舊進度檔沒跑 prep、進度檔沒戰寵名而任務已完成：用當下出戰寵當戰寵，只收尾）
@@ -1022,15 +1022,9 @@ class Run:
                 self.p['restore_taken'] = True
                 self.save()
             # 取回的原寵物一定放進第 2 格（任務寵已交 / 改等待、第 2 格空）→ 依格號出戰，不認名字
-            if self.p.get('already_done'):                                # 任務早已完成、任務寵沒交（留在寵物欄佔第 2 格）→ 取回的不在第 2 格，照舊依名字出戰
-                for nm, ra in self.battle_groups():
-                    rc, _ = self.sub('pet.py', ['set-state-many', '--role', ra, nm, '出戰'], 900)
-                    if rc:
-                        return self.pass_or(rc, EXIT_RESTORE, f'{nm} 出戰失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-many --role {ra} {nm} 出戰')
-            else:
-                rc, _ = self.sub('pet.py', ['set-state-slot', '--role', 'all', '--slots', str(BATTLE_SLOT), '出戰'], 900)
-                if rc:
-                    return self.pass_or(rc, EXIT_RESTORE, f'第 {BATTLE_SLOT} 格出戰失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-slot --role all --slots {BATTLE_SLOT} 出戰')
+            rc, _ = self.sub('pet.py', ['set-state-slot', '--role', 'all', '--slots', str(BATTLE_SLOT), '出戰'], 900)
+            if rc:
+                return self.pass_or(rc, EXIT_RESTORE, f'第 {BATTLE_SLOT} 格出戰失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-slot --role all --slots {BATTLE_SLOT} 出戰')
         # 鎖定戰寵 + 戰寵一般動作 = 攻擊：外掛面板每組只開一次（pet_catch --lock --normal，逐人同一次停留做完）
         steps = [('pet_catch.py', ['--lock', '戰寵', '--battle-pet', nm, '--normal', '攻擊'] + ([] if ra == 'all' else ['--roles', ra]), f'鎖定戰寵 = {nm} + 一般動作 = 攻擊')
                  for nm, ra in self.battle_groups()]
