@@ -29,6 +29,7 @@
 """
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -38,10 +39,11 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import digitmatch  # noqa: E402
 import petmatch  # noqa: E402
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 SEED_FILE = HERE / 'fixtures' / 'pet_glyph_tpl.json'
-CAP_DIR = uikit.CACHE / 'petident' / 'samples'
+CAP_DIR = clients.SHARED_CACHE / 'petident' / 'samples'     # 讀字樣本（診斷用，與帳號無關 → 共用）
 
 PREDS = {
     'cream': petmatch.PREDS['name'],                                   # 奶油色字 ≈ (240,224,128)
@@ -108,7 +110,7 @@ def save_learned(tpl_add: dict) -> None:
             cur = d.setdefault(k, {}).setdefault(ch, [])
             cur += [v for v in vs if v not in cur]
     LEARN_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = LEARN_FILE.with_suffix('.tmp')
+    tmp = LEARN_FILE.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
     tmp.replace(LEARN_FILE)
     load_tpl(reload=True)

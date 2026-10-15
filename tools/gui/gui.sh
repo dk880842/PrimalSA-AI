@@ -4,16 +4,28 @@
 # 動到遊戲的指令（click / drag / key / max / end…）gui.ps1 會寫操作 log（tools/.cache/actions.log，pane 顯示）；
 # 想附註用途：PSA_NOTE="對話確認" bash tools/gui/gui.sh click 948 461
 # shot 不給檔名時存到 tools/.cache/shot.png；給相對檔名（如 out1.png）也存到 tools/.cache/ 底下，絕對路徑照用
+# （多視窗：PSA_CLIENT=PrimalSA2 時相對檔名改放 tools/.cache/clients/PrimalSA2/，與 gui.ps1 / clients.py 同規則）
+# 退出碼 = gui.ps1 的退出碼（pipefail：輸出經 tr 去 \r，失敗照樣回非 0；1 沒在執行、6 同名多個、7 點擊鎖逾時、9 驗證停手旗標）
+set -o pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 # 路徑換算：WSL 用 wslpath -w；Git Bash 用 cygpath -w；都沒有就用原路徑
 winpath() { if command -v wslpath >/dev/null 2>&1; then wslpath -w "$1"; elif command -v cygpath >/dev/null 2>&1; then cygpath -w "$1"; else printf '%s' "$1"; fi; }
 PS="$(winpath "$DIR/gui.ps1")"
 # 多視窗：PSA_CLIENT=PrimalSA2 bash tools/gui/gui.sh ... 操作另一個視窗（不設 = PrimalSA）。WSL 要列進 WSLENV 才傳得到 powershell.exe（Git Bash 直接繼承，加了也無害）
 if [ -n "$PSA_CLIENT" ]; then case ":$WSLENV:" in *:PSA_CLIENT:*) ;; *) export WSLENV="${WSLENV:+$WSLENV:}PSA_CLIENT" ;; esac; fi
+# 這個視窗的狀態資料夾：去空白、去 .exe；空的 / PrimalSA（大小寫不分）= tools/.cache；其他 = tools/.cache/clients/<名稱>（不合法字元換 _、全是點加 _）
+cache_dir() {
+  local n
+  n="$(printf '%s' "$PSA_CLIENT" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/\.[eE][xX][eE]$//')"
+  if [ -z "$n" ] || [ "$(printf '%s' "$n" | tr 'A-Z' 'a-z')" = primalsa ]; then printf '%s' "$DIR/../.cache"; return; fi
+  n="$(printf '%s' "$n" | sed 's/[^A-Za-z0-9_.-]/_/g' | cut -c1-64)"
+  case "$n" in *[!.]*) ;; *) n="_$n" ;; esac
+  printf '%s' "$DIR/../.cache/clients/$n"
+}
 cmd="$1"; shift
 if [ "$cmd" = shot ]; then
   out="${1:-shot.png}"
-  case "$out" in /*|[A-Za-z]:*|\\*) ;; *) out="$DIR/../.cache/$out" ;; esac   # 相對路徑一律放 tools/.cache/（與 gui.ps1 一致）
+  case "$out" in /*|[A-Za-z]:*|\\*) ;; *) out="$(cache_dir)/$out" ;; esac   # 相對路徑一律放這個視窗的狀態資料夾（與 gui.ps1 一致）
   mkdir -p "$(dirname "$out")"
   set -- "$(winpath "$(realpath -m "$out" 2>/dev/null || echo "$out")")"
 fi

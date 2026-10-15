@@ -51,7 +51,8 @@ EXIT_NO_LEVEL = 59
 CACHE = uikit.CACHE
 PID_FILE, STOP_FILE, STATE_FILE = CACHE / 'follow.pid', CACHE / 'follow.stop', CACHE / 'follow.json'
 import logpaths  # noqa: E402
-EVENT_LOG = logpaths.p(uikit.ROOT / 'notes' / 'quest-events.log')
+import clients  # noqa: E402
+EVENT_LOG = logpaths.p(clients.npath('quest-events.log'))     # 主視窗 = notes/quest-events.log；其他 = notes/clients/<程序名>/
 BLOCK_RE = re.compile(r'未\s*達\s*到?\s*(\d+)\s*轉\s*(\d+)\s*級')
 MAP_NAME_BOX = (1085, 30, 225, 80)    # 右上地圖名（兩行時 HUD 的 pos / map 欄會讀不到，例：五兄弟的山寨地下６樓）
 CHAT_BOX = (65, 650, 460, 180)        # 左下聊天區（截圖座標；只在傳送失敗時 OCR）
@@ -291,6 +292,7 @@ class Follow:
         if now - self.unk_since > UNKNOWN_STOP_MIN * 60:
             errlog.add(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘，follow 停止，請人工檢查畫面（鐵則 5）', source=SRC)
             log(f'畫面不認得超過 {UNKNOWN_STOP_MIN} 分鐘 → 停手通知使用者')
+            uikit.trip_verify(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘', SRC)   # 多視窗：其他視窗也停
             return uikit.EXIT_UNKNOWN_SCREEN
         if not self.unk_logged:
             shot = self.alert_shot()

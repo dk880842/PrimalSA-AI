@@ -43,6 +43,7 @@ from pathlib import Path
 
 import actlog
 import charstate
+import clients
 import errlog
 import heal
 import layout
@@ -51,7 +52,7 @@ import watchstate
 import winenv
 from walk import gui, log
 
-CACHE = Path(__file__).resolve().parents[1] / '.cache'
+CACHE = clients.cache_dir()          # 每個視窗一份（主視窗 = tools/.cache，與改版前相同）
 STATE = CACHE / 'petwatch.json'
 LOCK = CACHE / 'petwatch.lock'
 

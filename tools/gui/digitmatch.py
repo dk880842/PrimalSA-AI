@@ -14,6 +14,7 @@
 """
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -159,7 +160,7 @@ def load_tpl(layout: str) -> dict:
 def save_tpl(layout: str, tpl: dict) -> None:
     TPL_DIR.mkdir(parents=True, exist_ok=True)
     p = tpl_path(layout)
-    tmp = p.with_suffix('.tmp')
+    tmp = p.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_text(json.dumps(tpl, ensure_ascii=False), encoding='utf-8')
     tmp.replace(p)
 

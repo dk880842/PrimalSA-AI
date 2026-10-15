@@ -11,8 +11,11 @@ import sys
 import time
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import clients  # noqa: E402
+
 ROOT = Path(__file__).resolve().parents[2]
-LOCK_FILE = ROOT / 'tools' / '.cache' / 'battle.lock'
+LOCK_FILE = clients.cpath('battle.lock')     # 每個視窗一份（主視窗 = tools/.cache/battle.lock，與改版前相同）
 LOCK_MAX_AGE = 1800.0                # 鎖檔超過 30 分鐘一律當作過期（防 pid 被別的程式重用、程式被強殺沒清）
 
 # 完整戰鬥畫面（2026-10-10 實測）：上方中央棕框外框 9 點，同時符合（容差 25）才算；下指令 / 播放中兩種畫面像素相同

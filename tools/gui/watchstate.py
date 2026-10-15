@@ -15,8 +15,10 @@ import os
 import time
 from pathlib import Path
 
+import clients  # noqa: E402  多視窗：每個視窗自己的狀態資料夾（主視窗 = tools/.cache，與改版前相同）
+
 ROOT = Path(__file__).resolve().parents[2]
-CACHE = ROOT / 'tools' / '.cache'
+CACHE = clients.cache_dir()                      # PSA_CLIENT=PrimalSA2 → tools/.cache/clients/PrimalSA2（state.json / watch.lock … 各視窗一份）
 STATE_FILE = CACHE / 'state.json'
 LOCK_FILE = CACHE / 'watch.lock'
 STOP_FILE = CACHE / 'watch.stop'
@@ -26,8 +28,8 @@ HALT_FILE = CACHE / 'netwatch.halt'
 ACK_FILE = CACHE / 'watch.ack'
 CONFIG_FILE = CACHE / 'watch-config.json'        # {"chars": [角色名白名單]}（不進 git）
 CURCHAR_FILE = CACHE / 'current-char.json'       # 切換角色的工具點完卡片後寫：{name, ts, src}
-PET_AVATARS_FILE = CACHE / 'pet-avatars.json'    # watch.py --learn-pet 建的寵物頭像庫
-QUEST_LOG = ROOT / 'notes' / 'quest-events.log'
+PET_AVATARS_FILE = clients.SHARED_CACHE / 'pet-avatars.json'    # watch.py --learn-pet 建的寵物頭像庫（與帳號無關 → 全部視窗共用）
+QUEST_LOG = clients.npath('quest-events.log')    # 主視窗 = notes/quest-events.log；其他 = notes/clients/<程序名>/quest-events.log
 VERSION = 1
 
 # 「內容有沒有變」的比較排除這些鍵（任何深度）：時間戳、序號、每輪都會變的量測值、雜訊值。
@@ -282,7 +284,12 @@ class VerifyGuard:
         self.sleep, self.mono = sleep, mono
 
     def check(self) -> str:
-        """'ok' = 可以動作；'timeout' = 暫停超過上限，呼叫端應停止"""
+        """'ok' = 可以動作；'timeout' = 暫停超過上限（或全視窗驗證停手旗標存在），呼叫端應停止"""
+        import verifyhalt
+        vh = verifyhalt.active()
+        if vh:                                   # 多視窗：任一視窗出現驗證視窗 → 全部停（旗標要人清，不等）
+            self.log(f'{self.source}：' + verifyhalt.message(vh))
+            return 'timeout'
         if self.reader() is not True:
             return 'ok'
         t0 = self.mono()

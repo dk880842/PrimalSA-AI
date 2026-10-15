@@ -30,6 +30,7 @@
   106 重登進遊戲了，但當前角色切回隊長失敗（char.py 的退出碼，訊息有詳情）
   107 起始畫面不是主畫面（戰鬥 / 其他面板 / 對話；--stuck 時只擋完整戰鬥 / 面板 / 對話）→ 不動
   108 netwatch 動作鎖被別的腳本佔用 → 不動
+  109 多視窗不自動重登（netwatch.auto_login_check：非主視窗，或主視窗時還有別的 PrimalSA* 在跑 / 查不到程序清單）→ 什麼都不點（登出後回不來，2026-10-15 使用者決定）
 未實機驗證（只有離線測試）：設置面板標題板 / ✕ 特徵（樣本有，沿用 screen_sigs）、全員登出鈕顏色、確認提示窗的像素特徵與 OCR 框（假設與網路異常提示同款單鈕窗；
 首次手動登出時使用者只給了座標 715,557）、「等回登入畫面」的時序。這些判斷都保守：不符就停手不點。
 """
@@ -48,7 +49,7 @@ import uikit  # noqa: E402
 
 SRC = 'relogin'
 (EXIT_PANEL, EXIT_NO_PROMPT, EXIT_PROMPT_OTHER, EXIT_NO_LOGIN, EXIT_RELOGIN_FAIL,
- EXIT_TEAM, EXIT_CHAR, EXIT_NOT_IDLE, EXIT_BUSY) = range(100, 109)
+ EXIT_TEAM, EXIT_CHAR, EXIT_NOT_IDLE, EXIT_BUSY, EXIT_MULTI) = range(100, 110)
 
 LOGOUT_BTN = (517, 731)              # 設置面板底部「全員登出」
 LOGOUT_SIG = [(517, 722, 195, 89, 57, 30), (517, 731, 201, 82, 50, 30)]   # 橘紅鈕面（p4/panel_setting.png / set_DKBO.png 量得）
@@ -174,6 +175,9 @@ def run(confirm: bool = False, dry_run: bool = False, leader: str = charstate.LE
     rc = uikit.preflight(SRC)
     if rc:
         return rc
+    how, why = netwatch.auto_login_check()          # 多視窗：登出後不會自動按登錄 → 根本不登出
+    if how != 'ok':
+        return uikit.fail(SRC, EXIT_MULTI, why if how == 'block' else f'{why}，不重登')
     st = uikit.screen(full=True)
     if not start_ok(st, stuck):
         return uikit.fail(SRC, EXIT_NOT_IDLE, f'起始畫面不是主畫面（state={st.get("state")} panel={st.get("panel")} full={st.get("full")}'

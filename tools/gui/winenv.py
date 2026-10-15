@@ -137,7 +137,9 @@ def spawn_detached(argv: list, log_path=None, cwd=None, popen=None) -> int:
     """背景常駐程序（例：grind.py follow）：跟呼叫端脫鉤，呼叫端 / 終端結束後照跑。回子程序 pid（失敗丟 OSError）。
     POSIX（WSL）= start_new_session（等同 setsid，脫離終端與行程群組；不會被 SIGHUP / 群組 kill 帶走）；
     Windows 原生 = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP，先試 CREATE_BREAKAWAY_FROM_JOB（工作物件不准脫離會 OSError → 不帶再試一次）。
-    stdout / stderr 附加寫到 log_path（沒給 = 丟棄）；stdin 一律 DEVNULL。popen 可換（測試）"""
+    stdout / stderr 附加寫到 log_path（沒給 = 丟棄）；stdin 一律 DEVNULL。popen 可換（測試）
+    多視窗：子程序繼承整份環境（含 PSA_CLIENT），所以 PSA_CLIENT=PrimalSA2 起的 follow 也操作 PrimalSA2、用自己的狀態資料夾；
+    沒設 PSA_CLIENT 就不帶（與改版前相同）。test_multiclient 驗證。"""
     popen = popen or subprocess.Popen
     out = open(log_path, 'ab') if log_path else subprocess.DEVNULL
     env = dict(os.environ, PYTHONIOENCODING='utf-8', PYTHONUNBUFFERED='1')

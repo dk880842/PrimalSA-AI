@@ -50,7 +50,7 @@ import uikit  # noqa: E402
 import winenv  # noqa: E402
 
 ROOT = HERE.parents[1]
-CACHE = ROOT / 'tools' / '.cache'
+CACHE = uikit.CACHE                  # 每個視窗一份（questdetail-live.png；主視窗 = tools/.cache）
 TPL_FILE = HERE / 'fixtures' / 'questdetail_tpl.json'
 TASK_TABLE = ROOT / 'knowledge' / 'data' / 'tables' / 'TaskExplan.jsonl'
 

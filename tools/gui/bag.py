@@ -1675,7 +1675,7 @@ def weapons(roles) -> tuple:
             if sp:
                 try:
                     import shutil
-                    shutil.copyfile(uikit.ROOT / sp, uikit.ROOT / 'tools' / '.cache' / f'weapon-{r}.png')
+                    shutil.copyfile(uikit.ROOT / sp, uikit.CACHE / f'weapon-{r}.png')
                 except OSError:
                     pass
     return 0, out

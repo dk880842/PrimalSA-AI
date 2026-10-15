@@ -38,6 +38,15 @@ $env:PSA_CLIENT = 'Primal*'
 $r = Find-PsaProcess -Procs @($one)
 Check '萬用字元名稱 → badname（不會比到多個程序）' ((-not $r.ok) -and $r.kind -eq 'badname')
 
+# ---- 2b) 每個視窗的狀態資料夾（與 clients.py cache_dir 同規則；只算路徑，不建資料夾）----
+$shared = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\.cache'))
+Check "主視窗 = tools\.cache（$(Get-PsaCacheDir 'PrimalSA')）" ((Get-PsaCacheDir 'PrimalSA') -eq $shared -and (Get-PsaCacheDir 'primalsa') -eq $shared)
+Check 'PrimalSA2 = tools\.cache\clients\PrimalSA2' ((Get-PsaCacheDir 'PrimalSA2') -eq (Join-Path $shared 'clients\PrimalSA2'))
+Check '不合法字元換 _、全是點加 _（不跳出 clients\）' ((Get-PsaCacheDir 'a/b') -eq (Join-Path $shared 'clients\a_b') -and (Get-PsaCacheDir '..') -eq (Join-Path $shared 'clients\_..'))
+Remove-Item Env:PSA_CLIENT
+Check '不給參數 = 目前 PSA_CLIENT（沒設 = 主視窗）' ((Get-PsaCacheDir) -eq $shared)
+Check 'Test-PsaVerifyHalt 回布林' ((Test-PsaVerifyHalt) -is [bool])
+
 # ---- 3) 點擊鎖 ----
 $mx = 'Local\PrimalSA-AI-Input-test-' + [Guid]::NewGuid().ToString('N')
 $lk = Enter-PsaInputLock -TimeoutMs 1000 -Name $mx

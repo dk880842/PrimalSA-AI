@@ -95,15 +95,29 @@ def _lock(path: Path):
                 pass
 
 
+def _client() -> str:
+    """非主視窗回程序名（PrimalSA2…），主視窗 / 讀不到回 ''"""
+    try:
+        import clients
+        return '' if clients.is_default() else clients.name()
+    except Exception:      # noqa: BLE001
+        return ''
+
+
 def add(error: str, fix=None, source=None, ts=None, path: Path | None = None, keep: int = KEEP):
-    """寫一筆，回傳 id（失敗回 None）。ts 為毫秒，預設現在。"""
+    """寫一筆，回傳 id（失敗回 None）。ts 為毫秒，預設現在。
+    多視窗：errlog 全部視窗共用一份；非主視窗的筆數多一個 client 欄位（程序名），主視窗格式不變"""
     path = path or LOG
     try:
         with _lock(path):
             rows = _read(path)
             nid = max([r.get('id', 0) for r in rows] + [0]) + 1
-            rows.append({'id': nid, 'ts': int(ts if ts is not None else time.time() * 1000),
-                         'error': str(error).replace('\n', ' '), 'fix': fix, 'source': source})
+            row = {'id': nid, 'ts': int(ts if ts is not None else time.time() * 1000),
+                   'error': str(error).replace('\n', ' '), 'fix': fix, 'source': source}
+            cl = _client()
+            if cl:
+                row['client'] = cl
+            rows.append(row)
             _write(path, rows[-keep:])
         return nid
     except OSError:

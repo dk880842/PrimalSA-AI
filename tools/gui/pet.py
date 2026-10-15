@@ -96,6 +96,7 @@ _T_START = time.time()
 import argparse  # noqa: E402
 import hashlib  # noqa: E402
 import json  # noqa: E402
+import os  # noqa: E402
 import re  # noqa: E402
 import sys  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -433,7 +434,7 @@ def save_icache(c: dict) -> None:
         d[sec] = dict(items)
     p = icache_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix('.tmp')
+    tmp = p.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
     tmp.replace(p)
 

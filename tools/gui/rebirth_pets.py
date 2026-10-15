@@ -77,13 +77,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'rebirth_pets'
 ROOT = uikit.ROOT
 import logpaths  # noqa: E402
-EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
-QUEST_LOG = logpaths.p(ROOT / 'notes' / 'quest-log.md')
+EVENT_LOG = logpaths.p(clients.npath('quest-events.log'))     # 主視窗 = notes/；其他 = notes/clients/<程序名>/
+QUEST_LOG = logpaths.p(clients.npath('quest-log.md'))
 PROGRESS = logpaths.p(uikit.CACHE / 'rebirth_pets.json')
 
 EXIT_PRE, EXIT_BOX, EXIT_STORE, EXIT_CATCH, EXIT_DIST, EXIT_RIDE, EXIT_BATTLE, EXIT_LOCK, EXIT_CLEAN, EXIT_ARGS = 100, 101, 102, 103, 104, 105, 106, 107, 108, 109
