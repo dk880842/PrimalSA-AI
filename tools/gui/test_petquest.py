@@ -56,8 +56,9 @@ class Sim:
     def sleep(self, s):
         pass
 
-    def clock(self):
-        return 0.0
+    def clock(self):                          # 每呼叫一次走 1 秒（練寵迴圈靠 TRAIN_MAX_S 牆鐘結束，不會無窮迴圈）
+        self.t = getattr(self, 't', 0.0) + 1.0
+        return self.t
 
     def encounter_off(self):
         self.calls.append(('enc_off',))
@@ -322,8 +323,10 @@ ok, lag = pq.train_status({'DKBO': [P('魯尼帖斯', level=18), P('貝魯卡', 
 check('train_status：門檻 ≥（18 過、29 < 30 沒過）', not ok and lag == {'DKBO': {'貝魯卡': 29}})
 check('battle_levels：出戰那隻優先', pq.battle_levels({'DKBO': [P('朵拉比斯', '等待', 1), P('朵拉比斯', '出戰', 126)]}) == {'DKBO': 126})
 check('stage_base：catch2 → catch、step1 不拆', pq.stage_base('catch2') == 'catch' and pq.stage_base('step1') == 'step1' and pq.stage_round('turnin2') == 2)
-check('stages_of 卡坦兩輪、恐龍一輪、猜謎', pq.stages_of(2019)[2:7] == ['catch1', 'distribute1', 'train1', 'turnin1', 'drop1'] and 'store_reward' in pq.stages_of(2019)
-      and pq.stages_of(2016)[2] == 'catch' and pq.stages_of(3003)[1] == 'step1')
+check('stages_of（2026-10-15 新順序）：恐龍 prep 在最前、accept 在 train 之後 turnin 之前；卡坦 accept 在 train1 之後；猜謎不變',
+      pq.stages_of(2016) == ['prep', 'catch', 'distribute', 'train', 'accept', 'turnin', 'drop', 'restore']
+      and pq.stages_of(2019) == ['prep', 'catch1', 'distribute1', 'train1', 'accept', 'turnin1', 'drop1', 'catch2', 'distribute2', 'train2', 'turnin2', 'store_reward', 'restore']
+      and pq.stages_of(3003) == ['accept', 'step1', 'prep', 'train', 'turnin', 'drop', 'restore'], str(pq.stages_of(2016)))
 
 # ---------------- 恐龍博士 happy path
 s = grow(Sim(2016))
@@ -378,11 +381,13 @@ check('同一進度檔重跑加 --confirm-drop → 從 drop 續跑完成（不�
 # ---------------- 誘餌不夠
 s = grow(Sim(2016, bait=6))
 rc = go(2016, s, confirm_drop=True)
-check('誘餌不夠沒 --confirm-buy-bait → 163、沒按「+」', rc == pq.EXIT_BAIT and not [c for c in s.calls if c[0] == 'plus'], f'rc={rc}')
+plus = [c for c in s.calls if c[0] == 'plus']
+check('誘餌不夠、不帶 --confirm-buy-bait 也會買（使用者 2026-10-15）：bait 帶 --keep-short-bait、DKBO3 買缺額 4 次', rc == 0 and plus == [('plus', 'DKBO3')] * 4
+      and all('--keep-short-bait' in a for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait'), f'rc={rc} plus={plus} {pq.LAST.get("info")}')
 s = grow(Sim(2016, bait=6))
 rc = go(2016, s, confirm_drop=True, confirm_buy=True)
 plus = [c for c in s.calls if c[0] == 'plus']
-check('--confirm-buy-bait：公共 6 個 → DKBO2 拆 5（餘 1）、DKBO3 取 1 個照用、只買缺額 4 次；石幣每次扣 50,000', rc == 0 and plus == [('plus', 'DKBO3')] * 4
+check('--confirm-buy-bait（no-op，結果同不帶）：公共 6 個 → DKBO2 拆 5（餘 1）、DKBO3 取 1 個照用、只買缺額 4 次；石幣每次扣 50,000', rc == 0 and plus == [('plus', 'DKBO3')] * 4
       and s.stone == 3_000_000 - 4 * pq.PLUS_COST and not s.bag_bait.get('DKBO3'), f'rc={rc} plus={plus} {pq.LAST.get("info")}')
 s = grow(Sim(2016, bait=8))
 rc = go(2016, s, confirm_drop=True, confirm_buy=True)
@@ -399,9 +404,18 @@ s.dia_drop = 5
 rc = go(2016, s, confirm_buy=True)
 check('「+」後鑽石有變 → 163 停（只按 1 次）', rc == pq.EXIT_BAIT and len([c for c in s.calls if c[0] == 'plus']) == 1 and '鑽石' in pq.LAST['info']['msg'])
 s = grow(Sim(2016, bait=0))
+s.money = lambda: (None, 0)
+rc = go(2016, s, confirm_drop=True)
+check('石幣讀不到不擋（2026-10-15 不讀石幣）、鑽石讀得到 → 照按', rc == 0 and [c for c in s.calls if c[0] == 'plus'], f'rc={rc} {pq.LAST.get("info")}')
+s = grow(Sim(2016, bait=0))
 s.money = lambda: (None, None)
-rc = go(2016, s, confirm_buy=True)
-check('石幣 / 鑽石讀不到不擋（2026-10-15 不讀石幣）→ 照按', rc != pq.EXIT_BAIT and [c for c in s.calls if c[0] == 'plus'])
+rc = go(2016, s, confirm_drop=True)
+check('按「+」前讀不到鑽石 → 163、一次都不按（鑽石檢查要能生效）', rc == pq.EXIT_BAIT and not [c for c in s.calls if c[0] == 'plus'] and '讀不到鑽石' in pq.LAST['info']['msg'], f'rc={rc} {pq.LAST.get("info")}')
+s = grow(Sim(2016, bait=0))
+s.dia_seq = [0, None]
+s.money = lambda: (None, s.dia_seq.pop(0) if len(s.dia_seq) > 1 else s.dia_seq[0])
+rc = go(2016, s, confirm_drop=True)
+check('按「+」後讀不到鑽石 → 163（只按 1 次）', rc == pq.EXIT_BAIT and len([c for c in s.calls if c[0] == 'plus']) == 1 and '讀不到鑽石' in pq.LAST['info']['msg'], f'rc={rc}')
 s = grow(Sim(2016, bait=0))
 _m = s.money
 s.dia_seq = [0, 5]
@@ -420,7 +434,18 @@ check('卡坦誘餌 50 → 10（鯊 20 + 雞 20）', s.bait == 10, str(s.bait))
 s = grow(Sim(2019, step=2))
 s.bar = {r: [P('布拉奇多斯', '騎乘', 5), P('朵拉比斯', '出戰', 125 + i)] for i, r in enumerate(ROLES)}
 rc = go(2019, s, confirm_drop=True)
-check('接取時步號已是 2 → 第 1 輪全跳過（不抓鯊）', rc == 0 and not any('鯊魚系' in ' '.join(a) for a in names(s, 'pet_catch.py')), f'rc={rc}')
+check('prep 開頭讀到步號已是 2 → 第 1 輪全跳過（不抓鯊、不交 / 丟修寶），第 2 輪照跑', rc == 0 and not any('鯊魚系' in ' '.join(a) for a in names(s, 'pet_catch.py'))
+      and any('火雞系' in ' '.join(a) for a in names(s, 'pet_catch.py')) and not names(s, 'petdrop.py'), f'rc={rc} {pq.LAST.get("info")}')
+s = grow(Sim(2019))
+rc = go(2019, s, confirm_drop=True)
+seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'pet_catch.py')]
+i_acc = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' not in a]
+i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'rest-all']
+i_shark = [i for i, (sc, a) in enumerate(seq) if sc == 'pet_catch.py' and '鯊魚系' in ' '.join(a)]
+i_bird = [i for i, (sc, a) in enumerate(seq) if sc == 'pet_catch.py' and '火雞系' in ' '.join(a)]
+i_t1 = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' in a]
+check('卡坦新順序：鯊抓 / 練 / rest-all 之後才接任務（只接一次）、接完交第 1 輪、交完才抓雞', rc == 0 and len(i_acc) == 1 and i_shark[-1] < i_rest[0] < i_acc[0] < i_t1[0] < i_bird[0],
+      f'rc={rc} acc={i_acc} rest={i_rest} t1={i_t1}')
 s = grow(Sim(2019))
 s.quest_q = {2019: [155, 117]}                               # 第 1 輪交完 questrun 回 117 但步號沒進
 s.read_step = lambda t: 1
@@ -450,15 +475,26 @@ rc = go(3003, s, confirm_drop=True)
 check('猜謎步 1 quest.py 3 且步號仍 1 → 161', rc == pq.EXIT_ACCEPT, f'rc={rc}')
 
 # ---------------- 其他
-s = Sim(2016)
+s = grow(Sim(2016))
 s.fail[('questrun.py', 'run')] = 9
 rc = go(2016, s)
-check('questrun 回 9（驗證視窗）→ 透傳 9', rc == 9)
-s = Sim(2016)
+check('questrun 回 9（驗證視窗，接取在練完後）→ 透傳 9', rc == 9 and pq.LAST['ran'] == ['prep', 'catch', 'distribute', 'train'], str(pq.LAST.get('ran')))
+s = grow(Sim(2016))
 s.quest_q = {2016: [0]}
 rc = go(2016, s)
-check('接取時 questrun 回 0（已完成）→ 不抓不交不丟，只收尾（鎖定 + 一般動作 + 驗）', rc == 0 and not any('--assign' in a for a in names(s, 'pet_catch.py'))
-      and not names(s, 'petdrop.py') and len(names(s, 'questrun.py')) == 1 and names(s, 'ass.py'), f'rc={rc}')
+check('接取（練完之後）questrun 回 0（已完成）→ 不交不丟，restore 照樣取回第 2 格（@原等級）+ 出戰 + 鎖定 + 一般動作', rc == 0
+      and not names(s, 'petdrop.py') and len(names(s, 'questrun.py')) == 1 and names(s, 'ass.py')
+      and any(a[0] == 'take-many' and '朵拉比斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
+      and all(any(p['name'] == '朵拉比斯' and p['state'] == '出戰' for p in s.bar[r]) for r in ROLES), f'rc={rc} {pq.LAST.get("info")}')
+s = grow(Sim(2016))
+rc = go(2016, s, confirm_drop=True)
+seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'team.py')]
+i_acc = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' not in a]
+i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'rest-all']
+i_store = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'store-many' and '--depot' in a and a[a.index('--depot') + 1] == 'personal']
+i_dis = [i for i, (sc, a) in enumerate(seq) if sc == 'team.py']
+check('恐龍新順序：解散 → 存第 2 格（個人倉庫）在最前、接任務在 rest-all 之後', rc == 0 and i_dis[0] < i_store[0] < i_rest[0] < i_acc[0] and seq[0][0] == 'team.py',
+      f'rc={rc} dis={i_dis[:1]} store={i_store[:1]} rest={i_rest} acc={i_acc}')
 check('不支援的任務 → 160', go(2017, Sim(2017)) == pq.EXIT_ARGS)
 check('--from 不認得 → 160', go(2016, Sim(2016), from_stage='xxx') == pq.EXIT_ARGS)
 buf = io.StringIO()
@@ -729,8 +765,10 @@ check('--keep-autoswap：restore 跳過（不取回朵拉比斯、不鎖定、�
       not any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
       and not [a for a in names(s, 'pet_catch.py') if '--lock' in a] and not names(s, 'ass.py'), str(names(s, 'pet_catch.py')))
 allp = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))
-check('--keep-autoswap：進度檔記 carry_orig（5 人原等級）', sorted(allp.get('carry_orig', {}).get('orig', {})) == sorted(pq.ALL_ROLES), str(allp.get('carry_orig')))
+check('--keep-autoswap：進度檔記 carry_orig（5 人原等級 + 第 2 格名字）', sorted(allp.get('carry_orig', {}).get('orig', {})) == sorted(pq.ALL_ROLES)
+      and allp['carry_orig'].get('battle') == {r: '朵拉比斯' for r in ROLES}, str(allp.get('carry_orig')))
 s2 = Sim(2019)
+s2.t = s.t                                                            # 同一條時間線（carry_orig 的 ts 不能在未來）
 for r in pq.ALL_ROLES:
     s2.bar[r] = [x for x in s2.bar[r] if x['name'] != '朵拉比斯']       # 朵拉比斯還在個人倉庫、寵物欄讀不到
 rc = go(2019, s2, from_stage='prep', to_stage='prep', reset=False)
@@ -766,13 +804,33 @@ for r in ROLES:
 rc = go(2016, s, reset=False, to_stage='prep')
 check('續跑沿用進度檔戰寵名（不重讀）', rc == 0 and any(a[0] == 'store-many' and '迪基格斯' in a for a in names(s, 'pet.py')), f'rc={rc} {pq.LAST.get("info")}')
 
-# 讀不到出戰寵 → 162 停手
+# 第 2 格（2026-10-15）：不看出戰狀態，記第 2 格名字 + 等級
 s = Sim(2016, battle='迪基格斯')
 for r in ROLES:
-    for p in s.bar[r]:
-        p['state'] = '等待'
+    s.bar[r][1]['state'] = '等待'
 rc = go(2016, s, to_stage='prep')
-check('沒有出戰寵且沒朵拉比斯 → 162 不亂猜、沒存倉', rc == pq.EXIT_PREP and not any(a[0] == 'store-many' for a in names(s, 'pet.py')), f'rc={rc}')
+pr = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']
+check('第 2 格是等待中的迪基格斯 → 照記（名字 + 等級）並存個人倉庫', rc == 0 and set(pr['battle'].values()) == {'迪基格斯'} and pr['orig'] == {r: 125 + i for i, r in enumerate(ROLES)}
+      and pr.get('stored') and all(len(s.bar[r]) == 1 for r in ROLES), f'rc={rc} {pq.LAST.get("info")}')
+nm, lv, bd = pq.pick_slot2({'DKBO': [dict(P('瑪斯貝卡', '騎乘', 5), slot=1), dict(P('迪基格斯', '出戰', 9), slot=2), dict(P('朵拉比斯', '出戰', 130), slot=3)]}, roles=['DKBO'])
+check('pick_slot2：取 slot == 2（1 起算），不是第一隻出戰的', nm == {'DKBO': '迪基格斯'} and lv == {'DKBO': 9} and not bd, f'{nm} {lv} {bd}')
+nm, lv, bd = pq.pick_slot2({'A': [dict(P('瑪斯貝卡', '騎乘', 5), slot=1), {'slot': 2, 'empty': True}],
+                            'B': [dict(P('朵拉比斯', '出戰', 9), slot=1), dict(P('瑪斯貝卡', '騎乘', 5), slot=2)],
+                            'C': [dict(P('朵拉比斯', '出戰', 9), slot=1), dict(P('瑪斯貝卞', '等待', 5), slot=2)],
+                            'D': [dict(P('瑪斯貝卡', '騎乘', 5), slot=1), {'slot': 2, 'state': '出戰', 'level': 3, 'img_species': '迪基格斯'}],
+                            'E': [dict(P('瑪斯貝卡', '騎乘', 5), slot=1), dict(P('迪基格斯', '出戰', None), slot=2)],
+                            'F': [dict(P('瑪斯貝卡', '騎乘', 5), slot=1), dict(P('朵拉比斯', '騎乘', 130), slot=2)]}, roles=list('ABCDEF'))
+check('pick_slot2：空格 / 騎寵（騎乘、像騎寵錯字）/ 只有縮圖 / 等級讀不到 / 騎乘中 → 全部記原因、不記名字',
+      nm == {} and set(bd) == set('ABCDEF') and '騎寵' in bd['B'] and '騎寵' in bd['C'] and '騎寵' in bd['F'] and '空' in bd['A'] and '讀不出' in bd['D'] and '等級' in bd['E'], str(bd))
+s = Sim(2016)
+s.bar[ROLES[2]][1] = P('瑪斯貝卡', '騎乘', 5)                   # 第 2 格是騎寵
+rc = go(2016, s, to_stage='prep')
+check('有人第 2 格是騎寵 → 162、一隻都不存（存倉不碰騎寵）', rc == pq.EXIT_PREP and not any(a[0] == 'store-many' for a in names(s, 'pet.py'))
+      and '騎寵' in pq.LAST['info']['msg'], f'rc={rc} {pq.LAST.get("info")}')
+s = Sim(2016)
+s.bar[ROLES[1]] = s.bar[ROLES[1]][:1]                          # 第 2 格空
+rc = go(2016, s, to_stage='prep')
+check('有人第 2 格空 → 162、沒存倉、沒接任務', rc == pq.EXIT_PREP and not any(a[0] == 'store-many' for a in names(s, 'pet.py')) and not names(s, 'questrun.py'), f'rc={rc}')
 
 # 各角色不同戰寵：分組存倉
 s = Sim(2016)

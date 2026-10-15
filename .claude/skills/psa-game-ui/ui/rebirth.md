@@ -70,7 +70,7 @@
 ## 2026-10-13 二轉後續：模組化與自動化（離線測試 test_rebirth.py / test_rebirth_steps.py / test_rebirth_pets.py；**實機未驗證**）
 可獨立呼叫的小模組（rebirth.py 只串階段）：
 - **`stuckrecover.py`**：quest.py 回 19 / 42（巡路卡住 / VS 牌卡死）→ `relogin_team`（relogin.py --stuck --confirm；105 → team.form）→ 呼叫端善後。questrun（每任務 2 次）與 rebirth（`Run.quest` 內，每階段 2 次，重登後 team.check / form、重吃龍王、重跑同一指令；`--fight` 單人重打不重登）共用。二轉 boss10 因手動 relogin 損失 13 分鐘。重登遇 9 / 10 原碼停手；失敗 / 仍卡 → 84（info.relogin_rc）。
-- **`catchbuy.py`**：外掛捉寵設置「+」買可抓捕數（`parse_money / money / press_plus / buy / buy_to`），petquest（`--confirm-buy-bait`）與 rebirth_pets（`--confirm-buy-catch`）同一份；每次按前後讀石幣（剛好少 50,000、鑽石不變、可抓捕數 +1 才繼續）。CLI：`catchbuy.py DKBO2 5 --confirm-buy`（紅區花石幣，沒旗標只印計畫）。
+- **`catchbuy.py`**：外掛捉寵設置「+」買可抓捕數（`parse_money / money / press_plus / buy / buy_to`），petquest（2026-10-15 起不需旗標，誘餌不夠只買缺額）與 rebirth_pets（`--confirm-buy-catch`）同一份；不讀石幣；鑽石用像素點陣讀（`read_dia_px`，鑽石 0 時 OCR 漏讀單獨的「0」），按前讀不到鑽石不按、按後鑽石讀不到 / 有變就停、可抓捕數 +1 才繼續。CLI：`catchbuy.py DKBO2 5 --confirm-buy`（紅區花石幣，沒旗標只印計畫）。
 - **`rebirth_steps.py`**：`accept --trans N` 接任務、`snapshot` / `drop-reward --trans N [--dry-run]` 轉生獎勵寵（見上）。三轉起 diff：每人要剛好 1 隻新出現的 Lv1、名字讀得出、狀態不是騎乘 / 出戰、不在第 1 格，先全員驗過才動手，任何不確定 → 98。
 - **`bag.py drop-spare-bow <角色>`**：武器格是精靈王之弓時丟背包多的那把（`--allow-protected`；武器格不是弓 → 93 不丟）。
 - boss20 備援 / 單人重打的 `quest.py --fight` 一律帶 `--step 4`（10F 為 `--step 2`），不靠追蹤文字 OCR（二轉 22:15 回 31）。

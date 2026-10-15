@@ -24,7 +24,7 @@
     --store-mount 名   **使用者當次明講才用**：舊騎寵（例 瑪斯貝卡）也存個人倉庫（先設等待、再 pet.py store --allow-mount-store）；沒給 = 舊騎寵不碰
     --from 階段        從這個階段開始（中斷後接著做；進度記在 tools/.cache/rebirth_pets.json）；--to 階段 = 做到該階段（含）就停
     --confirm-buy-catch catch：外掛捉寵設置「+」花石幣買可抓捕數到 count（每個 50,000 石幣；使用者規定騎寵這樣抓，二轉 5 次 = 250,000）。沿用 petquest 的
-                       catchbuy.buy_to：每按一次前後讀石幣（要剛好少 50,000、鑽石不變，否則停）、可抓捕數 +1 才繼續，買到 = count 後走 --direct-catch
+                       catchbuy.buy_to：不讀石幣；按前讀不到鑽石不按、按後鑽石讀不到 / 有變就停、可抓捕數 +1 才繼續，買到 = count 後走 --direct-catch
                        （不取誘餌、不試抓、直接抓）。不給 = 舊行為（取誘餌）。**紅區（花石幣）：只有使用者明講才加**
     --direct-catch     catch：可抓捕數已買好 = count，不取誘餌、不試抓，直接抓（--confirm-buy-catch 隱含）
     --keep-lock        preflight 不先取消外掛鎖定（遊戲沒擋）
@@ -1258,7 +1258,7 @@ class Run:
         return list(dict.fromkeys((self.info.get('renamed') or {}).get(ct, []) + [s.get('unnamed') for s in got if s.get('unnamed')]))
 
     def _buy_catch(self, ct, n):
-        """catchbuy.buy_to：外掛捉寵設置「+」按到可抓捕數 = n（續跑安全：已夠就不按）。每按一次前後讀石幣：剛好少 50,000、鑽石不變，否則停（鐵則 3）"""
+        """catchbuy.buy_to：外掛捉寵設置「+」按到可抓捕數 = n（續跑安全：已夠就不按）。不讀石幣；按前讀不到鑽石不按、按後鑽石讀不到 / 有變、可抓捕數不是 +1 就停（鐵則 3）"""
         import catchbuy
         T = self.T
         event(f'{ct} 用石幣「+」買可抓捕數到 {n}（--confirm-buy-catch；每個 {catchbuy.PLUS_COST} 石幣，預計最多 {n * catchbuy.PLUS_COST}）')

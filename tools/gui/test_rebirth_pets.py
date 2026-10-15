@@ -683,9 +683,14 @@ f.count = 3
 rc, _ = go(f, confirm_buy_catch=True)
 check('續跑：可抓捕數已有 3 → 只再按 2 次', rc == 0 and f.count == 5 and f.stone == 3000000 - 100000)
 f = Fake()
+f.img = True
 f.stone = 120000
 rc, _ = go(f, confirm_buy_catch=True)
-check('石幣不夠（第 3 個買不起）→ 103、不設外掛', rc == 103 and f.count == 2 and 'catch_setup' not in [c[0] for c in f.calls])
+check('石幣不讀、不擋（catchbuy 2026-10-15 使用者）：石幣看起來不夠也照按到 5', rc == 0 and f.count == 5, f'rc={rc} {f.count}')
+f = Fake()
+f.money = lambda: (None, None)
+rc, _ = go(f, confirm_buy_catch=True)
+check('按「+」前讀不到鑽石 → 103、一次都不按、不設外掛', rc == 103 and f.count == 0 and 'catch_setup' not in [c[0] for c in f.calls], f'rc={rc}')
 f = Fake()
 f.press_fail = 4
 check('「+」失敗（讀不到可抓捕數）→ 103', go(f, confirm_buy_catch=True)[0] == 103)
@@ -696,7 +701,8 @@ def _bad_press(r, limit=None):                                  # 按了但石�
     f.stone += 10000
     return rc_, b_, a_
 f.press_plus = _bad_press
-check('石幣扣的不是 50,000 → 103 停手', go(f, confirm_buy_catch=True)[0] == 103 and f.count == 1)
+f.img = True
+check('石幣扣多少不檢查（不讀石幣）→ 照買完', go(f, confirm_buy_catch=True)[0] == 0 and f.count == 5)
 f = Fake()
 orig_press = f.press_plus
 def _dia_press(r, limit=None):

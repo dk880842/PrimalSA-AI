@@ -8,7 +8,7 @@
   uv run --no-project python tools/gui/postrebirth.py run [--from 段] [--to 段] [--confirm-drop] [--confirm-buy-bait] [--spot 點名] [--fresh] [--dry-run]
     --confirm-drop      准做不可逆的丟 / 刪：紅暴的巴朵蘭恩（petdrop 1 級）+ 薩姆吉爾的首飾（bag.purge）、清背包（bag.purge 白名單）、
                         寵物任務的獎勵寵（布克布克 / 修寶 / 左迪洛斯）。沒給 → 紅暴不丟、清背包只 --dry-run 列出要刪的（空格不夠就 174 停）、寵物任務到丟寵段 168 停
-    --confirm-buy-bait  傳給 petquest：誘餌不夠時准用外掛「+」買（每次 50,000 石幣，按前後驗石幣）
+    --confirm-buy-bait  無作用（照傳給 petquest 也無害）：2026-10-15 起 petquest 誘餌不夠一律自動用外掛「+」買缺額，不需旗標（按前讀不到鑽石 / 鑽石有變就停）
     --spot 點名         收尾固定練功點（預設不給 = 去練功 grind.py start：依等級選點 + 未滿地雷區起 follow；2026-10-15 起不寫死地雷區）
     --from / --to       只跑某幾段（段名見 plan）；進度檔 tools/.cache/postrebirth.json 記完成的段（24 小時內），重跑 = 續跑；--fresh 從頭
   可 import：postrebirth.run(tools=…, …) → 退出碼；結果在 postrebirth.LAST
@@ -33,9 +33,9 @@
   q182b      questrun.py run 2025 2010 2014 2012 2013 2021 --after none --dragon（摩娜西普存個人 / 人龍隨機蛋存公共由 questdefs post 自動做）  失敗 172
   bag2       清背包②：同上，門檻 8 格（四大洞窟中間品 + 四件產物），名單 PURGE2 = PURGE1 + 杉的手環 / 月光的手鐲 / 巴巴洛的許可證；四大洞窟產物 bag.PURGE_FORBID 永不刪
   caves      questrun.py run 2000 2003 2001 2002 --after none --dragon --max-min 45           失敗 172
-  dino       petquest.py run 2016 [--confirm-drop] [--confirm-buy-bait]                       失敗 175
+  dino       petquest.py run 2016 [--confirm-drop]（先存第 2 格 → 抓 / 練 → 才接任務，見 petquest.py 檔頭）  失敗 175
              後面還會解卡坦（katan 在本次 --from / --to 範圍內、進度檔沒完成）→ 帶 `--keep-autoswap`：train 結束不關外掛「自動轉換戰寵」、restore 整段跳過
-             （自動轉換開著會把剛換回的朵拉比斯換掉、卡坦 prep 又要存倉；原等級記 petquest 進度檔 carry_orig，由卡坦 restore 統一換回，見 petquest.py 檔頭）；
+             （自動轉換開著會把剛換回的戰寵換掉、卡坦 prep 又要存倉；第 2 格名字 + 原等級記 petquest 進度檔 carry_orig，由卡坦 restore 統一換回，見 petquest.py 檔頭）；
              只跑 dino（--to dino 等）照舊關。dino 成功帶旗標後進度檔記 autoswap_pending，katan 成功才清。
              **中斷保險（選「提示 + finish 自動關」）**：dino 之後卡坦沒跑完就停（失敗 / --to 擋掉 / 手動中斷）→ 結束時 event + LAST['warnings'] 提示
              「自動轉換戰寵還開著、朵拉比斯在個人倉庫」與續跑指令，不在失敗現場自動操作遊戲（可能是斷線 / 驗證視窗 / 戰鬥中）；
@@ -415,7 +415,7 @@ class Run:
 
 
 def print_plan(o: dict) -> None:
-    print(f'postrebirth 計畫：{len(SEGMENTS)} 段（--confirm-drop {bool(o.get("confirm_drop"))}、--confirm-buy-bait {bool(o.get("confirm_buy"))}）')
+    print(f'postrebirth 計畫：{len(SEGMENTS)} 段（--confirm-drop {bool(o.get("confirm_drop"))}；誘餌不夠 petquest 自動買缺額，不需旗標）')
     for seg in SEGMENTS:
         print(f'[{seg}] {TITLES[seg]}')
         for script, args in seg_cmds(seg, o):
@@ -479,7 +479,7 @@ def main(argv=None) -> int:
     ap.add_argument('--from', dest='from_seg', default=None)
     ap.add_argument('--to', dest='to_seg', default=None)
     ap.add_argument('--confirm-drop', action='store_true', help='准丟 / 刪（紅暴巴朵蘭恩 + 首飾、清背包白名單、寵物任務獎勵寵）')
-    ap.add_argument('--confirm-buy-bait', action='store_true', help='傳給 petquest：誘餌不夠准用外掛「+」買')
+    ap.add_argument('--confirm-buy-bait', action='store_true', help='無作用（no-op，相容舊指令）：petquest 誘餌不夠一律自動買缺額')
     ap.add_argument('--spot', default=None, help='收尾固定練功點（預設不給 = 去練功：依等級選點 + follow）')
     ap.add_argument('--fresh', action='store_true')
     ap.add_argument('--dry-run', action='store_true')

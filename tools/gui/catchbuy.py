@@ -1,22 +1,30 @@
 #!/usr/bin/env python3
 """外掛「捉寵設置」的「+」買可抓捕數（petquest 與 rebirth_pets 共用；只用標準函式庫）。
 
-每按一次 +1 可抓捕數、扣 50,000 石幣（2026-10-12 實測）。**紅區按鈕**：只有呼叫端明確帶 --confirm-buy-bait（petquest）/
---confirm-buy-catch（rebirth_pets）才會進來。2026-10-15 起不讀石幣、不因石幣擋（使用者）；保險 = 只按缺額、每次按後可抓捕數必須 +1（沒增加就停）、按前外掛數 < 背包誘餌不按、鑽石按前後不變（讀得到才驗，有變立刻停，鐵則 3）。
+每按一次 +1 可抓捕數、扣 50,000 石幣（2026-10-12 實測）。**紅區按鈕**：petquest（寵物任務，2026-10-15 起不需旗標，使用者）/
+rebirth_pets（--confirm-buy-catch）才會進來。2026-10-15 起不讀石幣、不因石幣擋（使用者）；保險 = 只按缺額、每次按後可抓捕數必須 +1（沒增加就停）、按前外掛數 < 背包誘餌不按、
+**鑽石按前讀不到 → 不按、停手；按後讀不到或有變 → 停手**（鐵則 3）。
+
+鑽石怎麼讀（2026-10-15 修）：舊版用 OCR 讀寵物面板頂部資源列，p1 實跑一路「鑽石 None → None」= 鑽石檢查形同虛設。
+根因：帳號鑽石 = 0，資源列只有一個單獨的「0」（x≈552～558、y≈17～29，截圖 ui-log/005319-pet-slot-1.png），Windows OCR 對單獨一個「0」幾乎都漏讀
+（parse_money 只能回 None）。改成像素點陣：DIA_BOX 白字二值化 → 剛好是「0」的字形 → '0'；其他內容 → 'px:<點陣指紋>'（不解讀數字，只比前後是否相同）；
+沒有白字（面板沒開 / 位置不對）→ None。點陣是同一畫面的固定 UI 字，前後一致才算讀到（read_dia_stable 兩次相同）。
 
   parse_money(lines)                              OCR 行 → (石幣, 鑽石)：石幣 x<450、鑽石 450～700（x 分區 + 去重；讀不到 None，2026-10-13 三轉）
   parse_count_zero(txt, zero_ok)                  可抓捕數；zero_ok = 有「可抓捕數」字樣但沒數字 → 0（0 時 OCR 常漏「0」，2026-10-13 三轉 163）
   read_money_stable(read_fn, sleep_fn)            （舊，不再用於買）連續兩次讀到同一個非 0 石幣才採用
-  read_dia_stable / money()                       開寵物面板讀鑽石（兩次一致才採用）→ (None, 鑽石)；石幣不讀
+  dia_from_rows(rows)                             鑽石點陣 → '0' / 'px:指紋' / None（純函式）
+  read_dia_stable / money()                       開寵物面板讀鑽石點陣（兩次一致才採用）→ (None, 鑽石讀值)；石幣不讀
   press_plus(role, limit=None)                    外掛 → 角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)
                                                   limit：按前可抓捕數已 ≥ limit 就不點（回 (0, 前, 前)）
   buy(role, n, money_fn, press_fn, log)           固定按 n 次 → (kind, msg, rc, bought)
   buy_to(role, target, money_fn, press_fn, log, min_before=None)
                                                   按到可抓捕數 = target 為止（續跑安全）→ 同上；min_before = 背包現有誘餌數：誘餌不夠只買缺額
                                                   （外掛可抓捕數 = 背包誘餌 + 買的次數，**推測**，按前讀到的數字 < min_before 就不按、停手，
-                                                  每次按後仍驗 +1 / 石幣剛好 −50,000）
+                                                  每次按後仍驗 +1 / 鑽石不變）
     kind = 'ok' / 'fail'（呼叫端 fail(EXIT, msg)）/ 'pass'（rc 是 ass / uikit 退出碼，呼叫端 pass_or）
 """
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -28,6 +36,10 @@ import uikit  # noqa: E402
 PLUS_XY = (1295, 315)              # 外掛捉寵設置「可抓捕數 +」
 PLUS_COST = 50000
 MONEY_BOX = (250, 5, 700, 40)      # 寵物面板頂部資源列（石幣 x≈335,y≈23，右邊依序鑽石 / 活力 / 聲望；ui/pet.md）—— OCR 框待實機量；讀不到就不買
+DIA_BOX = (545, 12, 175, 22)       # 鑽石數字（x, y, w, h；截圖座標）：鑽石圖示 x≈505～535 之後、活力圖示 x≈755 之前；白字（2026-10-15 量 ui-log 截圖，位數多時往右長）
+DIA_WHITE = 200                    # 白字門檻：r, g, b 都 > 這個（資源列底是深色，量過無雜點）
+DIA_ZERO = ('..###..', '.#####.', '.##..##', '##...##', '##...##', '##...##', '##...##', '##...##',
+            '##...##', '##...##', '##...##', '.##.##.', '.#####.')      # 單獨「0」的字形（裁邊後 7×13；ui-log/005319、111110 兩張一致）
 EXIT_BAIT = 163                    # = petquest.EXIT_BAIT（誘餌 / 買可抓捕數失敗）；rebirth_pets 自己把 pass 的碼對應成 EXIT_CATCH
 
 
@@ -82,9 +94,34 @@ def read_money_stable(read_fn, sleep_fn=None, tries: int = 5, settle: float = 0.
     return None, None
 
 
+def dia_from_rows(rows):
+    """鑽石框白字點陣（'0'/'1' 字串列）→ 讀值（純函式）：沒有白字 → None；裁邊後剛好是 DIA_ZERO（「0」）→ '0'；
+    其他 → 'px:<裁邊點陣指紋>'（不解讀數字；呼叫端只比前後是否相同）"""
+    rows = [r for r in rows or []]
+    ys = [i for i, r in enumerate(rows) if '1' in r]
+    if not ys:
+        return None
+    xs = [j for r in rows for j, c in enumerate(r) if c == '1']
+    x0, x1 = min(xs), max(xs)
+    crop = tuple(r[x0:x1 + 1].replace('0', '.').replace('1', '#') for r in rows[ys[0]:ys[-1] + 1])
+    if crop == DIA_ZERO:
+        return '0'
+    return 'px:' + hashlib.sha1('\n'.join(crop).encode()).hexdigest()[:12]
+
+
+def read_dia_px():
+    """現場讀鑽石框（一次 gui pixel，同一張截圖）→ dia_from_rows 讀值；像素讀不到 → None"""
+    x, y, w, h = DIA_BOX
+    cols = uikit.px([(x + i, y + j) for j in range(h) for i in range(w)])
+    if not cols or len(cols) != w * h:
+        return None
+    rows = [''.join('1' if min(cols[j * w + i]) > DIA_WHITE else '0' for i in range(w)) for j in range(h)]
+    return dia_from_rows(rows)
+
+
 def read_dia_stable(read_fn, sleep_fn=None, tries: int = 3, settle: float = 0.6):
-    """只讀鑽石（2026-10-15 使用者：買可抓捕數不再讀石幣；鑽石檢查保留）：連續兩次讀到同一個數字才採用，
-    讀不到 / 不一致 → None（呼叫端略過鑽石增減檢查，不當 0）。read_fn() → (石幣, 鑽石)，石幣不看"""
+    """只讀鑽石（2026-10-15 使用者：買可抓捕數不再讀石幣；鑽石檢查保留）：連續兩次讀到同一個值才採用，
+    讀不到 / 不一致 → None（呼叫端不按 / 停手，不當 0）。read_fn() → (石幣, 鑽石)，石幣不看"""
     if sleep_fn:
         sleep_fn(settle)
     prev = None
@@ -99,14 +136,13 @@ def read_dia_stable(read_fn, sleep_fn=None, tries: int = 3, settle: float = 0.6)
 
 
 def money() -> tuple:
-    """寵物面板頂部資源列 → (None, 鑽石)；石幣不讀、不擋（使用者 2026-10-15）；鑽石讀不穩 / 面板打不開 → None（略過鑽石檢查）。
-    名字沿用 money（呼叫端的 money_fn）"""
+    """寵物面板頂部資源列 → (None, 鑽石讀值)；石幣不讀、不擋（使用者 2026-10-15）。鑽石用像素點陣（read_dia_px，不靠 OCR：鑽石 0 時 OCR 漏讀單獨的「0」）；
+    讀不穩 / 面板打不開 → None（呼叫端不按、停手）。名字沿用 money（呼叫端的 money_fn）"""
     import pet
-    import rebirth_pets as rp
     with pet.Session(False, True) as s:
         if s.rc:
             return None, None
-        return None, read_dia_stable(lambda: parse_money(rp.ocr_lines(MONEY_BOX, '-Zooms', '2,3,4')), uikit.sleep)
+        return None, read_dia_stable(lambda: (None, read_dia_px()), uikit.sleep)
 
 
 def press_plus(role, limit=None, min_before=None) -> tuple:
@@ -128,7 +164,7 @@ def press_plus(role, limit=None, min_before=None) -> tuple:
             return 0, before, before
         if min_before is not None and before < min_before:
             return EXIT_BAIT, before, None
-        uikit.gui('seq', f'click {PLUS_XY[0]} {PLUS_XY[1]}; wait 800', note=f'{role} 捉寵設置「+」買 1 個可抓捕數（--confirm-buy-*）')
+        uikit.gui('seq', f'click {PLUS_XY[0]} {PLUS_XY[1]}; wait 800', note=f'{role} 捉寵設置「+」買 1 個可抓捕數（petquest / rebirth_pets --confirm-buy-catch）')
         after = read()
         return 0, before, after
     finally:
@@ -139,9 +175,11 @@ def press_plus(role, limit=None, min_before=None) -> tuple:
 
 
 def _one(role, money_fn, press_fn, log, limit=None, min_before=None):
-    """按一次 → (kind, msg, rc, rec | None, pressed)。保險：按前鑽石、按後鑽石不變（有變立刻停）、可抓捕數 +1（沒增加停）、
-    min_before（外掛數 < 背包誘餌 → 不按）。不讀石幣、不因石幣擋（使用者 2026-10-15）"""
+    """按一次 → (kind, msg, rc, rec | None, pressed)。保險：按前讀不到鑽石 → 不按、停手；按後讀不到 / 有變 → 停手（鐵則 3）；
+    可抓捕數 +1（沒增加停）、min_before（外掛數 < 背包誘餌 → 不按）。不讀石幣、不因石幣擋（使用者 2026-10-15）"""
     _s0, d0 = money_fn()
+    if d0 is None:
+        return 'fail', f'{role} 按「+」前讀不到鑽石 → 不按、停手（鐵則 3：鑽石檢查要能生效）', 0, None, False
     if limit is None:
         rc, before, after = press_fn(role)
     elif min_before is None:
@@ -158,7 +196,9 @@ def _one(role, money_fn, press_fn, log, limit=None, min_before=None):
         return 'fail', f'{role}「+」按了可抓捕數 {before} → {after}（不是 +1）→ 停手', 0, None, True
     _s1, d1 = money_fn()
     rec = {'role': role, 'diamond': [d0, d1]}
-    if d0 is not None and d1 is not None and d1 != d0:
+    if d1 is None:
+        return 'fail', f'{role}「+」後讀不到鑽石（按前 {d0}）→ 無法確認鑽石沒變、停手（鐵則 3）', 0, rec, True
+    if d1 != d0:
         return 'fail', f'{role}「+」後鑽石 {d0} → {d1} 有變 → 停手（鐵則 3）', 0, rec, True
     log(f'{role} 買可抓捕數 1 個：可抓捕數 {before} → {after}、鑽石 {d0} → {d1}')
     return 'ok', '', 0, rec, True

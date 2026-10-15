@@ -1,33 +1,36 @@
 #!/usr/bin/env python3
-"""寵物任務總控（恐龍博士 2016 / 卡坦的願望 2019 / 猜謎三兄弟 3003）：接取 → 抓 / 分 / 練 → 交 → 丟獎勵寵 → 換回原戰寵。只用標準函式庫。
+"""寵物任務總控（恐龍博士 2016 / 卡坦的願望 2019 / 猜謎三兄弟 3003）：（恐龍 / 卡坦）存第 2 格 → 抓 / 分 / 練 → 接取 → 交 → 丟獎勵寵 → 換回原戰寵。只用標準函式庫。
 **只有離線測試（test_petquest.py），整支實機未跑過**；各段呼叫的既有腳本（questrun / pet_catch / pet / petwatch / petdrop / grind / ass）各自有實機紀錄，見 psa-pet-quest SKILL.md。
 
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/petquest.py plan 2016|2019|3003                 # 不碰遊戲：印每段要跑的指令
-  uv run --no-project python tools/gui/petquest.py run 2016|2019|3003 [--confirm-buy-bait] [--confirm-drop] [--dry-run] [--from 段] [--to 段] [--fresh]
-    --confirm-buy-bait  公共倉庫誘餌不夠時，手上現有的誘餌照用（取到抓寵者背包），只用外掛捉寵設置「+」買缺額 N − 現有 次可抓捕數（每按一次 50,000 石幣；
-                        2026-10-15 起不讀石幣、不因石幣擋（使用者）；保險：只按缺額、每按一次可抓捕數必須 +1、鑽石按前後不變，
-                        不讀石幣，只驗可抓捕數每按一次 +1、鑽石有變就停手；沒給這個旗標 → 誘餌不夠就 163 停）
+  uv run --no-project python tools/gui/petquest.py run 2016|2019|3003 [--confirm-drop] [--dry-run] [--from 段] [--to 段] [--fresh]
+    （誘餌不夠一律自動買：手上現有的誘餌照用，外掛捉寵設置「+」只買缺額 N − 現有 次可抓捕數，每按一次 50,000 石幣；**不需旗標、不設次數上限**（使用者 2026-10-15）；
+     不讀石幣；保險：按前讀不到鑽石 → 不按、163 停；每按一次可抓捕數必須 +1、按後鑽石讀不到 / 有變 → 163 停（鐵則 3）。鑽石用像素點陣讀，見 catchbuy.py）
+    --confirm-buy-bait  無作用（no-op，舊呼叫端相容；postrebirth 傳也無害）
     --confirm-drop      准丟獎勵寵（恐龍博士 布克布克、卡坦步 1 修寶、猜謎三兄弟 左迪洛斯；petdrop 驗名 + 只丟 1 級）；沒給 → 到丟寵段 168 停
     --from / --to       只跑某幾段（段名見 plan）；--fresh 不管進度檔從頭（預設：進度檔 tools/.cache/petquest.json 24 小時內記錄過的段直接跳過）
     --dry-run           = plan
     --keep-autoswap     （恐龍博士 2016 專用，postrebirth 在後面還要解卡坦時傳）train 結束先不關外掛「自動轉換戰寵」（卡坦 train 開頭本來就要開），
-                        restore 段整段跳過（不換回原朵拉比斯 / 不重鎖 / 不改一般動作）；原戰寵等級記進進度檔 carry_orig 給卡坦 prep 沿用，由卡坦 restore 統一換回、train 結束照常關
+                        restore 段整段跳過（不取回第 2 格的寵物 / 不重鎖 / 不改一般動作）；第 2 格的名字 + 等級記進進度檔 carry_orig（battle / orig）給卡坦 prep 沿用，
+                        由卡坦 restore 統一換回、train 結束照常關
     --verify-defer      內部 questrun 帶 --verify defer（postrebirth 傳；沒風險事件的逐人驗證延到 postrebirth 收尾，交寵物仍是風險事件 → 當場驗）
-  可 import：petquest.run(qid, tools=…, confirm_buy=…, confirm_drop=…) → 退出碼；結果在 petquest.LAST
+  可 import：petquest.run(qid, tools=…, confirm_drop=…) → 退出碼（confirm_buy 參數保留、無作用）；結果在 petquest.LAST
 
 流程（各段失敗就停在該段、印手動指令；畫面不認得 9 / 斷線 10 一律透傳；進度檔記完成的段，重跑 = 續跑）：
-  恐龍博士 2016 / 卡坦的願望 2019（使用者 2026-10-12 S5 / S6 做法；卡坦步 1 鯊、步 2 雞兩輪）
-    accept      questrun.py run <ID> --after none：接取後停在寵物步（115 manual / 155 需先抓寵 / 117 對話 ↔ 選擇循環）；0 = 任務已完成 → 只做收尾
-                卡坦接取後讀追蹤步號：已在步 2 → 跳過第 1 輪
-    prep        關原地遇敵 + 等戰鬥結束 → 解散隊伍 → pet.py list 記每人當下「出戰」的寵物名字（進度檔 battle，各角色可不同：p1 朵拉比斯、p2 迪基格斯；
-                續跑沿用已記的不重讀；讀不到〔沒出戰 / 多隻出戰 / 名字讀不出〕→ 162 不亂猜，僅「沒出戰但寵物欄有朵拉比斯」退回朵拉比斯）+ 等級（orig）
-                → 取消鎖定戰寵 → 各人戰寵存個人倉庫（同名的人一組 store-many；不碰騎寵）
-                （寵物欄只剩騎寵 + 4 空格；抓寵 / 練寵都不帶原戰寵）
+  恐龍博士 2016 / 卡坦的願望 2019（使用者 2026-10-12 S5 / S6 做法；卡坦步 1 鯊、步 2 雞兩輪；2026-10-15 使用者改順序：先存第 2 格 → 抓 / 分 / 練 → 才接任務）
+    段順序：恐龍 prep → catch → distribute → train → accept → turnin → drop → restore；
+            卡坦 prep → catch1 → distribute1 → train1 → accept → turnin1 → drop1 → catch2 → distribute2 → train2 → turnin2 → store_reward → restore
+            （第 2 輪〔雞〕要第 1 輪交完、追蹤進步 2 才能進）
+    prep        （不先接任務）關原地遇敵 + 等戰鬥結束 → 解散隊伍 → pet.py list 讀每人寵物欄**第 2 格**（pet.py list slot == 2，1 起算；第 1 格 = 騎寵位置）
+                的寵物，名字 + 等級記進度檔 battle / orig（各角色可不同：p1 朵拉比斯、p2 迪基格斯；續跑沿用已記的不重讀）
+                保險：第 2 格空 / 名字讀不出 / 等級讀不到 / 是騎寵（騎乘中、名字像騎寵）→ 162 停手、一隻都不存
+                → 取消鎖定戰寵 → 第 2 格的寵物存個人倉庫（同名的人一組 store-many；不碰騎寵）→ 寵物欄只剩騎寵 + 4 空格（不是 4 只記事件，抓寵溢出的自動進個人倉庫）
+                卡坦：prep 開頭（解散後）先讀一次追蹤步號，= 2（第 1 輪早已交）→ 第 1 輪各段跳過，不白抓鯊、也不讓鯊佔滿寵物欄
     catch[N]    **一次抓滿本輪總隻數 N（正常 5，不分批；使用者 2026-10-15）**：外掛捉寵設置已勾「自動存倉庫」，寵物欄滿了多抓的自動進抓寵者個人寵物倉庫，
                 所以可抓捕數 = N、背包誘餌 N 個，一次抓完（舊版依空格分批 [4, 1]，理由「進個人倉庫沒縮圖取不出來」已過時：2026-10-14 起名字為主、reset-name 還原物種名，
                 且實跑 notes/quest-log.md 339 行：欄只有 3 空格各抓 5 隻、2 隻自動進個人倉庫 → 取回成功）：
-                pet_catch.py --count N --stages bait（**每輪每人只取 / 拆一次**：公共倉庫取整疊拆出 N 個、其餘存回；背包已剛好 N 個就不取不拆）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 現有誘餌留背包照用、外掛「+」只買缺額 N − 現有（buy_to 按到可抓捕數 = N；按前讀到的數字 < 現有誘餌 = 外掛沒相加 → 不按停手）→
+                pet_catch.py --count N --stages bait --keep-short-bait（**每輪每人只取 / 拆一次**：公共倉庫取整疊拆出 N 個、其餘存回；背包已剛好 N 個就不取不拆）→ 有人誘餌不夠（92）→ 現有誘餌留背包照用、外掛「+」只買缺額 N − 現有（不需旗標；buy_to 按到可抓捕數 = N；按前讀到的數字 < 現有誘餌 = 外掛沒相加 → 不按停手；按前讀不到鑽石 → 不按停手）→
                 pet_catch.py --stages setup,wait,rename,register --count N --expect-bar 角色:min(N, 空格)（wait 第一次輪詢 N×20+20 秒、之後 60 秒；register 只核對「在欄新增」隻數，溢出的在個人倉庫不算）；
                 名字為主（2026-10-14 晚）：rename = pet.reset_soft 還原抓寵者寵物欄的成長字串名字（鉛筆 → 確認，免費）→ register = 名字驗證：
                 比抓寵前快照 catch-pre.json，新多出來的寵物名字 = 該抓寵者 --assign 的物種；名字是別的物種 → 15、在欄隻數不對 → 17；
@@ -47,13 +50,16 @@
                 → 每 POLL_S（10）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
                   levels 那格變空 / nh 不同 → 改讀完整 list；全部連兩輪 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25；逐隻累積：某隻連兩次 ≥ 門檻即鎖定、之後不清；不限升級幅度，誤讀 > 門檻+60 忽略；未鎖定者超過門檻+15 → 強制再讀完整 list，全 ≥ 門檻就結束）
                 → 關遇敵 → 自動轉換戰寵 off → pet.py rest-all（任務寵改等待；成功記進度檔 rested）
+    accept      （第 1 輪 train 的 rest-all 之後）questrun.py run <ID> --after none：接取後停在寵物步（115 manual / 155 / 117 對話 ↔ 選擇循環）；
+                0 = 任務已完成 → 其餘段跳過，只做 restore（第 2 格照樣取回、出戰、鎖定；練好的任務寵留在寵物欄）
+                卡坦接取後再讀一次追蹤步號：已在步 2 → 第 1 輪的交 / 丟跳過
     turnin[N]   questrun.py run <ID> --after none --pet-turnin [--rested]（train 段 30 分內 rest-all 成功才帶：questrun 交件前不重做 rest-all）
                 （恐龍：解散逐人 pet_turnin；卡坦：隊長交一次）；卡坦第 1 輪交完讀步號 = 2 才算
     drop[N]     （--confirm-drop）petdrop.py all <獎勵寵> --confirm-name <獎勵寵> --max-level 1（恐龍 布克布克；卡坦第 1 輪 修寶）
     store_reward（卡坦）獎勵朵拉比斯（Lv1）5 人存個人倉庫
-    restore     pet.py take-many --depot personal --plan "角色:戰寵名@原等級" → 戰寵出戰（set-state-many，同名一組）→ pet_catch.py --lock 戰寵 --battle-pet 戰寵名（同名一組 --roles，讀回）
+    restore     pet.py take-many --depot personal --plan "角色:第 2 格名字@原等級"（prep 記的）→ 出戰（set-state-many，同名一組）→ pet_catch.py --lock 戰寵 --battle-pet 名字（同名一組 --roles，讀回）
                 → ass.py pet all normal 攻擊 --no-resume（一般動作 = 攻擊、讀回）→ pet.py list 驗 5 人各自戰寵出戰且等級 = 原等級
-                （任務本來就完成〔沒跑 prep、進度檔沒戰寵名〕：用當下出戰寵當戰寵，只收尾）
+                （舊進度檔沒跑 prep、進度檔沒戰寵名而任務已完成：用當下出戰寵當戰寵，只收尾）
   猜謎三兄弟 3003（使用者 2026-10-12 / 10-13 做法）
     accept      questrun.py run 3003 --after none（步 1 manual → 115；步 2 需練寵 → 155；0 = 已完成）
     step1       追蹤步號 = 1 才做：quest.py --task 猜謎三兄弟 --stop-after-rewards 1（10-12 / 10-13 點追蹤自動巡到 810 伊那多拿金豬，沒爬塔）
@@ -63,17 +69,17 @@
     turnin      關遇敵 → questrun.py run 3003 --after none（交金豬 → 會員證 → 藍暴）
     drop        （--confirm-drop）petdrop.py all 左迪洛斯 --confirm-name 左迪洛斯 --max-level 1
     restore     pet_catch.py --lock 戰寵 --battle-pet 朵拉比斯 → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗朵拉比斯出戰、等級 ≥ 原等級（練功中可能升級）
-  --keep-autoswap 的安全結論（2026-10-15 讀程式）：恐龍博士 restore = 取回朵拉比斯 → 出戰 → 鎖定戰寵 → 一般動作；自動轉換戰寵（外掛，轉換級數 30）開著時，
+  --keep-autoswap 的安全結論（2026-10-15 讀程式）：恐龍博士 restore = 取回第 2 格的戰寵（p1 朵拉比斯）→ 出戰 → 鎖定戰寵 → 一般動作；自動轉換戰寵（外掛，轉換級數 30）開著時，
     剛換回的高等朵拉比斯會被外掛當「超過轉換級數」又換掉，且卡坦 prep 緊接著又要把朵拉比斯存個人倉庫，換回根本白做 → 帶旗標時 dino restore 整段跳過，
     朵拉比斯留在個人倉庫、原等級用進度檔 carry_orig 交給卡坦 prep（卡坦 prep 讀不到寵物欄的朵拉比斯，沿用 carry_orig；store-many --skip-missing 略過已存的）；
-    卡坦 restore 照常換回 + 鎖定 + 關自動轉換（train 結束就關）。中斷保險見 postrebirth.py 檔頭。
+    卡坦 restore 照常換回 + 鎖定 + 關自動轉換（train 結束就關）。carry_orig 帶的是恐龍 prep 記的第 2 格名字（battle）+ 等級（orig）。中斷保險見 postrebirth.py 檔頭。
   不做：恢復掛機（交給呼叫端 / postrebirth 收尾的 grind.py start）。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；petquest 自己 160～169）：
   160 參數錯 / 任務 ID 不支援 / 進度不一致（例：restore 要原等級但進度檔沒有）
   161 接取失敗（questrun 非預期退出碼）/ 猜謎步 1 沒拿到金布伊
-  162 準備失敗（關遇敵、解散、讀寵物欄、讀不到出戰寵名字〔沒出戰 / 多隻出戰 / 名字讀不出〕、取消鎖定、存原戰寵、金布伊出戰 / 鎖定）
-  163 誘餌不夠且沒給 --confirm-buy-bait / 買可抓捕數失敗（「+」按了可抓捕數沒變、鑽石有變）
+  162 準備失敗（關遇敵、解散、讀寵物欄、第 2 格空 / 名字讀不出 / 等級讀不到 / 是騎寵〔恐龍 / 卡坦〕、讀不到出戰寵名字〔猜謎〕、取消鎖定、存第 2 格、金布伊出戰 / 鎖定）
+  163 買可抓捕數失敗（按前讀不到鑽石 → 沒按；「+」按了可抓捕數沒 +1；按後鑽石讀不到 / 有變；外掛數 < 背包誘餌）
   164 抓寵失敗（pet_catch 非 0：14 系別物種選不到、15 新寵物名字 / 縮圖是別的物種、16 名字讀不出（還原失敗、成長字串也讀不出）、17 新寵物隻數不對 / 沒登錄、103 取誘餌 / 設定 / 逾時…）
   165 分配失敗（store-many / take-many 非 0、數量驗不過）/ 還原名字讀到費用字樣（pet_catch / pet 67，鐵則 3）
   166 練寵失敗（自動轉換戰寵、出戰、verify-battle、grind、等級逾時、petwatch、rest-all）
@@ -110,12 +116,13 @@ ALL_ROLES = clients.roster()          # 這個視窗（PSA_CLIENT）的名單：
 LEADER = ALL_ROLES[0] if ALL_ROLES else ''
 
 _r = questdefs.roster_at              # 抓寵分配用卡位（_r(1) = 名單第 2 個）而不是寫死 DKBO2…
-BATTLE_PET = '朵拉比斯'            # 讀不到出戰寵時的退路名字（p1 的戰寵；只在寵物欄確實有這隻時才用）；平常用 prep 記進進度檔 battle 的「各角色當下出戰寵」
+BATTLE_PET = '朵拉比斯'            # 猜謎 / 已完成收尾讀不到出戰寵時的退路名字（p1 的戰寵；只在寵物欄確實有這隻時才用）
+BATTLE_SLOT = 2                    # 恐龍博士 / 卡坦 prep 記並存倉的格（pet.py list slot 1 起算；第 1 格 = 騎寵位置），名字 / 等級記進度檔 battle / orig
 REWARD_PET = '朵拉比斯'            # 卡坦任務的獎勵寵（Lv1，與各角色戰寵無關；存個人倉庫）
 BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
 PET_FEE = 67                       # pet.EXIT_FEE：還原名字時讀到費用字樣（鐵則 3）
 import catchbuy  # noqa: E402  外掛「+」買可抓捕數的共用邏輯（rebirth_pets 同一份）
-PLUS_XY, PLUS_COST, MONEY_BOX = catchbuy.PLUS_XY, catchbuy.PLUS_COST, catchbuy.MONEY_BOX      # 紅區：只有 --confirm-buy-bait 才點
+PLUS_XY, PLUS_COST, MONEY_BOX = catchbuy.PLUS_XY, catchbuy.PLUS_COST, catchbuy.MONEY_BOX      # 紅區：只有誘餌不夠時 buy_plus 才點（鑽石讀不到 / 有變就停）
 POLL_S = 10.0                      # 練寵讀等級間隔（2026-10-15 使用者改 10 秒；是 sleep 間隔，每輪讀 5 人另需約 30 秒；總時限看 TRAIN_MAX_S 牆鐘不看輪數；舊版 30 / 120 秒）
 TRAIN_MISREAD_UP = 60            # 讀值 > 門檻 + 這麼多視為誤讀忽略；TRAIN_OVER：未鎖定的寵物超過門檻這麼多 → 強制再讀完整 list（防過度練）
 TRAIN_OVER = 15
@@ -146,11 +153,11 @@ def stages_of(qid: int) -> list:
     q = QUESTS[qid]
     if q['kind'] == 'quiz':
         return ['accept', 'step1', 'prep', 'train', 'turnin', 'drop', 'restore']
-    out = ['accept', 'prep']
+    out = ['prep']                                                       # 使用者 2026-10-15：prep 不先接任務；第 1 輪練完、rest-all 之後才接（accept）
     n = len(q['rounds'])
     for i, rd in enumerate(q['rounds'], 1):
         sfx = str(i) if n > 1 else ''
-        out += [f'catch{sfx}', f'distribute{sfx}', f'train{sfx}', f'turnin{sfx}']
+        out += [f'catch{sfx}', f'distribute{sfx}', f'train{sfx}'] + (['accept'] if i == 1 else []) + [f'turnin{sfx}']
         if rd.get('drop'):
             out.append(f'drop{sfx}')
     if q.get('store_reward'):
@@ -266,6 +273,36 @@ def battle_levels_by(roles_slots: dict, names: dict) -> dict:
         if r in lv:
             out[r] = lv[r]
     return out
+
+
+def pick_slot2(roles_slots: dict, roles=None) -> tuple:
+    """純函式：恐龍博士 / 卡坦 prep 讀每人寵物欄「第 2 格」的寵物（使用者 2026-10-15）→ ({角色: 名字}, {角色: 等級}, {角色: 失敗原因})。
+    「第 2 格」= pet.py list 的 slot == BATTLE_SLOT（2；slot 從 1 起算 = 面板寵物欄由上往下第 2 張卡）。第 1 格是騎寵位置
+    （pet.guard_store 預設不存第 1 格）；p1 第 2 格 = 朵拉比斯（出戰，截圖 ui-log/005319-pet-slot-1.png）、p2 新角色 = 迪基格斯（出戰，瑪斯貝卡騎乘）。
+    保險：第 2 格空 / 沒讀 / 名字讀不出（嚴格身分 strict_species，只有縮圖不算）/ 等級讀不到 → 失敗原因；
+    第 2 格是騎寵（狀態 = 騎乘、名字像騎寵 uikit.is_mount_like）→ 失敗原因（存倉不碰騎寵），由呼叫端 162 停手、一隻都不存"""
+    names, levels, bad = {}, {}, {}
+    for r in (roles if roles is not None else ALL_ROLES):
+        s2 = next((s for s in (roles_slots or {}).get(r) or [] if s and s.get('slot') == BATTLE_SLOT), None)
+        if not s2 or s2.get('empty'):
+            bad[r] = f'第 {BATTLE_SLOT} 格是空的'
+            continue
+        if s2.get('skipped'):
+            bad[r] = f'第 {BATTLE_SLOT} 格沒讀到'
+            continue
+        nm = strict_species(s2)
+        raw = nm or s2.get('raw_name') or s2.get('img_species') or ''
+        if s2.get('state') == '騎乘' or s2.get('mountlike') or (raw and (raw in uikit.MOUNTS or uikit.is_mount_like(raw))):
+            bad[r] = f'第 {BATTLE_SLOT} 格是騎寵（{raw or "?"}，狀態 {s2.get("state")}）→ 存倉不碰騎寵'
+            continue
+        if not nm:
+            bad[r] = f'第 {BATTLE_SLOT} 格名字讀不出'
+            continue
+        if not s2.get('level'):
+            bad[r] = f'第 {BATTLE_SLOT} 格 {nm} 等級讀不到'
+            continue
+        names[r], levels[r] = nm, s2['level']
+    return names, levels, bad
 
 
 def pick_battle_names(roles_slots: dict, roles=None, fallback: str = BATTLE_PET) -> tuple:
@@ -535,7 +572,7 @@ class Tools:
         return catchbuy.money()
 
     def press_plus(self, role, limit=None, min_before=None) -> tuple:
-        """外掛「+」按一次（紅區：只有 petquest --confirm-buy-bait 的 buy_plus 會呼叫）→ (rc, 按前, 按後)"""
+        """外掛「+」按一次（紅區：只有 buy_plus〔誘餌不夠時買缺額〕會呼叫）→ (rc, 按前, 按後)"""
         return catchbuy.press_plus(role, limit, min_before)
 
 
@@ -606,18 +643,28 @@ class Run:
             return 0
         if rc in (115, 155, 117):
             if self.q['kind'] == 'catch' and len(self.q['rounds']) > 1:
-                st = self.T.read_step(self.q['track'])
-                self.p['step'] = st
-                if st == 2:                                            # 卡坦步 1 已交：第 1 輪全部跳過
-                    event(f'任務 {self.qid}：追蹤步號 = 2 → 第 1 輪（{self.q["rounds"][0]["assign"][0][2]} 等）已交，跳過')
-                    for s in stages_of(self.qid):
-                        if s.endswith('1') and s not in self.p['done']:
-                            self.p['done'].append(s)
+                self.skip_done_rounds()
             if self.q['kind'] == 'quiz':
                 self.p['step'] = self.T.read_step(self.q['track'])
             return 0
         return self.pass_or(rc, EXIT_ACCEPT, f'接取：questrun 退出碼 {rc}（預期 0 / 115 / 155 / 117）',
                             f'uv run --no-project python tools/gui/questrun.py run {self.qid} --after none')
+
+    def skip_done_rounds(self) -> None:
+        """卡坦：讀任務追蹤步號（沒接 / 讀不到 = None）；= 2 → 第 1 輪（鯊）已交，第 1 輪各段標記完成跳過。
+        prep 開頭先讀一次（2026-10-15 起接任務改到第 1 輪練完之後；任務早已在步 2 時不白抓鯊、也不會鯊佔滿寵物欄讓第 2 輪抓不下），accept 後再讀一次"""
+        try:
+            st = self.T.read_step(self.q['track'])
+        except Exception as e:                                          # noqa: BLE001  讀不到就照常跑（接取後會再讀）
+            event(f'任務 {self.qid}：讀追蹤步號失敗 {e} → 照常')
+            return
+        self.p['step'] = st
+        if st == 2:
+            event(f'任務 {self.qid}：追蹤步號 = 2 → 第 1 輪（{self.q["rounds"][0]["assign"][0][2]} 等）已交，跳過')
+            for s in stages_of(self.qid):
+                if s.endswith('1') and s not in self.p['done']:
+                    self.p['done'].append(s)
+        self.save()
 
     def battle_names(self) -> dict:
         """進度檔記的各角色戰寵名（prep 讀到的；沒記的角色不在內）"""
@@ -638,6 +685,8 @@ class Run:
         rc, rs = self.pet_list()
         if rc:
             return self.pass_or(rc, EXIT_PREP, f'讀寵物欄失敗 pet rc={rc}', 'uv run --no-project python tools/gui/pet.py list --role all')
+        if self.q['kind'] == 'catch':
+            return self.record_slot2(rs)
         names = dict(self.battle_names())                                 # 續跑沿用已記的，不重讀覆蓋
         if [r for r in ALL_ROLES if not names.get(r)]:
             got, bad = pick_battle_names(rs)
@@ -656,6 +705,19 @@ class Run:
                              'uv run --no-project python tools/gui/pet.py list --role all（看清楚後手動記下等級）')
         self.p['orig'] = lv
         event(f'原戰寵（各角色出戰寵）：{names}；等級：{lv}')
+        self.save()
+        return 0
+
+    def record_slot2(self, rs) -> int:
+        """恐龍博士 / 卡坦：記每人寵物欄第 2 格（BATTLE_SLOT）的名字 + 等級 → 進度檔 battle / orig（restore 依此取回）。
+        任何人第 2 格空 / 名字讀不出 / 是騎寵 → 162，一隻都不存（不猜、存倉不碰騎寵）"""
+        names, lv, bad = pick_slot2(rs)
+        if bad:
+            return self.fail(EXIT_PREP, f'第 {BATTLE_SLOT} 格不能記 / 存（不猜、存倉不碰騎寵）：{bad}',
+                             f'uv run --no-project python tools/gui/pet.py list --role all（確認每人第 {BATTLE_SLOT} 格是戰寵、名字讀得出）')
+        self.p['battle'], self.p['orig'] = names, lv
+        self.p['free_before'] = {r: free_slots(rs.get(r)) for r in ALL_ROLES}
+        event(f'第 {BATTLE_SLOT} 格（戰寵）：{names}；等級：{lv}')
         self.save()
         return 0
 
@@ -679,13 +741,11 @@ class Run:
     def s_prep(self) -> int:
         if self.p.get('already_done'):
             return 0
-        rc = self.encounter_off()
+        rc = self.solo(EXIT_PREP) if self.q['kind'] == 'catch' else self.encounter_off()   # solo = 關遇敵 + 等戰鬥結束 + 解散
         if rc:
             return rc
-        if self.q['kind'] == 'catch':
-            rc = self.solo(EXIT_PREP)
-            if rc:
-                return rc
+        if self.q['kind'] == 'catch' and len(self.q['rounds']) > 1 and not self.p.get('step'):
+            self.skip_done_rounds()
         carry = self.all.get('carry_orig') or {}
         if not self.p.get('orig') and carry.get('orig') and 0 <= self.T.clock() - (carry.get('ts') or 0) <= PROGRESS_TRUST_S and carry.get('qid') != self.qid:
             self.p['orig'] = carry['orig']                              # 恐龍博士帶 --keep-autoswap 沒換回戰寵：沿用它記的原等級 / 名字（寵物欄已沒有戰寵可讀）
@@ -709,11 +769,17 @@ class Run:
             if rc:
                 return self.pass_or(rc, EXIT_PREP, f'鎖定戰寵 = {pet} 失敗 rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --lock 戰寵 --battle-pet {pet}')
             return 0
-        for nm, ra in self.battle_groups():                                # 各角色戰寵名可不同：同名的一組存
-            rc, _ = self.sub('pet.py', ['store-many', '--role', ra, '--pets', nm, '--depot', 'personal', '--skip-missing'], 1200)   # 續跑時已存過的人略過
+        for nm, ra in self.battle_groups():                                # 第 2 格的寵物：各角色名字可不同，同名的一組存
+            rc, _ = self.sub('pet.py', ['store-many', '--role', ra, '--pets', nm, '--depot', 'personal', '--skip-missing'], 1200)   # 續跑時已存過的人略過；同名多隻 → pet 72 停（不猜哪隻）
             if rc:
                 return self.pass_or(rc, EXIT_PREP, f'{nm} 存個人倉庫失敗 pet rc={rc}（寵物欄要空出 4 格）',
                                     f'uv run --no-project python tools/gui/pet.py store-many --role {ra} --pets {nm} --depot personal')
+        self.p['stored'] = True                                            # restore 要取回（接任務回 0 = 已完成時也要）
+        fb = self.p.get('free_before') or {}
+        not4 = {r: fb[r] + 1 for r in ALL_ROLES if r in fb and fb[r] + 1 != 4}
+        if not4:                                                           # 抓寵仍可跑（放不下的自動進個人倉庫），只記事件
+            event(f'存倉後寵物欄空格不是 4：{not4}（第 1 格騎寵 + 第 2 格存走以外還有別的寵物？）→ 照跑，抓寵溢出的自動進個人倉庫')
+        self.save()
         return 0
 
     def round_conf(self, stage) -> dict:
@@ -721,7 +787,7 @@ class Run:
 
     def buy_plus(self, role, need, have=0) -> int:
         """誘餌不夠只買缺額（使用者 2026-10-15）：背包現有 have 個誘餌照用，外掛「+」按到可抓捕數 = need（共 need − have 次）。
-        catchbuy.buy_to：不讀石幣；每按一次前後鑽石不變、可抓捕數 +1，否則停；
+        不需旗標、不設次數上限（使用者 2026-10-15）；catchbuy.buy_to：不讀石幣；按前讀不到鑽石 → 不按停手，每按一次後鑽石讀不到 / 有變、可抓捕數不是 +1 → 停；
         按前讀到的可抓捕數 < have（外掛沒把背包誘餌算進去）→ 一次都不按、停手（不猜能不能相加）"""
         event(f'{role} 誘餌現有 {have}、要 {need} → 外掛「+」買缺額 {need - have} 次（預計最多 {(need - have) * PLUS_COST} 石幣）')
         kind, msg, rc, bought = catchbuy.buy_to(role, need, self.T.money, self.T.press_plus, event, min_before=have)
@@ -812,17 +878,14 @@ class Run:
         event(f'{stage}：{catchers} 還要 {need} 隻 → 一次抓滿（寵物欄空格 {free}，放不下的自動進個人倉庫）')
         # 誘餌：這一輪每個抓寵者開始時一次取出並拆出 need 個（其餘存回公共，例 50 → 留 5、存回 45）；背包已剛好 need 個（續跑 / 重跑）→ pet_catch bait 不取不拆（冪等）
         # （2026-10-15 使用者：舊版每批「取 k 拆 k」是錯的；出處 = 實跑紀錄 notes/quest-log.md、notes/plan-dino-katan.md）
-        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'bait']
-                             + (['--keep-short-bait'] if self.o.get('confirm_buy') else []), 1800)    # 給 --confirm-buy-bait：不夠的人現有誘餌留背包，只買缺額
+        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'bait', '--keep-short-bait'], 1800)
+        # 不夠的人現有誘餌留背包，只買缺額（2026-10-15 使用者：寵物任務買可抓捕數不需旗標；--confirm-buy-bait 保留為 no-op）
         short = []
         have = bait_short_counts(lines)
         if rc and rc != BAIT_ITEM:
             return self.pass_or(rc, EXIT_CATCH, f'取誘餌失敗 pet_catch rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --assign "{csv_assign(assign)}" --count {need} --stages bait'), rs
         if rc == BAIT_ITEM:
             short = [r for r, _, _ in assign if r not in bait_ok_roles(lines)]
-            if not self.o.get('confirm_buy'):
-                return self.fail(EXIT_BAIT, f'公共倉庫誘餌不夠：{short} 各缺（要 {need} 個；每個可抓捕數用「+」買要 {PLUS_COST} 石幣）→ 沒給 --confirm-buy-bait，停手',
-                                 f'確認要買就重跑加 --confirm-buy-bait（或手動補誘餌到公共倉庫後重跑）'), rs
         for r in short:                                                 # 誘餌不夠的人：現有的照用，只用「+」買缺額（have 讀不到 = 0 = 全買）
             rc = self.buy_plus(r, need, have.get(r, 0))
             if rc:
@@ -1115,7 +1178,9 @@ class Run:
         orig = self.p.get('orig') or {}
         names = self.battle_names()
         shown = '、'.join(sorted(set(names.values()))) or BATTLE_PET
-        if self.o.get('keep_autoswap') and not self.p.get('already_done') and self.q['kind'] == 'catch':
+        # 第 2 格存過個人倉庫 → 要取回（2026-10-15 起 prep 在接任務前，接取回 0 = 已完成時也存過；舊進度檔沒有 stored → 照舊「沒完成 = 存過」）
+        took = self.q['kind'] == 'catch' and bool(self.p.get('stored') or not self.p.get('already_done'))
+        if self.o.get('keep_autoswap') and took:
             self.all['carry_orig'] = {'qid': self.qid, 'orig': orig, 'battle': names, 'ts': self.T.clock()}
             self.save()
             event(f'{shown} 先不換回（--keep-autoswap：自動轉換戰寵開著會把剛換回的換掉、卡坦 prep 又要存倉）→ 原等級 {orig} 記 carry_orig，由卡坦 restore 統一換回')
@@ -1131,7 +1196,7 @@ class Run:
         if [r for r in ALL_ROLES if not names.get(r)]:
             return self.fail(EXIT_ARGS, f'進度檔沒有 5 人的戰寵名 {names} → 不盲換（舊進度檔 / prep 沒跑）',
                              f'手動 pet.py take-many --depot personal --plan "{LEADER}:戰寵名@等級,…"；或 --fresh 從 prep 重來')
-        if self.q['kind'] == 'catch' and not self.p.get('already_done'):
+        if took:
             if [r for r in ALL_ROLES if not orig.get(r)]:
                 return self.fail(EXIT_ARGS, f'進度檔沒有 5 人原戰寵等級 {orig} → 不盲取（同名多隻）', f'手動 pet.py take-many --depot personal --plan "{LEADER}:{names.get(LEADER) or BATTLE_PET}@等級,…"')
             rc0, rs0 = self.pet_list()                                    # 續跑：已有原等級的戰寵在寵物欄的人不再取（take-many 對同名多隻會取到別隻，2026-10-14 恐龍博士手動取回後續跑）
@@ -1182,7 +1247,7 @@ class Run:
 
 def print_plan(qid: int, o: dict) -> None:
     q = QUESTS[qid]
-    print(f'petquest 計畫：任務 {qid}（{q["track"]}）段 {stages_of(qid)}；--confirm-buy-bait {bool(o.get("confirm_buy"))}、--confirm-drop {bool(o.get("confirm_drop"))}')
+    print(f'petquest 計畫：任務 {qid}（{q["track"]}）段 {stages_of(qid)}；誘餌不夠自動買（不需旗標）、--confirm-drop {bool(o.get("confirm_drop"))}')
     if q['kind'] == 'quiz':
         print(f'  accept   questrun.py run {qid} --after none（115 / 155 / 0）')
         print(f'  step1    （步號 1）quest.py --task {q["track"]} --stop-after-rewards 1 → pet.py list 5 人有{q["pet"]}')
@@ -1192,17 +1257,20 @@ def print_plan(qid: int, o: dict) -> None:
         print(f'  drop     petdrop.py all {q["drop"]} --confirm-name {q["drop"]} --max-level 1（要 --confirm-drop）')
         print(f'  restore  pet_catch --lock 戰寵 --battle-pet 戰寵名 → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗')
     else:
-        print(f'  accept   questrun.py run {qid} --after none（115 / 155 / 117；0 = 已完成）' + ('；讀步號 = 2 → 跳過第 1 輪' if len(q['rounds']) > 1 else ''))
-        print(f'  prep     關遇敵 → team.py disband → pet.py list 記各角色出戰寵名 / 等級 → pet_catch --unlock 戰寵 → pet.py store-many --role <同名的人> --pets 戰寵名 --depot personal')
+        print(f'  prep     （不先接任務）關遇敵 + 等戰鬥結束 → team.py disband → pet.py list 記每人第 {BATTLE_SLOT} 格名字 / 等級（空 / 讀不出 / 騎寵 → 162）'
+              f' → pet_catch --unlock 戰寵 → pet.py store-many --role <同名的人> --pets 第 {BATTLE_SLOT} 格名字 --depot personal（寵物欄剩騎寵 + 4 空格）')
         for i, rd in enumerate(q['rounds'], 1):
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
             print(f'  catch{sfx}   一次抓滿 {q.get("count", 5)} 隻（不分批）：先 pet_catch.py --assign "{csv_assign(a)}" --count {q.get("count", 5)} --stages bait（每人取 / 拆一次，背包已剛好就不動）'
-                  f' → [誘餌不夠且 --confirm-buy-bait：外掛「+」買 {q.get("count", 5)} 次，不讀石幣、每次驗可抓捕數 +1 / 鑽石不變] → --stages setup,wait,rename,register --expect-bar 角色:min(隻數, 空格)（第一次輪詢 N×20+20 秒、之後 60 秒；'
+                  f' → [誘餌不夠（不需旗標）：現有的照用、外掛「+」只買缺額，不讀石幣；按前讀不到鑽石不按、每次驗可抓捕數 +1 / 鑽石不變] → --stages setup,wait,rename,register --expect-bar 角色:min(隻數, 空格)（第一次輪詢 N×20+20 秒、之後 60 秒；'
                   f'rename = 抓寵者 reset-name、register = 名字驗證，名字讀不出才登錄成長字串）→ 整理（欄先存公共騰位 → 個人倉庫溢出取回 → 欄留 1、其餘存公共 → 取回的 reset-name）→ list 名字驗證 → pet_catch.py --stages baitback（剩的誘餌存回公共）')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" --candidates {species_csv(a)} → list 驗每人每物種 1 隻')
             print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
                   f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；連兩輪 ≥ 門檻 {rd["need"]}）→ 關遇敵 → autoswap off{"（--keep-autoswap 不關）" if o.get("keep_autoswap") else ""} → rest-all')
+            if i == 1:
+                print(f'  accept   questrun.py run {qid} --after none（練完 rest-all 之後才接；115 / 155 / 117；0 = 已完成 → 只做 restore）'
+                      + ('；讀步號 = 2 → 第 1 輪的交 / 丟跳過' if len(q['rounds']) > 1 else ''))
             print(f'  turnin{sfx}  questrun.py run {qid} --after none --pet-turnin --rested{" --verify defer" if o.get("verify_defer") else ""}'
                   + ('（下一輪前讀步號要進到下一步）' if i < len(q['rounds']) else '（預期 0）'))
             if rd.get('drop'):
@@ -1210,9 +1278,9 @@ def print_plan(qid: int, o: dict) -> None:
         if q.get('store_reward'):
             print(f'  store_reward pet.py store-many --role all --pets {q["store_reward"]} --depot personal（獎勵 Lv1）')
         if o.get('keep_autoswap'):
-            print(f'  restore  （--keep-autoswap：整段跳過，原等級記 carry_orig 給卡坦 prep；卡坦 restore 統一換回）')
+            print(f'  restore  （--keep-autoswap：整段跳過，第 {BATTLE_SLOT} 格名字 + 原等級記 carry_orig 給卡坦 prep；卡坦 restore 統一換回）')
         else:
-            print(f'  restore  pet.py take-many --depot personal --plan "角色:戰寵名@原等級" → set-state-many 戰寵名 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗')
+            print(f'  restore  pet.py take-many --depot personal --plan "角色:第 {BATTLE_SLOT} 格名字@原等級" → set-state-many 名字 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗')
     print('退出碼：160 參數 161 接取 162 準備 163 誘餌 / 買 164 抓 165 分配 166 練 167 交 168 丟 169 換回；9 驗證視窗 10 斷線')
 
 
@@ -1267,7 +1335,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('cmd', choices=['plan', 'run'])
     ap.add_argument('qid')
-    ap.add_argument('--confirm-buy-bait', action='store_true', help='誘餌不夠時准用外掛「+」買（每次 50,000 石幣，按前後驗可抓捕數 +1 / 鑽石，不讀石幣）')
+    ap.add_argument('--confirm-buy-bait', action='store_true', help='無作用（no-op，舊呼叫端相容）：2026-10-15 起誘餌不夠一律自動用外掛「+」買缺額，不需旗標（讀不到鑽石 / 鑽石有變就停）')
     ap.add_argument('--confirm-drop', action='store_true', help='准丟獎勵寵（布克布克 / 修寶 / 左迪洛斯，只丟 1 級）')
     ap.add_argument('--from', dest='from_stage', default=None)
     ap.add_argument('--to', dest='to_stage', default=None)

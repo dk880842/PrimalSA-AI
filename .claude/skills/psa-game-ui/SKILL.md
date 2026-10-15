@@ -155,7 +155,7 @@ uv run --no-project python tools/gui/errlog.py list
 | **新角色開局**（0 轉 1 級：開禮盒、穿新手裝、寵物出戰 / 騎乘、存倉、自動戰鬥 / 加點、組隊、初入石器、去練功） | **先跑 `newchar.py plan` 看步驟，再 `newchar.py run`**（未實機；手動流程 `notes/new-account.md`） |
 | 背包、道具、倉庫、材料圖鑑（多人穿裝 `bag.py wear`、多人存多樣 `bag.py store-items`） | [ui/bag.md](ui/bag.md) |
 | 看 / 改寵物出戰 · 等待（不碰存倉） | **先跑 `pet.py list` / `levels`（只讀等級）/ `set-state` / `rest-all`**（名字框是成長字串的先 `pet.py reset-name` 還原物種名）（沒名字寵物的成長字串 / 縮圖結果有跨程序快取，只用在這幾個指令，存倉 / 取出 / 丟寵照舊現場驗名；介面參考 [ui/pet.md](ui/pet.md)） |
-| **交寵物類任務**（恐龍博士 2016 / 卡坦的願望 2019 / 猜謎三兄弟 3003：外掛自動抓寵、共用倉庫分配、練寵、交任務；轉生 / 封印書後要重做；總控 `petquest.py run 2016\|2019\|3003 [--confirm-buy-bait] [--confirm-drop]`，退出碼 160～169，未實機） | **`/psa-pet-quest` skill** |
+| **交寵物類任務**（恐龍博士 2016 / 卡坦的願望 2019 / 猜謎三兄弟 3003：外掛自動抓寵、共用倉庫分配、練寵、交任務；轉生 / 封印書後要重做；總控 `petquest.py run 2016\|2019\|3003 [--confirm-drop]`（恐龍 / 卡坦先存第 2 格、練完才接任務；誘餌不夠自動買不需旗標），退出碼 160～169，未實機） | **`/psa-pet-quest` skill** |
 | 寵物出戰 / 騎乘 / 休息、寵物技能 | [ui/pet.md](ui/pet.md) |
 | 傳送到別的地圖 / 練級點 | [ui/transfer.md](ui/transfer.md) |
 | 遊戲設定、離線時間 | [ui/setting.md](ui/setting.md) |

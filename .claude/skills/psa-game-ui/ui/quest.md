@@ -222,7 +222,7 @@
 
 ## questrun.py：1.82 任務驅動器（P2，2026-10-11；計畫 notes/plan-182-script.md）
 - **吃 2倍智慧果 / 龍王的守護一律跑 `uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果`（龍王同理，換道具名）**：由它讀 buff 圖示決定吃不吃（已有就 skip、沒有才取出吃並驗圖示，沒驗到回 95）；**不要憑印象或 state.json / watch 的 buff 顯示判斷「已經有」而跳過**（2026-10-13 play agent 判斷 DKBO 有 buff 沒吃，實際已過期）。練寵掛機（petwatch）可加 `petwatch.py --exp-fruit` 讓它開練前自己跑。
-- **寵物任務總控 `petquest.py run 2016|2019|3003`（2026-10-13，未實機）**：接取（questrun 停在 115 / 155 / 117）→ 抓 / 分 / 練 → `questrun --pet-turnin` 交 → 丟獎勵寵 → 換回原戰寵（prep 記下各角色當下出戰寵：p1 朵拉比斯、p2 迪基格斯），一行跑完；155 的提示訊息也附這行。細節見 psa-pet-quest SKILL.md「總控腳本」。
+- **寵物任務總控 `petquest.py run 2016|2019|3003`（2026-10-13，未實機）**：恐龍 / 卡坦（2026-10-15 新順序）prep 存每人寵物欄第 2 格（名字 + 等級記進度檔；p1 朵拉比斯、p2 迪基格斯；空 / 騎寵 / 讀不出 162）→ 抓 / 分 / 練（誘餌不夠自動買「+」缺額，不需旗標；讀不到鑽石不按）→ rest-all 後才接任務（questrun 停在 115 / 155 / 117；0 = 已完成只收尾）→ `questrun --pet-turnin` 交 → 丟獎勵寵 → 取回第 2 格出戰；猜謎照舊先接取；一行跑完；155 的提示訊息也附這行。細節見 psa-pet-quest SKILL.md「總控腳本」。
 - **退出碼 155 需先抓 / 練寵（2026-10-13）**：no_track（quest.py 3）時若 questdefs 該任務有 `pet_prep` 且讀得到步號在其中（2019 步 1 / 2、2016 步 1 / 2、3003 步 2）→ 直接 155（`info.step`），訊息含下一步 pet_catch.py / petwatch.py 指令，不跑刷新 6 次；步號讀不到 → 舊流程（刷新後 112）。離線測試 test_questrun（8-pp）、test_questdefs。「寵物面板殘留」：quest.py `close_stray_panel` 是在 questrun 重跑 quest.py 時關掉別的工具（petwatch 掃描 / pet.py）留下的面板；questrun 自己 rest-all 走 pet.Session 會關面板，未找到 questrun 自己遺留的路徑（根因待實機：疑為同時跑的 petwatch / pet_catch 輪詢）。
 入口 `uv run --no-project python tools/gui/questrun.py plan|run|status [任務ID …]`；資料表 `questdefs.py`（2999 / 2017 / 2015 live，2027 / 2018 / 2011 只有資料）；特殊步驟 `questhandlers.py`（walk：成人儀式步 1 走到 10204:188,13）。退出碼 110～119（見 questrun.py 檔頭）。
 - 流程：交接（關遇敵 → **戰鬥設定檢查** → DKBO、組隊）→ 每任務 task_status（已完成跳過 / 待接取接取 / 進行中續跑）→（`--dragon` 才）龍王的守護 → quest.py 迴圈依退出碼分支 → 詳情確認已完成 →（`--drop-reward` 才）丟獎勵寵 → 全部成功才 `grind.py start --spot 地雷區`；失敗不恢復。
@@ -328,7 +328,7 @@ uv run --no-project python tools/gui/questrun.py run 2031 --after none \
 順序 = 使用者 2026-10-13 定案（notes/plan-post2-quests.md「使用者決定」9～12），每段呼叫既有腳本（子程序），失敗停在該段、印指令，進度檔 `tools/.cache/postrebirth.json`（24 小時）續跑：
 ```
 uv run --no-project python tools/gui/postrebirth.py plan [--confirm-drop]                     # 印 13 段完整順序與每段指令
-uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--confirm-buy-bait] [--from 段] [--to 段] [--fresh]
+uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--from 段] [--to 段] [--fresh]     # --confirm-buy-bait 已無作用（petquest 誘餌不夠自動買）
 ```
 - 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 沒龍王 → **自動改跑 `run 2031 --solo`**〔同一串參數〕，仍失敗才 173）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
 - **開面板前先靜下來（2026-10-15）**：inventory / bag1 / bag2 開頭呼叫 `Tools.quiet()`（follow 停 → `questrun.Tools.encounter_off_wait` 關原地遇敵並等這場打完 → `questrun.wait_battle_end` 畫面還是戰鬥就等，最多 240 秒）；inventory 失敗只警告、bag 失敗 174。起因：p2 地雷區掛機中 exp.py 開人物資訊，快戰畫面疊上來 → 9 + 停手旗標。questrun / petquest 段交接自己會做。`exp.py` 單獨跑也會先 `wait_not_battle()`（只等、不關遇敵；逾時 100）。
