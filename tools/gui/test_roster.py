@@ -81,11 +81,12 @@ check('index_of：DKBO1 / DKBO / DKBO5 / 空 → None（不在本視窗名單）
 check('index_of 指定主視窗：DKB0 → 0、DKBO10 → None', clients.index_of('DKB0', 'PrimalSA') == 0 and clients.index_of('DKBO10', 'PrimalSA') is None)
 check('by_slot 依名單位置配', clients.by_slot([1, 2, 3, 4, 5]) == dict(zip(P2, [1, 2, 3, 4, 5])))
 check('leader_last', clients.leader_last() == P2[1:] + P2[:1] and clients.leader_last('PrimalSA') == MAIN[1:] + MAIN[:1])
-check('all_names = 兩個名單聯集', clients.all_names() == MAIN + P2)
+P3 = ['DKBO11', 'DKBO12', 'DKBO13', 'DKBO14', 'DKBO15']
+check('all_names = 全部名單聯集（主 + PrimalSA2 + PrimalSA3）', clients.all_names() == MAIN + P2 + P3)
 
 # ---- charname / charstate ----
-canons = [charname.canon(x) for x in MAIN + P2]
-check('10 個名字正規化後不撞（DKBO10 = DKB010 不與別人相同）', len(set(canons)) == 10, str(canons))
+canons = [charname.canon(x) for x in MAIN + P2 + P3]
+check('15 個名字正規化後不撞（DKBO10 = DKB010、DKBO11 = DKB011 不與別人相同）', len(set(canons)) == 15, str(canons))
 check('canon_map 不丟任何名字', len(charname.canon_map(MAIN + P2)) == 10)
 check('charstate.DEFAULT_CHARS / LEAD', charstate.DEFAULT_CHARS == P2 and charstate.LEAD == 'DKBO6')
 check('uikit.CHARS = 名單', uikit.CHARS == P2)
