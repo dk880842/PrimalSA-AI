@@ -5,17 +5,21 @@
 使用者授權（2026-10-10，AGENTS.md 鐵則 2 的例外，只限這樣）：登入畫面**只點「登錄」**（用遊戲自動帶入的帳密），
 之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。絕不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、
 不讀 savepwd.txt 或登錄檔、不把帳號寫進任何 log。帳密欄空的 / 登錄後出現提示視窗 / 連續 3 次登錄失敗 / 看不懂的畫面 → halt 停手通知使用者。
+多視窗（2026-10-15 使用者決定，auto_login_check）：非主視窗（PSA_CLIENT ≠ PrimalSA）一律不按登錄；主視窗偵測到還有別的 PrimalSA* 程序在跑也不按
+（遊戲記住的帳號是所有視窗共用的，自動登錄可能登錯帳號、互踢）→ 照樣偵測斷線、點「網路異常」的確定，回到登入畫面就 halt 通知使用者。
+只有單一視窗時維持自動登錄。查不到程序清單 = 讀取失敗：本輪不點，連續 5 輪才 halt。
+全視窗驗證停手旗標（verifyhalt.py）存在 → check_and_reconnect 回 status 'verify'、guard sys.exit(9)，什麼都不點。
 
   import netwatch
   r = netwatch.guard('quest')            # 腳本迴圈每輪呼叫；要停手時直接 sys.exit(10 / 11)，否則回傳 dict
   r = netwatch.check_and_reconnect()     # 不 exit 的版本，回傳 {'status': ...}
-status：ok（沒事）/ reconnected（重連 / 重新登錄成功，已恢復）/ halt（要人類）/ fatal（連續失敗 3 次）
+status：ok（沒事）/ reconnected（重連 / 重新登錄成功，已恢復）/ halt（要人類）/ fatal（連續失敗 3 次）/ verify（全視窗驗證停手旗標）
 命令列：
   python tools/gui/netwatch.py --once                 檢查一次
   python tools/gui/netwatch.py --watch [--interval 10]  常駐（沒有其他腳本在跑、只是掛機時用）
   python tools/gui/netwatch.py --status                印目前 halt / 失敗計數
-退出碼：0 正常、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援。
-狀態檔（tools/.cache/，不進 git）：netwatch.halt（存在 = 已停手，等人類登入；HUD 回來後自動刪除）、
+退出碼：0 正常、9 全視窗驗證停手旗標、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援。
+狀態檔（tools/.cache/，非主視窗在 tools/.cache/clients/<程序名>/；不進 git）：netwatch.halt（存在 = 已停手，等人類登入；HUD 回來後自動刪除）、
 netwatch.json（連續失敗計數）、netwatch.act.lock（動作鎖：同時只有一支腳本在處理重連，不會互相亂點）、netwatch.lock（--watch 單例）。
 """
 import argparse
@@ -28,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import actlog  # noqa: E402
+import clients  # noqa: E402
 import errlog  # noqa: E402
 import layout  # noqa: E402
 import screen_sigs  # noqa: E402
@@ -37,7 +42,7 @@ from walk import gui, log  # noqa: E402
 PS_TIMEOUT = 40                      # 單次 PowerShell 呼叫上限（秒）；逾時當讀取失敗
 READ_FAIL_MAX = 5                    # 登入畫面連續 N 輪讀不到帳密欄 / 遊戲畫面 → halt
 
-CACHE = Path(__file__).resolve().parents[1] / '.cache'
+CACHE = clients.cache_dir()          # 每個視窗一份（主視窗 = tools/.cache，與改版前相同；PSA_CLIENT=PrimalSA2 → tools/.cache/clients/PrimalSA2）
 HALT = CACHE / 'netwatch.halt'
 STATE = CACHE / 'netwatch.json'
 ACT_LOCK = CACHE / 'netwatch.act.lock'
@@ -45,6 +50,7 @@ WATCH_LOCK = CACHE / 'netwatch.lock'
 
 EXIT_HALT = 10
 EXIT_FATAL = 11
+EXIT_VERIFY = 9                      # 全視窗驗證停手旗標（verifyhalt.py）= uikit.EXIT_UNKNOWN_SCREEN
 MAX_FAILS = 3
 TOL = screen_sigs.NET_TOL
 
@@ -367,6 +373,23 @@ def recover(src: str, encounter: bool = True, team: bool = True, grind_ensure: b
     return info
 
 
+MULTI_HALT = '多視窗不自動按登錄'      # halt 理由開頭（relogin.py 擋重登也用）
+
+
+def auto_login_check(procs=None) -> tuple:
+    """多視窗不自動按「登錄」（2026-10-15 使用者決定：遊戲記住的帳號是所有視窗共用的，自動登錄可能登錯帳號、互踢）。
+    → ('ok', '') 單一視窗、可以照舊自動登錄；('block', 理由) 非主視窗 / 主視窗但還有別的 PrimalSA* 在跑；
+    ('unknown', 理由) 主視窗但查不到程序清單（呼叫端當讀取失敗：本輪不點、連續幾輪才 halt）。procs 給測試用"""
+    if not clients.is_default():
+        return 'block', f'{MULTI_HALT}：非主視窗 {clients.name()} 只偵測斷線、不按登錄（記住的帳號是共用的，可能登錯帳號互踢），請人登入'
+    others = clients.others_running(procs=procs)
+    if others is None:
+        return 'unknown', '查不到正在執行的遊戲程序清單（判斷不了是不是多視窗）'
+    if others:
+        return 'block', f'{MULTI_HALT}：還有其他視窗在跑（{"、".join(others)}），記住的帳號是共用的，可能登錯帳號互踢，請人登入'
+    return 'ok', ''
+
+
 def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: bool = True) -> dict:
     """登入畫面 → 檢查帳密欄有內容 → 點「登錄」→ 處理選擇角色 / 載入 → 回到遊戲 → recover。
     失敗規則：欄位空 / 出現提示視窗（密碼錯誤、封停、維護、驗證）/ 看不懂的畫面逾時 / 連續 3 次 → halt（不重試）"""
@@ -376,6 +399,17 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
         st = _load()
         if st.get('login_fails', 0) >= MAX_FAILS:
             return halt(f'連續 {MAX_FAILS} 次登錄失敗', src) | {'status': 'fatal'}
+        how, why = auto_login_check()
+        if how == 'block':
+            return halt(why, src)
+        if how == 'unknown':
+            # 跟讀不到帳密欄同一套：本輪不點登錄，連續 READ_FAIL_MAX 輪才 halt
+            st['read_fails'] = st.get('read_fails', 0) + 1
+            _save(st)
+            if st['read_fails'] >= READ_FAIL_MAX:
+                return halt(f'連續 {READ_FAIL_MAX} 輪{why}，不自動登錄', src)
+            log(f'netwatch：{why}（{st["read_fails"]}/{READ_FAIL_MAX}），本輪不點登錄')
+            return {'status': 'ok', 'failed': True}
         filled = login_fields_filled()
         if filled is None:
             # 讀取失敗：不點登錄、不以「欄位空」halt；下輪再試，連續 READ_FAIL_MAX 輪讀不到才 halt
@@ -430,7 +464,12 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
 # ---------------- 主流程 ----------------
 def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True, team: bool = True, grind_ensure: bool = True) -> dict:
     """檢查「網路異常」提示 / 登入畫面；有就處理。shot 參數保留相容（目前自己取樣，不用外部截圖）。
-    回傳 {'status': 'ok'|'reconnected'|'halt'|'fatal', ...}；status 為 halt / fatal 時呼叫端必須停手。"""
+    回傳 {'status': 'ok'|'reconnected'|'halt'|'fatal'|'verify', ...}；status 為 halt / fatal / verify 時呼叫端必須停手。
+    verify = 全視窗驗證停手旗標（verifyhalt.py，多視窗時任一視窗出現驗證視窗）：什麼都不點，連重連都不做"""
+    import verifyhalt
+    vh = verifyhalt.active()
+    if vh:
+        return {'status': 'verify', 'reason': verifyhalt.message(vh)}
     if HALT.exists():
         if hud_ok():                         # 人類已登入回來
             _release(HALT)
@@ -478,8 +517,11 @@ def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True
 
 
 def guard(src: str, **kw) -> dict:
-    """給腳本迴圈用：要停手（halt / fatal）就直接 sys.exit(10 / 11)（會跑 finally），重連成功回傳 dict（呼叫端依 'reconnected' 重設自己的狀態）"""
+    """給腳本迴圈用：要停手（halt / fatal / verify）就直接 sys.exit(10 / 11 / 9)（會跑 finally），重連成功回傳 dict（呼叫端依 'reconnected' 重設自己的狀態）"""
     r = check_and_reconnect(src=src, **kw)
+    if r['status'] == 'verify':
+        print(f'{src}：{r["reason"]}', file=sys.stderr, flush=True)
+        sys.exit(EXIT_VERIFY)
     if r['status'] == 'halt':
         sys.exit(EXIT_HALT)
     if r['status'] == 'fatal':
@@ -507,7 +549,7 @@ def main() -> int:
     if not a.watch:
         r = check_and_reconnect(**kw)
         print(json.dumps(r, ensure_ascii=False, default=str))
-        return {'halt': EXIT_HALT, 'fatal': EXIT_FATAL}.get(r['status'], 0)
+        return {'halt': EXIT_HALT, 'fatal': EXIT_FATAL, 'verify': EXIT_VERIFY}.get(r['status'], 0)
     if not _take(WATCH_LOCK, 120):
         log('已有另一支 netwatch --watch 在跑（tools/.cache/netwatch.lock）')
         return 3
@@ -519,6 +561,9 @@ def main() -> int:
             except OSError:
                 pass
             r = check_and_reconnect(**kw)
+            if r['status'] == 'verify':
+                log(r['reason'])
+                return EXIT_VERIFY
             if r['status'] in ('halt', 'fatal'):
                 return EXIT_HALT if r['status'] == 'halt' else EXIT_FATAL   # 人類登入後重新啟動即可（halt 檔會自動清）
             time.sleep(a.interval)

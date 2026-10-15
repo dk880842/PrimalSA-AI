@@ -84,13 +84,14 @@ sys.path.insert(0, str(HERE))
 import charstate  # noqa: E402
 import rebirth_steps  # noqa: E402  接任務 / 轉生獎勵寵（可獨立呼叫的小步驟）
 import stuckrecover  # noqa: E402  卡住自動重登（questrun 同一份）
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'rebirth'
 ROOT = uikit.ROOT
 import logpaths  # noqa: E402
-EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
-QUEST_LOG = logpaths.p(ROOT / 'notes' / 'quest-log.md')
+EVENT_LOG = logpaths.p(clients.npath('quest-events.log'))     # 主視窗 = notes/；其他 = notes/clients/<程序名>/
+QUEST_LOG = logpaths.p(clients.npath('quest-log.md'))
 PROGRESS = logpaths.p(uikit.CACHE / 'rebirth.json')
 
 EXIT_LEVEL, EXIT_ITEMS, EXIT_SPACE, EXIT_TEAM, EXIT_QUEST, EXIT_BOSS, EXIT_BAG, EXIT_SETUP, EXIT_REBIRTH, EXIT_CONFIRM = 80, 81, 82, 83, 84, 85, 86, 87, 88, 89

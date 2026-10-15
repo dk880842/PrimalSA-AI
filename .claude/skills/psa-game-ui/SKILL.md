@@ -92,15 +92,23 @@ uv run --no-project python tools/gui/errlog.py list
 - 背景模式 `dclick`（倉庫存入）、`key` 打字（含中文）都實測可用（2026-10-09）。`key` 語法：一般字元 = 打進輸入框；`{ESC}` `{BS}` 等 = 按鍵；`{a}` = 只按 a 鍵（快捷鍵用）。
 - `gui.ps1` 必須保持 **UTF-8 with BOM**（PowerShell 5.1 讀無 BOM 檔會把中文當 Big5，整支解析失敗）。
 
-## 多視窗（PSA_CLIENT，2026-10-15 第 1 步：選視窗 + 點擊鎖）
+## 多視窗（PSA_CLIENT，2026-10-15 第 1 步：選視窗 + 點擊鎖；第 3a 步：每視窗狀態隔離 + 不自動登錄 + 全視窗驗證停手）
 同機多開時每個視窗是不同名稱的執行檔（`PrimalSA.exe` = 主視窗 DKBO～DKBO5；`PrimalSA2.exe` = DKBO6～DKBO10；名單寫死在 `tools/gui/clients.py`）。
 - **選視窗**：環境變數 `PSA_CLIENT` = 程序名稱（不含 .exe），**不設 = PrimalSA，行為與以前完全相同**。例：`PSA_CLIENT=PrimalSA2 bash tools/gui/gui.sh info`、`PSA_CLIENT=PrimalSA2 bash tools/gui/mirror.sh`、`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/walk.py ...`。
   精確比對程序名稱（`psawin.ps1` 的 `Find-PsaProcess`；gui / stat / ocr / findmark / titlematch / digitmatch / mirror 共用）：沒在執行 → `gui.ps1` exit 1「PrimalSA2 沒有在執行」、讀圖腳本回 `{"ok":false,"error":"遊戲沒有在執行（PrimalSA2）"}`；**同名程序多個或名稱不合法 → exit 6，不操作**。
   WSL 呼叫 powershell.exe 要經 WSLENV 才帶得過去：`winenv.run_ps`（一次性呼叫帶 `client_env()`）、`gui.sh` / `mirror.sh` 已自動加；常駐 `serve.ps1` 不綁視窗，**每個請求帶 `client`**，執行前設 / 清 `$env:PSA_CLIENT`，`gui.ps1` 的 hwnd 快取鍵含 client。
 - **點擊鎖**：`gui.ps1` 的 click / dclick / drag（背景與 fg 模式）在「游標移過去 → 移回」那段取 Windows 具名 Mutex `Local\PrimalSA-AI-Input`（跨行程、WSL / 原生共用，無競爭約 0.4 ms）；seq 裡每個點擊各自取放。5 秒拿不到 → **不點、exit 7**（actions.log 記「點擊鎖逾時」）；等超過 300 ms 或前一持有者沒放就死（abandoned，視為取得）也記 log。key（PostMessage）不鎖。
 - **操作 log**：非主視窗的行在時間後加 `[PrimalSA2]`（gui.ps1 與 actlog.py 同規則），主視窗格式不變。
-- **還不能給 PrimalSA2 用的**（後續階段）：寫死 DKBO 名字的 team / char / pet / bag / ass / quest / questrun / rebirth / petquest / exp / grind / relogin / netwatch；共用 `state.json` / `watch.py` / `uikit.preflight` 快路徑 / `heal.py`（讀 watchstate）/ `follow` / `grind.lock` / `battle.lock` / `current-char.json` / `netwatch.lock`。PrimalSA2 只用 gui.sh、mirror.sh、讀圖 .ps1、`walk.py`（`maphist.json` 仍共用）。
-- 離線測試：`test_multiclient.py`（假 powershell.exe 守門）、`test_psawin.ps1`（真 powershell，只測不存在 / 同名多個的程序名與自用 Mutex，碰不到遊戲）。
+- **每個視窗自己的狀態檔（第 3a 步）**：`clients.cache_dir()` = 主視窗 `tools/.cache/`（**原路徑，零遷移**）；其他 `tools/.cache/clients/<程序名>/`（第一次用自動建）。事件 log（quest-events.log、quest-log.md）= 主視窗 `notes/`；其他 `notes/clients/<程序名>/`。
+  各視窗一份：state.json / watch.lock / watch.stop / watch.ack / watch-config.json / psa-hud.json / watch-dump / watch-alerts、netwatch.lock / .act.lock / .json / .halt / netwatch_team.png、follow.pid / .stop / .json / .log、grind.lock / grind.json / trans.json、petwatch.lock / .json、battle.lock、current-char.json、maphist.json、exp-history.jsonl、track-pos.json、各驅動器進度檔（rebirth / rebirth_pets / rebirth_pets_before / questrun / postrebirth / petquest .json）、抓寵批次 catch-src / catch-pre、截圖暫存（ui-log / tmp / quest-log / questdetail-live.png / gui.sh 與 gui.ps1 的相對檔名 shot、gui-session.txt）。
+  全部視窗共用（與帳號無關或本來就有檔鎖）：樣板 pet-tpl（名字 / 等級 / species / ident-cache / glyph）、name-tpl、item-name-tpl、digit-tpl、task-titles、pet-avatars.json、圖庫 item-images / pet-images / *-coarse.bin、shots-index、petident 樣本、spot-thresholds.json（遊戲規則）、errlog.jsonl（有檔鎖；非主視窗的筆數多 `client` 欄）、actions.log（非主視窗行加 `[程序名]`）、gui-server.pids、verify-halt.json。共用樣板的寫入暫存檔名帶 pid（兩個視窗同時學不會撞檔）。
+  常駐程式各視窗一份、互不擋：`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/watch.py` / `netwatch.py --watch` / `grind.py follow` 用自己的鎖與狀態；`winenv.spawn_detached`（grind 起 follow）子程序繼承 PSA_CLIENT；grind 掃 heal --watch 只把同一視窗的當衝突。
+- **多視窗不自動登錄**（使用者 2026-10-15）：非主視窗一律不按「登錄」；主視窗看到還有別的 PrimalSA* 程序在跑也不按（記住的帳號共用，可能登錯帳號互踢）→ 只點「網路異常」確定、回登入畫面就 halt 通知人；`relogin.py` 多視窗時 109 不動。詳見 [ui/network.md](ui/network.md)「多視窗時不自動登錄」。
+- **全視窗驗證停手**：多視窗時任一視窗疑似驗證視窗（uikit 回 9、watch verify_suspect、quest 警報）→ 寫 `tools/.cache/verify-halt.json`，**所有視窗**的 preflight / netwatch.guard / VerifyGuard / gui.ps1 輸入指令都停（9）；人處理完 `uv run --no-project python tools/gui/verifyhalt.py clear`。單一視窗不寫，行為不變。詳見 ui/network.md。
+- `gui.sh` 退出碼 = gui.ps1 的退出碼（2026-10-15 修：以前 `| tr` 吃掉、失敗也回 0）。
+- **PrimalSA2 現在能用的**：gui.sh、mirror.sh、讀圖 .ps1、`walk.py`（自己的 maphist）、`watch.py`（自己的 state.json；角色名白名單還是 DKBO，當前角色名認不出）、`netwatch.py --watch --no-team --no-grind`（斷線只點確定 + halt；recover 的組隊 / grind ensure 用 DKBO 名字，3b 前要關）、`verifyhalt.py`、`heal.py`（沒有名字相依，未實機）。
+- **還不能給 PrimalSA2 用的**（第 3b 步，名單相依）：寫死 DKBO 名字的 team / char / pet / bag / ass / quest / questrun / rebirth / petquest / exp / grind（含 follow）/ relogin / charstate 白名單。
+- 離線測試：`test_multiclient.py`、`test_clientctx.py`（假 powershell.exe 守門：路徑快照〔沒設 PSA_CLIENT 時 63 個路徑常數與改版前逐字相同〕、verify-halt、netwatch 多視窗不登錄、gui.sh 退出碼）、`test_psawin.ps1`（真 powershell，只測不存在 / 同名多個的程序名與自用 Mutex，碰不到遊戲）。
 
 ## 移動：先用 walk.py（不要自己算座標點地面）
 - **鏡頭高度一律拉到最左**（設置 → 畫面設置，見 [ui/setting.md](ui/setting.md)）：walk.py 的每格位移只在這個鏡頭下準，與視窗大小無關；滾輪會改鏡頭高度，**不要在遊戲畫面上滾滾輪**。走路 / 補血一直走錯格時先檢查這個。
@@ -136,7 +144,7 @@ uv run --no-project python tools/gui/errlog.py list
 | 自動戰鬥、補血、抓寵、遇敵 | [ui/ass.md](ui/ass.md) |
 | 聊天、信件、通知、排行榜、家族 | [ui/social.md](ui/social.md) |
 | 商城、交易所、抽獎（多為紅區） | [ui/shop.md](ui/shop.md) |
-| 「網路異常，是否重連?」提示、斷線後登入畫面（`tools/gui/netwatch.py`；已接進 quest / petwatch / heal --watch；點確定會回登入畫面 → 自動按「登錄」重登（使用者授權，只按登錄；欄位空 / 錯誤提示 / 連 3 次失敗才停手）） | [ui/network.md](ui/network.md) |
+| 「網路異常，是否重連?」提示、斷線後登入畫面（`tools/gui/netwatch.py`；已接進 quest / petwatch / heal --watch；點確定會回登入畫面 → 自動按「登錄」重登（使用者授權，只按登錄；欄位空 / 錯誤提示 / 連 3 次失敗才停手；**多視窗時不按登錄、直接 halt**）） | [ui/network.md](ui/network.md) |
 | 沒見過的畫面、答題驗證 | [ui/todo.md](ui/todo.md) |
 全部清單與「依情境找」見 [ui/README.md](ui/README.md)。學到新畫面或新流程時，照 README 的「新增 / 更新規則」寫進對應檔並更新兩邊索引。
 

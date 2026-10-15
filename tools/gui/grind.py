@@ -59,6 +59,7 @@ import heal  # noqa: E402
 import screen_sigs  # noqa: E402
 import spots  # noqa: E402
 import team  # noqa: E402
+import clients  # noqa: E402
 import uikit  # noqa: E402
 import walk  # noqa: E402
 
@@ -138,7 +139,8 @@ def leader_team_read() -> dict | None:
 
 # ---- 鎖 ----
 def _other_running() -> str | None:
-    """另一支會搶畫面的工具在跑 → 回名稱。petwatch / grind 看鎖檔 pid；heal --watch 沒有鎖檔，Linux 掃 /proc（盡力）"""
+    """另一支會搶畫面的工具在跑 → 回名稱。petwatch / grind 看鎖檔 pid（鎖檔每個視窗一份）；heal --watch 沒有鎖檔，Linux 掃 /proc（盡力）。
+    多視窗：別的視窗（環境變數 PSA_CLIENT 不同）的 heal --watch 不算衝突；讀不到對方環境照舊當衝突"""
     for name, lock in (('grind', LOCK), ('petwatch', CACHE / 'petwatch.lock')):
         try:
             pid = int(lock.read_text().strip())
@@ -157,6 +159,9 @@ def _other_running() -> str | None:
                     except OSError:
                         continue
                     if any(c.endswith(b'heal.py') for c in cmd) and b'--watch' in cmd:
+                        other = clients.proc_client(d.name)
+                        if other is not None and other.lower() != clients.name().lower():
+                            continue                       # 別的視窗的 heal --watch
                         return f'heal --watch（pid {d.name}）'
         except OSError:
             pass

@@ -124,7 +124,7 @@ def load_tpl(layout: str = LAYOUT, reload: bool = False) -> dict:
 def save_tpl(tpl: dict, layout: str = LAYOUT) -> None:
     TPL_DIR.mkdir(parents=True, exist_ok=True)
     p = tpl_path(layout)
-    tmp = p.with_suffix('.tmp')
+    tmp = p.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_text(json.dumps(tpl, ensure_ascii=False), encoding='utf-8')
     tmp.replace(p)
     _CACHE.pop(str(p), None)

@@ -15,6 +15,7 @@
 測試可替換 petmatch.TPL_DIR；所有碰遊戲的呼叫都走 uikit.px。
 """
 import json
+import os
 import re
 import sys
 from collections import Counter
@@ -23,10 +24,11 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import digitmatch  # noqa: E402
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 LAYOUT = '2880x1659'
-TPL_DIR = uikit.CACHE / 'pet-tpl'
+TPL_DIR = clients.SHARED_CACHE / 'pet-tpl'     # 名字 / 等級樣板、species.json、ident-cache：遊戲字型與物種事實，全部視窗共用
 
 # ---- 取樣框（截圖座標 x, y, w, h；P-I5 實測）----
 BOX_NAME = (430, 160, 200, 45)          # 選中寵物名字（奶油色字、棕木牌底）
@@ -108,6 +110,12 @@ def iou(a: int, b: int, stride: int) -> float:
 
 
 # ---- 樣板檔 ----
+def client_dir() -> Path:
+    """抓寵批次狀態（catch-src.json / catch-pre.json：誰抓的、抓前寵物欄快照）放哪：每個視窗一份。
+    主視窗 = TPL_DIR（與改版前相同；測試替換 TPL_DIR 時跟著走）；其他視窗 = 自己的 tools/.cache/clients/<程序名>/pet-tpl"""
+    return TPL_DIR if clients.is_default() else clients.cache_dir() / 'pet-tpl'
+
+
 def tpl_path(layout: str = LAYOUT) -> Path:
     return TPL_DIR / f'{layout}.json'
 
@@ -124,7 +132,7 @@ def load_tpl(layout: str = LAYOUT) -> dict:
 def save_tpl(tpl: dict, layout: str = LAYOUT) -> None:
     TPL_DIR.mkdir(parents=True, exist_ok=True)
     p = tpl_path(layout)
-    tmp = p.with_suffix('.tmp')
+    tmp = p.with_suffix(f'.{os.getpid()}.tmp')
     tmp.write_text(json.dumps(tpl, ensure_ascii=False), encoding='utf-8')
     tmp.replace(p)
 
@@ -542,7 +550,7 @@ def load_species() -> dict:
         return reg
     _derive(reg)                                            # 舊格式遷移：legacy 單值 + 抓寵來源檔（catch-src.json，pet_catch register 寫的「誰抓的」）補回撞號
     try:
-        cs = json.loads((TPL_DIR / 'catch-src.json').read_text(encoding='utf-8'))
+        cs = json.loads((client_dir() / 'catch-src.json').read_text(encoding='utf-8'))
     except (OSError, ValueError):
         cs = {}
     for g, es in (cs if isinstance(cs, dict) else {}).items():
@@ -559,7 +567,7 @@ def save_species(reg: dict) -> None:
     _derive(reg)
     TPL_DIR.mkdir(parents=True, exist_ok=True)
     p = species_path()
-    tmp = p.with_suffix('.tmp')
+    tmp = p.with_suffix(f'.{os.getpid()}.tmp')
     out = {'ver': SPECIES_VER, 'thumb': reg.get('thumb') or {}, 'growth': reg['growth'], 'growth_src': reg['growth_src']}
     tmp.write_text(json.dumps(out, ensure_ascii=False), encoding='utf-8')
     tmp.replace(p)

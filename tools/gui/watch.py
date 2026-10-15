@@ -45,10 +45,18 @@ import charstate  # noqa: E402
 import digitmatch  # noqa: E402
 import errlog  # noqa: E402
 import screen_sigs  # noqa: E402
+import verifyhalt  # noqa: E402
 import watchstate  # noqa: E402
 import winenv  # noqa: E402
 
-INTERVAL = 0.5                    # 使用者決定：固定 0.5 s
+
+def trip_verify(reason: str) -> bool:
+    """疑似驗證視窗（unknown_long / quest 警報轉述）：多視窗時設全視窗驗證停手旗標（verifyhalt.py；單一視窗不寫，行為不變）。
+    watch 自己不停（零輸入，繼續監看），state.flags.verify_halt 會顯示。測試可替換"""
+    return verifyhalt.trip(reason, 'watch')
+
+
+INTERVAL = 0.5                   # 使用者決定：固定 0.5 s
 SLOW_CYCLE_MS = 300               # 中位數超過 → 判斷退回一次性（server 沒在用 / 起不來），降頻保護 CPU
 SLOW_MIN, SLOW_MAX = 2.0, 4.0     # 降頻間隔 = min(4, max(2, 3×cycle))
 HEARTBEAT = 1.0                   # 內容沒變也每 1 s 寫一次（seq +1）
@@ -519,6 +527,7 @@ class Watcher:
                 eid = errlog.add(f'疑似驗證視窗：畫面連續 {int(UNKNOWN_LONG_S)} 秒以上不認得（watch 偵測；不碰、請人工確認）' + (f'；截圖 {shot}' if shot else ''), source='watch')
                 self.unk_alert = {'kind': 'unknown_long', 'since': self.unknown_wall, 'shot': shot, 'err_id': eid,
                                   'msg': f'不認得的畫面超過 {int(UNKNOWN_LONG_S)} 秒（可能是驗證視窗，請人工確認）'}
+                trip_verify(f'watch：畫面連續 {int(UNKNOWN_LONG_S)} 秒以上不認得（疑似驗證視窗）')
         elif st in NOGAME_STATES:
             self.unknown_since = self.known_since = None
             self._clear_unknown(st)
@@ -591,6 +600,7 @@ class Watcher:
                 if not any(a.get('line') == ln[:200] for a in self.q_alerts):
                     eid = errlog.add(f'quest 警報轉述：{msg[:100]}（疑似驗證視窗，請人工確認）', source='watch')
                     self.q_alerts.append({'kind': 'verify', 'src': 'quest', 'line': ln[:200], 'msg': msg[:120], 'err_id': eid})
+                    trip_verify(f'watch 轉述 quest 警報：{msg[:100]}')
                     del self.q_alerts[:-3]
 
     def _check_ack(self) -> None:
@@ -866,10 +876,11 @@ class Watcher:
         return d
 
     def _flags(self, mono: float) -> dict:
-        """battle_lock（只讀 peek）/ netwatch_halt；0.4 s 內重複 build 不重讀檔（每輪 build 2～3 次）"""
+        """battle_lock（只讀 peek）/ netwatch_halt / verify_halt（全視窗驗證停手旗標，verifyhalt.py）；0.4 s 內重複 build 不重讀檔（每輪 build 2～3 次）"""
         c = self._flags_cache
         if c is None or mono - c[0] > 0.4:
-            c = self._flags_cache = (mono, {'battle_lock': watchstate.peek_battle_lock(), 'netwatch_halt': Path(watchstate.HALT_FILE).exists()})
+            c = self._flags_cache = (mono, {'battle_lock': watchstate.peek_battle_lock(), 'netwatch_halt': Path(watchstate.HALT_FILE).exists(),
+                                            'verify_halt': verifyhalt.active() is not None})
         return c[1]
 
     def flush(self, force: bool = False) -> bool:

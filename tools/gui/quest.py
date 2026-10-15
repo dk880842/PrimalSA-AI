@@ -128,8 +128,9 @@ STALL_MARKER_PX = 10                 # 兩次點的黃問號座標差超過這�
 AUTO_STUCK_MAX = 4                   # 同一場戰鬥最多按幾次自動戰鬥鈕
 NPC_WAIT = 12.0                      # --fight 點 NPC 後最多等幾秒看有沒有反應（走過去 + 開對話框）
 import logpaths  # noqa: E402
-LOG_FILE = logpaths.p(ROOT / 'notes' / 'quest-events.log')
-SHOT_DIR = ROOT / 'tools' / '.cache' / 'quest-log'
+import clients  # noqa: E402
+LOG_FILE = logpaths.p(clients.npath('quest-events.log'))     # 主視窗 = notes/quest-events.log；其他 = notes/clients/<程序名>/
+SHOT_DIR = clients.cpath('quest-log')                      # 每個視窗一份（主視窗 = tools/.cache/quest-log）
 SHOT_KEEP_DAYS = 3                   # 啟動時清掉 SHOT_DIR 內超過幾天的圖檔
 SHOT_EXTS = ('.png', '.jpg', '.jpeg')
 
@@ -615,7 +616,7 @@ def clear_leftovers(rounds: int = CLEAR_ROUNDS) -> str:
 # 「樣板」= 上次掃描（titlematch / OCR 確認標題相符）命中那一刻在該 y 讀的標題列像素（5 列 × 120 點、每 2 px 一點）；最多留 3 個變體（選中 / 未選中底色）。
 # 名稱不符絕不點仍成立：點之前一定要現場像素跟「確認過標題的那張卡」**每一點**都吻合（每通道差 ≤ 16，且有字的深色點）；
 # 只差一個筆畫（漆黑洞窟(一轉) / (二轉)）也會有多點不同 → 對不上 → 退回整輪掃描（只是慢，不會點錯）。
-TRACK_POS = logpaths.p(ROOT / 'tools' / '.cache' / 'track-pos.json')        # 測試時 testenv 轉向暫存
+TRACK_POS = logpaths.p(clients.cpath('track-pos.json'))        # 測試時 testenv 轉向暫存
 TRACK_POS_TTL_S = 6 * 3600
 TRACK_SIG_TOL, TRACK_SIG_NEED, TRACK_SIG_INK = 16, 1.0, 12
 TRACK_SIG_MAX = 3
@@ -2424,6 +2425,8 @@ def _main() -> int:
                 shot = snap('UNKNOWN')
                 event('警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）→ 停止自動操作，請使用者處理', shot)
                 print('!!! 請人工檢查畫面（鐵則 5：驗證視窗不可亂猜答案）', flush=True)
+                import verifyhalt
+                verifyhalt.trip('quest.py 連續 3 次遇到不認得的畫面（疑似答題 / 驗證視窗）', 'quest')   # 多視窗：其他視窗也停
                 return 2
         if a.once:
             return 0

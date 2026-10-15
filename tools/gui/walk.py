@@ -476,7 +476,8 @@ def rewarp_if_on_exit() -> tuple | None:
     return step_to(p[0], p[1], p[2], exit_map=wp['tMap'])
 
 
-MAPHIST = ROOT / 'tools' / '.cache' / 'maphist.json'
+import clients  # noqa: E402
+MAPHIST = clients.cpath('maphist.json')      # 走過的地圖順序：每個視窗一份（主視窗 = tools/.cache/maphist.json）
 
 
 def note_map(map_id: int) -> None:

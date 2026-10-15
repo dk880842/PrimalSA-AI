@@ -68,7 +68,7 @@ def parse_assign(s: str) -> list:
 EXIT_CATCH_SPECIES = 15
 EXIT_CATCH_UNREAD = 16
 EXIT_CATCH_MISSED = 17                     # register：有新寵物沒登錄（同人兩格同字串點陣不同 / 名字不對），見 plan_register
-SRC_FILE = 'catch-src.json'                # 抓寵來源檔（petmatch.TPL_DIR 底下）
+SRC_FILE = 'catch-src.json'                # 抓寵來源檔（petmatch.client_dir() 底下：主視窗 = petmatch.TPL_DIR，其他視窗各自一份）
 PRE_FILE = 'catch-pre.json'                # 抓寵前寵物欄快照（register 排除舊寵物用）
 PRE_MAX_S = 30 * 60                        # 快照超過這麼久就不信（自己重讀）
 PASS_RC = (9, 10)                          # uikit.EXIT_UNKNOWN_SCREEN / EXIT_HALT：驗證視窗 / 斷線 → 不做任何收尾點擊
@@ -76,7 +76,7 @@ PASS_RC = (9, 10)                          # uikit.EXIT_UNKNOWN_SCREEN / EXIT_HA
 
 def src_path():
     import petmatch
-    return petmatch.TPL_DIR / SRC_FILE
+    return petmatch.client_dir() / SRC_FILE
 
 
 def load_src() -> dict:
@@ -99,7 +99,7 @@ def save_src(d: dict) -> None:
 
 def pre_path():
     import petmatch
-    return petmatch.TPL_DIR / PRE_FILE
+    return petmatch.client_dir() / PRE_FILE
 
 
 def save_pre(pets: dict, now: float | None = None) -> None:

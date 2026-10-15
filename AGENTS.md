@@ -35,7 +35,7 @@ PrimalSA-AI/
                        petquest.py（寵物任務總控：`run 2016|2019|3003 [--confirm-buy-bait] [--confirm-drop]`，接取 → 分批抓（≤ 寵物欄空格；抓完 reset-name 還原名字 → 名字驗證，成長字串登錄只當備援）/ 公共倉庫分配 / 練寵 → 交 → 丟獎勵寵 → 換回原朵拉比斯，進度檔續跑，退出碼 160～169，只有離線測試）；
                        exp.py（唯讀讀 5 人經驗 + 升級時間估計：`read` / `eta --target 131`，人物資訊面板開一次逐人切頭像、經驗表交叉驗證，歷史 tools/.cache/exp-history.jsonl，退出碼 100～102）；
                        操作 log：actlog.py（寫 `.cache/actions.log` 最新 2000 行 + 按小時分檔 `.cache/actions/YYYY-MM-DD_HH.log` 保留 14 天；`actlog.py show [--date] HH:MM-HH:MM [--grep]` 查舊細節；gui.ps1 同步寫分檔）；
-                       共用模組：spots.py（練級傳送點表，heal 也用）、uikit.py（面板規格 / 禁區保護 / preflight）、charstate.py（當前角色旁路檔）、namematch.py / petmatch.py / digitmatch.py（名字、寵物、HUD 數字的圖樣板比對）；petglyph.py（名字框成長字串 / 倉庫卡字與等級的字形樣板讀字，取代 OCR、倉庫卡不用選卡；種子 fixtures/pet_glyph_tpl.json）；petimg_match.py（寵物縮圖比知識庫頭像認物種；2026-10-14 晚起 pet.py 名字為主：名字讀到物種名就不比縮圖，縮圖只在名字讀不出時補，衝突 = 不確定）；itemname_match.py（道具格「顯示道具名」白字整名樣板，2026-10-14 起 bag.py 道具辨識第一層，彈窗核對過才學）；itemimg_match.py（道具格縮圖比 GameClient 道具圖，名字沒認出的格才用，PSA_ITEM_MATCH）；imgmatch.py（兩者共用的比對核心）；netwatch.py（斷線重連 / 自動登錄，重登後自動 grind ensure）
+                       共用模組：clients.py（多視窗身分 PSA_CLIENT / 每視窗狀態資料夾 cache_dir）、verifyhalt.py（全視窗驗證停手旗標）、spots.py（練級傳送點表，heal 也用）、uikit.py（面板規格 / 禁區保護 / preflight）、charstate.py（當前角色旁路檔）、namematch.py / petmatch.py / digitmatch.py（名字、寵物、HUD 數字的圖樣板比對）；petglyph.py（名字框成長字串 / 倉庫卡字與等級的字形樣板讀字，取代 OCR、倉庫卡不用選卡；種子 fixtures/pet_glyph_tpl.json）；petimg_match.py（寵物縮圖比知識庫頭像認物種；2026-10-14 晚起 pet.py 名字為主：名字讀到物種名就不比縮圖，縮圖只在名字讀不出時補，衝突 = 不確定）；itemname_match.py（道具格「顯示道具名」白字整名樣板，2026-10-14 起 bag.py 道具辨識第一層，彈窗核對過才學）；itemimg_match.py（道具格縮圖比 GameClient 道具圖，名字沒認出的格才用，PSA_ITEM_MATCH）；imgmatch.py（兩者共用的比對核心）；netwatch.py（斷線重連 / 自動登錄，重登後自動 grind ensure）
                        watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；HUD 數值用 digitmatch.py 樣板比對為主、stat.ps1 OCR 補漏；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、shotcache.py（tools/.cache 截圖樣本的分類索引 shots-index.json + 取點快取；screen_sigs 挑點 / make_fixtures 用，`build|stats|list|relabel|bench`）、test_*（離線測試）
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
@@ -47,7 +47,7 @@ PrimalSA-AI/
    工具只能讀取它；所有產出寫到 `knowledge/` 或 `tools/.cache/`。遊戲自己更新 / 下載資源不在此限。
 2. **不碰帳號機密**：不讀取、不輸出、不記錄密碼與登入資訊（例：`AssetBundles/savepwd.txt`、登錄檔 PlayerPrefs 的 `LastPassword_*`、`LastCdkey_*`、`LastAccount_*`）。需要登入時由人類操作。
    例外：斷線回到登入畫面時，可以自動按「登錄」（只用遊戲已自動帶入的帳密；不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、不把帳號名寫進 log）。
-   帳密欄是空的、登錄出錯（密碼錯誤、封號、維護、驗證碼）或連續失敗 3 次 → 停手通知使用者。實作見 `tools/gui/netwatch.py`。
+   帳密欄是空的、登錄出錯（密碼錯誤、封號、維護、驗證碼）或連續失敗 3 次 → 停手通知使用者。同機多個遊戲視窗時一律不自動按登錄（記住的帳號共用，可能登錯帳號互踢）。實作見 `tools/gui/netwatch.py`。
 3. **不付費**：不得進行任何儲值、購買鑽石、月卡、抽獎扣鑽等花真錢或鑽石的操作；`economy/recharge.md` 只供參考。
 4. **不修改遊戲行為**：不改遊戲檔案、不注入、不寫入遊戲記憶體、不竄改 / 偽造封包、不使用加速或修改器。
    AI 只能透過正常的畫面操作（看畫面、點擊、鍵盤）遊玩。
@@ -55,7 +55,7 @@ PrimalSA-AI/
    公告寫明違規「最高永久封停所有帳戶」。**一旦出現答題 / 驗證視窗，立刻停止自動操作並通知使用者**，不要自己亂猜答案。
 6. **不用違規方式多開**：遊戲允許同一台電腦同時開多個視窗（使用者 2026-10-15 確認至少 3 個；做法：`GameClient` 內放改名的執行檔 `PrimalSA2.exe` 加目錄連結 `PrimalSA2_Data` → `PrimalSA_Data`，由使用者自行建立）。
    不要用虛擬機、沙盒、改硬體識別碼、改執行檔內容或注入等方式繞過遊戲或伺服器的限制。每個視窗最多 5 個角色（UISwitchRole）。
-   工具用環境變數 `PSA_CLIENT=<程序名稱>`（PrimalSA2 …；不設 = PrimalSA）選視窗，點擊有全域鎖；哪些工具已支援見 psa-game-ui SKILL.md「多視窗」。
+   工具用環境變數 `PSA_CLIENT=<程序名稱>`（PrimalSA2 …；不設 = PrimalSA）選視窗，點擊有全域鎖；每個視窗的狀態檔各自一份（主視窗沿用 `tools/.cache/`、`notes/`，其他在 `clients/<程序名>/` 底下）；多視窗時 netwatch 不自動按登錄，任一視窗疑似驗證視窗就寫 `tools/.cache/verify-halt.json` 讓全部視窗停手（人處理完 `verifyhalt.py clear`）；哪些工具已支援見 psa-game-ui SKILL.md「多視窗」。
 7. **`knowledge/` 不要手動改**：它由工具產生，重新匯出會覆蓋。要補充攻略心得、遊玩紀錄，請另外放在 `notes/`（自行建立）。
 8. 對使用者回報時說實話：查不到的資料就說查不到，推測的內容要標明是推測。
 

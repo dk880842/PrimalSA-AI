@@ -13,6 +13,8 @@
 $PsaDefaultClient = 'PrimalSA'
 $PsaInputMutexName = 'Local\PrimalSA-AI-Input'
 $PsaInputLockTimeoutMs = 5000
+$PsaGuiDir = $PSScriptRoot                    # tools/gui（dot-source 當下記住，函式裡用）
+$PsaSharedCache = [IO.Path]::GetFullPath((Join-Path $PsaGuiDir '..\.cache'))
 
 # PSA_CLIENT 正規化：去空白、去結尾 .exe；空的 = PrimalSA
 function Get-PsaClient {
@@ -24,6 +26,19 @@ function Get-PsaClient {
 
 # 是不是主視窗（PrimalSA）：log 不加標籤、錯誤訊息維持舊文字
 function Test-PsaDefaultClient([string]$Name) { return [string]::Equals($Name, $PsaDefaultClient, [StringComparison]::OrdinalIgnoreCase) }
+
+# 每個視窗自己的狀態資料夾（與 clients.py cache_dir / dir_name 同規則）：主視窗 = tools/.cache（與改版前相同）；
+# 其他 = tools/.cache/clients/<程序名>（不合法字元換 _、全是點的名稱前面加 _，不會跳出 clients/）。gui.ps1 的相對截圖 / gui-session.txt 用
+function Get-PsaCacheDir([string]$Name = (Get-PsaClient)) {
+  if (Test-PsaDefaultClient $Name) { return $PsaSharedCache }
+  $d = $Name -replace '[^A-Za-z0-9_.-]', '_'
+  if ($d.Length -gt 64) { $d = $d.Substring(0, 64) }
+  if ($d -match '^\.*$') { $d = '_' + $d }
+  return (Join-Path (Join-Path $PsaSharedCache 'clients') $d)
+}
+
+# 全視窗驗證停手旗標（verifyhalt.py 寫；多視窗時任一視窗出現驗證視窗）：存在 → gui.ps1 不送 click / dclick / drag / key（exit 9）
+function Test-PsaVerifyHalt { return (Test-Path -LiteralPath (Join-Path $PsaSharedCache 'verify-halt.json')) }
 
 # 找 PSA_CLIENT 指定的遊戲程序。回傳 hashtable：
 #   ok=$true  → name、proc（唯一一個 Process）

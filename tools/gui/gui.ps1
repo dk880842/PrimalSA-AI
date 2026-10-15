@@ -123,7 +123,7 @@ public class Guard {
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
-if (-not (Test-Path Function:\Find-PsaProcess)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # Find-PsaProcess（依 PSA_CLIENT 選程序）、Enter/Exit-PsaInputLock（點擊鎖）
+if (-not (Test-Path Function:\Test-PsaVerifyHalt)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # Find-PsaProcess（依 PSA_CLIENT 選程序）、Enter/Exit-PsaInputLock（點擊鎖）、Get-PsaCacheDir、Test-PsaVerifyHalt（看最新的函式：舊 server 沒有就重載）
 $Client = Get-PsaClient
 # 視窗 handle 快取（只給唯讀的 pixel / info 用；常駐 serve.ps1 以 & 呼叫、同一 runspace，$global: 跨次保留；一次性執行每次新行程，等於沒快取）。
 # 命中條件：快取的 client 名稱 == 這次的 PSA_CLIENT，且 IsWindow、該視窗所屬行程 PID == 快取的 PID（防 handle 被回收給別的視窗）；任一不符就重查（約 27 ms）。
@@ -157,7 +157,7 @@ $Fg = $false
 $WaitOk = $true
 
 # ---- fg 模式：任務期間的使用者狀態（前景視窗、游標）存在檔案裡，跨多次呼叫保留，end 時還原 ----
-$stateFile = Join-Path $PSScriptRoot "..\.cache\gui-session.txt"
+$stateFile = Join-Path (Get-PsaCacheDir $Client) 'gui-session.txt'   # 每個視窗一份（主視窗 = tools/.cache/gui-session.txt）
 function SetFg($hwnd) {
   # 暫時把本執行緒的輸入接到目前前景視窗的執行緒，才能繞過前景鎖定（不然只會讓工作列閃爍）
   $me = [W]::GetCurrentThreadId(); $fgT = [W]::GetWindowThreadProcessId([W]::GetForegroundWindow(), [IntPtr]::Zero)
@@ -279,6 +279,10 @@ function ActLog([string]$msg) {
 }
 
 function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
+ # 全視窗驗證停手旗標（tools/.cache/verify-halt.json，verifyhalt.py）：送輸入的指令一律不做、exit 9（鐵則 5 最後一道保險；人處理完跑 verifyhalt.py clear）
+ if (($Cmd -eq 'click' -or $Cmd -eq 'dclick' -or $Cmd -eq 'drag' -or $Cmd -eq 'key') -and (Test-PsaVerifyHalt)) {
+   ActLog "驗證停手旗標存在，$Cmd 未執行"; Write-Error "全視窗驗證停手旗標存在（tools/.cache/verify-halt.json），$Cmd 沒做；人處理完驗證視窗後跑 verifyhalt.py clear"; exit 9
+ }
  switch ($Cmd) {
   'fg' {
     # fg <指令> ...：這一個指令用前景模式；seq 裡單獨一個 fg 則之後都用前景模式
@@ -290,8 +294,8 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
   'info' { "client=$($r.R)x$($r.B) origin=($($p.X),$($p.Y)) scale=$Scale shot=$([int]($r.R/$Scale))x$([int]($r.B/$Scale)) foreground=$([W]::GetForegroundWindow() -eq $h) input=$(if (InputDesktopOk) { 'ok' } else { 'blocked' })" }
   'shot' {
     if (-not $A1) { $A1 = 'shot.png' }
-    # 相對路徑一律解析到 tools/.cache/ 底下（單獨 shot 與 seq 內的 shot 一致；絕對路徑照用）
-    if (-not [IO.Path]::IsPathRooted($A1)) { $A1 = [IO.Path]::GetFullPath((Join-Path (Join-Path $PSScriptRoot '..\.cache') $A1)) }
+    # 相對路徑一律解析到這個視窗的狀態資料夾（主視窗 = tools/.cache/，其他 = tools/.cache/clients/<程序名>/；單獨 shot 與 seq 內的 shot 一致；絕對路徑照用）
+    if (-not [IO.Path]::IsPathRooted($A1)) { $A1 = [IO.Path]::GetFullPath((Join-Path (Get-PsaCacheDir $Client) $A1)) }
     $null = New-Item -ItemType Directory -Force -Path ([IO.Path]::GetDirectoryName($A1))
     $full = New-Object System.Drawing.Bitmap $r.R, $r.B
     $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()

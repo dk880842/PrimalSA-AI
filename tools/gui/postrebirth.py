@@ -52,12 +52,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'postrebirth'
 ROOT = uikit.ROOT
 import logpaths  # noqa: E402
-EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
+EVENT_LOG = logpaths.p(clients.npath('quest-events.log'))     # 主視窗 = notes/quest-events.log；其他 = notes/clients/<程序名>/
 PROGRESS = logpaths.p(uikit.CACHE / 'postrebirth.json')
 
 EXIT_ARGS, EXIT_INV, EXIT_QUEST, EXIT_HERO, EXIT_BAG, EXIT_PET, EXIT_FINISH = 170, 171, 172, 173, 174, 175, 176

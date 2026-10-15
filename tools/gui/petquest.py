@@ -80,12 +80,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'petquest'
 ROOT = uikit.ROOT
 import logpaths  # noqa: E402
-EVENT_LOG = logpaths.p(ROOT / 'notes' / 'quest-events.log')
+EVENT_LOG = logpaths.p(clients.npath('quest-events.log'))     # 主視窗 = notes/quest-events.log；其他 = notes/clients/<程序名>/
 PROGRESS = logpaths.p(uikit.CACHE / 'petquest.json')
 
 (EXIT_ARGS, EXIT_ACCEPT, EXIT_PREP, EXIT_BAIT, EXIT_CATCH, EXIT_DIST, EXIT_TRAIN, EXIT_TURNIN, EXIT_DROP,
