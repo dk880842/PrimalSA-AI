@@ -3,9 +3,11 @@
 
 背景：金幣附帶技能「風的精靈Lv.5」，裝備後外掛「人物首次動作」下拉才會出現這個選項（ui/ass.md）；解任務 BOSS 戰靠它（ass.QUEST_BATTLE）。
 新角色開局（newchar.py buy 步驟）與任何新視窗的隊長都要做一次。2026-10-09 主視窗 DKBO 手動做過（notes/leveling.md 03:11）。
-**實機驗證狀態（2026-10-15 寫成時）**：手動探路只走到「便利店面板開著、已選好溫蒂妮Lv5的金幣、價格 500、數量 1」就被 watch 的全視窗驗證旗標擋下
-（便利店面板不在 screen_sigs 認得清單，開著超過 10 秒 watch 判「連續 10 秒不認得」寫 verify-halt.json）→ **購買 / 穿戴 / 首次動作 / 回村 腳本沒有實機跑過**；
-座標來自該次手動截圖（進競技場 / 道具屋 / 便利店 / 背包裝備格）與 ui/*.md 既有實測。
+**實機驗證狀態（2026-10-15 PrimalSA2 DKBO6）**：購買手動做的（便利店 / 提示「需要花費 500」確定 615,557 / 石幣 150,000 → 149,500）；
+穿戴手動點 618,662（金幣進左上飾品格 234,210）；之後 `buywendy.py run --confirm-buy` 實跑：check（已穿 + 石幣 149500 OCR 正確）、first（已是風的精靈、已勾，不點）、
+back（傳村 → team.form 5 人 → 傳柯奧4F）都過，grind.go 被工具逾時殺掉，補跑 `grind.py start` 掛機確認。**未實機**：買前核對（title_ok / 價格 OCR）、腳本內走嚮導 / 道具屋、
+bag.wear_item 在樂器彈窗（手動穿過；腳本版那次被 verify-halt 擋）、_visit_first 實際改下拉。
+便利店面板與背包裝備彈窗不在 screen_sigs，開著超過約 10 秒 watch 會寫全視窗 verify-halt.json（2026-10-15 兩次誤報）。
 
 用法（專案根目錄；WSL / Windows 原生指令相同；PSA_CLIENT=PrimalSA2 → 隊長 DKBO6）：
   uv run --no-project python tools/gui/buywendy.py plan                       # 只讀（開一次背包看裝備 / 背包、不點購買）：已有金幣 → 買 / 穿都跳過
