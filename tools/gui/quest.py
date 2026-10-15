@@ -2428,7 +2428,7 @@ def _main() -> int:
                 event('警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）→ 停止自動操作，請使用者處理', shot)
                 print('!!! 請人工檢查畫面（鐵則 5：驗證視窗不可亂猜答案）', flush=True)
                 import verifyhalt
-                verifyhalt.trip('quest.py 連續 3 次遇到不認得的畫面（疑似答題 / 驗證視窗）', 'quest')   # 多視窗：其他視窗也停
+                verifyhalt.trip('quest.py 連續 3 次遇到不認得的畫面（疑似答題 / 驗證視窗）', 'quest')   # 多視窗：本視窗停手旗標（其他視窗照常）
                 return 2
         if a.once:
             return 0

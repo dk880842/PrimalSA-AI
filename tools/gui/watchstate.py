@@ -284,10 +284,10 @@ class VerifyGuard:
         self.sleep, self.mono = sleep, mono
 
     def check(self) -> str:
-        """'ok' = 可以動作；'timeout' = 暫停超過上限（或全視窗驗證停手旗標存在），呼叫端應停止"""
+        """'ok' = 可以動作；'timeout' = 暫停超過上限（或本視窗驗證停手旗標存在），呼叫端應停止"""
         import verifyhalt
         vh = verifyhalt.active()
-        if vh:                                   # 多視窗：任一視窗出現驗證視窗 → 全部停（旗標要人清，不等）
+        if vh:                                   # 多視窗：這個視窗出現過驗證視窗 → 停（旗標要人清，不等；其他視窗的旗標不影響）
             self.log(f'{self.source}：' + verifyhalt.message(vh))
             return 'timeout'
         if self.reader() is not True:

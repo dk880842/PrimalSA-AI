@@ -4,7 +4,7 @@
 安全原則（鐵則 2~5、SKILL.md）：
 - 面板內點擊一律經 safe_click：面板特徵不在 → 不點（回 False，避免背景點擊穿透到地面走路）；點到 FORBIDDEN 矩形 → 丟 ForbiddenClick。
 - preflight：版面、netwatch、戰鬥鎖、畫面連 3 次不認得（疑似驗證視窗）→ 退出 9 停手通知使用者。
-  多視窗（PSA_CLIENT）：全視窗驗證停手旗標（verifyhalt.py）存在 → 一律 9；回 9 時（preflight / fail）多視窗才設旗標，讓其他視窗也停。
+  多視窗（PSA_CLIENT）：本視窗驗證停手旗標（verifyhalt.py，每視窗一份）存在 → 一律 9；回 9 時（preflight / fail）多視窗才設本視窗旗標（其他視窗照常）。
 - CACHE = 這個視窗的狀態資料夾（clients.cache_dir：主視窗 = tools/.cache 不變；其他 = tools/.cache/clients/<程序名>）；SHARED_CACHE = 全部視窗共用。
 - 名字比對「對不上就拒絕」：人物名走 charstate.norm_char（= charname 的正規化，與 watch 同一套）；寵物名 snap_pet 對 Monster 表。
 所有會碰遊戲的函式都走模組層級的 gui / sleep / clock（測試可替換）；匯入本模組不會碰遊戲。
@@ -165,7 +165,7 @@ def watch_state(max_age: float = WATCH_MAX_AGE_S):
 
 
 def verify_halted() -> dict | None:
-    """全視窗驗證停手旗標（verifyhalt.py；多視窗時任一視窗出現驗證視窗就設）。測試可替換"""
+    """本視窗（PSA_CLIENT）驗證停手旗標（verifyhalt.py；多視窗時這個視窗出現驗證視窗就設，只停這個視窗）。測試可替換"""
     import verifyhalt
     return verifyhalt.active()
 
@@ -200,10 +200,10 @@ def preflight(src: str, fast: bool = True) -> int:
     battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）；
     載入圖 / 全黑轉場（transition_now）不計次、等它過去（最多 screen_sigs.TRANSITION_MAX_S 秒）。
     fast=True 且 watch 狀態夠新時（watch_preflight_ok）省掉 layout / netwatch / 畫面連讀（約 0.36 s → 約 0.02 s）；battle.lock 一律檢查。
-    全視窗驗證停手旗標（verifyhalt.py）存在 → 一開始就 9（不讀畫面）；連 3 次不認得回 9 時多視窗才設旗標（trip_verify）"""
+    本視窗驗證停手旗標（verifyhalt.py）存在 → 一開始就 9（不讀畫面）；連 3 次不認得回 9 時多視窗才設本視窗旗標（trip_verify）"""
     import battleguard
     vh = verify_halted()
-    if vh:                                        # 任一視窗出現過驗證視窗（多視窗）：全部停手，人清旗標前不動
+    if vh:                                        # 這個視窗出現過驗證視窗（多視窗）：本視窗停手，人清旗標前不動（其他視窗照常）
         import verifyhalt
         print(f'{src}：' + verifyhalt.message(vh), file=sys.stderr)
         return EXIT_UNKNOWN_SCREEN
@@ -678,13 +678,13 @@ def shot_getter(tag: str = 'img'):
 
 
 def trip_verify(reason: str, src: str) -> bool:
-    """疑似驗證視窗：多視窗時設全視窗停手旗標（單一視窗不寫，行為不變）。測試可替換"""
+    """疑似驗證視窗：多視窗時設本視窗停手旗標（只停這個視窗；單一視窗不寫，行為不變）。測試可替換"""
     import verifyhalt
     return verifyhalt.trip(reason, src)
 
 
 def fail(src: str, rc: int, msg: str) -> int:
-    """印訊息 + errlog + 回 rc（errlog 寫失敗不影響）；rc = 9（疑似驗證視窗）另外 trip_verify（多視窗時全部停手）"""
+    """印訊息 + errlog + 回 rc（errlog 寫失敗不影響）；rc = 9（疑似驗證視窗）另外 trip_verify（多視窗時本視窗停手）"""
     print(f'{src}：{msg}', file=sys.stderr)
     if rc == EXIT_UNKNOWN_SCREEN:
         trip_verify(msg, src)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """多視窗第 3a 步離線測試（不碰遊戲、不呼叫真的 powershell.exe）：
   clients 狀態資料夾（cache_dir / notes_dir / dir_name）；沒設 PSA_CLIENT 時各模組路徑常數與改版前逐字相同、PrimalSA2 全部落在 clients/PrimalSA2；
-  verifyhalt（多視窗才寫、preflight / netwatch.guard / VerifyGuard / uikit.fail）；netwatch 多視窗不按登錄、relogin.py 109；
+  verifyhalt（每視窗一份、多視窗才寫、只停本視窗；舊共用旗標歸屬；preflight / netwatch.guard / VerifyGuard / uikit.fail）；netwatch 多視窗不按登錄、relogin.py 109；
   spawn_detached 把 PSA_CLIENT 傳給子程序；errlog client 欄；gui.sh 退出碼（pipefail）與相對截圖路徑；gui.ps1 / psawin.ps1 靜態檢查。
 整支測試期間 PATH 最前面放假的 powershell.exe（記錄每次呼叫）：預期會呼叫的測試讀完就清空，最後確認沒有任何意外的呼叫。
   uv run --no-project python tools/gui/test_clientctx.py
@@ -155,9 +155,9 @@ OLD = {   # 改版前（git 5416595）各常數的值：主視窗必須逐字相
     'verifyhalt.FILE': f'{C}/verify-halt.json',
     'pet_catch.src_path()': f'{C}/pet-tpl/catch-src.json', 'pet_catch.pre_path()': f'{C}/pet-tpl/catch-pre.json',
 }
-# 全部視窗共用（PSA_CLIENT 設什麼都不變）：樣板 / 圖庫 / 共用 log / 全域旗標
+# 全部視窗共用（PSA_CLIENT 設什麼都不變）：樣板 / 圖庫 / 共用 log（verify-halt.json 2026-10-15 起每視窗一份，不在這裡）
 SHARED = {'actlog.LOG', 'errlog.LOG', 'spots.THRESH_FILE', 'namematch.TPL_DIR', 'digitmatch.TPL_DIR', 'digitmatch.MISMATCH_DIR',
-          'itemname_match.TPL_DIR', 'titlematch.TPL_DIR', 'winenv.PIDS_FILE', 'verifyhalt.FILE', 'petmatch.TPL_DIR', 'petglyph.CAP_DIR',
+          'itemname_match.TPL_DIR', 'titlematch.TPL_DIR', 'winenv.PIDS_FILE', 'petmatch.TPL_DIR', 'petglyph.CAP_DIR',
           'watchstate.PET_AVATARS_FILE'}
 
 
@@ -244,6 +244,51 @@ uikit.sleep = lambda *_: None
 check('多視窗：preflight 連 3 次不認得 → 9 且設旗標', uikit.preflight('pf') == 9 and (verifyhalt.active() or {}).get('src') == 'pf')
 verifyhalt.clear()
 layout.current, netwatch.guard = _lc, _ng
+
+# ---- 各自視窗停手（使用者 2026-10-15）：旗標每視窗一份，只停出事的視窗 ----
+LD = Path(os.environ['PSA_LOG_DIR'])
+P2 = LD / 'clients' / 'PrimalSA2' / 'verify-halt.json'
+check('路徑：主視窗 <base>/verify-halt.json、PrimalSA2 <base>/clients/PrimalSA2/verify-halt.json',
+      verifyhalt.path('PrimalSA') == LD / 'verify-halt.json' and verifyhalt.path('primalsa2') == P2 and verifyhalt.path() == VH)
+os.environ['PSA_CLIENT'] = 'PrimalSA2'
+check('PrimalSA2 trip → 寫自己的資料夾', verifyhalt.trip('p2 不認得', 'watch') is True and P2.exists() and not VH.exists())
+check('PrimalSA2：active / preflight 9 / guard exit 9', verifyhalt.active() is not None and uikit.preflight('t') == 9
+      and netwatch.check_and_reconnect(src='t')['status'] == 'verify')
+check('PrimalSA2 停手訊息帶程序名、清除指令帶程序名', 'PrimalSA2' in verifyhalt.message(verifyhalt.active()) and 'clear PrimalSA2' in verifyhalt.message(verifyhalt.active()))
+os.environ.pop('PSA_CLIENT')
+check('主視窗看不到 PrimalSA2 的旗標（照常）', verifyhalt.active() is None
+      and verifyhalt.active(client='PrimalSA2') is not None)
+vg = watchstate.VerifyGuard('t', log=lambda *_: None, reader=lambda: False)
+check('主視窗 VerifyGuard → ok（PrimalSA2 的旗標不影響）', vg.check() == 'ok')
+check('主視窗 trip → 寫主視窗自己的，PrimalSA2 的不變', verifyhalt.trip('主視窗', 'q') is True and VH.exists()
+      and verifyhalt.active()['client'] == 'PrimalSA' and verifyhalt.active(client='PrimalSA2')['reason'] == 'p2 不認得')
+check('status all → 9；兩個視窗都列', verifyhalt.main(['status']) == 9)
+check('clear（不給 = 本視窗）只清主視窗', verifyhalt.main(['clear']) == 0 and not VH.exists() and P2.exists())
+check('status PrimalSA → 0；status PrimalSA2 → 9', verifyhalt.main(['status', 'PrimalSA']) == 0 and verifyhalt.main(['status', 'PrimalSA2']) == 9)
+check('clear PrimalSA2 → 只清它', verifyhalt.clear(client='PrimalSA2') and not P2.exists())
+verifyhalt.write('a', 'x')
+os.environ['PSA_CLIENT'] = 'PrimalSA2'
+verifyhalt.write('b', 'y')
+os.environ.pop('PSA_CLIENT')
+check('clear all → 全清', verifyhalt.main(['clear', 'all']) == 0 and not VH.exists() and not P2.exists())
+
+# 舊格式：改版前 PrimalSA2 寫在共用路徑（= 主視窗路徑）、內含 client 欄 → 歸屬 PrimalSA2
+VH.write_text(json.dumps({'ts': 1, 'client': 'PrimalSA2', 'src': 'watch', 'reason': '舊共用'}, ensure_ascii=False), encoding='utf-8')
+check('舊共用旗標：主視窗不停', verifyhalt.active() is None and verifyhalt.trip('x', 'y', multi=False) is False)
+d2 = verifyhalt.active(client='PrimalSA2')
+check('舊共用旗標：歸屬 PrimalSA2（legacy=True）', d2 is not None and d2.get('legacy') is True and '舊共用旗標檔' in verifyhalt.describe(d2))
+check('舊共用旗標：PrimalSA3 不受影響', verifyhalt.active(client='PrimalSA3') is None)
+check('status 列出歸屬 PrimalSA2 → 9', verifyhalt.main(['status']) == 9 and 'PrimalSA2' in verifyhalt.known_clients())
+check('主視窗 clear 不刪別人的舊旗標', verifyhalt.clear() is False and VH.exists())
+check('主視窗 write：先把舊旗標搬給 PrimalSA2，再寫自己的', verifyhalt.write('主視窗新', 'z') and P2.exists()
+      and json.loads(P2.read_text(encoding='utf-8'))['reason'] == '舊共用' and verifyhalt.active()['reason'] == '主視窗新')
+verifyhalt.main(['clear', 'all'])
+VH.write_text(json.dumps({'ts': 1, 'client': 'PrimalSA2', 'src': 'watch', 'reason': '舊共用'}, ensure_ascii=False), encoding='utf-8')
+check('clear PrimalSA2 → 連舊共用旗標一起清', verifyhalt.clear(client='PrimalSA2') and not VH.exists())
+VH.write_text('壞檔', encoding='utf-8')
+check('壞檔 → 算主視窗的（保守）', verifyhalt.active() is not None and verifyhalt.active(client='PrimalSA2') is None)
+verifyhalt.clear()
+check('migrate_legacy 沒舊檔 → None', verifyhalt.migrate_legacy() is None)
 
 # watch.py：unknown_long / quest 警報兩處都 trip，state.flags 帶 verify_halt（靜態）
 ws = (GUI / 'watch.py').read_text(encoding='utf-8')
@@ -384,10 +429,11 @@ if not existed:
 # ================================================================ 7) gui.ps1 / psawin.ps1 靜態檢查
 gp = (GUI / 'gui.ps1').read_text(encoding='utf-8-sig')
 pw = (GUI / 'psawin.ps1').read_text(encoding='utf-8-sig')
-check('gui.ps1：click / dclick / drag / key 先看 Test-PsaVerifyHalt → exit 9', 'Test-PsaVerifyHalt' in gp and 'exit 9' in gp)
+check('gui.ps1：click / dclick / drag / key / typeq 先看本視窗 Get-PsaVerifyHalt $Client → exit 9', '($vhp = Get-PsaVerifyHalt $Client)' in gp and 'exit 9' in gp)
 check('gui.ps1：相對截圖 / gui-session.txt 用 Get-PsaCacheDir', gp.count('Get-PsaCacheDir $Client') == 2)
-check('gui.ps1：舊 server 沒新函式會重載 psawin', "Test-Path Function:\\Test-PsaVerifyHalt" in gp)
-check('psawin.ps1：Get-PsaCacheDir / Test-PsaVerifyHalt（verify-halt.json）', 'function Get-PsaCacheDir' in pw and 'verify-halt.json' in pw)
+check('gui.ps1：舊 server 沒新函式會重載 psawin', "Test-Path Function:\\Get-PsaVerifyHalt" in gp)
+check('psawin.ps1：Get-PsaVerifyHalt 用 Get-PsaCacheDir 算本視窗路徑（verify-halt.json）',
+      'function Get-PsaCacheDir' in pw and 'function Get-PsaVerifyHalt' in pw and "Join-Path (Get-PsaCacheDir $Name) 'verify-halt.json'" in pw)
 for f in ('gui.ps1', 'psawin.ps1', 'test_psawin.ps1'):
     check(f'{f} 是 UTF-8 with BOM', (GUI / f).read_bytes()[:3] == b'\xef\xbb\xbf')
 

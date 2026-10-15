@@ -292,7 +292,7 @@ class Follow:
         if now - self.unk_since > UNKNOWN_STOP_MIN * 60:
             errlog.add(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘，follow 停止，請人工檢查畫面（鐵則 5）', source=SRC)
             log(f'畫面不認得超過 {UNKNOWN_STOP_MIN} 分鐘 → 停手通知使用者')
-            uikit.trip_verify(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘', SRC)   # 多視窗：其他視窗也停
+            uikit.trip_verify(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘', SRC)   # 多視窗：本視窗停手旗標（其他視窗照常）
             return uikit.EXIT_UNKNOWN_SCREEN
         if not self.unk_logged:
             shot = self.alert_shot()

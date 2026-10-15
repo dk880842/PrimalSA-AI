@@ -27,10 +27,11 @@ export type WatchLine = { main: string; hints: { text: string; tone: WatchTone }
 export type ProgLine = { text: string; tone: 'plain' | 'gray' | 'yellow' | 'red' }
 
 // 多視窗（第 3d 步）：每個視窗一份狀態行 / HUD 行 / 遇敵行
-export type WinView = { client: string; wl: WatchLine; ht: string | null; en: { text: string; warn: boolean } | null }
+// al = 這個視窗自己的停手紅字（verify-halt.json 每視窗一份、verify_suspect），只顯示在該視窗段落
+export type WinView = { client: string; wl: WatchLine; ht: string | null; en: { text: string; warn: boolean } | null; al?: Banner[] }
 // 多視窗：每個視窗一份即時進度區
 export type WinProg = { client: string; lines: ProgLine[] }
-// 頂端醒目警示（verify-halt.json、任一視窗 verify_suspect）
+// 頂端醒目警示（單視窗的 verify-halt.json、舊共用旗標提示）；多視窗的停手紅字在 WinView.al
 export type Banner = { text: string; tone: WatchTone }
 
 declare module 'claude-code' {

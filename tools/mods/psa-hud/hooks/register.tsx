@@ -77,7 +77,7 @@ export const notesRel = (c?: string | null) => (isMainClient(c) ? 'notes' : `not
 export const stateFileFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/state.json` : undefined }
 export const hudCfgFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/psa-hud.json` : undefined }
 export const questLogFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${notesRel(client)}/quest-events.log` : undefined }
-export const verifyHaltFromCwd = (cwd: string) => { const r = rootFromCwd(cwd); return r ? `${r}/tools/.cache/verify-halt.json` : undefined }   // 全部視窗共用
+export const verifyHaltFromCwd = (cwd: string, client?: string) => { const r = rootFromCwd(cwd); return r ? `${r}/${cacheRel(client)}/verify-halt.json` : undefined }   // 每視窗一份（verifyhalt.path）
 
 // actions.log 是全部視窗共用的一份：非主視窗的行是「HH:MM:SS [程序名] …」（actlog.py / gui.ps1），主視窗沒有標籤。
 // 取出某個視窗的行；非主視窗的行去掉標籤（後面的解析照單視窗格式）。undefined（讀不到）原樣回
@@ -669,17 +669,47 @@ async function detectClients($: EngineInterface): Promise<void> {
   }
 }
 
-// 全視窗驗證停手旗標（tools/.cache/verify-halt.json，verifyhalt.py）+ 多視窗時任一視窗 verify_suspect → 頂端醒目警示（純函式）
-export function bannerLines(halt: string | undefined, wins: { client: string; state: WState | null }[]): Banner[] {
+// 每視窗驗證停手旗標（verifyhalt.py；2026-10-15 起各自視窗停手）：主視窗 tools/.cache/verify-halt.json、其他 tools/.cache/clients/<程序名>/verify-halt.json。
+// 舊格式：改版前全部視窗共用主視窗那一份，非主視窗寫的內含 client 欄 → 歸屬那個視窗（與 verifyhalt.legacy_owner / psawin Get-PsaVerifyHalt 同規則）
+type HaltDoc = { ts?: number; client?: string; src?: string; reason?: string }
+export type Halt = { text: string; legacy: boolean }
+const parseHalt = (s: string): HaltDoc | null => {
+  try { const x = JSON.parse(s) as unknown; return x && typeof x === 'object' ? (x as HaltDoc) : null } catch { return null }
+}
+// 主視窗路徑上那份旗標屬於誰：client 欄是別的視窗 → 那個視窗（舊共用格式）；壞檔 / 沒欄位 / 主視窗 → PrimalSA；沒檔 → undefined
+export function haltOwner(mainText: string | undefined): string | undefined {
+  if (mainText === undefined) return undefined
+  const c = parseHalt(mainText)?.client
+  const n = typeof c === 'string' ? c.trim().replace(/\.exe$/i, '') : ''
+  return n && !isMainClient(n) ? n : MAIN_CLIENT
+}
+// 某個視窗的旗標：own = 它自己路徑上的內容（主視窗 = mainText），mainText = 主視窗路徑上的內容（判斷舊共用旗標）
+export function haltFor(client: string, own: string | undefined, mainText: string | undefined): Halt | undefined {
+  const owner = haltOwner(mainText)
+  if (isMainClient(client)) return owner && isMainClient(owner) ? { text: mainText!, legacy: false } : undefined
+  if (own !== undefined) return { text: own, legacy: false }
+  return owner && owner.toLowerCase() === client.toLowerCase() ? { text: mainText!, legacy: true } : undefined
+}
+// 一個視窗的停手紅字（純函式）：旗標兩行（清除指令帶程序名）+ 多視窗時 verify_suspect 一行（單視窗的 verify_suspect 已在狀態提示行，不重複）
+export function haltLines(client: string, h: Halt | undefined, state: WState | null = null, multi = false): Banner[] {
   const out: Banner[] = []
-  if (halt !== undefined) {
-    let d: { ts?: number; client?: string; src?: string; reason?: string } = {}
-    try { const x = JSON.parse(halt) as unknown; if (x && typeof x === 'object') d = x as typeof d } catch { /* 壞檔也當旗標存在 */ }
+  if (h) {
+    const d = parseHalt(h.text) ?? {}                 // 壞檔也當旗標存在
     const when = typeof d.ts === 'number' ? ` ${stamp(d.ts * 1000)}` : ''
-    out.push({ text: `全部視窗停手：驗證旗標${when} ${d.client ?? '?'} ${d.src ?? ''}：${d.reason ?? ''}`.replace(/\s+/g, ' ').trim(), tone: 'red' })
-    out.push({ text: '人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear', tone: 'red' })
+    out.push({ text: `${multi ? '' : `${client} `}停手：驗證旗標${when} ${d.src ?? ''}：${d.reason ?? ''}${h.legacy ? '（舊共用旗標檔）' : ''}`.replace(/\s+/g, ' ').trim(), tone: 'red' })
+    out.push({ text: `人處理完驗證視窗後：uv run --no-project python tools/gui/verifyhalt.py clear ${client}`, tone: 'red' })
   }
-  if (wins.length > 1) for (const w of wins) if (w.state?.flags?.verify_suspect) out.push({ text: `[${w.client}] 疑似答題 / 驗證視窗，請人工處理（全部視窗停手）`, tone: 'red' })
+  if (multi && state?.flags?.verify_suspect) out.push({ text: '疑似答題 / 驗證視窗，請人工處理（只停這個視窗）', tone: 'red' })
+  return out
+}
+// pane 最上面的警示（純函式）：單視窗 = 主視窗的停手紅字；多視窗的紅字放在各視窗段落（WinView.al），這裡只剩
+// 「舊共用旗標屬於沒顯示的視窗」的黃字提示（主視窗不受影響，提示怎麼清）
+export function bannerLines(mainText: string | undefined, wins: { client: string; state: WState | null }[]): Banner[] {
+  const out: Banner[] = wins.length > 1 ? [] : haltLines(MAIN_CLIENT, haltFor(MAIN_CLIENT, mainText, mainText))
+  const owner = haltOwner(mainText)
+  if (owner && !isMainClient(owner) && !wins.some(w => w.client.toLowerCase() === owner.toLowerCase())) {
+    out.push({ text: `舊共用驗證旗標屬 ${owner}（主視窗不受影響）；清：uv run --no-project python tools/gui/verifyhalt.py clear ${owner}`, tone: 'yellow' })
+  }
   return out
 }
 
@@ -691,6 +721,9 @@ async function tickState($: EngineInterface): Promise<void> {
   try {
     const views: WinView[] = []
     const seen: { client: string; state: WState | null }[] = []
+    const readText = async (p: string) => { try { const x = await $.fs.read(p); return typeof x === 'string' ? x : undefined } catch { return undefined } }
+    const mainHalt = await readText(verifyHaltFromCwd(projCwd) ?? 'tools/.cache/verify-halt.json')
+    const multi = ctls.length > 1
     for (const c of [...ctls]) {
       let text: string | undefined
       let hasFile = true
@@ -710,7 +743,8 @@ async function tickState($: EngineInterface): Promise<void> {
       if (typeof et?.val === 'boolean') c.lastEnc = et.val
       const eo = et ? { text: et.text, warn: et.warn } : null
       seen.push({ client: c.name, state })
-      views.push({ client: c.name, wl: vm, ht, en: eo })
+      const own = isMainClient(c.name) ? mainHalt : await readText(verifyHaltFromCwd(projCwd, c.name) ?? `${cacheRel(c.name)}/verify-halt.json`)
+      views.push({ client: c.name, wl: vm, ht, en: eo, al: multi ? haltLines(c.name, haltFor(c.name, own, mainHalt), state, true) : [] })
       if (c.sup !== sup) continue
       const wasAlive = hudAlive
       hudAlive = alive
@@ -722,9 +756,7 @@ async function tickState($: EngineInterface): Promise<void> {
     }
     const wv = views.length > 1 ? views : []
     if (JSON.stringify(await read($, winsAtom)) !== JSON.stringify(wv)) await update($, winsAtom, () => wv)
-    let halt: string | undefined
-    try { const x = await $.fs.read(verifyHaltFromCwd(projCwd) ?? 'tools/.cache/verify-halt.json'); halt = typeof x === 'string' ? x : undefined } catch { halt = undefined }
-    const bn = bannerLines(halt, seen)
+    const bn = bannerLines(mainHalt, seen)
     if (JSON.stringify(await read($, bannerAtom)) !== JSON.stringify(bn)) await update($, bannerAtom, () => bn)
   } catch {
     // 讀檔 / 寫 atom 失敗（例：模組正在卸載）：這一輪略過，保持上一次的畫面，不留未處理的 rejection
@@ -1069,7 +1101,7 @@ async function init($: EngineInterface, cwd: string, o: { openPane: boolean }): 
 export type PaneData = {
   wl?: WatchLine | null; st?: Stat | null; ht?: string | null; en?: { text: string; warn: boolean } | null
   pg?: ProgLine[] | null; lines?: ErrEntry[] | null
-  // 多視窗（第 3d 步）：wins / progs 有 2 個以上才改成每視窗一段；banner 非空就在最上面顯示紅字（單視窗也顯示 verify-halt.json）
+  // 多視窗（第 3d 步）：wins / progs 有 2 個以上才改成每視窗一段（各視窗的停手紅字 al 在自己段落）；banner 非空就在最上面顯示（單視窗的 verify-halt.json）
   wins?: WinView[] | null; progs?: WinProg[] | null; banner?: Banner[] | null
 }
 export type PaneEls = { Box: ElementConstructor<BoxProps>; Text: ElementConstructor<TextProps> }
@@ -1098,6 +1130,7 @@ export function paneTree(els: PaneEls, d: PaneData): RenderElement {
             return (
               <Box key={`win${wi}`} flexDirection="column">
                 <Text wrap="truncate-end" bold>{`[${w.client}] ${String(w.wl?.main ?? '')}`}</Text>
+                {(Array.isArray(w.al) ? w.al : []).map((b, i) => <Text key={`wal${wi}-${i}`} wrap="truncate-end" color={color(b.tone) ?? 'red'} bold>{`  ${String(b.text ?? '')}`}</Text>)}
                 {wh.map((hint, i) => <Text key={`wh${wi}-${i}`} wrap="truncate-end" color={color(hint.tone)} dimColor={hint.tone === 'gray'}>{`  ${String(hint.text ?? '')}`}</Text>)}
                 <Text wrap="truncate-end" dimColor={!wst && !w.ht}>{`  ${w.ht ?? (wst ? format(wst) : '（等級 / HP 讀取中…）')}`}</Text>
                 {w.en ? <Text wrap="truncate-end" color={w.en.warn ? 'yellow' : 'green'}>{`  ${String(w.en.text ?? '')}`}</Text> : null}

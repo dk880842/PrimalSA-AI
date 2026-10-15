@@ -124,7 +124,7 @@ public class Guard {
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
-if (-not (Test-Path Function:\Test-PsaVerifyHalt)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # Find-PsaProcess（依 PSA_CLIENT 選程序）、Enter/Exit-PsaInputLock（點擊鎖）、Get-PsaCacheDir、Test-PsaVerifyHalt（看最新的函式：舊 server 沒有就重載）
+if (-not (Test-Path Function:\Get-PsaVerifyHalt)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # Find-PsaProcess（依 PSA_CLIENT 選程序）、Enter/Exit-PsaInputLock（點擊鎖）、Get-PsaCacheDir、Get-PsaVerifyHalt（每視窗旗標；看最新的函式：舊 server 沒有就重載）
 $Client = Get-PsaClient
 # 視窗 handle 快取（只給唯讀的 pixel / info 用；常駐 serve.ps1 以 & 呼叫、同一 runspace，$global: 跨次保留；一次性執行每次新行程，等於沒快取）。
 # 命中條件：快取的 client 名稱 == 這次的 PSA_CLIENT，且 IsWindow、該視窗所屬行程 PID == 快取的 PID（防 handle 被回收給別的視窗）；任一不符就重查（約 27 ms）。
@@ -280,9 +280,10 @@ function ActLog([string]$msg) {
 }
 
 function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
- # 全視窗驗證停手旗標（tools/.cache/verify-halt.json，verifyhalt.py）：送輸入的指令一律不做、exit 9（鐵則 5 最後一道保險；人處理完跑 verifyhalt.py clear）
- if (($Cmd -eq 'click' -or $Cmd -eq 'dclick' -or $Cmd -eq 'drag' -or $Cmd -eq 'key' -or $Cmd -eq 'typeq') -and (Test-PsaVerifyHalt)) {
-   ActLog "驗證停手旗標存在，$Cmd 未執行"; Write-Error "全視窗驗證停手旗標存在（tools/.cache/verify-halt.json），$Cmd 沒做；人處理完驗證視窗後跑 verifyhalt.py clear"; exit 9
+ # 本視窗驗證停手旗標（verifyhalt.py；主視窗 tools/.cache/verify-halt.json、其他 tools/.cache/clients/<程序名>/verify-halt.json）：
+ # 送輸入的指令一律不做、exit 9（鐵則 5 最後一道保險；只看這個請求的 $Client，別的視窗的旗標不擋；人處理完跑 verifyhalt.py clear <程序名>）
+ if (($Cmd -eq 'click' -or $Cmd -eq 'dclick' -or $Cmd -eq 'drag' -or $Cmd -eq 'key' -or $Cmd -eq 'typeq') -and ($vhp = Get-PsaVerifyHalt $Client)) {
+   ActLog "驗證停手旗標存在，$Cmd 未執行"; Write-Error "本視窗（$Client）驗證停手旗標存在（$vhp），$Cmd 沒做；人處理完驗證視窗後跑 verifyhalt.py clear $Client"; exit 9
  }
  switch ($Cmd) {
   'fg' {

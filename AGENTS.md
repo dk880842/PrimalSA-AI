@@ -37,7 +37,7 @@ PrimalSA-AI/
                        bufftime.py（唯讀讀 buff 剩餘時間 + 預計到期：`read [--kind exp|dragon|all]`，點頭像下方 buff 圖示開浮窗 OCR 後再點關，p1 / p2 皆可，退出碼 130～134，2026-10-15 實機驗證）；
                        exp.py（唯讀讀 5 人經驗 + 升級時間估計：`read` / `eta --target 131`，人物資訊面板開一次逐人切頭像、經驗表交叉驗證，歷史 tools/.cache/exp-history.jsonl，退出碼 100～102）；
                        操作 log：actlog.py（寫 `.cache/actions.log` 最新 2000 行 + 按小時分檔 `.cache/actions/YYYY-MM-DD_HH.log` 保留 14 天；`actlog.py show [--date] HH:MM-HH:MM [--grep]` 查舊細節；gui.ps1 同步寫分檔）；
-                       共用模組：clients.py（多視窗身分 PSA_CLIENT / 每視窗狀態資料夾 cache_dir）、accounts.py（斷線重登的視窗 → 帳號對照，讀本機 accounts.local.json〔不進 git〕，帳號欄核對 / 重打，未實機）、verifyhalt.py（全視窗驗證停手旗標）、spots.py（練級傳送點表，heal 也用）、uikit.py（面板規格 / 禁區保護 / preflight）、charstate.py（當前角色旁路檔）、namematch.py / petmatch.py / digitmatch.py（名字、寵物、HUD 數字的圖樣板比對）；petglyph.py（名字框成長字串 / 倉庫卡字與等級的字形樣板讀字，取代 OCR、倉庫卡不用選卡；種子 fixtures/pet_glyph_tpl.json）；petimg_match.py（寵物縮圖比知識庫頭像認物種；2026-10-14 晚起 pet.py 名字為主：名字讀到物種名就不比縮圖，縮圖只在名字讀不出時補，衝突 = 不確定）；itemname_match.py（道具格「顯示道具名」白字整名樣板，2026-10-14 起 bag.py 道具辨識第一層，彈窗核對過才學）；itemimg_match.py（道具格縮圖比 GameClient 道具圖，名字沒認出的格才用，PSA_ITEM_MATCH）；imgmatch.py（兩者共用的比對核心）；netwatch.py（斷線重連 / 自動登錄，重登後自動 grind ensure）
+                       共用模組：clients.py（多視窗身分 PSA_CLIENT / 每視窗狀態資料夾 cache_dir）、accounts.py（斷線重登的視窗 → 帳號對照，讀本機 accounts.local.json〔不進 git〕，帳號欄核對 / 重打，未實機）、verifyhalt.py（每視窗驗證停手旗標，只停出事的視窗）、spots.py（練級傳送點表，heal 也用）、uikit.py（面板規格 / 禁區保護 / preflight）、charstate.py（當前角色旁路檔）、namematch.py / petmatch.py / digitmatch.py（名字、寵物、HUD 數字的圖樣板比對）；petglyph.py（名字框成長字串 / 倉庫卡字與等級的字形樣板讀字，取代 OCR、倉庫卡不用選卡；種子 fixtures/pet_glyph_tpl.json）；petimg_match.py（寵物縮圖比知識庫頭像認物種；2026-10-14 晚起 pet.py 名字為主：名字讀到物種名就不比縮圖，縮圖只在名字讀不出時補，衝突 = 不確定）；itemname_match.py（道具格「顯示道具名」白字整名樣板，2026-10-14 起 bag.py 道具辨識第一層，彈窗核對過才學）；itemimg_match.py（道具格縮圖比 GameClient 道具圖，名字沒認出的格才用，PSA_ITEM_MATCH）；imgmatch.py（兩者共用的比對核心）；netwatch.py（斷線重連 / 自動登錄，重登後自動 grind ensure）
                        watch.py（零輸入即時狀態監看 → tools/.cache/state.json，psa-hud 啟動；HUD 數值用 digitmatch.py 樣板比對為主、stat.ps1 OCR 補漏；state 只供顯示，不能當點擊依據）、serve.ps1（常駐 server，winenv.GuiServer 啟動；WSL 預設開、Windows 原生需 PSA_GUI_SERVER=1、=0 關閉）、bench.py（唯讀量測 / soak）、shotcache.py（tools/.cache 截圖樣本的分類索引 shots-index.json + 取點快取；screen_sigs 挑點 / make_fixtures 用，`build|stats|list|relabel|bench`）、test_*（離線測試）
     web/               靜態查詢網站：build.py 讀 knowledge/ 產生 site/（不進 git），static/ 是前端；deploy.sh 建置並發布到 Cloudflare Pages
     .cache/            匯出時的暫存（HotUpdate.dll 等），可刪
@@ -60,7 +60,7 @@ PrimalSA-AI/
    公告寫明違規「最高永久封停所有帳戶」。**一旦出現答題 / 驗證視窗，立刻停止自動操作並通知使用者**，不要自己亂猜答案。
 6. **不用違規方式多開**：遊戲允許同一台電腦同時開多個視窗（使用者 2026-10-15 確認至少 3 個；做法：`GameClient` 內放改名的執行檔 `PrimalSA2.exe` 加目錄連結 `PrimalSA2_Data` → `PrimalSA_Data`，由使用者自行建立）。
    不要用虛擬機、沙盒、改硬體識別碼、改執行檔內容或注入等方式繞過遊戲或伺服器的限制。每個視窗最多 5 個角色（UISwitchRole）。
-   工具用環境變數 `PSA_CLIENT=<程序名稱>`（PrimalSA2 …；不設 = PrimalSA）選視窗，點擊有全域鎖；每個視窗的狀態檔各自一份（主視窗沿用 `tools/.cache/`、`notes/`，其他在 `clients/<程序名>/` 底下）；多視窗時 netwatch 只在本機帳號對照核對通過才自動按登錄（鐵則 2），任一視窗疑似驗證視窗就寫 `tools/.cache/verify-halt.json` 讓全部視窗停手（人處理完 `verifyhalt.py clear`）；哪些工具已支援見 psa-game-ui SKILL.md「多視窗」。
+   工具用環境變數 `PSA_CLIENT=<程序名稱>`（PrimalSA2 …；不設 = PrimalSA）選視窗，點擊有全域鎖；每個視窗的狀態檔各自一份（主視窗沿用 `tools/.cache/`、`notes/`，其他在 `clients/<程序名>/` 底下）；多視窗時 netwatch 只在本機帳號對照核對通過才自動按登錄（鐵則 2），某個視窗疑似驗證視窗就寫**那個視窗自己的**停手旗標（主視窗 `tools/.cache/verify-halt.json`、其他 `tools/.cache/clients/<程序名>/verify-halt.json`），只有該視窗停手、其他視窗照常（使用者 2026-10-15 改；人處理完 `verifyhalt.py clear <程序名>`，`status` 列各視窗）；哪些工具已支援見 psa-game-ui SKILL.md「多視窗」。
 7. **`knowledge/` 不要手動改**：它由工具產生，重新匯出會覆蓋。要補充攻略心得、遊玩紀錄，請另外放在 `notes/`（自行建立）。
 8. 對使用者回報時說實話：查不到的資料就說查不到，推測的內容要標明是推測。
 
@@ -112,7 +112,7 @@ PrimalSA-AI/
 操作前先讀 `.claude/skills/psa-game-ui/SKILL.md`（工具用法、操作迴圈、紅區）與同資料夾 `ui/README.md`（功能索引；按鈕座標、各面板內容依功能拆檔）。
 工具：`bash tools/gui/gui.sh shot|click|drag|key|info|max|end`（WSL / Git Bash 手打用）；走路 / 補血用 `uv run --no-project python tools/gui/walk.py ...`、`heal.py`（兩邊指令相同）。座標用截圖座標；預設背景操作（不搶前景，點擊時游標瞬移約 0.15 秒）；用過 `fg` / `max` 後要跑 `end` 把前景還給使用者。
 
-**即時狀態**：開著 psa-hud 時有 `watch.py` 在背景零輸入監看（只送 pixel / info / digitmatch / stat），`uv run --no-project python tools/gui/watch.py --get` 可讀；它只是參考，點擊前仍要現場讀圖，`idle` 不代表沒有驗證視窗；出現 `verify_suspect` / alerts 就依鐵則 5 停手通知。`state.hud.buffs`（每 12 s 唯讀讀頭像下方 buff：`exp` = 2倍智慧果、`dragon` = 龍王的守護）顯示在 pane 等級行尾與練功中那行。只有開 psa-hud 的那個 session 管理它，兩個平台同時開 session 時只有一邊有即時狀態。多視窗時（第 3d 步，未實機）同一個 session 每個視窗各 spawn 一支 watch（非主視窗的狀態在 `tools/.cache/clients/<程序名>/state.json`，讀法 `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/watch.py --get`），pane 每視窗一段；`tools/.cache/verify-halt.json` 或任一視窗 verify_suspect 會在 pane 最上面紅字警示。
+**即時狀態**：開著 psa-hud 時有 `watch.py` 在背景零輸入監看（只送 pixel / info / digitmatch / stat），`uv run --no-project python tools/gui/watch.py --get` 可讀；它只是參考，點擊前仍要現場讀圖，`idle` 不代表沒有驗證視窗；出現 `verify_suspect` / alerts 就依鐵則 5 停手通知。`state.hud.buffs`（每 12 s 唯讀讀頭像下方 buff：`exp` = 2倍智慧果、`dragon` = 龍王的守護）顯示在 pane 等級行尾與練功中那行。只有開 psa-hud 的那個 session 管理它，兩個平台同時開 session 時只有一邊有即時狀態。多視窗時（第 3d 步，未實機）同一個 session 每個視窗各 spawn 一支 watch（非主視窗的狀態在 `tools/.cache/clients/<程序名>/state.json`，讀法 `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/watch.py --get`），pane 每視窗一段；各視窗的 verify-halt.json / verify_suspect 紅字顯示在該視窗自己的段落（單視窗在 pane 最上面），不會全部一起紅。
 
 ## 5.2 在 Claude 桌面 App（Windows 原生）執行
 專案也可以用 Claude 桌面 App 的 Claude Code 開（路徑 `C:\games\PrimalSA-AI`，shell 是 Git Bash，沒有 wslpath、沒有 /mnt/c）。工具已兼容，差異如下：

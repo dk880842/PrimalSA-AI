@@ -51,7 +51,7 @@ import winenv  # noqa: E402
 
 
 def trip_verify(reason: str) -> bool:
-    """疑似驗證視窗（unknown_long / quest 警報轉述）：多視窗時設全視窗驗證停手旗標（verifyhalt.py；單一視窗不寫，行為不變）。
+    """疑似驗證視窗（unknown_long / quest 警報轉述）：多視窗時設本視窗驗證停手旗標（verifyhalt.py，只停這個視窗；單一視窗不寫，行為不變）。
     watch 自己不停（零輸入，繼續監看），state.flags.verify_halt 會顯示。測試可替換"""
     return verifyhalt.trip(reason, 'watch')
 
@@ -876,7 +876,7 @@ class Watcher:
         return d
 
     def _flags(self, mono: float) -> dict:
-        """battle_lock（只讀 peek）/ netwatch_halt / verify_halt（全視窗驗證停手旗標，verifyhalt.py）；0.4 s 內重複 build 不重讀檔（每輪 build 2～3 次）"""
+        """battle_lock（只讀 peek）/ netwatch_halt / verify_halt（本視窗驗證停手旗標，verifyhalt.py）；0.4 s 內重複 build 不重讀檔（每輪 build 2～3 次）"""
         c = self._flags_cache
         if c is None or mono - c[0] > 0.4:
             c = self._flags_cache = (mono, {'battle_lock': watchstate.peek_battle_lock(), 'netwatch_halt': Path(watchstate.HALT_FILE).exists(),

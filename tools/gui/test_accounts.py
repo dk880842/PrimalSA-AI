@@ -287,7 +287,7 @@ ps1 = (GUI / 'gui.ps1').read_text(encoding='utf-8-sig')
 blk = ps1[ps1.index("  'typeq' {"):ps1.index("  'end' {")]
 check('gui.ps1 typeq：ActLog 只記字數、不含 $A1 內容', 'ActLog "typeq（$($A1.Length) 字' in blk and 'ActLog "typeq $A1' not in blk and '$A1"' not in blk.split('ActLog', 1)[1].split('\n', 1)[0])
 check('gui.ps1 typeq：只用 BgChar（PostMessage 到 $h），不用 SendKeys', 'BgChar' in blk and '[System.Windows.Forms.SendKeys]' not in blk)
-check('gui.ps1 typeq 受驗證停手旗標擋', "-or $Cmd -eq 'typeq') -and (Test-PsaVerifyHalt)" in ps1)
+check('gui.ps1 typeq 受驗證停手旗標擋', "-or $Cmd -eq 'typeq') -and ($vhp = Get-PsaVerifyHalt $Client)" in ps1)
 check('gui.ps1 維持 BOM', (GUI / 'gui.ps1').read_bytes()[:3] == b'\xef\xbb\xbf')
 src = (GUI / 'netwatch.py').read_text(encoding='utf-8')
 check('netwatch 登入輸入鎖是全視窗共用路徑（SHARED_CACHE，不是每視窗 CACHE）', "LOGIN_INPUT_LOCK = clients.SHARED_CACHE / 'login-input.lock'" in src)
