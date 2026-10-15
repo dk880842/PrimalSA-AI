@@ -53,6 +53,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 自動戰鬥的動作、對象、補血 / 回魔 / 復活門檻 | [ass.md](ass.md#戰鬥設置分頁2026-10-09-實測只看沒改) |
 | 角色自動加點方案、同步加點 | [ass.md](ass.md#便捷功能--特色設定角色自動加點2026-10-09-實測) |
 | 鎖定 / 解除鎖定騎寵、戰寵 | [ass.md](ass.md#鎖定騎寵--鎖定戰寵2026-10-09-實測使用者授權) |
+| 新角色 0 轉 1 級開局（開禮盒 / 穿裝 / 寵物 / 存倉 / 外掛 / 組隊 / 初入石器 / 練功） | `tools/gui/newchar.py plan|run`（未實機；手動流程 notes/new-account.md、[bag.md](bag.md)、[ass.md](ass.md) 的 points 段） |
 | 多角色處理背包 / 寵物 | 面板左欄頭像直接切換（[bag.md](bag.md)、[pet.md](pet.md)），不用切換面板 |
 | 看角色在哪 | 主畫面右上 1195,65「地圖名 ID:x,y」 |
 | 「網路異常，是否重連?」/ 回到登入畫面 | [network.md](network.md) → 點確定；登入畫面 netwatch 自動按登錄（授權範圍見該檔）|

@@ -8,7 +8,7 @@ ass.py set_many（實機過）/ points（同日新增、未實機）、team.py f
 用法（專案根目錄；WSL / Windows 原生指令相同；PSA_CLIENT=PrimalSA2 → 名單 DKBO6～DKBO10）：
   uv run --no-project python tools/gui/newchar.py plan [--confirm-buy] [--no-grind]          # 只印步驟 / 狀態 / 退出碼，完全不碰遊戲（= run --dry-run）
   uv run --no-project python tools/gui/newchar.py run [--from 步驟] [--to 步驟] [--fresh] [--confirm-buy] [--no-grind] [--dry-run]
-    --from / --to    只做這段（中斷後接著做；已完成的步驟記在進度檔 newchar.json，重跑自動跳過）
+    --from / --to    只做這段（中斷後接著做；已完成的步驟記在進度檔 newchar.json〔12 小時內有效〕，重跑自動跳過；--from 指定的那步一定重做）
     --fresh          不看進度檔，從頭（每步本身也會先看狀態：已開的禮盒 / 已穿的裝備 / 已存的道具 / 已是目標的寵物與勾選都不重做）
     --confirm-buy    花石幣買溫蒂妮Lv5的金幣 + 隊長人物首次動作 風的精靈：**目前未支援**（shopbuy 只會買耐久力回複藥）→ 該步記「未支援」跳過、最後回 199
     --no-grind       最後不去練功
