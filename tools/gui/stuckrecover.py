@@ -2,7 +2,7 @@
 """卡住自動重登的共用邏輯（questrun 與 rebirth 共用；只用標準函式庫）。
 
 quest.py 回 19（自動巡路卡住，刷新角色 / 點地面 / 走出口都無效）、42（快速戰鬥 VS 牌卡死）= 客戶端 / 伺服器端狀態卡住，
-解法是全員重登（relogin.py --stuck --confirm；登入畫面只按遊戲已帶入帳密的「登錄」，鐵則 2）→ 重登後 relogin 自己 team.check，
+解法是全員重登（relogin.py --stuck --confirm；登入畫面只按遊戲已帶入帳密的「登錄」，鐵則 2；有本機帳號對照 accounts.local.json 時先核對帳號欄、不符只重打帳號欄，多視窗也照跑，否則多視窗 109）→ 重登後 relogin 自己 team.check，
 退出碼 105 = 進遊戲了但隊伍不對 → 呼叫端的重組函式（team.form --regroup）。
 本檔只放「判斷 + 呼叫順序 + 計次」，呼叫端各自負責重登前後的善後（questrun：戰鬥設定 / HP / 遇敵；rebirth：龍王的守護重吃）。
 

@@ -3,7 +3,7 @@
 
 實測（2026-10-10）：點確定後遊戲**直接回到登入畫面**（帳號 / 密碼欄由遊戲自動帶入、登錄 / 註冊鈕），不會自動重連。
 使用者授權（2026-10-10，AGENTS.md 鐵則 2 的例外，只限這樣）：登入畫面**只點「登錄」**（用遊戲自動帶入的帳密），
-之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。絕不輸入 / 修改 / 清除帳密欄、不點鑰匙 / 註冊、
+之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。密碼欄絕不碰（帳號欄只在下面「帳號核對」時重打）、不點鑰匙 / 註冊、
 不讀 savepwd.txt 或登錄檔、不把帳號寫進任何 log。帳密欄空的 / 登錄後出現提示視窗 / 連續 3 次登錄失敗 / 看不懂的畫面 → halt 停手通知使用者。
 多視窗（2026-10-15 使用者決定，auto_login_check）：非主視窗（PSA_CLIENT ≠ PrimalSA）一律不按登錄；主視窗偵測到還有別的 PrimalSA* 程序在跑也不按
 （遊戲記住的帳號是所有視窗共用的，自動登錄可能登錯帳號、互踢）→ 照樣偵測斷線、點「網路異常」的確定，回到登入畫面就 halt 通知使用者。
@@ -266,7 +266,7 @@ def login_fields_filled() -> bool | None:
 
 
 def halt(reason: str, src: str) -> dict:
-    """停手：寫 halt 檔、errlog、大聲警告。絕不輸入帳密"""
+    """停手：寫 halt 檔、errlog、大聲警告。密碼欄絕不碰"""
     try:
         CACHE.mkdir(parents=True, exist_ok=True)
         HALT.write_text(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {reason}\n', encoding='utf-8')
