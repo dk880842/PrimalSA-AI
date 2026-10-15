@@ -485,7 +485,7 @@ def known_panel_obj(name: str) -> Panel | None:
     fixed = {'switch': SWITCH, 'pet': PET, 'team': TEAMPANEL, 'qteam': QTEAM}.get(name)
     if fixed:
         return fixed
-    x = screen_sigs.PANEL_X.get(name)
+    x = screen_sigs.PANEL_X.get(name) or (screen_sigs.SHOP_X if name == 'shop' else None)     # NPC 商店的 ✕ 不在 PANEL_X（另判），✕ 關閉不會買東西
     return Panel(name.upper(), None, [x], (x[0], x[1])) if x else None
 
 

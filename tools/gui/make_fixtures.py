@@ -2,7 +2,7 @@
 """離線 fixture 抽取（P0；只用標準函式庫、不碰遊戲）：用 shotcache（像素快取，底層 pngread 解碼一次）從 tools/.cache 既有 1440×830 截圖抽像素，
 存成 tools/gui/fixtures/{switch,pet,depot,exp}_px.json，給 uikit / char / team / pet / grind 的離線測試用。
 截圖不存在就印出「跳過」並回報（不報錯）。計畫：notes/plan-scriptify.md §1.4。
-用法：uv run --no-project python tools/gui/make_fixtures.py [--only bag_slots,leader_badge,world,panel,popup]
+用法：uv run --no-project python tools/gui/make_fixtures.py [--only bag_slots,leader_badge,world,panel,popup,shop]
 注意：來源是舊截圖（新帳號 Lv1、別的地圖），各值要在對應實機量測時重確認。"""
 import json
 import os
@@ -169,6 +169,30 @@ def make_panel_fixture() -> list:
     return miss
 
 
+# ---- NPC 商店（screen_sigs.SHOP_X / SHOP_PTS；2026-10-15，watch 對 p2 競技場便利店報 unknown_long 誤警報）----
+# 只存 ✕ + 16 點（不把整張圖塞進 repo、也不動既有 panel_px / popup_px 的點清單）。正例 = 同一家店 2 張；負例 = tools/.cache/ui 全部全螢幕 / 面板截圖
+# （含商城 ui/shop.png、交易所 bourse、LuckyCard lucky、贊助 sponsor）+ 面板 / 彈窗樣本 + 主畫面 / 洞窟地圖
+SHOP_POS = ['clients/PrimalSA2/watch-alerts/unknown-1792043285.png', 'clients/PrimalSA2/watch-alerts/unknown-1792043435.png']
+SHOP_NEG_EXTRA = ['clients/PrimalSA2/shot.png']
+
+
+def make_shop_fixture() -> list:
+    """shop_px.json：points = [SHOP_X 座標] + SHOP_PTS 座標；每張存 hex 與期望（True = 商店）。回缺的檔案"""
+    pts = [screen_sigs.SHOP_X[:2]] + [(x, y) for x, y, *_ in screen_sigs.SHOP_PTS]
+    negs = sorted(set(['ui/' + f.name for f in (CACHE / 'ui').glob('*.png')] + list(PANEL_POS) + PANEL_NEG + list(POPUP_SRC) + SHOP_NEG_EXTRA))
+    samples, miss = [], []
+    for rel, want in [(r, True) for r in SHOP_POS] + [(r, False) for r in negs]:
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = {tuple(map(int, k.split(','))): tuple(v) for k, v in grab(p, pts).items()}
+        samples.append({'f': rel, 'expect_shop': want, 'px': ''.join('%02x%02x%02x' % px[pt] for pt in pts)})
+    write('shop_px.json', {'note': 'NPC 商店辨識樣本（2026-10-15）：points = ✕ + SHOP_PTS；expect_shop = 人工看圖的標籤（正例 = p2 競技場便利店 2 張，其餘是各種不是商店的畫面）',
+                           'points': [list(p) for p in pts], 'samples': samples})
+    return miss
+
+
 # ---- 面板上疊已知彈窗（screen_sigs.popup_over_panel；watch 誤報 #243 #244 #254 #261 #264，2026-10-12）----
 # 檔名 → 期望 (面板, 彈窗種類) 或 None（負例：壓暗的面板上疊「不認得」的彈窗 / 其他 unknown 畫面，必須仍是 unknown）；人工看圖確認
 POPUP_SRC = {
@@ -319,7 +343,7 @@ def main() -> int:
         names = sys.argv[sys.argv.index('--only') + 1].split(',')
         for n in names:
             miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture,
-                    'panel': make_panel_fixture, 'popup': make_popup_fixture}[n]()
+                    'panel': make_panel_fixture, 'popup': make_popup_fixture, 'shop': make_shop_fixture}[n]()
             print(n, '缺', miss) if miss else None
         return 0
     done, skipped = [], []
@@ -374,6 +398,8 @@ def main() -> int:
     done.append('panel_px.json' + (f'（缺 {miss_panel}）' if miss_panel else ''))
     miss_pp = make_popup_fixture()
     done.append('popup_px.json' + (f'（缺 {miss_pp}）' if miss_pp else ''))
+    miss_shop = make_shop_fixture()
+    done.append('shop_px.json' + (f'（缺 {miss_shop}）' if miss_shop else ''))
     miss_ql = make_questlist_fixture()
     done.append('questlist_px.json' + (f'（缺 {miss_ql}）' if miss_ql else ''))
     for n, fn in (('bag_slots_px.json', make_bag_slots_fixture), ('leader_badge_px.json', make_leader_badge_fixture), ('world_px.json', make_world_fixture)):
