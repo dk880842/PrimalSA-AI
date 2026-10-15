@@ -42,6 +42,7 @@ notes/quest-log.md 10-10 兩段：第一次輸、5 人 HP 1 原地；第二次 5
   143 補血失敗
   144 重打失敗：輸到 --max-tries / 片數用完 / 步號比隊長還前面（不合理）/ quest.py 非預期退出碼
   145 組隊 / 解散失敗：舊隊解散、以掉隊者為隊長組隊、最後 DKBO 重組或 team.check 不滿 5 人
+  148 重打前補血後重讀全隊 HP 仍偏低（HEAL_TRIES 輪都沒補起來；info.low）→ 不打、收尾回 DKBO
   147 戰鬥設定檢查失敗（ass.battle_check 非 0：人物首次動作的值不對 13 / 勾選改不動 4 / 面板 2～7 / 戰鬥中 8；info.battle）
   146 quest.py 回需要人看的碼（39 不可逆對話、33 / 29 對話無進展、25 自動戰鬥卡住、19 巡路卡住、3 追蹤沒反應且 --fight 也點不到、5 找不到任務但隊長沒完成）
 安全：只用 char / team / quest / heal / bag 現有的驗證流程，不加任何新的點擊座標；不做不可逆動作；驗證視窗（9）/ 斷線（10）立即透傳。
@@ -66,10 +67,12 @@ import uikit  # noqa: E402
 
 SRC = 'bossretry'
 (EXIT_TEAM_READ, EXIT_SWITCH, EXIT_STEP, EXIT_HEAL, EXIT_REFIGHT, EXIT_REGROUP, EXIT_QUEST_MANUAL, EXIT_BATTLESET) = range(140, 148)
+EXIT_HEAL_VERIFY = 148           # 補血後重讀全隊 HP 仍偏低（補了 HEAL_TRIES 輪還是 < hp_min，含 HP 0）→ 不打
 ROLES = clients.roster()         # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
 LEADER = ROLES[0] if ROLES else ''
 TEAM_SIZE = len(ROLES) or 5
-HP_MIN = 60                      # 全隊任一人 HP 低於這個 % → 補血（同 questrun.TEAM_HP_MIN）
+HP_MIN = 80                      # 全隊任一人 HP 低於這個 % → 補血（2026-10-15 起 80，同 questrun do_fight 紅暴 sd.hp_min；HP 0 一定補）
+HEAL_TRIES = 2                   # 重打前補血 + 重讀確認最多幾輪（第 1 輪補完仍偏低 → 再補 1 次，仍低 148）
 MAX_TRIES = 2                    # 每個掉隊者最多「輸 / 被打飛」幾次
 MAX_SLICES = 6                   # 每個掉隊者最多跑幾片 quest.py
 MAX_REFORM = 3                   # 每個掉隊者打的過程中隊伍又散（38 / 30 / 32）最多重組幾次
@@ -283,21 +286,38 @@ class Run:
         return 0
 
     def hp_gate(self, where: str) -> int:
-        """全隊 HP（bag.hps）任一 < hp_min → 補血（小護士補整隊）；讀不到 → 補（被打飛的人通常 HP 1，寧可多補）"""
-        rc, pct = self.T.team_hp()
+        """每次重打前（第一次、輸了 / 被打飛之後、打完 BOSS 之後）：讀全隊 HP（bag.hps）任一 < hp_min（HP 0 一定算）→ 補血（小護士補整隊）→
+        **補完重讀確認**（2026-10-15 四寶玉之謎連輸 3 次：舊版補完不驗，補沒補到沒人知道）；仍偏低再補一輪，HEAL_TRIES 輪後仍低 → 148 不打。
+        第一次讀不到 → 補（被打飛的人通常 HP 1，寧可多補）；補完重讀讀不到 → 記事件放行（不卡死，無法驗證）。"""
+        for n in range(1, HEAL_TRIES + 1):
+            rc, pct = self.T.team_hp()
+            if rc in PASS:
+                return rc
+            low = {r: v for r, v in (pct or {}).items() if v is not None and v < self.o['hp_min']}
+            if not rc and pct and not low:
+                self.event(f'{where}：全隊 HP {pct}，{"補血後確認 OK" if n > 1 else "不用補"}')
+                return 0
+            if n > 1 and (rc or not pct):
+                self.event(f'{where}：補血後讀不到全隊 HP（rc {rc}）→ 無法驗證，放行')
+                return 0
+            self.event(f'{where}：重打前 HP 偏低 → 先補血（第 {n}/{HEAL_TRIES} 輪）：全隊 HP {pct}（rc {rc}；偏低 {low}）→ 補血（小護士補整隊）')
+            try:
+                self.T.heal()
+            except RuntimeError as e:
+                return self.fail(EXIT_HEAL, f'{where}：補血失敗：{e}')
+            self.info['heals'] = self.info.get('heals', 0) + 1
+        rc, pct = self.T.team_hp()                                 # 最後一輪補完的確認讀
         if rc in PASS:
             return rc
         low = {r: v for r, v in (pct or {}).items() if v is not None and v < self.o['hp_min']}
         if not rc and pct and not low:
-            self.event(f'{where}：全隊 HP {pct}，不用補')
+            self.event(f'{where}：全隊 HP {pct}，補血後確認 OK')
             return 0
-        self.event(f'{where}：全隊 HP {pct}（rc {rc}；偏低 {low}）→ 補血（小護士補整隊）')
-        try:
-            self.T.heal()
-        except RuntimeError as e:
-            return self.fail(EXIT_HEAL, f'{where}：補血失敗：{e}')
-        self.info['heals'] = self.info.get('heals', 0) + 1
-        return 0
+        if rc or not pct:
+            self.event(f'{where}：補血後讀不到全隊 HP（rc {rc}）→ 無法驗證，放行')
+            return 0
+        self.info['low'] = low
+        return self.fail(EXIT_HEAL_VERIFY, f'{where}：補血 {HEAL_TRIES} 輪後 HP 仍偏低 {low}（門檻 {self.o["hp_min"]}%），不打；請人看（小護士沒補到？）')
 
     def refight(self, who: str, ref_step) -> int:
         """掉隊者已是當前角色：讀步號 → 落後就以他為隊長組 5 人打到追上 → 解散這隊。→ 0 / 退出碼"""

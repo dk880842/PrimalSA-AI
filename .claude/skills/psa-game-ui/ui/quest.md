@@ -258,6 +258,7 @@
   - **龍王的守護與巡路**：08:04 depot_use rc 90 根因（證實，看 ui-log/080426-bag-nopopup、080431-bag-open-fail）：片「時間到」時遊戲還在自動巡路，吃龍王途中隊伍走到看門者 → NPC 對話框把整個 UI 連同背包藏起來 → use_item 點格沒開彈窗 90、depot_store 開不了背包 90，舊 `bag.Session` 看不到背包外框就不關 → quest.py ESC 掉對話框後背包露出 → 誤報 9。修：questrun 看到畫面是 `walking` 這片先不吃；`bag.Session` 結束一定 `close_leftover`（見 ui/bag.md）。07:59 那次背包 / 倉庫面板是誰開的**查不到**（actions.log 只留 2000 行已輪替；那片沒吃龍王）。
 
 - **2026-10-13 冗餘 review 修正（notes/review-redundancy-1013.md 前 5 名 + 卡住自動重登；離線測試通過，實機未驗證）**：
+  - **bossretry 重打前補血並驗證**（2026-10-15 四寶玉之謎連輸 3 次：重打前全隊 HP 有 0 / 41，舊版補完不重讀、門檻只 60%）：每次重打前（第一次、輸 / 被打飛後、打完 BOSS 後）讀全隊 HP，任一人 < 80%（HP 0 一定）→ 補血（小護士補整隊）→ **重讀確認**，仍偏低再補一輪，2 輪後仍低回 **148**（不打、收尾切回 DKBO）；補完讀不到 HP → 記事件放行。補血停在醫院，之後由 quest.py 按任務追蹤自動傳送 / 巡路回 BOSS 處（同原流程）。事件 log：「重打前 HP 偏低 → 先補血（第 n/2 輪）」「補血後確認 OK」。不衝突「練功不自動補血」（那是掛機）。
   - **逐人驗證改「風險才當場、其餘批次」**（10-13 驗 20 次共 43 分、0 次抓到落後者）：`--verify risk`（預設）本任務有風險事件 —— quest.py 30 / 32 / 38 / 21 / 41、bossretry、全員重登、BOSS 後有人 HP 0 或讀不出、交寵物（解散逐人交）—— 才完成時當場 `verify_many`；
     沒有 → 進度檔 `verify_pending`，全部任務結束後其他 4 人**每人開一次詳情讀全部待驗任務**（`questdetail.status_all` 多標題）；下一任務的前置（`questdefs.prereqs` = Task 表 finishTasks，1.82 全部要先完成成人儀式）在待驗清單 → 接取前先批次驗；
     失敗退出時待驗留在進度檔（`LAST.verify_pending`），下次 questrun 結束再驗（超過 2 小時丟掉）。`--verify each` = 舊行為、`--verify off` / `--no-verify-all` 不驗。結果照寫 quest-events（「逐人驗證：{角色: 狀態}」）。

@@ -294,6 +294,25 @@ T = Fake(steps={'DKBO': [4], 'DKBO5': [3]}, team_hp=[LOW])
 T.heal = lambda: (_ for _ in ()).throw(RuntimeError('假：傳送失敗'))
 check('補血失敗 → 143', go(T) == br.EXIT_HEAL)
 
+# ---- 重打前 HP 偏低（含 0）→ 先補血、補完重讀確認（2026-10-15 四寶玉之謎連輸 3 次）----
+Z = (0, {'DKBO': 100, 'DKBO2': 100, 'DKBO3': 0, 'DKBO4': 81, 'DKBO5': 41})
+OK = (0, {r: 100 for r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')})
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37], team_hp=[Z, OK])
+rc = go(T)
+n = T.names()
+check('HP 0 / 41 / 81 → 補血 1 次 → 重讀 OK → 才打', rc == 0 and n.count('heal') == 1 and n.index('heal') < n.index('quest'), T.calls)
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37], team_hp=[Z, Z, OK])
+rc = go(T)
+check('補完仍偏低 → 再補第 2 輪 → 確認 OK → 打', rc == 0 and T.names().count('heal') == 2 and T.names().count('quest') == 1, T.calls)
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3]}, quest=[37], team_hp=[Z, Z, Z])
+rc = go(T)
+check('補 2 輪仍偏低 → 148、沒打、收尾切回 DKBO', rc == br.EXIT_HEAL_VERIFY == 148 and 'quest' not in T.names() and T.calls[-2:] == [('disband', 'DKBO5'), ('ensure', 'DKBO')], T.calls)
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37], team_hp=[(0, {'DKBO': 100, 'DKBO2': 79, 'DKBO3': 100, 'DKBO4': 100, 'DKBO5': 100}), OK])
+check('79% < 80 門檻也補', go(T) == 0 and T.names().count('heal') == 1)
+T = Fake(steps={'DKBO': [4], 'DKBO5': [3, 4]}, quest=[37], team_hp=[Z, (8, {})])
+rc = go(T)
+check('補完讀不到 HP → 放行（無法驗證）', rc == 0 and 'quest' in T.names(), T.calls)
+
 # ---- dry-run / plan 不碰遊戲 ----
 out = io.StringIO()
 with contextlib.redirect_stdout(out):
