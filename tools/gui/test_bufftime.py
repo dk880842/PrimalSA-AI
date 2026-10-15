@@ -152,5 +152,44 @@ finally:
     uikit.preflight = uikit_pf
 check('preflight 9 → rc 9、沒點', r['rc'] == 9 and f.clicks == [])
 
+# ---- 到期快取 bufftime.json（psa-hud 倒數用）----
+import json  # noqa: E402
+import clients  # noqa: E402
+cp = bt.cache_path()
+check('快取路徑在測試暫存資料夾（不寫真的 tools/.cache）', 'psatest-' in str(cp) and cp.name == 'bufftime.json', str(cp))
+cp.unlink(missing_ok=True)
+f = Fake(['exp', 'dragon', None], POP)
+r = run(f)
+d = json.loads(cp.read_text(encoding='utf-8'))
+check('讀完寫快取：exp / dragon 到期', set(d['buffs']) == {'exp', 'dragon'} and d['buffs']['exp']['remaining_s'] == 3306
+      and d['buffs']['exp']['expires_ts'] == r['buffs'][0]['expires_ts'] and d['v'] == 1)
+f = Fake(['exp', None, None], POP)
+run(f, 'dragon')
+d = json.loads(cp.read_text(encoding='utf-8'))
+check('--kind dragon 且圖示列沒龍王 → 移除 dragon、exp 保留', set(d['buffs']) == {'exp'})
+f = Fake(['exp', None, None], POP, time_text='糊掉了')
+run(f)
+d2 = json.loads(cp.read_text(encoding='utf-8'))
+check('有圖示但讀失敗 → 保留舊值', d2['buffs'].get('exp') == d['buffs']['exp'])
+f = Fake([None, None, None], POP)
+run(f)
+check('圖示列都沒有 → 清空', json.loads(cp.read_text(encoding='utf-8'))['buffs'] == {})
+before = cp.read_text(encoding='utf-8')
+f = Fake(['exp', None, None], POP)
+saved_row = bt.bag.buff_row
+os.environ.pop('PSA_CLIENT', None)
+uikit_pf, uikit_hv = uikit.preflight, uikit.hud_visible
+uikit.preflight = lambda src, fast=True: 0
+uikit.hud_visible = lambda: True
+bt.bag.buff_row = lambda: ['exp', None, None]
+try:
+    bt.read('all', dry_run=True)
+finally:
+    bt.bag.buff_row, uikit.preflight, uikit.hud_visible = saved_row, uikit_pf, uikit_hv
+check('--dry-run 不寫快取', cp.read_text(encoding='utf-8') == before)
+m = bt.merge_cache({'buffs': 'bad'}, [], ['exp'], ['exp'], 5.0)
+check('merge_cache：壞舊檔當空', m == {'v': 1, 'ts': 5.0, 'buffs': {}})
+check('p2 快取路徑檔名相同（真路徑在 clients/PrimalSA2）', clients.cpath('bufftime.json', 'PrimalSA2').parts[-3:] == ('clients', 'PrimalSA2', 'bufftime.json'))
+
 print('失敗', fails)
 sys.exit(1 if fails else 0)

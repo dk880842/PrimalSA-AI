@@ -61,5 +61,5 @@
 - 頭像下方 buff 列：第 1 格中心約 (98,172)，每格 46 px（第 2、3 格約 144、190，未實測）。**點圖示約 1 秒開浮窗（x 432～1006、y 360～468），再點同一格就關**（不用 ESC）。
 - 浮窗內：標題（青字，約 585,394，例「2倍智慧果」）、說明、剩餘時間綠字靠右（約 920,397，裁 x 860～990、y 388～408），格式固定「N天N時N分N秒」。
 - OCR 要用 `-Dark 0 -Zooms 2,3,4`（深底亮字；`-Light 120 / 170` 讀不到）。浮窗不是面板，開著時 `uikit.screen()` 判 unknown → 只在點開前 preflight。
-- 腳本：`uv run --no-project python tools/gui/bufftime.py read [--kind exp|dragon|all]`（唯讀；p2 加 `PSA_CLIENT=PrimalSA2`；退出碼 130～134；可 `import bufftime; bufftime.read('exp')`）。實測 13:11 p1 2倍智慧果剩 49 分 19 秒（約 14:00 到期）、13:13 p2 剩 5 時 46 分 55 秒（約 19:00 到期）。
+- 腳本：`uv run --no-project python tools/gui/bufftime.py read [--kind exp|dragon|all]`（唯讀；p2 加 `PSA_CLIENT=PrimalSA2`；退出碼 130～134；可 `import bufftime; bufftime.read('exp')`）。讀完把預計到期寫進本視窗 `bufftime.json`（主視窗 `tools/.cache/`、其他 `tools/.cache/clients/<程序名>/`），psa-hud pane 依它倒數「智慧果 剩 H:MM」；吃新的智慧果 / pane 顯示「智慧果 ?」時再跑一次。實測 13:11 p1 2倍智慧果剩 49 分 19 秒（約 14:00 到期）、13:13 p2 剩 5 時 46 分 55 秒（約 19:00 到期）。
 

@@ -9,6 +9,9 @@
 → 驗證浮窗已關（沒關就 ESC；仍關不掉 = 133 停手）。沒有 buff → rc 0、buffs = []。
 最後一行 JSON {"ok","rc","buffs":[{"kind","name","slot","remaining_s","raw","read_at","expires_at"}],"errors":[...]}
 （read_at / expires_at = 本機時間 ISO 字串；另附 read_ts / expires_ts epoch 秒）。
+讀完（非 --dry-run、buff 列讀得到）把預計到期寫進**本視窗**快取 `bufftime.json`（主視窗 tools/.cache/、其他 tools/.cache/clients/<程序名>/）：
+{"v":1,"ts","buffs":{"exp":{"expires_ts","read_ts","remaining_s"},"dragon":{...}}}；這次要讀的種類圖示列沒有 → 移除該項，
+有圖示但讀失敗 → 保留舊值。psa-hud pane 依它倒數顯示「智慧果 剩 H:MM」（watch 零輸入，不會為了讀時間去點畫面）。
 可 import：`bufftime.read('exp')` 回上述 dict（給「快到期自動補吃」用）；`parse_remaining(text)` / `expires_at(...)` 是純函式。
 
 座標（2026-10-15 p1 實測，2880x1659 客戶區 / 截圖座標）：buff 圖示第 k 格中心 = bag.BUFF_SLOTS[k] 的中心（第 1 格約 98,172）；
@@ -34,6 +37,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bag  # noqa: E402
+import clients  # noqa: E402
+import logpaths  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'bufftime'
@@ -160,6 +165,50 @@ def wait_hud(secs: float = HUD_WAIT_S) -> bool:
     return wait_for(uikit.hud_visible, secs)
 
 
+# ---- 到期快取（psa-hud 讀）----
+CACHE_NAME = 'bufftime.json'
+
+
+def cache_path() -> Path:
+    """本視窗的到期快取（PSA_CLIENT 在呼叫時才讀；測試時 testenv 轉向暫存）"""
+    return logpaths.p(clients.cpath(CACHE_NAME))
+
+
+def merge_cache(old: dict | None, buffs: list, want, row, now: float) -> dict:
+    """純函式：舊快取 + 這次讀到的 → 新快取。want = 這次要讀的種類；row = bag.buff_row() 結果。
+    讀到 → 更新；圖示列沒有 → 移除（buff 已沒了）；有圖示但讀失敗 → 保留舊值"""
+    ob = (old or {}).get('buffs')
+    cur = dict(ob) if isinstance(ob, dict) else {}
+    got = {b['kind']: b for b in buffs}
+    for k in want:
+        if k in got:
+            b = got[k]
+            cur[k] = {'expires_ts': b['expires_ts'], 'read_ts': b['read_ts'], 'remaining_s': b['remaining_s']}
+        elif k not in (row or []):
+            cur.pop(k, None)
+    return {'v': 1, 'ts': now, 'buffs': cur}
+
+
+def save_cache(buffs: list, want, row, now: float | None = None, path: Path | None = None) -> Path | None:
+    """讀改寫本視窗 bufftime.json（暫存檔 + os.replace 原子寫）；寫失敗只記 log 不影響結果"""
+    import os
+    path = path or cache_path()
+    try:
+        old = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        old = None
+    d = merge_cache(old if isinstance(old, dict) else None, buffs, want, row, now if now is not None else time.time())
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f'{path.name}.{os.getpid()}.tmp')
+        tmp.write_text(json.dumps(d, ensure_ascii=False), encoding='utf-8')
+        os.replace(tmp, path)
+        return path
+    except OSError as e:
+        log(f'寫到期快取失敗：{e}')
+        return None
+
+
 # ---- 主流程 ----
 def _close_popup(k: int) -> bool:
     """再點同一格關浮窗；沒關 → ESC；回是否已關"""
@@ -234,6 +283,7 @@ def read(kind: str = 'all', dry_run: bool = False) -> dict:
             res['rc'] = rc
         if rc == EXIT_STUCK:
             break
+    save_cache(res['buffs'], want, row)
     res['ok'] = res['rc'] == 0
     return res
 
