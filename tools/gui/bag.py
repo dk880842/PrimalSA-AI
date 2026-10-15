@@ -1065,7 +1065,9 @@ def stack_qty(i: int, want: str) -> int | None:
             return 1
         if not _click(628, 648, POPUP, f'bag 讀疊數：拆分 {want}', wait_ms=700):
             return None
-        q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Zooms', '2,3'))
+        q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Dark', '0', '-Zooms', '2,3,4'))   # 2026-10-15 實機：預設 Dark 150 讀成空，不二值化才讀得到
+        if q is None:
+            q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Light', '180', '-Zooms', '3,4'))
         uikit.gui('seq', f'click {SPLIT_CANCEL[0]} {SPLIT_CANCEL[1]}; wait 600', note='bag 讀疊數：取消數量輸入')
         return q
     finally:
