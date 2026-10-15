@@ -664,8 +664,16 @@ class Tools:
                 return uikit.fail(SRC, bag.EXIT_PANEL, '拆分後背包面板消失')
             nxt = bag.read_slot_name(i + 1)
             if not (nxt and bag.name_match(nxt, name)):
-                uikit.snap('rebirth-split-after')
-                return uikit.fail(SRC, bag.EXIT_VERIFY, f'拆分後隔壁格讀到 {nxt!r}，不是 {name}（待實機量；不重點）')
+                # 2026-10-15 petquest 恐龍博士：拆出的新疊不一定在隔壁格（DKBO2 隔壁是龍的魅力之笛、新疊在 +2）→ 往後掃其他格找同名
+                got = None
+                for j in range(i + 2, bag.n_slots(False)):
+                    t = bag.read_slot_name(j)
+                    if t and bag.name_match(t, name):
+                        got = j
+                        break
+                if got is None:
+                    uikit.snap('rebirth-split-after')
+                    return uikit.fail(SRC, bag.EXIT_VERIFY, f'拆分後隔壁格讀到 {nxt!r}，往後掃也沒有 {name}（不重點）')
         return 0
 
     def bait_return(self, role):
