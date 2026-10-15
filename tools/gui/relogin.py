@@ -17,7 +17,9 @@
   3 「是否登出全部角色?」提示：像素特徵（米色單鈕提示窗，同網路異常）+ OCR 訊息含「登 / 出 / 全」（OCR 讀不出就信任像素；讀到別的字 → 不點）→ 確定 715,557
   4 等回登入畫面（≤ 60 s）→ netwatch.relogin：帳密欄有內容才點「登錄」590,585（帳密欄空 / 登錄後提示窗 / 連續 3 次失敗 = halt）→ 選角面板「一鍵全登」740,640 → 等進遊戲（約 20 s）
   5 team.check（5 人、隊長 DKBO）；全員單人才 team.form；最後 char.ensure DKBO（重登後當前角色會變 DKBO5）
-鐵則 2：登入畫面只點「登錄」（遊戲自動帶入的帳密）；不輸入 / 清除帳密欄、不點鑰匙 / 註冊、不把帳號寫進 log、登入畫面不存截圖。
+鐵則 2：登入畫面只點「登錄」（遊戲自動帶入的帳密）；不點鑰匙 / 註冊、不把帳號寫進 log、登入畫面不存截圖；密碼欄絕不碰。
+  例外（2026-10-15）：有本機帳號對照時，帳號欄是別的帳號 → 只清空並重打帳號欄成本視窗帳號（netwatch.retype_account）。
+--leader 預設：本視窗名單（clients.roster）第 1 個，查不到才 DKBO；PrimalSA2 的 team / char 名單相依還沒做（第 3b 步），隊伍檢查可能 105，必要時加 --no-team。
 鐵則 5：出現驗證 / 答題視窗 → 不處理、停手通知使用者。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit，11 = netwatch 連續登錄失敗；relogin 自己 100～108）：
@@ -30,7 +32,9 @@
   106 重登進遊戲了，但當前角色切回隊長失敗（char.py 的退出碼，訊息有詳情）
   107 起始畫面不是主畫面（戰鬥 / 其他面板 / 對話；--stuck 時只擋完整戰鬥 / 面板 / 對話）→ 不動
   108 netwatch 動作鎖被別的腳本佔用 → 不動
-  109 多視窗不自動重登（netwatch.auto_login_check：非主視窗，或主視窗時還有別的 PrimalSA* 在跑 / 查不到程序清單）→ 什麼都不點（登出後回不來，2026-10-15 使用者決定）
+  109 多視窗不自動重登（netwatch.login_mode：沒有本視窗的帳號對照設定、且是非主視窗，或主視窗時還有別的 PrimalSA* 在跑 / 查不到程序清單）→ 什麼都不點（登出後回不來，2026-10-15 使用者決定）
+      本機設定檔 tools/gui/accounts.local.json 有本視窗帳號（accounts.py）→ 不擋，單 / 多視窗都照跑；登入畫面由 netwatch.relogin 核對帳號欄
+      （符合才按登錄、不符只重打帳號欄再核對、讀不出 / 重打後不符 = halt 10；密碼欄不碰；未實機）
 未實機驗證（只有離線測試）：設置面板標題板 / ✕ 特徵（樣本有，沿用 screen_sigs）、全員登出鈕顏色、確認提示窗的像素特徵與 OCR 框（假設與網路異常提示同款單鈕窗；
 首次手動登出時使用者只給了座標 715,557）、「等回登入畫面」的時序。這些判斷都保守：不符就停手不點。
 """
@@ -167,16 +171,24 @@ def start_ok(st: dict, stuck: bool = False) -> bool:
     return bool(stuck) and (state == 'walking' or (state == 'battle' and not st.get('full')))
 
 
-def run(confirm: bool = False, dry_run: bool = False, leader: str = charstate.LEAD, size: int = 5, check_team: bool = True,
+def default_leader() -> str:
+    """本視窗名單第 1 個（clients.roster；主視窗 = DKBO），查不到 = charstate.LEAD"""
+    import clients
+    r = clients.roster()
+    return r[0] if r else charstate.LEAD
+
+
+def run(confirm: bool = False, dry_run: bool = False, leader: str | None = None, size: int = 5, check_team: bool = True,
         stuck: bool = False) -> int:
+    leader = leader or default_leader()
     if not confirm and not dry_run:
         print(f'{SRC}：登出會讓全部角色下線（不可逆），沒有 --confirm 不動；只想看前置檢查用 --dry-run', file=sys.stderr)
         return uikit.EXIT_USAGE
     rc = uikit.preflight(SRC)
     if rc:
         return rc
-    how, why = netwatch.auto_login_check()          # 多視窗：登出後不會自動按登錄 → 根本不登出
-    if how != 'ok':
+    how, why, _acct = netwatch.login_mode()         # 多視窗又沒有帳號對照：登出後不會自動按登錄 → 根本不登出（有對照 = 'account' 照跑）
+    if how not in ('ok', 'account'):
         return uikit.fail(SRC, EXIT_MULTI, why if how == 'block' else f'{why}，不重登')
     st = uikit.screen(full=True)
     if not start_ok(st, stuck):
@@ -215,7 +227,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--confirm', action='store_true', help='確認要全員登出（不可逆）')
     ap.add_argument('--dry-run', action='store_true', help='只做前置檢查，不點任何東西')
-    ap.add_argument('--leader', default=charstate.LEAD)
+    ap.add_argument('--leader', default=None, help='隊長（預設本視窗名單第 1 個；主視窗 DKBO）')
     ap.add_argument('--size', type=int, default=5)
     ap.add_argument('--no-team', action='store_true', help='重登後不檢查隊伍 / 當前角色')
     ap.add_argument('--stuck', action='store_true', help='卡死時用：起始畫面也接受自動巡路中 / 快速戰鬥 VS 牌（完整戰鬥仍不動）')

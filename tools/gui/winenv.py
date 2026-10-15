@@ -170,7 +170,7 @@ SERVER_NAMED = {
     'titlematch': ('Mode', 'Dir', 'Image', 'Out', 'Y', 'Thr'),
     'digitmatch': ('Image', 'Boxes'),
 }
-INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
+INPUT_CMDS = {'click', 'dclick', 'drag', 'key', 'typeq', 'max', 'end', 'fg'}   # 會動到輸入 / 前景的 gui 指令：逾時不重送
 START_TIMEOUT = 20.0
 IDLE_MARGIN = 15.0          # client 閒置超過 (SERVER_IDLE_MIN*60 − 此秒數) 就先重開 server
 SERVER_IDLE_MIN = 3         # serve.ps1 閒置看門狗（分鐘）：長程序每秒都有請求，不會誤殺；殘留的 server 最多活這麼久
@@ -245,6 +245,16 @@ def _log_err(kind: str, msg: str) -> None:
         errlog.add(msg, source='winenv')
     except Exception:
         pass
+
+
+def redact(pos) -> str:
+    """errlog 用的參數摘要（前 40 字）；typeq（登入畫面重打帳號）的內容一律遮掉，帳號名不能進 log（鐵則 2）"""
+    pos = [str(a) for a in pos or []]
+    if pos and pos[0] == 'typeq':
+        return 'typeq ***'
+    if pos and pos[0] == 'seq' and len(pos) > 1 and 'typeq' in pos[1]:
+        return 'seq（含 typeq，內容不記錄）'
+    return ' '.join(pos)[:40]
 
 
 def estimate_timeout(script: str, pos: list[str], named: dict[str, str]) -> tuple[float, bool]:
@@ -469,7 +479,7 @@ class GuiServer:
                     break
                 if st == 'timeout':
                     self.close()
-                    _log_err('timeout', f'常駐 server 請求逾時（{name} {" ".join(pos)[:40]}，{tmo:.0f}s），已重開')
+                    _log_err('timeout', f'常駐 server 請求逾時（{name} {redact(pos)}，{tmo:.0f}s），已重開')
                     raise subprocess.TimeoutExpired(self._argv(), tmo)
                 if st == 'notsent':
                     self.close()
@@ -478,7 +488,7 @@ class GuiServer:
                     return None
                 # eof：server 在處理請求時死了（可能被 kill）
                 self.close()
-                _log_err('eof', f'常駐 server 中途結束（{name} {" ".join(pos)[:40]}）')
+                _log_err('eof', f'常駐 server 中途結束（{name} {redact(pos)}）')
                 if is_input or attempt == 2:
                     return subprocess.CompletedProcess(self._argv(), 125, '', 'server 中途結束，輸入類指令不重送\n')
             r = subprocess.CompletedProcess(self._argv(), int(m.get('rc', 1)), m.get('out', '') or '', m.get('err', '') or '')

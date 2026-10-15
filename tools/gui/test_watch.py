@@ -133,7 +133,7 @@ real_run_ps, real_wanted, real_alive = winenv.run_ps, winenv._server_wanted, win
 
 # ---------------------------------------------------------------- 1. 零輸入白名單
 w, clk, fk = make('wl')
-for bad in ('click', 'dclick', 'drag', 'key', 'max', 'end', 'fg', 'seq', 'waitpix', 'waitstill', 'shot', 'wait', 'ifok', 'ifnok'):
+for bad in ('click', 'dclick', 'drag', 'key', 'typeq', 'max', 'end', 'fg', 'seq', 'waitpix', 'waitstill', 'shot', 'wait', 'ifok', 'ifnok'):
     try:
         watch._gui(bad, '1', '2')
         check(f'_gui 拒絕 {bad}', False)

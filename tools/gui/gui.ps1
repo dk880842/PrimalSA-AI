@@ -5,6 +5,7 @@
 #   gui.ps1 dclick <x> <y>            雙擊
 #   gui.ps1 drag <x1> <y1> <x2> <y2>  拖曳（縮圖座標）
 #   gui.ps1 key <SendKeys字串>        送鍵盤，例：{ESC}、{ENTER}、abc
+#   gui.ps1 typeq <文字>              只打字（逐字 WM_CHAR，一律背景 PostMessage 到本視窗 hwnd、不轉 SendKeys 特殊鍵）；操作 log 只記字數、不記內容（登入畫面重打帳號用）
 #   gui.ps1 info                      印出視窗大小 / 位置
 #   gui.ps1 pixel <x> <y> | "x,y x,y ..."  背景截圖後印出各點顏色 r,g,b（縮圖座標），給腳本判斷畫面狀態
 #   gui.ps1 max                       最大化遊戲視窗（ui/ 座標以最大化的 2880×1659 為準）
@@ -280,7 +281,7 @@ function ActLog([string]$msg) {
 
 function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
  # 全視窗驗證停手旗標（tools/.cache/verify-halt.json，verifyhalt.py）：送輸入的指令一律不做、exit 9（鐵則 5 最後一道保險；人處理完跑 verifyhalt.py clear）
- if (($Cmd -eq 'click' -or $Cmd -eq 'dclick' -or $Cmd -eq 'drag' -or $Cmd -eq 'key') -and (Test-PsaVerifyHalt)) {
+ if (($Cmd -eq 'click' -or $Cmd -eq 'dclick' -or $Cmd -eq 'drag' -or $Cmd -eq 'key' -or $Cmd -eq 'typeq') -and (Test-PsaVerifyHalt)) {
    ActLog "驗證停手旗標存在，$Cmd 未執行"; Write-Error "全視窗驗證停手旗標存在（tools/.cache/verify-halt.json），$Cmd 沒做；人處理完驗證視窗後跑 verifyhalt.py clear"; exit 9
  }
  switch ($Cmd) {
@@ -389,6 +390,13 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     if ($script:Fg) { Focus; [System.Windows.Forms.SendKeys]::SendWait($A1) } else { BgKeys $A1 }
     "key $A1"
   }
+  'typeq' {
+    # 內容不進操作 log（帳號名不能寫進 log，鐵則 2）；fg 模式也不用 SendKeys（SendKeys 送前景視窗，多視窗可能打錯），一律 PostMessage 到 $h
+    ActLog "typeq（$($A1.Length) 字，內容不記錄）"
+    Wake
+    foreach ($ch in $A1.ToCharArray()) { BgChar $ch }
+    "typeq $($A1.Length)"
+  }
   'end' {
     if (-not (Test-Path $stateFile)) { "end: 沒有要還原的狀態（任務期間沒切過前景）"; break }
     $v = (Get-Content $stateFile -Raw).Trim() -split ' '
@@ -485,7 +493,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       if ($t[0]) { Invoke-Gui $t[0] $t[1] $t[2] $t[3] $t[4] $t[5] }
     }
   }
-  default { "未知指令：$Cmd（shot|click|dclick|drag|key|info|max|end|wait|seq|fg）" }
+  default { "未知指令：$Cmd（shot|click|dclick|drag|key|typeq|info|max|end|wait|seq|fg）" }
 }
 }
 Invoke-Gui $Cmd $A1 $A2 $A3 $A4 $A5
