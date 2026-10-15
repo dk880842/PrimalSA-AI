@@ -106,7 +106,7 @@ PICK_RETRY = 3                                             # 物種下拉（不�
 LAST: dict = {}
 
 # ---- 外掛座標（ui/ass.md / plan-dino-katan.md 手動實測；2880×1659 截圖座標）----
-ASS_TAB = {'general': (850, 212), 'catch': (984, 212)}
+ASS_TAB = {'general': (850, 212), 'catch': (984, 212), 'battle': (696, 206)}
 LOCK_XY = {'騎寵': {'check': (656, 313), 'dd': (1285, 312)}, '戰寵': {'check': (656, 377), 'dd': (1285, 377)}}
 CATCH_XY = {'auto': (656, 315), 'store': (820, 315), 'family_dd': (921, 377), 'pet_dd': (1283, 377), 'scroll': ((750, 650), (750, 480))}
 # 下面全是「待實機量」的 OCR 框（x, y, w, h）：讀字用，錯了只會讀不到 → 停手，不會亂點
@@ -813,8 +813,10 @@ class Tools:
         rc, _ = self.lock_set_many([(role, which, on, ident)])
         return rc
 
-    def lock_set_many(self, items):
-        """items = [(角色, '騎寵'|'戰寵', on, ident)]：同角色排在一起，外掛面板只開一次。→ (rc, 出錯的角色或 None)"""
+    def lock_set_many(self, items, normal=None):
+        """items = [(角色, '騎寵'|'戰寵', on, ident)]：同角色排在一起，外掛面板只開一次。→ (rc, 出錯的角色或 None)
+        normal（例 '攻擊'）：每人鎖定做完後同一次停留再切「戰鬥設置」分頁把戰寵一般動作設成 normal（ass._visit_pet_normal，現值相同不改、讀回確認），
+        不用再另開一次面板（petquest restore 2026-10-16）"""
         by: dict = {}
         for r, w, on, ident in items:
             by.setdefault(r, []).append((w, on, ident))
@@ -824,6 +826,12 @@ class Tools:
                 rc = self._lock_set_here(role, w, on, ident)
                 if rc:
                     return rc, None
+            if normal:
+                import ass
+                uikit.gui('seq', f'click {ASS_TAB["battle"][0]} {ASS_TAB["battle"][1]}; wait 600', note=f'rebirth_pets 外掛分頁 battle（{role} 戰寵一般動作）')
+                rc, _st, msg, _ = ass._visit_pet_normal(normal, False)(role)
+                if rc:
+                    return uikit.fail(SRC, rc, msg or f'{role} 戰寵一般動作 = {normal} 失敗'), None
             return 0, True
         rc, _, bad = self.ass_each(list(by), 'general', fn)
         return rc, bad

@@ -34,7 +34,7 @@
     讀殘影：pet.list_role 選格後名字框跟上一格點陣完全相同 → 等 0.6 秒重讀（最多 2 次），兩格被讀成同一字串合併的情況（推定是 49/10/6/3 的根因）。
   setup / wait 失敗（設置選不到、逾時…；驗證視窗 9 / 斷線 10 除外）→ 收尾把這批抓寵者的「自動抓寵」勾掉（catch_off；已設好的人不會繼續抓）。
   uv run --no-project python tools/gui/pet_catch.py --catch-off [--roles DKBO2,DKBO3]     # 改做：外掛捉寵設置「自動抓寵」取消勾選（讀回）
-  uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）
+  uv run --no-project python tools/gui/pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯] [--mount-species 布拉奇多斯] [--normal 攻擊] [--roles ...]   # 外掛鎖定重勾（下拉讀字選、讀回）；--normal = 同一次面板順便設戰寵一般動作
   uv run --no-project python tools/gui/pet_catch.py --autoswap on|off [--roles ...]                 # 自動轉換戰寵
   批次（2026-10-12）：背包（取誘餌）/ 外掛（捉寵設置、輪詢、自動轉換、鎖定）面板都只開一次，逐人切頭像做完再關。
 退出碼：0 全部抓完；67 rename 讀到費用字樣（pet.EXIT_FEE，已按取消，鐵則 3）；16 register：有新寵物名字框讀不出（還原失敗、成長字串也讀不出；EXIT_CATCH_UNREAD，那隻沒登錄，其他照登錄）；103 取誘餌 / 設定 / 逾時失敗（rebirth_pets.EXIT_CATCH）；14 捉寵設置系別 / 物種選不到或讀回對不上（EXIT_CATCH_PICK，已重試、已收下拉、沒勾自動抓寵）；
@@ -451,8 +451,8 @@ def set_autoswap(roles: list, on: bool, tools=None) -> int:
     return rc
 
 
-def relock(roles: list, battle_pet: str = '朵拉比斯', mount_species: str = '布拉奇多斯', which=('騎寵', '戰寵'), tools=None) -> int:
-    """外掛「鎖定騎寵 / 鎖定戰寵」重勾（交寵物任務 / 換戰寵後）：讀寵物欄決定每人要選哪一隻（騎寵沒名字用成長字串；有名字用物種名、找不到退回成長字串）→
+def relock(roles: list, battle_pet: str = '朵拉比斯', mount_species: str = '布拉奇多斯', which=('騎寵', '戰寵'), tools=None, normal=None) -> int:
+    """（normal 給了 = 同一次面板停留順便把戰寵一般動作設成 normal，--normal 攻擊）外掛「鎖定騎寵 / 鎖定戰寵」重勾（交寵物任務 / 換戰寵後）：讀寵物欄決定每人要選哪一隻（騎寵沒名字用成長字串；有名字用物種名、找不到退回成長字串）→
     外掛面板只開一次逐人：下拉 OCR 讀字找剛好一列吻合的（每人順序不同，errlog #257）→ 讀回欄位 → 勾 → 讀回勾選（每項當場讀回，不另開面板）。→ 0 / rebirth_pets 退出碼"""
     T = tools or rp.Tools()
     rc, pets = T.pets_list(roles)
@@ -462,7 +462,7 @@ def relock(roles: list, battle_pet: str = '朵拉比斯', mount_species: str = '
     if why:
         print(f'pet_catch：{why}')
         return rp.EXIT_LOCK
-    rc, bad = T.lock_set_many(items)
+    rc, bad = T.lock_set_many(items, normal=normal)
     if rc:
         print(f'pet_catch：{bad} 鎖定失敗 rc {rc}')
         return rc
@@ -524,6 +524,7 @@ def main(argv=None) -> int:
     ap.add_argument('--autoswap', choices=['on', 'off'], help='改做：5 人外掛「自動轉換戰寵」勾 / 取消（不抓寵）')
     ap.add_argument('--verify-battle', action='store_true', help='改做：逐人讀回出戰寵（開遇敵練寵前；沒有出戰寵退出碼 105）')
     ap.add_argument('--lock', default=None, metavar='騎寵,戰寵', help='改做：外掛鎖定重勾（騎寵 / 戰寵 / 兩者；下拉讀字選、讀回）')
+    ap.add_argument('--normal', default=None, metavar='攻擊', help='搭配 --lock：同一次外掛面板停留順便設戰寵一般動作（petquest restore 用）')
     ap.add_argument('--unlock', default=None, metavar='騎寵,戰寵', help='改做：外掛取消鎖定（換練功寵前）')
     ap.add_argument('--catch-off', action='store_true', help='改做：外掛捉寵設置「自動抓寵」取消勾選（--roles，預設隊長以外全部：主視窗 DKBO2～5）')
     ap.add_argument('--battle-pet', default='朵拉比斯')
@@ -557,7 +558,7 @@ def main(argv=None) -> int:
         which = tuple(w for w in ('騎寵', '戰寵') if w in a.lock)
         if not which:
             ap.error('--lock 要 騎寵 / 戰寵 / 騎寵,戰寵')
-        return relock(a.roles.split(','), a.battle_pet, a.mount_species, which)
+        return relock(a.roles.split(','), a.battle_pet, a.mount_species, which, normal=a.normal)
     if a.autoswap:
         import winenv
         winenv.enable_server()

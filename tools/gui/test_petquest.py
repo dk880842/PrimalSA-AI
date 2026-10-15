@@ -286,7 +286,7 @@ class Sim:
                 if not hit or len(self.bar[r]) >= 5:
                     return self.out(72 if not hit else 77, js={'ops': list(ops)})
                 src.remove(hit)
-                self.bar[r].append(hit)
+                self.bar[r].append(dict(hit))      # 複製：避免不同角色共用同一個 dict 被 grow 重複升級
                 ops.append({'role': r, 'pet': name, 'ok': True})
             return self.out(0)
         if cmd == 'depot-list':                 # 唯讀：公共 + 指定角色個人倉庫各物種張數
@@ -338,7 +338,15 @@ def grow(sim, by=2):
             for r in ROLES:
                 for p in sim.bar[r]:
                     if p['name'] not in ('布拉奇多斯', '朵拉比斯', '迪基格斯', '金布伊'):
-                        p['level'] += by
+                        if p['level'] < 30:                    # 自動轉換戰寵依序換寵：一次只練一隻（格序），練到 30 才換下一隻
+                            p['level'] += by
+                            p['state'] = '出戰'
+                            if p['level'] >= 30:               # 練到 30 → 外掛換下（等待）、下一隻任務寵上場
+                                p['state'] = '等待'
+                                nxt = [q for q in sim.bar[r] if q['name'] not in ('布拉奇多斯', '朵拉比斯', '迪基格斯', '金布伊') and q['level'] < 30]
+                                if nxt:
+                                    nxt[0]['state'] = '出戰'
+                            break
         return orig(args)
     sim.pet = pet
     return sim
@@ -379,7 +387,7 @@ check('每人寵物欄 = 騎寵 + 原朵拉比斯出戰（等級 = 原等級）�
 check('一次抓滿 5（不分批）：bait 只取 / 拆一次（count 5，每人一次）、setup 一次、不 baitback；誘餌 50 → 40', [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait'] == ['5']
       and getattr(s, 'bait_takes', 0) == len(pq.ALL_ROLES[1:5]) * 0 + getattr(s, 'bait_takes', 0) and s.bait == 40 and getattr(s, 'baitback', 0) == 0, f'{s.bait} {getattr(s, "bait_takes", 0)}')
 check('抓前關遇敵 + 解散；收尾鎖定戰寵 + 一般動作攻擊', ('enc_off',) in s.calls and ('team.py', ('disband',)) in s.calls
-      and any(a[:2] == ('--lock', '戰寵') for a in names(s, 'pet_catch.py')) and ('pet', 'all', 'normal', '攻擊', '--no-resume') in names(s, 'ass.py'))
+      and any(a[:2] == ('--lock', '戰寵') for a in names(s, 'pet_catch.py')) and any(a[:2] == ('--lock', '戰寵') and a[-2:] == ('--normal', '攻擊') for a in names(s, 'pet_catch.py')) and not names(s, 'ass.py'))
 check('交寵物用 questrun --pet-turnin --rested（train 段剛 rest-all 過，questrun 不重做）', ('run', '2016', '--after', 'none', '--pet-turnin', '--rested') in names(s, 'questrun.py'), str(names(s, 'questrun.py')))
 check('恐龍博士練寵固定 80 級練功區：grind.py start --spot 波拉島（使用者 2026-10-15 指定）', pq.TRAIN_SPOT == '波拉島' and ('start', '--spot', '波拉島') in names(s, 'grind.py'), str(names(s, 'grind.py')))
 pa = [a for a in names(s, 'pet.py') if a[0] in ('list', 'levels')]
@@ -387,11 +395,11 @@ tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
 in_train = [c[1][0] for c in s.calls[tr[0]:] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels', 'set-state-slot')]
 in_train = in_train[:in_train.index('set-state-slot')]
 ss = [a for a in names(s, 'pet.py') if a[0] == 'set-state-slot']
-check('練寵不認物種：出戰 = set-state-slot --slots 2 出戰（不帶物種 / --candidates）、rest = --slots 2,3,4,5 等待；train 不再呼叫 set-state-many / rest-all',
-      ss[0][ss[0].index('--slots') + 1] == '2' and ss[0][-1] == '出戰' and ss[-1][ss[-1].index('--slots') + 1] == '2,3,4,5' and ss[-1][-1] == '等待'
+check('練寵不認物種：出戰 = set-state-slot --slots 2 出戰（不帶物種 / --candidates）、rest = 只最後一格（--slots 3）等待；train 不再呼叫 set-state-many / rest-all',
+      ss[0][ss[0].index('--slots') + 1] == '2' and ss[0][-1] == '出戰' and ss[1][ss[1].index('--slots') + 1] == '3' and ss[1][-1] == '等待'
       and all('--candidates' not in a for a in ss) and not any(a[0] == 'rest-all' for a in names(s, 'pet.py')), str(ss))
-check('練寵輪詢：第一次 list（身分）、之後只 levels --slots 任務寵格', in_train[0] == 'list' and in_train[1:] and set(in_train[1:]) == {'levels'}
-      and all('--slots' in a for a in names(s, 'pet.py') if a[0] == 'levels'), str(in_train))
+check('練寵輪詢：不呼叫 list、只 levels --slots 3（恐龍博士最後一格 = 第 3 格）', in_train and set(in_train) == {'levels'}
+      and all(a[a.index('--slots') + 1] == '3' for a in names(s, 'pet.py') if a[0] == 'levels'), str(in_train))
 pc = [a for a in names(s, 'pet_catch.py') if '--stages' in a and 'setup' in a[a.index('--stages') + 1]]
 check('一次抓滿：pet_catch setup,wait 只一次、--count 5、不帶 --reuse-setup / --expect-bar', len(pc) == 1 and pc[0][pc[0].index('--stages') + 1] == 'setup,wait'
       and pc[0][pc[0].index('--count') + 1] == '5' and '--reuse-setup' not in pc[0] and '--expect-bar' not in pc[0], str(pc))
@@ -518,7 +526,7 @@ s = grow(Sim(2016))
 s.quest_q = {2016: [0]}
 rc = go(2016, s)
 check('接取（練完之後）questrun 回 0（已完成）→ 不交不丟，restore 照樣取回第 2 格（@原等級）+ 出戰 + 鎖定 + 一般動作', rc == 0
-      and not names(s, 'petdrop.py') and len(names(s, 'questrun.py')) == 1 and names(s, 'ass.py')
+      and not names(s, 'petdrop.py') and len(names(s, 'questrun.py')) == 1 and any('--normal' in a for a in names(s, 'pet_catch.py'))
       and any(a[0] == 'take-many' and '朵拉比斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
       and all(any(p['name'] == '朵拉比斯' and p['state'] == '出戰' for p in s.bar[r]) for r in ROLES), f'rc={rc} {pq.LAST.get("info")}')
 s = grow(Sim(2016))
@@ -594,8 +602,8 @@ go(2016, s, confirm_drop=True, from_stage='turnin', reset=False)
 check('rested 超過 RESTED_S 才續跑交件 → 不帶 --rested（questrun 自己 rest-all）', not any('--rested' in a for a in names(s, 'questrun.py') if '--pet-turnin' in a), str(names(s, 'questrun.py')))
 need = {'魯尼帖斯': 18}
 base = {'DKBO': [{'slot': 1, 'name': '布拉奇多斯'}, {'slot': 2, 'name': '魯尼帖斯', 'level': 3, 'nh': 'a'}]}
-smap = pq.task_slot_map({'A': [{'slot': 2, 'name': '魯尼帖斯'}, {'slot': 1, 'name': 'x'}], 'B': [{'slot': 3, 'name': '魯尼帖斯'}]}, need)
-check('task_slot_map：(角色, 物種) → 格號；只含任務寵', smap == {('A', '魯尼帖斯'): [2], ('B', '魯尼帖斯'): [3]})
+smap = {('A', '魯尼帖斯'): [2], ('B', '魯尼帖斯'): [3]}
+check('task_slot_map 已拿掉（練寵只讀最後一格，不認寵物）', not hasattr(pq, 'task_slot_map'))
 check('levels_of：讀到的格取等級；變空 / 沒讀到 = None', pq.levels_of({'A': [{'slot': 2, 'level': 9}], 'B': [{'slot': 3, 'empty': True}]}, smap) == {('A', '魯尼帖斯'): 9, ('B', '魯尼帖斯'): None}
       and pq.levels_of({}, smap) == {('A', '魯尼帖斯'): None, ('B', '魯尼帖斯'): None})
 k = ('DKBO', '魯尼帖斯')
@@ -636,7 +644,7 @@ rc = go(2016, s, confirm_drop=True)
 tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
 ra = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'set-state-slot' and c[1][-1] == '等待'][0]
 seq = [c[1][0] for c in s.calls[tr[0]:ra] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels')]
-check('練寵讀等級：第一次 list、之後只 levels（讀失敗下一輪再讀 levels，不改讀 list），仍練完', rc == 0 and seq[0] == 'list' and set(seq[1:]) == {'levels'} and len(seq) >= 4, f'rc={rc} {seq[:8]}')
+check('練寵讀等級：只 levels（讀失敗下一輪再讀 levels），不呼叫 list，仍練完', rc == 0 and seq and set(seq) == {'levels'} and len(seq) >= 4, f'rc={rc} {seq[:8]}')
 pc = names(s, 'pet_catch.py')
 check('不跑 pet_catch --verify-battle；autoswap on 1 次、off 1 次（恐龍博士沒帶 --keep-autoswap 練完就關）',
       not any('--verify-battle' in a for a in pc) and len([a for a in pc if a[:2] == ('--autoswap', 'on')]) == 1 and len([a for a in pc if a[:2] == ('--autoswap', 'off')]) == 1, str(pc))
@@ -912,7 +920,7 @@ rc = go(2016, s, confirm_drop=True)
 check('恐龍博士（戰寵迪基格斯）happy：rc 0、進度檔記 battle', rc == 0 and set(json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']['battle'].values()) == {'迪基格斯'}, f'rc={rc} {pq.LAST.get("info")}')
 check('存倉 / 取回 / 出戰 / 鎖定都用迪基格斯，沒碰朵拉比斯', any(a[0] == 'store-many' and '迪基格斯' in a for a in names(s, 'pet.py'))
       and any(a[0] == 'take-many' and '迪基格斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
-      and ('--lock', '戰寵', '--battle-pet', '迪基格斯') in names(s, 'pet_catch.py')
+      and ('--lock', '戰寵', '--battle-pet', '迪基格斯', '--normal', '攻擊') in names(s, 'pet_catch.py')
       and not any('朵拉比斯' in ' '.join(map(str, a)) for a in names(s, 'pet.py') + names(s, 'pet_catch.py')))
 check('結果：每人 騎寵 + 迪基格斯出戰', all([p['name'] for p in s.bar[r]] == ['布拉奇多斯', '迪基格斯'] and s.bar[r][1]['state'] == '出戰' for r in ROLES))
 
@@ -963,3 +971,43 @@ check('各角色戰寵不同 → 分兩組 store-many（隊長迪基格斯 / 其
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)
+
+# ---------------- 2026-10-16 練寵只讀最後一格；restore 精簡
+s = grow(Sim(2019))
+rc = go(2019, s, confirm_drop=True)
+lv = [a for a in names(s, 'pet.py') if a[0] == 'levels']
+check('卡坦練寵只讀第 5 格（4 種 → 1 + 4）、不呼叫 list（train 段內）', rc == 0 and lv and all(a[a.index('--slots') + 1] == '5' for a in lv), str(lv[:3]))
+rs_ = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'take-many' and '--depot' in c[1] and c[1][c[1].index('--depot') + 1] == 'personal' and '朵拉比斯@' in c[1][-1] or False]
+s = grow(Sim(2016))
+rc = go(2016, s, confirm_drop=True)
+rs_i = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'take-many' and '朵拉比斯@' in c[1][c[1].index('--plan') + 1]][-1]
+after = [c for c in s.calls[rs_i:] if c[0] in ('pet.py', 'pet_catch.py', 'ass.py')]
+check('restore：take-many → set-state-slot --slots 2 出戰 → pet_catch --lock --normal 攻擊（一次）→ 只剩最後核對 list；不讀取回前 list、不呼叫 set-state-many / ass.py',
+      rc == 0 and [(c[0], c[1][0]) for c in after] == [('pet.py', 'take-many'), ('pet.py', 'set-state-slot'), ('pet_catch.py', '--lock'), ('pet.py', 'list')]
+      and after[1][1][-3:] == ('--slots', '2', '出戰') and after[2][1][-2:] == ('--normal', '攻擊') and not names(s, 'ass.py'), str([(c[0], c[1][:3]) for c in after]))
+# 續跑：restore_taken 記號有 → 不取回、不讀 list；沒記號才取
+s = grow(Sim(2016))
+go(2016, s, confirm_drop=True, to_stage='drop')
+prog = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))
+check('restore 前進度檔沒有 restore_taken', 'restore_taken' not in prog['2016'])
+n0 = len(s.calls)
+rc = go(2016, s, confirm_drop=True, from_stage='restore', reset=False)
+seg = [c for c in s.calls[n0:] if c[0] == 'pet.py']
+check('restore 成功後記 restore_taken（任務完成才清）、取回只 1 次', rc == 0 and len([c for c in seg if c[1][0] == 'take-many']) == 1, str([c[1][:2] for c in seg]))
+s = grow(Sim(2016))
+go(2016, s, confirm_drop=True, to_stage='drop')
+s.fail[('pet.py', 'set-state-slot')] = 5                         # 取回成功、第 2 格出戰失敗 → 記號已存
+go(2016, s, confirm_drop=True, from_stage='restore', reset=False)
+check('取回成功後出戰失敗：進度檔已記 restore_taken', json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016'].get('restore_taken') is True)
+s.fail.clear()
+n0 = len(s.calls)
+rc = go(2016, s, confirm_drop=True, from_stage='restore', reset=False)
+seg = [(c[0], c[1][0]) for c in s.calls[n0:] if c[0] in ('pet.py', 'pet_catch.py')]
+check('續跑：看到 restore_taken 跳過取回、不讀 list，直接出戰 → 鎖定 + 一般動作 → 驗', rc == 0 and seg[:3] == [('pet.py', 'set-state-slot'), ('pet_catch.py', '--lock'), ('pet.py', 'list')] and ('pet.py', 'take-many') not in seg, str(seg))
+
+# 練完等待只改最後一格、在關遇敵之前
+s = grow(Sim(2016))
+go(2016, s, confirm_drop=True, to_stage='train')
+ix = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'set-state-slot' and c[1][-1] == '等待']
+eo = [i for i, c in enumerate(s.calls) if c == ('enc_off',)]
+check('練完：第二次讀到最後一格達標 → 立刻 set-state-slot 只改最後那一格（第 3 格）等待，在關遇敵之前', len(ix) == 1 and s.calls[ix[0]][1][s.calls[ix[0]][1].index('--slots') + 1] == '3' and eo and ix[0] < eo[-1], f'{ix} {eo}')
