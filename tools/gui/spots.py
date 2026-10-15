@@ -132,6 +132,61 @@ def auto_spot(trans: int, level: int) -> str | None:
     return spot_for(trans, level, 0, AUTO) if level >= 1 else None
 
 
+# ---- 隊伍最低等級（使用者 2026-10-16：選點看 5 人最低等級；p3 隊長 46 級、隊友 <45 → 五兄弟洞窟傳送被擋）----
+CAP_TTL = 1800.0                   # 「有人未達 N轉M級」記下的上限有效時間（秒）；過期後會再試一次（那個人可能升級了）
+
+
+def team_min(levels) -> tuple | None:
+    """{角色: (轉, 級) | None} → 5 人裡最低的 (轉, 級)（先比轉數再比等級）；讀不到的人略過、全讀不到 None"""
+    vals = [tuple(v) for v in (levels or {}).values() if v and v[0] is not None and v[1]]
+    return min(vals) if vals else None
+
+
+def cap_file() -> Path:
+    """每個視窗各一份（隊伍不同）：<狀態資料夾>/team-cap.json"""
+    import clients
+    return clients.cache_dir() / 'team-cap.json'
+
+
+def load_cap(path=None, now=None) -> tuple | None:
+    """傳送被擋時記下的上限 (轉, 級)；過期 / 沒有 None"""
+    try:
+        d = json.loads(Path(path or cap_file()).read_text(encoding='utf-8'))
+        import time as _t
+        if (now if now is not None else _t.time()) - float(d['ts']) > CAP_TTL:
+            return None
+        return int(d['trans']), int(d['level'])
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def set_cap(trans: int, level: int, path=None, now=None) -> tuple:
+    """記下「隊裡有人低於 (trans, level)」→ 之後選點的有效等級最多 (trans, level)；只往低改（同一輪多次被擋取最低）。寫檔失敗不丟例外"""
+    import time as _t
+    now = now if now is not None else _t.time()
+    old = load_cap(path, now)
+    new = min(old, (trans, level)) if old else (trans, level)
+    try:
+        p = Path(path or cap_file())
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({'trans': new[0], 'level': new[1], 'ts': now}), encoding='utf-8')
+    except OSError:
+        pass
+    return new
+
+
+def effective(leader, team=None, cap=None) -> tuple:
+    """選點用的有效 (轉, 級)：隊長、隊伍最低（team，(轉,級) 或 None）、被擋記下的上限（cap）三者取最小；舊行為（只有隊長）= 不給 team / cap"""
+    return min(x for x in (tuple(leader), team and tuple(team), cap and tuple(cap)) if x)
+
+
+def block_cap(blk, leader) -> tuple | None:
+    """傳送被擋訊息 (要求轉, 要求級) → 擋住的那個人的上限 (轉, 級-1)；要求比隊長自己還高（= 是隊長不夠，不是隊友）或讀不出 → None"""
+    if not blk or blk[0] is None or blk[1] is None or (blk[0], blk[1]) > tuple(leader):
+        return None
+    return blk[0], max(1, blk[1] - 1)
+
+
 def spot_of_map(map_id) -> str | None:
     """地圖 ID → 練功點名（不在表內 None）"""
     return next((n for n, v in SPOTS.items() if v[2] == map_id), None)

@@ -16,6 +16,7 @@ import spots  # noqa: E402
 
 TMP = Path(tempfile.mkdtemp())
 spots.THRESH_FILE = TMP / 'thr.json'
+spots.cap_file = lambda: TMP / 'cap.json'
 follow.PID_FILE, follow.STOP_FILE, follow.STATE_FILE = TMP / 'f.pid', TMP / 'f.stop', TMP / 'f.json'
 follow.EVENT_LOG = TMP / 'events.log'
 fails = 0
@@ -49,6 +50,8 @@ class World:
         self.enc_on = True
         self.ens_rc = None
         self.panel = None             # 非 None = watch 認得面板開著（state=panel）
+        self.team = None              # follow.read_team_levels 假回傳 {角色: (轉, 級)}；None = 讀不到
+        self.team_reads = 0
 
 
 def install(w):
@@ -66,6 +69,7 @@ def install(w):
     follow.heal.read_vitals = lambda last=None, **k: ({'ok': True, 'hpPct': w.hp, 'mpPct': 100}, 1.0)
     follow.heal.heal_trip = lambda spot, no_return=False, reopen=True: (w.heals.append(spot), w.reopens.append(reopen))
     follow.grind.take_lock = lambda: True
+    follow.read_team_levels = lambda: (setattr(w, 'team_reads', w.team_reads + 1), w.team)[1]
     def _screen(*a, **k):
         if w.enc_on == 'none':
             return None
@@ -476,5 +480,77 @@ def _popen(argv, **kw):
 pid = winenv.spawn_detached(['x', 'y'], TMP / 'sp.log', popen=_popen)
 check('spawn_detached：回 pid、stdin DEVNULL、POSIX 新 session、log 附加', pid == 77 and got['stdin'] == winenv.subprocess.DEVNULL
       and (got.get('start_new_session') is True if os.name != 'nt' else bool(got.get('creationflags'))) and (TMP / 'sp.log').exists(), str({k: v for k, v in got.items() if k != 'env'}))
+
+# 12) 隊伍最低等級選點（使用者 2026-10-16：p3 隊長 0 轉 46、隊友 <45 → 不該選五兄弟洞窟）
+def fresh_cap():
+    try:
+        (TMP / 'cap.json').unlink()
+    except OSError:
+        pass
+
+
+check('spots.team_min：先比轉數再比等級、略過讀不到的', spots.team_min({'a': (0, 46), 'b': (0, 44), 'c': None, 'd': (1, 5)}) == (0, 44)
+      and spots.team_min({'a': None}) is None and spots.team_min(None) is None)
+check('spots.effective：隊長 / 隊伍 / 上限取小；只有隊長 = 舊行為', spots.effective((0, 46), (0, 44), None) == (0, 44) and spots.effective((0, 46), None, None) == (0, 46)
+      and spots.effective((0, 46), (0, 50), (0, 30)) == (0, 30))
+check('spots.block_cap：隊友擋 → (轉, 級-1)；隊長自己不夠 / 讀不出 → None', spots.block_cap((0, 45), (0, 46)) == (0, 44) and spots.block_cap((0, 45), (0, 40)) is None
+      and spots.block_cap((None, None), (0, 46)) is None and spots.block_cap(None, (0, 46)) is None)
+fresh_cap()
+spots.set_cap(0, 44, now=1000.0)
+check('cap 過期（30 分）失效、只往低改', spots.load_cap(now=1000.0 + 100) == (0, 44) and spots.load_cap(now=1000.0 + spots.CAP_TTL + 1) is None
+      and spots.set_cap(0, 50, now=1100.0) == (0, 44) and spots.set_cap(0, 40, now=1100.0) == (0, 40))
+
+# 隊長 46、隊友 44：不換到五兄弟洞窟，留在海主人隧道
+fresh_cap()
+w = install(World(lv=(0, 46), map_=31401))
+w.team = {'DKBO11': (0, 46), 'DKBO12': (0, 44), 'DKBO13': (0, 44), 'DKBO14': (0, 46), 'DKBO15': (0, 47)}
+f = mk(w, trans=0)
+f.cur = '海主人隧道'
+rc = f.step()
+check('隊長 46 隊友 44 → 不起 start（留海主人隧道）、讀過一次隊伍', rc is None and not any(m == 'start' for m, _ in w.runs) and w.team_reads == 1 and f.eff == (0, 44), str(w.runs))
+f.step()
+check('5 分鐘內不重讀隊伍（快取）', w.team_reads == 1)
+w.t += follow.TEAM_TTL + 1
+f.step()
+check('過 TEAM_TTL 才重讀', w.team_reads == 2)
+w.team = {'DKBO11': (0, 46), 'DKBO12': (0, 45)}
+w.t += follow.TEAM_TTL + 1
+f.step()
+check('隊友升到 45 → 換五兄弟洞窟', ('start', '五兄弟洞窟') in w.runs and f.cur == '五兄弟洞窟', str(w.runs))
+
+# 讀不到隊伍：只看隊長；傳送被擋 → 記上限、留原點、不退出；之後不再選五兄弟（舊版 0 轉每 10 分鐘重試同一點）
+fresh_cap()
+w = install(World(lv=(0, 46), map_=31401))
+w.team = None
+w.start_rc['五兄弟洞窟'] = follow.grind.EXIT_TELEPORT
+w.block = (0, 45)
+f = mk(w, trans=0)
+f.cur = '海主人隧道'
+rc = f.step()
+check('讀不到隊伍 → 只看隊長，試傳五兄弟被擋 → follow 不結束（None）、留原點 ensure', rc is None and ('start', '五兄弟洞窟') in w.runs and ('ensure', None) in w.runs and f.cur == '海主人隧道', str(w.runs))
+check('被擋記上限 (0, 44) 並寫 errlog', spots.load_cap() == (0, 44) and any('上限' in e for e in w.errs), str(w.errs))
+w.runs.clear()
+w.t += follow.BLOCK_COOLDOWN + 1                      # 冷卻過了也不再試五兄弟（上限擋住）
+w.team_at = None
+f.step()
+check('上限有效 → 冷卻過後不再選五兄弟洞窟', not any(m == 'start' for m, _ in w.runs), str(w.runs))
+spots.set_cap(0, 44, now=0.0)                          # 假裝上限已過期（TTL 30 分）
+check('上限過期後重新放行', spots.load_cap() is None)
+fresh_cap()
+
+# 舊行為：隊長 46、隊伍都 46 → 照舊換五兄弟
+w = install(World(lv=(0, 46), map_=31401))
+w.team = {'a': (0, 46), 'b': (0, 47)}
+f = mk(w, trans=0)
+f.cur = '海主人隧道'
+f.step()
+check('隊伍都 >= 45 → 換五兄弟洞窟（p1 / p2 同等級結果不變）', ('start', '五兄弟洞窟') in w.runs)
+w = install(World(lv=(0, 46), map_=11001))
+f = mk(w, trans=0)
+f.cur = '柯奧龜洞'
+f.step()
+check('隊長想換、隊伍讀不到：照隊長（舊行為）', any(m == 'start' for m, _ in w.runs))
+fresh_cap()
+
 print(f'\n失敗 {fails} 項' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

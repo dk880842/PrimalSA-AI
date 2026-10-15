@@ -109,7 +109,7 @@ def install(g, stat_missing=False):
     A, H, T, C, U = grind.ass, grind.heal, grind.team, grind.char, grind.uikit
     grind.sleep = lambda s: setattr(g, 't', g.t + s)
     grind.clock = g.clock
-    grind.read_leader_bag = lambda: g.log.append('bag_levels') or g.bag_lv
+    grind.read_leader_bag = lambda: (g.log.append('bag_levels'), grind.LAST_TEAM.clear(), grind.LAST_TEAM.update(getattr(g, 'bag_team', None) or {}), g.bag_lv)[-1]
     U.preflight = lambda src: g.log.append('preflight') or 0
     U.fail = lambda src, rc, msg: g.log.append(f'fail:{rc}:{msg}') or rc
     C.ensure = lambda name: g.log.append('char.ensure') or g.char_rc
@@ -132,7 +132,7 @@ def install(g, stat_missing=False):
 
     def tele(tab, dest, want_map, name, pre='', want_xy=None):
         g.log.append(f'teleport:{name}')
-        if g.tele_fail:
+        if g.tele_fail or name in getattr(g, 'tele_fail_spots', ()):
             raise RuntimeError('x')
         g.map = want_map
     H.teleport = tele
@@ -482,6 +482,7 @@ check('血量 <40 自動補血', 'heal_trip:地雷區2' in g.log)
 # 16) 去練功 go()（2026-10-15）：依等級選點、最高點不起 follow、未滿起 follow（帶正確轉數）、先停舊 follow、轉數來源順序
 import follow  # noqa: E402
 spots.THRESH_FILE = TMP / 'thresh.json'                 # 學到的門檻不讀真檔
+spots.cap_file = lambda: TMP / 'cap.json'               # 被擋上限不讀真檔
 FOL = {'alive': None, 'stops': 0, 'ensure': [], 'ensure_ret': {'action': 'started', 'pid': 4321}}
 follow.alive_other = lambda: FOL['alive']
 
@@ -591,6 +592,70 @@ g.bag_lv = (4, 125)
 g.screens = good_screens()
 rc, j, _ = go()
 check('去練功 125 級從波拉島 → 傳地雷區、不起 follow', rc == 0 and 'teleport:地雷區' in g.log and not FOL['ensure'] and j['follow']['action'] == 'none', str(j))
+
+
+# ---- 選點看隊伍最低等級 / 傳送被擋退點（使用者 2026-10-16）----
+def fresh_cap():
+    try:
+        (TMP / 'cap.json').unlink()
+    except OSError:
+        pass
+
+
+fresh_cap()
+fol_reset()
+g = install(Game(cur_map=11001, level='0轉46級'))
+g.bag_lv = (0, 46)
+g.bag_team = {'A': (0, 46), 'B': (0, 44), 'C': None, 'D': (0, 47)}
+g.screens = good_screens()
+rc, j, _ = go()
+check('去練功 隊長 46 隊友 44 → 海主人隧道（不是五兄弟洞窟）、記 team_min / eff', rc == 0 and 'teleport:海主人隧道' in g.log and 'teleport:五兄弟洞窟' not in g.log
+      and j['spot'] == '海主人隧道' and j['team_min'] == [0, 44] and j['eff'] == [0, 44] and FOL['ensure'] == [0], str(j))
+fresh_cap()
+fol_reset()
+g = install(Game(cur_map=11001, level='0轉46級'))
+g.bag_lv = (0, 46)
+g.bag_team = {'A': (0, 46), 'B': (0, 45)}
+g.screens = good_screens()
+rc, j, _ = go()
+check('隊伍最低 45 → 五兄弟洞窟（門檻 45 剛好夠）', rc == 0 and j['spot'] == '五兄弟洞窟' and j['eff'] == [0, 45], str(j))
+
+fresh_cap()
+fol_reset()
+g = install(Game(cur_map=11001, level='0轉46級'))
+g.bag_lv = (0, 46)
+g.tele_fail_spots = {'五兄弟洞窟'}
+follow.read_block_msg = lambda: (0, 45)
+g.screens = good_screens()
+rc, j, _ = go()
+check('隊伍沒讀到、傳送五兄弟被擋「未達到 0轉45級」→ 退海主人隧道、掛機成功、起 follow',
+      rc == 0 and g.log.index('teleport:五兄弟洞窟') < g.log.index('teleport:海主人隧道') and j['spot'] == '海主人隧道' and j['retreat'] == '海主人隧道' and FOL['ensure'] == [0], str(g.log))
+check('退點後記上限 (0, 44)', spots.load_cap() == (0, 44))
+fol_reset()
+g = install(Game(cur_map=11001, level='0轉46級'))
+g.bag_lv = (0, 46)
+g.screens = good_screens()
+rc, j, _ = go()
+check('下次去練功：上限擋住，直接海主人隧道、不再試五兄弟', rc == 0 and 'teleport:五兄弟洞窟' not in g.log and j['spot'] == '海主人隧道', str(g.log))
+fresh_cap()
+fol_reset()
+g = install(Game(cur_map=11001, level='0轉46級'))
+g.bag_lv = (0, 46)
+g.tele_fail_spots = {'五兄弟洞窟'}
+follow.read_block_msg = lambda: None
+g.screens = good_screens()
+rc, j, _ = go()
+check('傳送失敗但聊天沒有未達訊息 → 照舊 51、不退點', rc == 51 and 'teleport:海主人隧道' not in g.log, str(rc))
+follow.read_block_msg = lambda: (0, 50)
+fresh_cap()
+fol_reset()
+g = install(Game(cur_map=11001, level='0轉46級'))
+g.bag_lv = (0, 46)
+g.tele_fail_spots = {'五兄弟洞窟'}
+g.screens = good_screens()
+rc, j, _ = go()
+check('被擋要求比隊長還高（隊長自己不夠）→ 不記上限、不退點、51', rc == 51 and spots.load_cap() is None, str(rc))
+fresh_cap()
 
 # CLI：start 不給 --spot = 去練功；指定點先停 follow
 _go, _run = grind.go, grind.run

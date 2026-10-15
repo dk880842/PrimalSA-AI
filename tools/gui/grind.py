@@ -10,7 +10,7 @@
 最後一行是 JSON（rc、耗時、各步秒數、EXP 命中數…）；同內容寫 tools/.cache/grind.json。
 
 去練功（使用者 2026-10-15；`start` 不給 --spot 或 --spot auto；可 import：grind.go(trans=None, trans_hint=None, …)）：
-  有 follow 在跑先停（它持 grind.lock）→ 依當下隊長等級選點（spots.auto_spot = AUTO 表 + spots.learn 學到的門檻）→ 傳送 → 外掛 → 遇敵 → EXP 確認 →
+  有 follow 在跑先停（它持 grind.lock）→ 依當下隊伍最低等級選點（5 人等級同一趟背包讀 read_team_bag；spots.effective = 隊長 / 隊伍最低 / 被擋上限取小；傳送被擋「XXX 未達到N轉M級」→ block_retreat 記上限、退下一個較低點；spots.auto_spot = AUTO 表 + spots.learn 學到的門檻）→ 傳送 → 外掛 → 遇敵 → EXP 確認 →
   選到最高一檔（地雷區 ≥120，spots.is_top）→ 結束，不起 follow；未滿 → 背景常駐 `grind.py follow --no-heal --trans N`（follow.ensure_running：
   winenv.spawn_detached，已有同轉數的在跑不重開；輸出 tools/.cache/follow.log），follow 換到地雷區確認掛機後自己結束。follow 起不來只記 errlog（退出碼仍 0）。
   轉數（HUD 轉數位會讀錯，不用）：--trans 明講 > 背包讀隊長等級字（bag.levels，成功寫 tools/.cache/trans.json）> trans_hint > 快取 > HUD（警告）。
@@ -331,11 +331,28 @@ def load_trans() -> int | None:
         return None
 
 
-def read_leader_bag():
-    """背包面板讀隊長等級字（bag.levels，rebirth 判轉數用的同一套）→ (轉, 級) 或 None（測試替換）"""
+LAST_TEAM: dict = {}              # 最近一次 read_leader_bag 同一趟讀到的 5 人 {角色: (轉, 級) | None}（選點看隊伍最低等級用；測試只換 read_leader_bag 時為空 = 只看隊長）
+
+
+def read_team_bag() -> dict | None:
+    """背包面板一次開、逐人點左欄頭像讀 5 人等級字（bag.levels，約 8 秒、不多開面板）→ {角色: (轉, 級) | None}；失敗 None（測試替換）"""
     import bag
-    rc, lv = bag.levels([LEADER])
-    return None if rc else lv.get(LEADER)
+    rc, lv = bag.levels(list(uikit.CHARS))
+    return None if rc else lv
+
+
+def read_leader_bag():
+    """背包面板讀隊長等級字（rebirth 判轉數用的同一套）→ (轉, 級) 或 None。順便把同一趟讀到的 5 人存 LAST_TEAM（不多開面板）"""
+    LAST_TEAM.clear()
+    lv = read_team_bag()
+    if lv:
+        LAST_TEAM.update(lv)
+    return (lv or {}).get(LEADER)
+
+
+def team_floor():
+    """LAST_TEAM 裡 5 人最低 (轉, 級)；沒讀到 None（只看隊長，舊行為）"""
+    return spots.team_min(LAST_TEAM)
 
 
 def leader_trans(hint=None) -> tuple:
@@ -375,6 +392,33 @@ def choose_spot(spot: str, trans: int, level: int, cur_map) -> tuple:
     if cur and (cur == name or (spot == 'auto' and spots.same_tier(cur, name))):
         return None, ''
     return name, ''
+
+
+TELEPORT_TRIES = 3
+
+
+def block_retreat(name, leader, team, cur_map):
+    """傳送失敗後：OCR 聊天區看「XXX 未達到 N轉M級禁止傳送」→ 記下那個人的上限（spots.set_cap，之後選點 / follow 都不再選到 name）
+    → (退回的點名 | None = 留在現在這點,)；沒讀到被擋訊息（不是等級問題）/ 退不到更低的點 → None（呼叫端照舊回 51）"""
+    import follow
+    try:
+        blk = follow.read_block_msg()
+    except Exception as e:
+        log(f'傳送失敗後讀聊天區失敗：{e}')
+        return None
+    cap = spots.block_cap(blk, leader)
+    if not cap:
+        return None
+    if blk[0] >= 1:
+        spots.learn(name, blk[0], blk[1])
+    cap = spots.set_cap(*cap)
+    et, el = spots.effective(leader, team, cap)
+    alt = spots.auto_spot(et, el)
+    log(f'傳送 {name} 被擋（未達到{blk[0]}轉{blk[1]}級）→ 上限記為 {cap[0]}轉{cap[1]}級，退回 {alt or "原地"}')
+    if not alt or alt == name:
+        return None
+    nm, err = choose_spot('auto', et, el, cur_map)
+    return None if err else (nm,)
 
 
 def read_map() -> int | None:
@@ -530,7 +574,12 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
                 return uikit.fail(SRC, uikit.EXIT_USAGE, f'讀不到隊長{"轉數" if trans is None else "等級"}，無法依等級選點（auto）')
             info.update(trans=trans, trans_src=src, level_num=level)
             log(f'隊長 {trans}轉{level}級（轉數來源 {src}）')
-            name, err = choose_spot(spot, trans, level, cur)
+            team_lv, cap = team_floor(), spots.load_cap()
+            et, el = spots.effective((trans, level), team_lv, cap)
+            if (et, el) != (trans, level):
+                info.update(team_min=team_lv, cap=cap, eff=[et, el])
+                log(f'選點改看隊伍最低 {et}轉{el}級（隊伍最低 {team_lv}、被擋上限 {cap}）')
+            name, err = choose_spot(spot, et, el, cur)
         else:
             trans, level = lv if lv else (0, 0)
             if spot != 'here' and not lv:
@@ -554,12 +603,21 @@ def _run(mode: str, spot, confirm_secs: float, fix: bool, do_heal: bool, info: d
             else:
                 log(f'警告：血量 {s.get("hpPct")}% < 40 但 {target} 不在 heal.SPOTS，不自動補血')
         if name and not info.get('healed'):
-            x, y, mp = spots.SPOTS[name][:3]
-            try:
-                heal.teleport(heal.TAB_LEVEL, (x, y), mp, name, want_xy=heal.SPOT_XY.get(mp))
-            except RuntimeError as e:
-                return uikit.fail(SRC, EXIT_TELEPORT, f'傳送 {name} 失敗：{e}')
+            for attempt in range(TELEPORT_TRIES):
+                x, y, mp = spots.SPOTS[name][:3]
+                try:
+                    heal.teleport(heal.TAB_LEVEL, (x, y), mp, name, want_xy=heal.SPOT_XY.get(mp))
+                    break
+                except RuntimeError as e:
+                    nxt = block_retreat(name, (trans, level), team_lv, cur) if spot == 'auto' else None
+                    if nxt is None or attempt == TELEPORT_TRIES - 1:
+                        return uikit.fail(SRC, EXIT_TELEPORT, f'傳送 {name} 失敗：{e}')
+                    name = nxt[0]
+                    info['retreat'] = name
+                    if name is None:                    # 退回後就是現在這點：不傳送
+                        break
             lap('傳送')
+            info['spot'] = name or spots.spot_of_map(cur) or info['spot']
         elif not name:
             log('已在練功地圖，不傳送' if spot != 'here' else '--spot here：不傳送')
     # 5) 外掛 5 人

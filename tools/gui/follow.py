@@ -14,9 +14,10 @@
 做什麼：每 --every 秒讀隊長等級（state.hud.level，即 psa-hud 狀態列那個數字；watch 不在才退回 heal.stat()，連續 2 次一致才採用；
 轉數用 --trans（預設 1，不從 HUD 讀，因為轉數位會被讀錯；等級文字容忍「0轉26級 / 1轉26級 / 轉24, / 24,」，見 level_of；地圖 ID 取 state.hud.map.id；轉生後要重啟）、等級只升不降，讀到比已確認低的視為誤讀）→ 依換點表（spots.FOLLOW，實測真門檻：1 柯奧龜洞、10 阿布龜洞、20 海主人隧道、45 五兄弟洞窟、
 60 柯奧4F龜洞、80 波拉島、120 地雷區；1 轉以上沿用、未實測）算出該在的點，等級到門檻 + --buffer（預設 0）就換 →
-和目前地圖不同時呼叫 grind.run('start', spot=...)（關遇敵 → 等戰鬥 → 傳送 → 外掛 → 開遇敵 → EXP 橫幅確認）。
+隊長等級想換點時才讀一次隊伍 5 人等級（read_team_levels = 背包一次讀，快取 TEAM_TTL 300 秒、失敗 TEAM_FAIL_TTL 60 秒；使用者 2026-10-16）取最低（轉, 級），
+再與傳送被擋記下的上限（spots.set_cap / team-cap.json）取小選點：隊友不夠就不換、不整支退出。和目前地圖不同時呼叫 grind.run('start', spot=...)（關遇敵 → 等戰鬥 → 傳送 → 外掛 → 開遇敵 → EXP 橫幅確認）。
 傳送被擋（聊天「未達到N轉M級禁止傳送」，只在傳送失敗時 OCR 一次聊天區）→ errlog + 把該點門檻修正存 tools/.cache/spot-thresholds.json
-（spots.learn），留在原點（grind.run('ensure')）、10 分鐘內不再試該點。
+（spots.learn）；擋住的是隊友（要求 <= 隊長）另記隊伍上限（spots.set_cap，0 轉也有效、之後選點不再選到該點），留在原點（grind.run('ensure')）、10 分鐘內不再試該點。
 補血：隊長血 / 魔低（連 2 次）→ heal.heal_trip(目前點) → grind.run('ensure')。健康檢查：每 --check-every 分鐘（或等級 --stall-min 分鐘沒動）
 grind.run('check')，快速 / 自動戰鬥關了或遇敵鈕關了 → grind.run('ensure')（自動修）。
 暫停：battle.lock（quest / pet 在動）、petwatch / 別的 grind / heal --watch 在跑時不動作。watch 標 verify_suspect 時先讀一次畫面，
@@ -61,6 +62,8 @@ READ_GAP = 3.0                        # 等級兩次讀之間（watch 約 3 s �
 BAD_MAX = 40                          # 連續幾輪讀不到等級就停（每輪 --every 秒；15 s × 40 ≈ 10 分鐘。HUD 偶爾被蓋住 1～2 分鐘，10 輪太容易誤停，2026-10-11 實機）
 FAIL_MAX = 3
 BLOCK_COOLDOWN = 600.0
+TEAM_TTL = 300.0                      # 隊伍最低等級讀一次的有效秒數（隊長等級想換點、隊友還不夠時，最多每 5 分鐘開一次背包讀）
+TEAM_FAIL_TTL = 60.0                  # 讀隊伍失敗後多久再試
 RETRY_GAP = 30.0                      # 掛機未恢復（ensure / start 失敗）後，每隔多久再試一次 ensure
 ENC_OFF_SECS = 60.0                   # 練功點上遇敵鈕關超過這麼久（watch 零輸入讀到）就補 ensure
 ENC_MAX_AGE = 5.0                     # state.screen 資料年齡上限
@@ -103,6 +106,15 @@ def read_status() -> tuple:
         m = re.match(r'(\d+):', str(pos or ''))
         mid = int(m[1]) if m else mid
     return lv, mid
+
+
+def read_team_levels() -> dict | None:
+    """背包面板一次讀 5 人 (轉, 級)（grind.read_team_bag，約 8 秒）→ {角色: (轉, 級) | None}；讀不到 / 出錯 None（測試替換）"""
+    try:
+        return grind.read_team_bag()
+    except Exception as e:
+        log(f'讀隊伍等級失敗：{e}')
+        return None
 
 
 def spot_by_name(text) -> str | None:
@@ -198,6 +210,9 @@ class Follow:
         self.enc_off_since = None   # watch 讀到遇敵鈕關的起點（clock）
         self.panel_since = None     # watch 讀到面板開著的起點（clock）；None = 沒有面板
         self.panel_noted = None
+        self.team_val = None        # 隊伍最低 (轉, 級)（背包讀 5 人；None = 沒讀到 → 只看隊長）
+        self.team_at = None         # 上次讀隊伍的時間（clock）
+        self.eff = None             # 這一輪選點用的有效 (轉, 級)（隊長 / 隊伍最低 / 被擋上限取小）
         self.unk_since = None       # 畫面不認得的起點（clock）；None = 沒在 unknown 暫停
         self.unk_logged = False
 
@@ -235,6 +250,21 @@ class Follow:
             if i < 2:
                 nap(READ_GAP)
         return self.good if self.bad == 0 else None
+
+    def eff_level(self) -> tuple:
+        """選點用的有效 (轉, 級) = 隊長 / 隊伍最低 / 傳送被擋記下的上限 三者取小（使用者 2026-10-16）。
+        只在「隊長等級想換點」時才呼叫：背包讀 5 人（一次約 8 秒），成功快取 TEAM_TTL 秒、失敗 TEAM_FAIL_TTL 秒內不重讀（失敗 = 只看隊長 + 上限，傳送被擋會自己退點）"""
+        now = clock()
+        ttl = TEAM_TTL if self.team_val else TEAM_FAIL_TTL
+        if self.team_at is None or now - self.team_at >= ttl:
+            lv = read_team_levels()
+            self.team_at = now
+            self.team_val = spots.team_min(lv)
+            if self.team_val:
+                note(f'隊伍最低 {self.team_val[0]}轉{self.team_val[1]}級（隊長 {self.good[0]}轉{self.good[1]}級）')
+            else:
+                log('隊伍等級讀不到，這輪只看隊長（傳送被擋會自動退點）')
+        return spots.effective(self.good, self.team_val, spots.load_cap())
 
     # ---- 面板（使用者自己開的）----
     def panel_pause(self) -> bool:
@@ -411,9 +441,11 @@ class Follow:
         self.block_until[target] = clock() + BLOCK_COOLDOWN
         if blk and blk[1] is not None:
             t, n = blk
-            need = spots.UNREACHABLE if t > trans else max(n, level + 1)
+            need = spots.UNREACHABLE if t > trans else n
             saved = spots.learn(target, trans, need)
-            msg = f'傳送 {target} 被擋（未達到{t}轉{n}級）：{trans}轉門檻修正為 {saved} 級，留在 {old or "原地"}'
+            cap = spots.block_cap(blk, self.good)       # 擋住的是隊友（要求 <= 隊長）：記下上限，選點不再回到這點（0 轉沒有 learn，靠這個）
+            capmsg = f'；隊伍有人低於 {cap[0]}轉{cap[1] + 1}級，選點上限記為 {spots.set_cap(*cap)}' if cap else ''
+            msg = f'傳送 {target} 被擋（未達到{t}轉{n}級）：{trans}轉門檻修正為 {saved} 級{capmsg}，留在 {old or "原地"}'
         else:
             msg = f'傳送 {target} 失敗，聊天區沒讀到「未達到…」（{"有禁止傳送字樣但讀不出數字" if blk else "原因不明：戰鬥中 / 其他"}），10 分鐘後再試，不修正門檻'
         errlog.add(msg, source=SRC)
@@ -502,6 +534,12 @@ class Follow:
         table = spots.FOLLOW
         target = spots.spot_for(trans, level, self.a.buffer, table)
         same = self.cur and target and (self.cur == target or spots.same_tier(self.cur, target))
+        self.eff = self.good
+        if target and not same:                      # 隊長想換點 → 看隊伍最低等級 / 被擋上限，可能不換或換到較低的點
+            self.eff = self.eff_level()
+            if self.eff != self.good:
+                target = spots.spot_for(self.eff[0], self.eff[1], self.a.buffer, table)
+                same = self.cur and target and (self.cur == target or spots.same_tier(self.cur, target))
         if same and spots.is_top(target) and not self.a.dry_run and not self.unrecovered:
             note(f'{trans}轉{level}級已在最高練功點 {self.cur}，不再監測，follow 結束')
             self.write_state('stopped')
