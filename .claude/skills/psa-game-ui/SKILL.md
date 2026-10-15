@@ -141,6 +141,7 @@ uv run --no-project python tools/gui/errlog.py list
 | 開始 / 恢復練功（選練功區、傳送、開遇敵、5 人快速 + 自動戰鬥檢查） | **先跑 `grind.py start|ensure|check`**，非 0 再 **`/psa-grind-start` skill**（手動流程當退路） |
 | 解散隊伍 | **先跑 `team.py disband`**，非 0 再 **`/psa-disband-team` skill**（介面參考 [ui/team.md](ui/team.md)） |
 | 確認誰是「當前」角色 | [ui/team.md](ui/team.md) |
+| 讀 buff 剩餘時間（2倍智慧果 / 龍王的守護，唯讀；`bufftime.py read [--kind exp|dragon|all]`，p2 加 `PSA_CLIENT=PrimalSA2`；退出碼 130～134） | [ui/home.md](ui/home.md)「buff 圖示浮窗」 |
 | 看角色屬性 / 抗性 / 潛力點 | [ui/role.md](ui/role.md) |
 | 看任務進度、任務詳情、自動巡路解任務（`tools/gui/quest.py --task 任務名`；檢測方針：黃色「?」優先，否則追蹤列表任務名（每頁先標題樣板、沒中同頁 OCR；看 ▲ / ▼ 決定捲不捲；下緣被裁的卡先捲上來再點）核對再點；`ocr.ps1` / `findmark.ps1`；**預設模式任務 BOSS 戰打完先驗隊伍再停：退出碼 37 滿員 / 38 不滿（slice 時間到也延後到停手），`--no-stop-after-boss` 才連跑；任務 NPC 只有「再見」→ ESC、退出碼 40；`--hp-check-min N` 戰鬥後全隊 HP 偏低 → 41；殘留的已知面板（背包等）點 ✕ 關、不算驗證視窗；對話框內文 / 按鈕含轉生 / 封印 / 刪除 / 丟棄 → 不按、退出碼 39，確認後 `--allow-irreversible`**，errlog #68） | [ui/quest.md](ui/quest.md) |
 | **單人逃跑解任務**（DKB0 單人跑 NPC、遇怪逃跑 → 組隊對話 / 打；紅暴 2031 只在 questrun 回 156〔沒有龍王的守護〕時用，平常 `questrun.py run 2031` 組隊打到底；`quest.py --solo / --fight`、`psa.py steps`、`heal.py --no-return`） | **`/psa-quest-solo` skill**（介面參考 [ui/quest.md](ui/quest.md#單人逃跑解任務questpy---solo----fight2026-10-10流程見-psa-quest-solo-skill)） |
