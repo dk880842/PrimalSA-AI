@@ -939,6 +939,133 @@ rc, sts, msg, info = ass.points_set('DKBO', [])
 check('勾選點了沒變 → 4、不補點、右半切回', rc == ass.EXIT_CONFIRM and g.box_clicks == [('DKBO', ass.PT_CUSTOM)] and g.right == 'battle', f'{rc} {msg}')
 check('CLI：points set 多人 → 1、用法錯 → 1', ass.main(['points', 'all', 'set']) == 1 and ass.main(['points', 'DKBO', 'xx']) == 1)
 
+print('(28) heal：戰鬥設置 自動補血 精靈補血（2026-10-15，newchar 用；座標 / 像素待實機補正）')
+HEAL_LINES = [('精靈補血', 730, 425), ('滋潤的精靈Lv.3', 944, 425), ('人物:', 660, 477), ('50%', 743, 477), ('SET', 816, 477), ('寵物:', 910, 477), ('60%', 994, 477),
+              ('騎寵:', 1160, 477), ('45%', 1243, 477), ('寵物技能補血', 750, 540), ('無合適技能', 944, 540), ('人物:', 660, 593), ('50%', 743, 593),
+              ('使用肉和物品補血', 780, 656), ('人物:', 660, 709), ('騎寵:', 1160, 709), ('50%', 1243, 709)]
+ph = ass.parse_heal(HEAL_LINES)
+check('parse_heal：三列標籤 y / 下拉 / % 門檻（寵物技能補血不會被當精靈補血）',
+      ph['精靈補血']['y'] == 425 and ph['精靈補血']['dd'] == '滋潤的精靈Lv.3' and ph['精靈補血']['pct'] == [50, 60, 45]
+      and ph['寵物技能補血']['y'] == 540 and ph['寵物技能補血']['dd'] == '無合適技能' and ph['寵物技能補血']['pct'] == [50]
+      and ph['肉和物品補血']['y'] == 656 and ph['肉和物品補血']['pct'] == [50], str(ph))
+check('parse_heal：標籤與下拉併成一行 → 下拉 = 後面的字', ass.parse_heal([('精靈補血 滋潤的精靈Lv.3', 800, 425)])['精靈補血']['dd'] == '滋潤的精靈Lv.3')
+check('parse_heal：沒有標籤 / 空 → {}', ass.parse_heal([('原地遇敵', 200, 343)]) == {} and ass.parse_heal([]) == {})
+check('heal_checked：全白 = 沒勾、任一點非白 = 勾、空 = None', ass.heal_checked([(255, 255, 255)] * 5) is False
+      and ass.heal_checked([(255, 255, 255), (30, 30, 30)]) is True and ass.heal_checked([]) is None)
+
+
+class HGame(Game):
+    """戰鬥設置分頁自動補血：scroll 0 = 頂端（精靈補血 y612）、1 = 捲過（y425）、2 = 捲到底（看不到補血）；DKBO 內容 y 多 6px（換角色 y 會漂）"""
+
+    def __init__(self, on=None, scroll=0, nolabel=False, stuck_heal=False, **k):
+        super().__init__(**k)
+        self.on = {r: {'精靈補血': False, '寵物技能補血': False, '肉和物品補血': False} for r in ass.ROLES}
+        for r, v in (on or {}).items():
+            self.on[r]['精靈補血'] = v
+        self.scroll, self.nolabel, self.stuck_heal = scroll, nolabel, stuck_heal
+        self.drags, self.heal_clicks = [], []
+
+    def ly(self):
+        base = {0: 612, 1: 425}.get(self.scroll)
+        return None if base is None else base + (6 if self.role == 'DKBO' else 0)
+
+    def rows_y(self):
+        y = self.ly()
+        return {} if y is None or self.nolabel else {'精靈補血': y, '寵物技能補血': y + 115, '肉和物品補血': y + 231}
+
+    def color(self, x, y):
+        if self.panel and 648 <= x <= 664:
+            for k, ry in self.rows_y().items():
+                if abs(y - ry) <= 6:
+                    return (30, 30, 30) if self.on[self.role][k] and (x, y) == (656, ry) else (255, 255, 255)
+        return super().color(x, y)
+
+    def gui(self, *args, note=''):
+        if args[0] == 'drag':
+            xy = tuple(int(v) for v in args[1:5])
+            self.drags.append(xy)
+            if xy == ass.HEAL_SCROLL:
+                self.scroll = 1
+            elif xy == ass.HEAL_UNSCROLL:
+                self.scroll = 0
+            return ''
+        return super().gui(*args, note=note)
+
+    def click(self, x, y):
+        if self.panel and x == ass.HEAL_CHK_X:
+            for k, ry in self.rows_y().items():
+                if abs(y - ry) <= 8:
+                    self.heal_clicks.append((self.role, k, y))
+                    if not self.stuck_heal:
+                        self.on[self.role][k] = not self.on[self.role][k]
+                    return
+        super().click(x, y)
+
+    def ocr(self, box, *opts):
+        if box == ass.PET_TITLE_BOX:
+            return '戰寵動作一' if self.panel and self.scroll == 0 else ''
+        return super().ocr(box, *opts)
+
+    def ocr_lines(self, box, *opts):
+        if box != ass.HEAL_BOX or not self.panel:
+            return []
+        out = []
+        for k, y in self.rows_y().items():
+            if not (box[1] <= y <= box[1] + box[3]):
+                continue
+            out += [(k, 730, y), ('滋潤的精靈Lv.3' if k == '精靈補血' else '無合適技能', 944, y), ('50%', 743, y + 52)]
+        return out
+
+
+def hsetup(g):
+    setup(g)
+    ass._ocr_lines = g.ocr_lines
+
+
+g = HGame()
+hsetup(g)
+rc, sts, msg, info = ass.heal_get(list(ass.ROLES))
+check('heal_get：5 人唯讀、頂端不用捲、沒點任何補血勾選、面板關', rc == 0 and not g.drags and not g.heal_clicks and not g.panel
+      and all(s['精靈補血']['on'] is False and s['精靈補血']['dd'] == '滋潤的精靈Lv.3' and s['精靈補血']['pct'] == [50] for s in sts.values()), f'{rc} {msg}')
+g = HGame(on={'DKBO2': True, 'DKBO3': True})
+hsetup(g)
+rc, sts, msg, info = ass.heal_get(['DKBO', 'DKBO2'])
+check('heal_get：已勾的讀成勾（DKBO2 勾、DKBO 不勾；DKBO 內容 y 差 6px 照樣找到）', rc == 0 and sts['DKBO2']['精靈補血']['on'] and not sts['DKBO']['精靈補血']['on'], f'{rc} {sts}')
+g = HGame(on={'DKBO3': True})
+hsetup(g)
+rc, sts, msg, info = ass.heal_set(list(ass.ROLES), True)
+check('heal_set on：只點沒勾的 4 人（DKBO3 已勾不點）、點在標籤 y（DKBO 618 / 其他 612）、讀回確認、隊長最後',
+      rc == 0 and sorted(r for r, _, _ in g.heal_clicks) == ['DKBO', 'DKBO2', 'DKBO4', 'DKBO5'] and (g.heal_clicks[-1] == ('DKBO', '精靈補血', 618))
+      and ('DKBO2', '精靈補血', 612) in g.heal_clicks and all(s['精靈補血']['on'] for s in sts.values())
+      and all(v['精靈補血'] for v in g.on.values()) and sum(len(v) for v in info['changed'].values()) == 4 and not g.panel, f'{rc} {msg} {g.heal_clicks}')
+n = len(g.heal_clicks)
+rc, sts, msg, info = ass.heal_set(list(ass.ROLES), True)
+check('heal_set on 再跑一次：全部已勾 → 不點', rc == 0 and len(g.heal_clicks) == n and not info['changed'], f'{rc} {g.heal_clicks}')
+g = HGame(on={r: True for r in ass.ROLES})
+hsetup(g)
+rc, sts, msg, info = ass.heal_set(['DKBO2', 'DKBO3'], False)
+check('heal_set off：只動指定 2 人、其他不碰', rc == 0 and g.on['DKBO2']['精靈補血'] is False and g.on['DKBO3']['精靈補血'] is False and g.on['DKBO4']['精靈補血'] is True, f'{rc} {msg}')
+check('heal_set：寵物技能 / 肉和物品補血勾選不被動到', all(not v['寵物技能補血'] and not v['肉和物品補血'] for v in g.on.values()))
+g = HGame(scroll=2)
+hsetup(g)
+rc, sts, msg, info = ass.heal_set(['DKBO2'], True)
+check('起始捲到底（看不到補血）→ 捲一次找到、勾成功、結束捲回頂端（pet_on_top 成立）',
+      rc == 0 and g.on['DKBO2']['精靈補血'] and g.drags == [ass.HEAL_SCROLL, ass.HEAL_UNSCROLL] and g.scroll == 0, f'{rc} {msg} {g.drags}')
+g = HGame(nolabel=True)
+hsetup(g)
+rc, sts, msg, info = ass.heal_set(['DKBO2'], True)
+check('OCR 找不到標籤 → 17、不點任何補血勾選、捲了 %d 次後捲回' % ass.HEAL_SCROLL_TRIES,
+      rc == ass.EXIT_HEAL_NOLABEL and not g.heal_clicks and g.drags.count(ass.HEAL_SCROLL) == ass.HEAL_SCROLL_TRIES and not g.panel, f'{rc} {msg} {g.drags}')
+g = HGame(stuck_heal=True)
+hsetup(g)
+rc, sts, msg, info = ass.heal_set(['DKBO2'], True)
+check('點了沒變 → 4、只點 1 次（不補點）', rc == ass.EXIT_CONFIRM and len(g.heal_clicks) == 1, f'{rc} {msg}')
+g = HGame()
+hsetup(g)
+rc, sts, msg, info = ass.heal_set(['DKBO2'], True, ('寵物技能補血',))
+check('rows_wanted 可指定其他列（寵物技能補血）；預設不動精靈補血', rc == 0 and g.on['DKBO2']['寵物技能補血'] and not g.on['DKBO2']['精靈補血'], f'{rc} {msg}')
+check('CLI：heal 用法錯 / 角色錯 → 1', ass.main(['heal', 'all', 'set', '寵物技能補血', 'on']) == 1 and ass.main(['heal', 'all', 'xx']) == 1 and ass.main(['heal', 'DKBO,DKBO', 'get']) == 1)
+
 # 快戰中開面板不暫停遇敵：預設 --pause 關、戰鬥打斷自動重試
 _seq = [(6, {}, 'x', {}), (12, {}, 'x', {}), (0, {'a': 1}, '', {})]
 _sl = ass.sleep
