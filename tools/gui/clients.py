@@ -49,6 +49,7 @@ NAME_RE = re.compile(r'^[A-Za-z0-9_.-]{1,64}$')   # 與 psawin.ps1 相同：只�
 ROSTERS = {
     'PrimalSA': ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'],
     'PrimalSA2': ['DKBO6', 'DKBO7', 'DKBO8', 'DKBO9', 'DKBO10'],
+    'PrimalSA3': ['DKBO11', 'DKBO12', 'DKBO13', 'DKBO14', 'DKBO15'],
 }
 
 
