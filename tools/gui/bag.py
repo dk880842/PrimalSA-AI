@@ -1068,6 +1068,8 @@ def stack_qty(i: int, want: str) -> int | None:
         q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Dark', '0', '-Zooms', '2,3,4'))   # 2026-10-15 實機：預設 Dark 150 讀成空，不二值化才讀得到
         if q is None:
             q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Light', '180', '-Zooms', '3,4'))
+        if q is None:                                    # 個位數（例 5）輸入框 OCR 讀不到 → 讀視窗上方道具圖示角落的白色疊數（2026-10-15 實機）
+            q = parse_qty(uikit.ocr((690, 325, 60, 50), '-Light', '180', '-Zooms', '4,8'))
         uikit.gui('seq', f'click {SPLIT_CANCEL[0]} {SPLIT_CANCEL[1]}; wait 600', note='bag 讀疊數：取消數量輸入')
         return q
     finally:
