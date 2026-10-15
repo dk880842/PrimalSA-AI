@@ -1729,6 +1729,12 @@ class Run:
             return 0, knocked
         if qrc != 20:
             return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：quest.py --solo 退出碼 {qrc}（預期 20 到達 NPC；3 = 追蹤沒反應、19 / 42 卡住）', quest_rc=qrc), knocked
+        cs = getattr(T, 'clear_screen', None)
+        if cs:                                                          # 到 NPC 後對話框可能又跳出來（2026-10-15 紅暴步 1：ESC 後 NPC 對話重開、HUD 不在 → team.form 40）→ 先清殘留
+            try:
+                cs()
+            except Exception as e:                                      # noqa: BLE001
+                event(f'任務 {tid} 步 {step}：到 NPC 後清殘留例外 {e}')
         rc = self.form(f'任務 {tid} 步 {step} 到 NPC 後')
         if rc:
             return (rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else
