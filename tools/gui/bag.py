@@ -25,7 +25,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py store-items all --public 寵物誘餌,離線水晶 --personal 1轉新手禮盒 [--strict]   # 多人存多樣（面板開一次、每人一次存完；沒有的略過；實機未驗證）
 最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / wear_item / wear_many / swap_weapon / depot_take / depot_store / depot_store_items / drop_item。
 背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
-AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的兩項）。
+AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的一項）。
 道具辨識以名字為主（2026-10-14）：find / find_items / team_read / list / item_slots / find_item 一次截圖 →
 ① 名字樣板（itemname_match：「顯示道具名」白字整名圖，學出來的，tools/.cache/item-name-tpl/）認得的格 = 確定名稱 →
 ② 沒認出的格才比 GameClient 道具圖（itemimg_match，只認得到 imageId，同圖多名）→ ③ 還是沒認出 / 被浮字蓋住的格才名稱 OCR。
@@ -1238,7 +1238,8 @@ MARK_MIN = 12                                   # 25 點至少幾點是紅（實
 PURGE_FORBID = ['大地的羈絆', '火的羽毛飾品', '風的鎖', '水的戒指', '雅哈奴的日記', '拉魯的項鍊', '不死鳥的羽毛', '風的豎琴',
                 '深藍色石頭', '群青的水', '碧青水晶', '龍王的守護', '2倍智慧果', '離線水晶', '安撫之素', '寵物誘餌', '2轉新手禮盒']
 # 背包滿時可以「不問人」自動 purge 的名單（questrun 背包滿 → 信箱流程用）= ui/bag.md「可刪除道具白名單」表，
-# 但排除有條件的兩項：「龍的魅力之笛」（要和龍之槍 / 鎧 / 衣同一批刪，腳本判斷不了）、「亞姆亞姆的斧頭」（任務完成後才刪；
+# 但排除有條件的一項：「亞姆亞姆的斧頭」（任務完成後才刪；
+# 2026-10-15 使用者：「龍的魅力之笛」（龍的巢穴解完就可刪）、「不可思議的貝殼」（彌生和日美子獎勵）可刪，已列入。
 # 仙尼亞的花 / 郵寄物 / 切繩石是任務途中中間品（2017 / 2018），Task 表查不到是否為下一步條件；2026-10-14 使用者已知任務中途誤刪的風險並接受，仍列入。
 # 而且同名有兩個道具：2448 是步 2 獎勵、2416 是步 1 要交的條件道具，用名稱刪會刪到進行中的任務道具）。
 # test_questdefs 核對：每個名稱都在 bag.md 白名單表、不在 PROTECT / PURGE_FORBID、也不是任何 questdefs 任務的條件道具（不會刪到任務要交的東西）
@@ -1246,7 +1247,7 @@ MAZU_FAMILY = ['馬祖的斧頭', '馬祖的矛', '馬祖的棍棒']
 AUTO_PURGE = ['儀之兜', '杉的手環', '龍之鎧', '龍之槍', '龍之衣', '月光的手鐲', '巴巴洛的許可證', '空想的衣服',
               '老爺爺的護身符', '薩頓家的秘藥', '山賊的羽飾',
               '馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '空想的帽子', '空想的豎琴',
-              '仙尼亞的花', '郵寄物', '切繩石']
+              '仙尼亞的花', '郵寄物', '切繩石', '龍的魅力之笛', '不可思議的貝殼']
 
 
 def mark_red(c) -> bool:

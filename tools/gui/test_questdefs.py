@@ -76,7 +76,7 @@ white = {m.group(1).strip() for m in _re.finditer(r'^\|\s*([^|]+?)\s*\|', sec, _
 items = {r['ID']: r.get('nameTn') for r in rows('Item')}
 cond_names = {items.get(c['itemId']) for t in tasks if t.get('group') in questdefs.BY_ID for c in (t.get('condition') or []) if c and c.get('itemId')}
 check('AUTO_PURGE 每個都在 bag.md 白名單表', set(bag.AUTO_PURGE) <= white, str(set(bag.AUTO_PURGE) - white))
-check('AUTO_PURGE 不含有條件的「龍的魅力之笛」「亞姆亞姆的斧頭」', not ({'龍的魅力之笛', '亞姆亞姆的斧頭'} & set(bag.AUTO_PURGE)) and {'龍的魅力之笛', '亞姆亞姆的斧頭'} <= white)
+check('AUTO_PURGE 不含有條件的「亞姆亞姆的斧頭」；含龍的魅力之笛 / 不可思議的貝殼（使用者 2026-10-15）', '亞姆亞姆的斧頭' not in bag.AUTO_PURGE and '亞姆亞姆的斧頭' in white and {'龍的魅力之笛', '不可思議的貝殼'} <= set(bag.AUTO_PURGE))
 check('AUTO_PURGE 含仙尼亞的花 / 郵寄物 / 切繩石（使用者 2026-10-14 決定）且在白名單表', {'仙尼亞的花', '郵寄物', '切繩石'} <= set(bag.AUTO_PURGE) and {'仙尼亞的花', '郵寄物', '切繩石'} <= white)
 check('AUTO_PURGE 含馬祖 / 空想獎勵裝備', {'馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '空想的帽子', '空想的豎琴'} <= set(bag.AUTO_PURGE))
 check('Item 表每個新增名稱只有一個 ID（無同名陷阱）', all(sum(1 for r in rows('Item') if r.get('nameTn') == n) == 1 for n in ['仙尼亞的花', '郵寄物', '切繩石', '馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '空想的帽子', '空想的豎琴']))
