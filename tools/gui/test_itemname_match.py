@@ -237,6 +237,43 @@ def test_read_page(d):
     clear_tpl()
 
 
+# ---- 3b. 「新」紅標（2026-10-16 p2：剛從倉庫取出的誘餌格左上紅標蓋住名字區左側）----
+def test_new_tag(d):
+    import json as _j
+    seed_tpl(d)
+    fx = _j.loads((HERE / 'fixtures' / 'itemname_newtag.json').read_text(encoding='utf-8'))
+    for s in fx['samples']:
+        x, y, w, h = s['box']
+        hx = s['px']
+        pic = {(x + i % w, y + i // w): (int(hx[i * 6:i * 6 + 2], 16), int(hx[i * 6 + 2:i * 6 + 4], 16), int(hx[i * 6 + 4:i * 6 + 6], 16)) for i in range(w * h)}
+        get = lambda a, b, pic=pic: pic.get((a, b), EMPTY)     # noqa: E731
+        r = N.read_cell(get, s['kind'], s['slot'], state=True)
+        check(f'實際截圖 {s["f"].split("/")[-1]} 第 {s["slot"] + 1} 格：紅標 {s["new"]} 偵測對、名字 {s["name"]}',
+              N.new_tag(get, s['kind'], s['slot']) == s['new'] and r['name'] == s['name'] and r.get('new') == s['new'], r)
+    # 合成：每個背包「寵物誘餌」樣本格都畫上紅標（左側紅條、紅條下的名字點清掉）→ 遮罩比對仍認得；不遮罩時紅條吃掉的字會讓分數掉
+    bad = []
+    for smp in d['samples']:
+        if smp['label'] != '寵物誘餌' or smp['kind'] != 'bag':
+            continue
+        rows = d['images'][smp['img']]['rows']
+        mw, mh = N.NEW_MASK['bag']
+        covered = [('0' * 16 + r[16:]) if j < mh else r for j, r in enumerate(rows)]       # 紅條蓋住名字區 x 0～15
+        get0 = synth({('bag', smp['slot']): covered})
+        _, cx, cy = N.cells_of('bag')[smp['slot']]
+
+        def get(a, b, get0=get0, cx=cx, cy=cy):
+            if cx - 46 <= a <= cx - 36 and cy - 47 <= b <= cy - 10:
+                return (220, 30, 30)
+            return get0(a, b)
+        r = N.read_cell(get, 'bag', smp['slot'], state=True)
+        if not (N.new_tag(get, 'bag', smp['slot']) and r['name'] == '寵物誘餌'):
+            bad.append((smp['rel'], smp['slot'], r))
+    check('合成紅標：每個背包「寵物誘餌」樣本格（各欄）遮罩後都認得', not bad, str(bad[:2]))
+    get = synth({('bag', 0): pick(d, '寵物誘餌', slot=0)[1]})
+    check('沒有紅標的格 new_tag = False（不遮罩）', not N.new_tag(get, 'bag', 0) and N.read_cell(get, 'bag', 0, state=True).get('new') is False)
+    clear_tpl()
+
+
 # ---- 4. bag.py 接線 ----
 def test_bag(d):
     import bag
@@ -349,6 +386,7 @@ def main(argv=None) -> int:
     test_accuracy(d)
     test_learn_rules(d)
     test_read_page(d)
+    test_new_tag(d)
     try:
         import itemimg_match
         itemimg_match.index()

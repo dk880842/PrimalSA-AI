@@ -451,6 +451,58 @@ def delok_points() -> list:
     return list(dict.fromkeys(pts))
 
 
+# ---- 背包 / 倉庫頁「道具說明彈窗」（點道具格跳出：圖示 + 名稱 + 詳細介紹 + 拆分 / 丟棄 / 穿戴 / 取出 / 存入鈕；2026-10-16，watch / uikit 共用）----
+# 根因（10-16 p2 三次誤設驗證停手旗標，最後一次 02:40:05 watch-alerts/unknown-1792089604）：腳本 / 人開著道具彈窗超過 10 秒，
+# 整個背包被壓暗（消耗品彈窗 ×0.60、裝備彈窗 ×0.45，每點每通道同一比例；不在 dim_panel 的 0.40～0.56 內、標題板還常被跑馬燈蓋）→ unknown。
+# 三個條件全要（驗證 / 答題視窗、網路提示、別的彈窗不可能同時滿足）：
+#   1. 窗外是「同一比例壓暗的背包外框」：✕、刪除管理、整理背包 + 右半米色底 5 點（背包頁 / 倉庫頁右半都是背包格，兩頁一樣），8 中 7；
+#   2. 彈窗金框左右兩邊：消耗品版 x 492 / 968、裝備版 x 482 / 958（y 520 / 600 / 690 三列），其中一版 6 點全中；
+#   3. 彈窗底部有藍色按鈕（拆分 / 丟棄 / 穿戴 / 取出；y 640 / 650 兩列至少 ITEMPOP_BTN_MIN 點藍）。
+# 樣本：clients/PrimalSA2/s6.png、watch-alerts/unknown-1792085490 / 1792089604 / 1792044006、p4/depot_popup、ui-log/052337（跑馬燈蓋標題）等，fixtures/bag_itempop_px.json。
+BAG_ITEMPOP_BG = [(1280, 113, 197, 70, 43), (1150, 625, 177, 70, 38), (1150, 688, 58, 106, 162), (990, 300, 223, 187, 147),
+                  (1240, 300, 244, 219, 183), (990, 520, 223, 187, 147), (1240, 520, 244, 219, 187), (1255, 745, 229, 199, 163)]
+ITEMPOP_DIM_K = (0.40, 0.66)
+ITEMPOP_DIM_TOL = 12
+ITEMPOP_BG_NEED = 7
+ITEMPOP_GOLD = (186, 129, 65)
+ITEMPOP_GOLD_TOL = 28
+ITEMPOP_FRAMES = ([(x, y) for x in (492, 968) for y in (520, 600, 690)],     # 消耗品 / 倉庫取出版（x 492～968）
+                  [(x, y) for x in (482, 958) for y in (520, 600, 690)])     # 裝備版（穿戴 / 丟棄，x 482～958）
+ITEMPOP_BTN_PTS = [(x, y) for y in (640, 650) for x in range(540, 930, 6)]
+ITEMPOP_BTN_MIN = 6
+
+
+def _blue_btn(c) -> bool:
+    r, g, b = c
+    return b >= 140 and b - r >= 70 and r <= 120
+
+
+def _dim_k(px: dict, pts):
+    """pts（x, y, r, g, b）同一比例壓暗的 k（中位數）與吻合點數 → (k, n)；缺點當不符"""
+    ratios = sorted(c / ref for x, y, *refc in pts if (x, y) in px for c, ref in zip(px[(x, y)], refc) if ref >= 80)
+    if not ratios:
+        return None, 0
+    k = ratios[len(ratios) // 2]
+    n = sum(1 for x, y, r, g, b in pts if (x, y) in px and all(abs(c - ref * k) <= ITEMPOP_DIM_TOL for c, ref in zip(px[(x, y)], (r, g, b))))
+    return k, n
+
+
+def bag_itempop(px: dict) -> bool:
+    """壓暗的背包（或倉庫頁）上疊「道具說明彈窗」（三個條件見上方註解）。缺點一律不符"""
+    k, n = _dim_k(px, BAG_ITEMPOP_BG)
+    if k is None or not ITEMPOP_DIM_K[0] <= k <= ITEMPOP_DIM_K[1] or n < ITEMPOP_BG_NEED:
+        return False
+    if not any(all(pt in px and close(px[pt], ITEMPOP_GOLD, ITEMPOP_GOLD_TOL) for pt in fr) for fr in ITEMPOP_FRAMES):
+        return False
+    return sum(1 for pt in ITEMPOP_BTN_PTS if pt in px and _blue_btn(px[pt])) >= ITEMPOP_BTN_MIN
+
+
+def itempop_points() -> list:
+    """bag_itempop 要讀的全部點（不重複）"""
+    pts = [(x, y) for x, y, *_ in BAG_ITEMPOP_BG] + [pt for fr in ITEMPOP_FRAMES for pt in fr] + ITEMPOP_BTN_PTS
+    return list(dict.fromkeys(pts))
+
+
 def dim_panel(px: dict):
     """被模態彈窗壓暗的已知面板名（PANEL_TITLE 同一比例 k 縮暗）或 None。缺點一律不符。未壓暗（k≈1）的面板不算"""
     for name, pts in PANEL_TITLE.items():
@@ -477,7 +529,7 @@ def popup_over_panel(px: dict):
     return (pn, kinds[0]) if pn in POPUP_PANELS else None
 
 
-ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗）
+ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗；popup_item = 背包道具說明彈窗）
 
 
 def annot_points() -> list:
@@ -496,10 +548,10 @@ def annot_points() -> list:
 
 
 def loading_points() -> list:
-    """watch 另外加讀的點：「加載中」字形遮罩 + 英文版進度條 + 背包刪除確認窗（delok_points，2026-10-15）。
+    """watch 另外加讀的點：「加載中」字形遮罩 + 英文版進度條 + 背包刪除確認窗（delok_points，2026-10-15）+ 背包道具說明彈窗（itempop_points，2026-10-16）。
     不在 points() / annot_points()（那兩組被凍結 fixture 綁住）"""
     seen, out = set(points()) | set(annot_points()), []
-    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points() + delok_points():
+    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points() + delok_points() + itempop_points():
         if pt not in seen:
             seen.add(pt)
             out.append(pt)
@@ -516,6 +568,8 @@ def annotate(px: dict, base: dict) -> list:
     遇敵鈕（enc_on）不在這裡：用 enc_on() 另外取"""
     if base.get('state') == 'unknown' and bag_delok(px):      # 刪除確認窗的框和「提示」單鈕窗相同（notice_dialog 也會中），所以先判
         return ['popup_delok', 'over_bag']
+    if base.get('state') == 'unknown' and bag_itempop(px):    # 道具說明彈窗：窗外背包壓暗 ×0.45～0.60（dim_panel 不認）
+        return ['popup_item', 'over_bag']
     for name, sig in ANNOT_SIGS.items():
         if _match_safe(px, sig):
             return [name]
@@ -544,7 +598,7 @@ _LABELS = {'idle': '主畫面', 'walking': '自動跑路中', 'dialog': '對話�
            'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
 
 _ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面', 'loading': '載入畫面', 'black': '黑畫面（轉場）',
-               'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗', 'popup_delok': '刪除確認窗'}
+               'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗', 'popup_delok': '刪除確認窗', 'popup_item': '道具說明彈窗'}
 
 
 def label(d: dict, annot=None) -> str:

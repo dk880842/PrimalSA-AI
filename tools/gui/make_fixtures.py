@@ -234,6 +234,95 @@ def make_bag_del_fixture() -> list:
     return miss
 
 
+# ---- 背包道具說明彈窗（screen_sigs.bag_itempop；2026-10-16 p2 道具彈窗開著 > 10 秒三次誤設驗證停手旗標）----
+# 檔名 → True（正例：消耗品 / 裝備 / 倉庫取出 / 存入版、跑馬燈蓋標題）/ False（負例）；正例是 tools/.cache 3056 張全掃命中的 22 張，人工看圖確認
+BAG_ITEMPOP_SRC = {
+    'b3.png': True, 'b4.png': True, 'eq1.png': True, 'f1.png': True, 'pop1.png': True, 'w3.png': True,
+    'clients/PrimalSA2/b5.png': True, 'clients/PrimalSA2/s6.png': True, 'clients/PrimalSA2/s7.png': True,
+    'clients/PrimalSA2/ui-log/013633-bag-popup-btn.png': True, 'clients/PrimalSA2/ui-log/140017-bag-wear-verify.png': True,
+    'clients/PrimalSA2/watch-alerts/unknown-1792044006.png': True, 'clients/PrimalSA2/watch-alerts/unknown-1792085490.png': True,
+    'clients/PrimalSA2/watch-alerts/unknown-1792089604.png': True, 'p4/bag_popup.png': True, 'p4/depot_popup.png': True,
+    'p4/store_popup.png': True, 'ui/h_item.png': True, 'ui-log/052304-bag-popup-btn.png': True, 'ui-log/052337-depot-use-nobuff.png': True,
+    'ui-log/182015-bag-store-verify.png': True, 'watch-alerts/unknown-1792059604.png': True,
+    # 負例：壓暗背包上的數量輸入窗 / 刪除確認窗（窗外壓暗條件會中，金框 / 藍鈕不中）、普通背包、提示窗、寵物面板上的確定窗、外掛面板
+    'clients/PrimalSA2/s2.png': False, 'catch-m0/split.png': False, 'h5.png': False, 'del2.png': False, 'watch-alerts/unknown-1792078474.png': False,
+    'clients/PrimalSA2/s5.png': False, 'ui-log/022843-bag-noitem.png': False, 'kr322.png': False, 'net1.png': False, 'c470.png': False,
+    'ui-log/215658-manual-catch-tab.png': False, 'del0.png': False,
+}
+
+
+def make_bag_itempop_fixture() -> list:
+    """bag_itempop_px.json：points = watch 實際讀的全部點；每張存 hex 與期望（True / False）。回缺的檔案"""
+    pts = list(dict.fromkeys(screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()))
+    samples, miss = [], []
+    for rel, want in BAG_ITEMPOP_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = {tuple(map(int, k.split(','))): tuple(v) for k, v in grab(p, pts).items()}
+        samples.append({'f': rel, 'expect': want, 'px': ''.join('%02x%02x%02x' % px[pt] for pt in pts)})
+    write('bag_itempop_px.json', {'note': '背包道具說明彈窗樣本（2026-10-16）：expect = true（彈窗）/ false（負例）；points = watch 讀的全部點',
+                                  'points': [list(p) for p in pts], 'samples': samples})
+    return miss
+
+
+# ---- 小數字像素字形（numglyph：拆分數量框 / 背包格疊數 / 外掛可抓捕數；2026-10-16 p2 OCR 把 20 讀空 / 讀成 2）----
+# (檔名, kind, 格號 | None, 人工看圖的值)；框內原始 RGB 存 hex，測試走 numglyph.binarize → read_rows
+NUMGLYPH_SRC = [
+    ('clients/PrimalSA2/s2.png', 'qty', None, 20),                 # 02:37 DKBO7 拆分數量輸入窗（腳本讀不出 → 164 那張的同一畫面）
+    ('catch-m0/split.png', 'qty', None, 50),
+    ('clients/PrimalSA2/s5.png', 'slot', 0, 21),                   # 02:39 買 1 個後背包第 1 格誘餌 21（帶「新」紅標）
+    ('ui-log/181752-rebirth-split-after.png', 'slot', 0, 1),
+    ('ui-log/215658-manual-catch-tab.png', 'ass', None, 0),
+    ('ui-log/220112-rebirth-catch-family.png', 'ass', None, 5),
+    ('ui-log/093442-rebirth-catch-species.png', 'ass', None, 4),
+]
+
+
+def make_numglyph_fixture() -> list:
+    """numglyph_samples.json：每個樣本存框 (x, y, w, h) 與框內 RGB hex。回缺的檔案"""
+    import numglyph
+    samples, miss = [], []
+    for rel, kind, slot, want in NUMGLYPH_SRC:
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        box = numglyph.slot_box(slot) if kind == 'slot' else {'qty': numglyph.QTY_BOX, 'ass': numglyph.ASS_COUNT_BOX}[kind]
+        x, y, w, h = box
+        pts = [(x + i, y + j) for j in range(h) for i in range(w)]
+        px = grab(p, pts)
+        samples.append({'f': rel, 'kind': kind, 'slot': slot, 'value': want, 'box': list(box),
+                        'px': ''.join('%02x%02x%02x' % tuple(px[f'{a},{b}'][:3]) for a, b in pts)})
+    write('numglyph_samples.json', {'note': '小數字像素字形樣本（2026-10-16）：value = 人工看圖；px = 框內 RGB（列優先）', 'samples': samples})
+    return miss
+
+
+# ---- 道具格「新」紅標（itemname_match.new_tag / 遮罩比對；2026-10-16 p2 剛取出的誘餌格帶紅標）----
+ITEM_NEWTAG_SRC = [('clients/PrimalSA2/s5.png', 'bag', 0, '寵物誘餌', True), ('clients/PrimalSA2/s5.png', 'bag', 3, '大地的羈絆[地]', False)]
+
+
+def make_itemname_newtag_fixture() -> list:
+    """itemname_newtag.json：每格存格心周圍 (cx-55, cy-50, 112, 62) 的 RGB hex（名字區 + 紅標偵測框都在內）。回缺的檔案"""
+    import itemname_match
+    samples, miss = [], []
+    for rel, kind, slot, name, new in ITEM_NEWTAG_SRC:
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        _, cx, cy = itemname_match.cells_of(kind)[slot]
+        box = (cx - 55, cy - 50, 112, 62)
+        x, y, w, h = box
+        pts = [(x + i, y + j) for j in range(h) for i in range(w)]
+        px = grab(p, pts)
+        samples.append({'f': rel, 'kind': kind, 'slot': slot, 'name': name, 'new': new, 'box': list(box),
+                        'px': ''.join('%02x%02x%02x' % tuple(px[f'{a},{b}'][:3]) for a, b in pts)})
+    write('itemname_newtag.json', {'note': '道具格「新」紅標樣本（2026-10-16）：new = 人工看圖有沒有紅標；px = 框內 RGB（列優先）', 'samples': samples})
+    return miss
+
+
 # ---- 追蹤列表 ▲ / ▼ 捲動箭頭（quest.classify_arrows；2026-10-12 解救老爺爺冗餘捲動修正）----
 # 檔名 → 期望 {'up','down'}（None = 遮罩 / 不可信）；人工看圖確認
 QUESTLIST_SRC = {
@@ -346,11 +435,13 @@ def make_world_fixture() -> list:
 
 
 def main() -> int:
-    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del）
+    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del / bag_itempop / numglyph / itemname_newtag）
         names = sys.argv[sys.argv.index('--only') + 1].split(',')
         for n in names:
             miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture,
-                    'panel': make_panel_fixture, 'popup': make_popup_fixture, 'bag_del': make_bag_del_fixture}[n]()
+                    'panel': make_panel_fixture, 'popup': make_popup_fixture, 'bag_del': make_bag_del_fixture,
+                    'bag_itempop': make_bag_itempop_fixture, 'numglyph': make_numglyph_fixture,
+                    'itemname_newtag': make_itemname_newtag_fixture}[n]()
             print(n, '缺', miss) if miss else None
         return 0
     done, skipped = [], []
@@ -408,7 +499,8 @@ def main() -> int:
     miss_ql = make_questlist_fixture()
     done.append('questlist_px.json' + (f'（缺 {miss_ql}）' if miss_ql else ''))
     for n, fn in (('bag_slots_px.json', make_bag_slots_fixture), ('leader_badge_px.json', make_leader_badge_fixture), ('world_px.json', make_world_fixture),
-                  ('bag_del_px.json', make_bag_del_fixture)):
+                  ('bag_del_px.json', make_bag_del_fixture), ('bag_itempop_px.json', make_bag_itempop_fixture),
+                  ('numglyph_samples.json', make_numglyph_fixture), ('itemname_newtag.json', make_itemname_newtag_fixture)):
         m = fn()
         done.append(n + (f'（缺 {m}）' if m else ''))
     print('完成：', done)

@@ -147,6 +147,86 @@ seq = iter([(None, 0), (None, 0)])
 check('read_dia_stable：兩次一致才採用', catchbuy.read_dia_stable(lambda: next(seq), None) == 0)
 seq = iter([(1, 0), (1, 5), (1, 0)])
 check('read_dia_stable：不一致 / 讀不到 → None', catchbuy.read_dia_stable(lambda: next(seq), None) is None and catchbuy.read_dia_stable(lambda: (1, None), None) is None)
+
+# ---- 可抓捕數讀值（2026-10-16 p2 DKBO7：OCR 把 20 讀成 2 → 以為 2 < 5 按了「+」→ 讀「2 → 21」判非 +1 停手，白花 50,000）----
+import json  # noqa: E402
+import ass  # noqa: E402
+import numglyph  # noqa: E402
+import rebirth_pets as rp  # noqa: E402
+_seed = json.loads((HERE / 'fixtures' / 'num_glyph_tpl.json').read_text(encoding='utf-8'))['ass']
+_BG, _INK = (221, 221, 219), (30, 30, 30)
+
+
+def _ass_px(n):
+    """外掛捉寵設置可抓捕數框：用種子字形畫出 n（字距 2 px，y 308 起，同實機位置）"""
+    bx, by, bw, bh = numglyph.ASS_COUNT_BOX
+    pic = {(bx + i, by + j): _BG for j in range(bh) for i in range(bw)}
+    x = 1200
+    for ch in str(n):
+        g = _seed[ch][0]
+        for j, r in enumerate(g):
+            for i, c in enumerate(r):
+                if c == '1':
+                    pic[(x + i, 308 + j)] = _INK
+        x += len(g[0]) + 2
+    return pic
+
+
+class Ass:
+    """假外掛面板：可抓捕數 count（像素照 count 畫），OCR 固定讀 ocr_txt（模擬掉字）；點「+」→ count + 1"""
+    def __init__(self, count, ocr_txt):
+        self.count, self.ocr_txt, self.clicks = count, ocr_txt, []
+
+    def px(self, pts):
+        pic = _ass_px(self.count)
+        return [pic.get(p, _BG) for p in pts]
+
+    def gui(self, *a, note=''):
+        if a and a[0] == 'seq' and 'click 1295 315' in a[1]:
+            self.clicks.append(note)
+            self.count += 1
+        return ''
+
+
+_keep = (uikit.px, uikit.gui, uikit.sleep, rp.ocr_lines, rp.Tools._ass_open, ass.panel_open, ass.close_panel)
+try:
+    rp.Tools._ass_open = lambda self, role, tab: 0
+    ass.panel_open, ass.close_panel, uikit.sleep = (lambda: True), (lambda: True), (lambda s: None)
+    fa = Ass(20, '自動抓寵 自動存倉庫 可抓捕數: 2 +')
+    uikit.px, uikit.gui = fa.px, fa.gui
+    rp.ocr_lines = lambda box, *o: [(fa.ocr_txt or f'可抓捕數: {fa.count} +', 0, 0)]      # ocr_txt None = OCR 讀對
+    r = quiet(catchbuy.press_plus, 'DKBO7', 5, 0)
+    check('外掛顯示 20、OCR 讀成「2」：像素字形讀 20 ≥ 5 → 不按「+」（10-16 p2 白花 50,000 的情境）', r == (0, 20, 20) and not fa.clicks, f'{r} {fa.clicks}')
+    fa = Ass(20, '可抓捕數: 2 +')
+    uikit.px, uikit.gui = fa.px, fa.gui
+    r = quiet(catchbuy.press_plus, 'DKBO7', 25, 0)
+    check('要 25：按 1 次，讀 20 → 21（不是「2 → 21」）', r == (0, 20, 21) and len(fa.clicks) == 1, f'{r}')
+    k, msg, rc_, bought = catchbuy.buy_to('DKBO7', 21, lambda: (None, '0'), lambda role, lim=None, mb=None: quiet(catchbuy.press_plus, role, lim, mb),
+                                          lambda m: None, min_before=0)
+    check('buy_to 21：已是 21 → 不再按、ok', k == 'ok' and len(fa.clicks) == 1, msg)
+    # 樣板認不全（ass 字型清空）→ 只能靠 OCR：OCR「2」位數 ≠ 像素 2 字 → 讀不出 → 不按
+    _keep_tpl = numglyph.load_tpl
+    _empty = {k: ({} if k == 'ass' else v) for k, v in _keep_tpl().items()}
+    numglyph.load_tpl = lambda reload=False: _empty
+    fa = Ass(20, '可抓捕數: 2 +')
+    uikit.px, uikit.gui = fa.px, fa.gui
+    r = quiet(catchbuy.press_plus, 'DKBO7', 25, 0)
+    check('樣板認不出 + OCR 掉字「2」→ 按前讀不出（None）→ EXIT_BAIT、不按', r[0] == catchbuy.EXIT_BAIT and r[1] is None and not fa.clicks, f'{r}')
+    fa.ocr_txt = None
+    r = quiet(catchbuy.press_plus, 'DKBO7', 25, 0)
+    check('樣板認不出 + OCR 讀對 20（位數 = 2 字）→ 採用、按 1 次、20 → 21', r == (0, 20, 21) and len(fa.clicks) == 1, f'{r}')
+    numglyph.load_tpl = _keep_tpl
+    numglyph.load_tpl(reload=True)
+finally:
+    uikit.px, uikit.gui, uikit.sleep, rp.ocr_lines, rp.Tools._ass_open, ass.panel_open, ass.close_panel = _keep
+k, msg, *_ = catchbuy.buy('DKBO2', 1, lambda: (None, '0'), lambda r, l=None, m=None: (0, 20, None), lambda m: None)
+check('按後可抓捕數讀值不可信（None）→ fail「讀值不可信」（不當成非 +1 的數字）', k == 'fail' and '不可信' in msg, msg)
+for _s in json.loads((HERE / 'fixtures' / 'numglyph_samples.json').read_text(encoding='utf-8'))['samples']:
+    if _s['kind'] != 'ass':
+        continue
+    _x, _y, _w, _h = _s['box']
+    _cols = [(int(_s['px'][i * 6:i * 6 + 2], 16), int(_s['px'][i * 6 + 2:i * 6 + 4], 16), int(_s['px'][i * 6 + 4:i * 6 + 6], 16)) for i in range(_w * _h)]
+    check(f'外掛實際截圖 {_s["f"].split("/")[-1]} 可抓捕數像素讀 {_s["value"]}', numglyph.read_rows(numglyph.binarize(_cols, _w, _h, 'ass'), 'ass')['value'] == _s['value'])
 check('CLI：沒給 --confirm-buy 只印計畫、不碰遊戲', quiet(catchbuy.main, ['DKBO2', '5']) == 0)
 import petquest  # noqa: E402
 check('petquest 與 catchbuy 共用常數 / parse_money', petquest.PLUS_COST == catchbuy.PLUS_COST and petquest.PLUS_XY == catchbuy.PLUS_XY and petquest.parse_money is catchbuy.parse_money

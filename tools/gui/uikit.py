@@ -149,6 +149,18 @@ def transition_now() -> str | None:
     return screen_sigs.transition(dict(zip(pts, cols))) if cols is not None else None
 
 
+def known_popup_now() -> str | None:
+    """現場讀一次 watch 的全部點：面板上疊「已知彈窗」（screen_sigs.annotate 的 popup_*：數字鍵盤 / 數量輸入 / 確定取消 / 刪除確認 / 道具說明彈窗）→ 種類，否則 None。
+    只在 screen() 判 unknown 時才值得問（preflight 用：這些彈窗不是驗證視窗，不計次）"""
+    pts = list(dict.fromkeys(screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()))
+    cols = px(pts)
+    if cols is None:
+        return None
+    d = dict(zip(pts, cols))
+    ann = screen_sigs.annotate(d, screen_sigs.classify(d))
+    return next((a for a in ann if a.startswith('popup_') and a in screen_sigs.ANNOT_KNOWN), None)
+
+
 def hud_visible() -> bool:
     return sig_match(screen_sigs.SIG_HUD)
 
@@ -240,6 +252,11 @@ def preflight(src: str, fast: bool = True) -> int:
             if clock() - t_trans < screen_sigs.TRANSITION_MAX_S:
                 sleep(1.0)
                 continue
+        if st == 'unknown':                               # 背包 / 寵物面板上疊已知彈窗（道具說明 / 數量輸入 / 數字鍵盤 / 確定取消 / 刪除確認，2026-10-16）：
+            kp = known_popup_now()                        # 不是驗證視窗 → 不計次、不設停手旗標；後續開面板仍要看得到 HUD 才點（open_panel_ex），不會亂點
+            if kp:
+                mark(f'preflight({kp})')
+                return EXIT_OK
         i += 1
         if i < UNKNOWN_N:
             sleep(UNKNOWN_GAP_S)

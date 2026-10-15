@@ -374,6 +374,16 @@ class Session:
                 self.rc = _fail(EXIT_PANEL, '背包停在刪除模式，按 X / 取消刪除後仍回不到普通背包頁', 'bag-delmode-stuck')
                 return self
             self.opened = True                           # 殘留的面板當成自己開的：結束時關掉
+        elif not self.was_open and popup_open():
+            # 上次中斷 / 人手動留下的道具說明彈窗（背包被壓暗 ×0.45～0.60，BAGANY 外框不認得）：ESC 關掉就回普通背包頁
+            # （2026-10-16 p2：舊版走 preflight → 連 3 次 unknown → 誤設驗證停手旗標；watch 現在也認得 screen_sigs.bag_itempop）
+            log('背包上留著道具說明彈窗（上次中斷？）→ ESC 關掉（不按拆分 / 丟棄）')
+            close_popup()
+            if uikit.is_open(BAGANY):
+                self.opened = True                       # 殘留的面板當成自己開的：結束時關掉
+            else:
+                self.rc = _fail(EXIT_PANEL, '道具說明彈窗 ESC 後回不到背包頁', 'bag-popup-stuck')
+                return self
         elif not self.was_open:
             self.rc = uikit.preflight(SRC)
             if self.rc:
@@ -1064,9 +1074,49 @@ def parse_qty(texts) -> int | None:
     return int(m.group()) if m else None
 
 
+SPLIT_ICON_QTY_BOX = (690, 325, 60, 50)  # 數量輸入視窗上方道具圖示角落的白色疊數（2026-10-15 實機）
+
+
+def slot_count(i: int) -> dict:
+    """背包頁第 i 格右下角疊數（彈窗開之前讀；numglyph 'slot' 像素字形，唯讀）→ {'value': int | None, 'n': 字數}。
+    第一次樣板沒全認出就再讀一次（EXP 橫幅飄過）"""
+    import numglyph
+    r = {'value': None, 'n': -1}
+    for _ in range(2):
+        r = numglyph.read_box('slot', numglyph.slot_box(i))
+        if r['value'] is not None:
+            break
+        uikit.sleep(0.3)
+    return {'value': r['value'], 'n': r['n']}
+
+
+def split_qty_read(slot_read: dict | None = None) -> int | None:
+    """「數量輸入」視窗開著：讀整疊數量（2026-10-16 改，bag.stack_qty 與 rebirth_pets._split 共用）。
+    numglyph 'qty' 像素切字為主（字數一定準），樣板認不全才用 OCR（-Dark 0 / -Light 180 / 圖示角落疊數），**OCR 位數必須等於像素字數**才採用；
+    slot_read = 開彈窗前讀的背包格疊數（slot_count）：讀得到值就必須相等、只讀到字數就位數必須相等，否則不採用 → None（呼叫端不猜）。
+    根因：10-16 p2 _split 用 OCR 預設參數讀成空（rc 164）；同類 OCR 會把 20 讀成 2"""
+    import numglyph
+    reads = [lambda: parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Dark', '0', '-Zooms', '2,3,4')),   # 2026-10-15 實機：預設 Dark 150 讀成空，不二值化才讀得到
+             lambda: parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Light', '180', '-Zooms', '3,4')),
+             lambda: parse_qty(uikit.ocr(SPLIT_ICON_QTY_BOX, '-Light', '180', '-Zooms', '4,8'))]
+    r = numglyph.read_number('qty', numglyph.QTY_BOX, reads, uikit.sleep, tries=2, log=log)
+    q = r['value']
+    if q is None or not slot_read:
+        return q
+    sv, sn = slot_read.get('value'), slot_read.get('n') or 0
+    if sv is not None and sv != q:
+        log(f'數量輸入框讀 {q}，背包格疊數讀 {sv}：不一致 → 不採用')
+        return None
+    if sv is None and sn > 0 and len(str(q)) != sn:
+        log(f'數量輸入框讀 {q}（{len(str(q))} 位），背包格疊數 {sn} 個字：位數不一致 → 不採用')
+        return None
+    return q
+
+
 def stack_qty(i: int, want: str) -> int | None:
     """背包第 i 格（want）的疊數：開彈窗核對名稱 → 有「拆分」鈕才點、讀數量輸入視窗、按取消（不改變任何東西）；沒有「拆分」鈕 = 單個 → 1。
-    名稱不符 / 開不了 / 讀不出 → None（呼叫端不可當 0 或猜值）。疊數 OCR 框沿用 rebirth_pets 拆分實測框"""
+    名稱不符 / 開不了 / 讀不出 → None（呼叫端不可當 0 或猜值）。數量用 split_qty_read（像素字形 + 與背包格疊數交叉核對）"""
+    sc = slot_count(i)
     if not open_slot_popup(i):
         return None
     try:
@@ -1077,11 +1127,7 @@ def stack_qty(i: int, want: str) -> int | None:
             return 1
         if not _click(628, 648, POPUP, f'bag 讀疊數：拆分 {want}', wait_ms=700):
             return None
-        q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Dark', '0', '-Zooms', '2,3,4'))   # 2026-10-15 實機：預設 Dark 150 讀成空，不二值化才讀得到
-        if q is None:
-            q = parse_qty(uikit.ocr(SPLIT_QTY_BOX, '-Light', '180', '-Zooms', '3,4'))
-        if q is None:                                    # 個位數（例 5）輸入框 OCR 讀不到 → 讀視窗上方道具圖示角落的白色疊數（2026-10-15 實機）
-            q = parse_qty(uikit.ocr((690, 325, 60, 50), '-Light', '180', '-Zooms', '4,8'))
+        q = split_qty_read(sc)
         uikit.gui('seq', f'click {SPLIT_CANCEL[0]} {SPLIT_CANCEL[1]}; wait 600', note='bag 讀疊數：取消數量輸入')
         return q
     finally:

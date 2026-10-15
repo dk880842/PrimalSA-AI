@@ -93,13 +93,19 @@ finally:
 
 # ---- rebirth_pets.bait_take（2026-10-16 最簡流程）----
 keep = {k: getattr(bag, k) for k in ('Session', 'select_role', 'stacks_of', 'depot_take', 'depot_store', 'find_item', 'open_slot_popup', 'name_match',
-                                     'popup_name', '_ocr_join', '_click', 'close_popup', 'read_slot_name')}
+                                     'popup_name', '_ocr_join', '_click', 'close_popup', 'read_slot_name', 'slot_count', 'split_qty_read')}
 keep_ocr, keep_gui, keep_fail, keep_open = rp.ocr_lines, uikit.gui, uikit.fail, uikit.is_open
 calls, state = [], {'stacks': [], 'qty': '50'}
+order = []
 try:
-    bag.Session, bag.select_role = _S, lambda r: 0
+    bag.Session = _S
+    bag.select_role = lambda r: order.append(('select', r)) or 0
     bag.stacks_of = lambda w: list(state['stacks'])
-    bag.find_item = lambda n, **k: 0 if state['stacks'] else None           # 背包有沒有誘餌（只看格名）
+    bag.find_item = lambda n, **k: order.append(('find', n)) or (0 if state['stacks'] else None)   # 背包有沒有誘餌（只看格名）
+    # 數量讀取（2026-10-16 改像素字形 + 背包格疊數交叉核對，bag.split_qty_read；這裡只驗流程，讀法本身見下一段）
+    qty_reads = []
+    bag.slot_count = lambda i: {'value': int(state['qty']) if state['qty'] else None, 'n': len(state['qty'])}
+    bag.split_qty_read = lambda sc=None: qty_reads.append(sc) or (int(state['qty']) if state['qty'] else None)
     bag.depot_take = lambda *a, **k: calls.append(('take',)) or state.update(stacks=[(0, int(state['qty']))]) or 0
     bag.depot_store = lambda role, w, d='public', **k: calls.append(('store', k)) or 0
     bag.open_slot_popup = lambda i: True
@@ -108,21 +114,22 @@ try:
         raise AssertionError('不該再做名稱 / 按鈕列 OCR')
     bag.name_match, bag.popup_name, bag._ocr_join = boom, boom, boom
     bag._click, bag.close_popup, bag.read_slot_name = lambda *a, **k: calls.append(('click', a[0], a[1])) or True, lambda: True, lambda i, d=False: rp.BAIT
-    ocr_boxes = []
-    rp.ocr_lines = lambda box, *o: ocr_boxes.append(box) or ([(state['qty'], 0, 0)] if state['qty'] else [])
+    rp.ocr_lines = lambda box, *o: (_ for _ in ()).throw(AssertionError('拆分數量不准再直接 OCR（改 bag.split_qty_read）'))
     uikit.gui = lambda *a, **k: calls.append(('gui', a[1] if len(a) > 1 else a)) or ''
     uikit.fail = lambda src, rc, msg: rc
     uikit.is_open = lambda *a, **k: True
     t = rp.Tools()
 
     def run(stacks, keepn=4, qty='50', keep_short=False):
-        calls.clear(); ocr_boxes.clear()
+        calls.clear(); qty_reads.clear(); order.clear()
         state['stacks'], state['qty'] = stacks, qty
         with contextlib.redirect_stdout(io.StringIO()):
             return t.bait_take('DKBO2', keepn, keep_short)
 
     rc = run([(3, 4)])
     check('背包已剛好 4 個 → 跳過（不取、不拆、不存、不開彈窗）', rc == 0 and not calls and t.split_noop, str(calls))
+    check('先選人（DKBO2）再讀格名找誘餌（10-16 p2 根因：沒選人就讀到當前登錄角色的背包）',
+          order[:2] == [('select', 'DKBO2'), ('find', rp.BAIT)], str(order))
     rc = run([(2, 1), (3, 3)])
     check('總數剛好 4（兩疊）也跳過', rc == 0 and not calls)
     rc = run([(0, 4), (1, 46)], qty='50')
@@ -132,8 +139,8 @@ try:
     check('多疊 10 + 20 也一律全存回重取（不回 95）', rc == 0 and calls[0] == ('store', {'all_copies': True}) and calls[1] == ('take',))
     rc = run([])
     check('第一次（背包沒誘餌）：不讀疊數、取整疊 50 → 拆 4（只讀 1 次數量）→ 存 46',
-          rc == 0 and calls[0] == ('take',) and calls[-1] == ('store', {'keep_ok': True, 'want_count': 46}) and ocr_boxes == [(670, 430, 170, 45)]
-          and any('755 451' in str(c) for c in calls) and any('610 545' in str(c) for c in calls), str(calls) + str(ocr_boxes))
+          rc == 0 and calls[0] == ('take',) and calls[-1] == ('store', {'keep_ok': True, 'want_count': 46}) and qty_reads == [{'value': 50, 'n': 2}]
+          and any('755 451' in str(c) for c in calls) and any('610 545' in str(c) for c in calls), str(calls) + str(qty_reads))
     rc = run([], qty='4')
     check('整疊 == keep → 取消 828,545、不存回、split_noop', rc == 0 and t.split_noop and calls[-1] == ('gui', 'click 828 545; wait 600') and not any(c[0] == 'store' for c in calls), str(calls))
     rc = run([], qty='2')
@@ -154,6 +161,66 @@ finally:
     for k, v in keep.items():
         setattr(bag, k, v)
     rp.ocr_lines, uikit.gui, uikit.fail, uikit.is_open = keep_ocr, keep_gui, keep_fail, keep_open
+
+# ---- 拆分數量 / 背包格疊數：像素字形讀值（2026-10-16 p2 DKBO7 整疊 20：OCR 讀空 → 164；同類 OCR 把 20 讀成 2）----
+import json  # noqa: E402
+import numglyph  # noqa: E402
+_nfx = json.loads((HERE / 'fixtures' / 'numglyph_samples.json').read_text(encoding='utf-8'))
+
+
+def _paint(f, kind):
+    s = next(x for x in _nfx['samples'] if x['f'] == f and x['kind'] == kind)
+    x, y, w, h = s['box']
+    hx = s['px']
+    return {(x + i % w, y + i // w): (int(hx[i * 6:i * 6 + 2], 16), int(hx[i * 6 + 2:i * 6 + 4], 16), int(hx[i * 6 + 4:i * 6 + 6], 16))
+            for i in range(w * h)}
+
+
+keep_px, keep_ocr2, keep_sleep, keep_tpl = uikit.px, uikit.ocr, uikit.sleep, numglyph.load_tpl
+painted, ocr_seq = {}, []
+try:
+    uikit.px = lambda pts: [painted.get(p, (0, 0, 0)) for p in pts]
+    uikit.sleep = lambda s: None
+    uikit.ocr = lambda box, *o: [ocr_seq.pop(0)] if ocr_seq else []
+    painted.update(_paint('clients/PrimalSA2/s2.png', 'qty'))
+    painted.update(_paint('clients/PrimalSA2/s5.png', 'slot'))
+    with contextlib.redirect_stdout(io.StringIO()):
+        sc = bag.slot_count(0)
+        ocr_seq[:] = ['2', '2', '2']
+        q = bag.split_qty_read({'value': 20, 'n': 2})
+    check('背包格疊數（s5 第 1 格，帶「新」紅標）像素讀 21', sc == {'value': 21, 'n': 2}, str(sc))
+    check('拆分數量框（s2 實際截圖 20）：樣板讀 20，不理 OCR 的「2」', q == 20, str(q))
+    with contextlib.redirect_stdout(io.StringIO()):
+        q = bag.split_qty_read(sc)
+    check('數量框 20 ≠ 背包格疊數 21 → 不採用（None）', q is None, str(q))
+    with contextlib.redirect_stdout(io.StringIO()):
+        q = bag.split_qty_read({'value': None, 'n': 1})
+    check('背包格只讀到 1 個字、數量框 2 位數 → 不採用', q is None, str(q))
+    # 樣板認不出（qty 字型樣板清空）→ 只能靠 OCR：位數 == 像素字數（2）才採用
+    _empty = {k: ({} if k == 'qty' else v) for k, v in keep_tpl().items()}
+    numglyph.load_tpl = lambda reload=False: _empty
+    ocr_seq[:] = ['2', '2', '2', '2', '2', '2']
+    with contextlib.redirect_stdout(io.StringIO()):
+        q = bag.split_qty_read()
+    check('樣板認不出 + OCR 一直讀「2」（位數 1 ≠ 像素 2 字）→ None（不猜、不當 2）', q is None, str(q))
+    ocr_seq[:] = ['2', '20']
+    with contextlib.redirect_stdout(io.StringIO()):
+        q = bag.split_qty_read()
+    check('樣板認不出 + 第二組 OCR 讀 20（位數 = 2 字）→ 採用 20', q == 20, str(q))
+    numglyph.load_tpl = keep_tpl
+    numglyph.load_tpl(reload=True)
+    check('採用的 OCR 讀值有學進字形（測試暫存檔）', numglyph.LEARN_FILE.exists() and 'psatest-' in str(numglyph.LEARN_FILE))
+    rows = numglyph.binarize([painted.get((670 + i, 430 + j), (0, 0, 0)) for j in range(45) for i in range(170)], 170, 45, 'qty')
+    check('digits_ok：位數 = 字數才 True', numglyph.digits_ok(2, 20) and not numglyph.digits_ok(2, 2) and not numglyph.digits_ok(0, 0)
+          and numglyph.read_rows(rows, 'qty')['n'] == 2)
+    for s in _nfx['samples']:
+        x, y, w, h = s['box']
+        hx = s['px']
+        cols = [(int(hx[i * 6:i * 6 + 2], 16), int(hx[i * 6 + 2:i * 6 + 4], 16), int(hx[i * 6 + 4:i * 6 + 6], 16)) for i in range(w * h)]
+        r = numglyph.read_rows(numglyph.binarize(cols, w, h, s['kind']), s['kind'], keep_tpl())
+        check(f'numglyph 實際截圖 {s["f"].split("/")[-1]} {s["kind"]} = {s["value"]}', r['value'] == s['value'] and r['n'] == len(str(s['value'])), str(r))
+finally:
+    uikit.px, uikit.ocr, uikit.sleep, numglyph.load_tpl = keep_px, keep_ocr2, keep_sleep, keep_tpl
 
 # ---- 雙擊存取（未實機）----
 names = ('Session', 'select_role', 'find_item', 'stacks_of', 'stack_qty', 'open_depot', '_click', 'popup_open', 'popup_name', 'name_match', '_ocr_join',

@@ -584,7 +584,15 @@ class Tools:
         import bag
         self.split_noop = False
         self.split_short = None
-        have = bag.find_item(BAIT, popup_fallback=False) is not None   # 只讀格名，不開彈窗
+        # 先選人再讀格名（2026-10-16 p2 卡坦 catch2 根因：舊版沒選人就 find_item → 讀到背包面板剛開時顯示的「當前登錄」角色 DKBO6，
+        # DKBO7 背包明明有 20 個誘餌卻當成沒有 → 去公共倉庫找不到 → 「誘餌現有 0」→ 外掛「+」白買）
+        with bag.Session() as s:
+            if s.rc:
+                return s.rc
+            rc = bag.select_role(role)
+            if rc:
+                return rc
+            have = bag.find_item(BAIT, popup_fallback=False) is not None   # 只讀格名（名字樣板 / 縮圖 / 格名 OCR），不開彈窗
         if have:                                                  # 重跑才會有：讀疊數，剛好 keep 跳過，否則全存回重取
             rc, stacks = self._bait_stacks(role)
             if rc:
@@ -666,16 +674,16 @@ class Tools:
             i = slot if slot is not None else bag.find_item(name)
             if i is None:
                 return uikit.fail(SRC, bag.EXIT_ITEM, f'{role} 背包找不到 {name}（拆分）')
+            sc = bag.slot_count(i)                                # 開彈窗前先讀背包格右下角疊數（像素），拆分框讀值要跟它一致
             if not bag.open_slot_popup(i):
                 return uikit.fail(SRC, bag.EXIT_PANEL, '拆分：點道具沒開彈窗')
             if not bag._click(628, 648, bag.POPUP, f'rebirth_pets 拆分 {name}', wait_ms=700):
                 return uikit.fail(SRC, bag.EXIT_PANEL, '拆分：彈窗特徵消失，沒點拆分')
-            mq = re.search(r'\d{1,3}', ' '.join(t for t, _, _ in ocr_lines((670, 430, 170, 45), '-Zooms', '2,3')))
-            qty = int(mq.group()) if mq else None
+            qty = bag.split_qty_read(sc)                          # 2026-10-16：舊版 OCR 預設參數把 20 讀成空 → 164；改像素字形 + 交叉核對
             if qty is None:
                 uikit.gui('seq', 'click 828 545; wait 600', note='rebirth_pets 拆分：讀不到數量，取消')
                 uikit.snap('rebirth-split-dialog')
-                return uikit.fail(SRC, bag.EXIT_VERIFY, f'拆分：整疊數量讀不出（不猜）')
+                return uikit.fail(SRC, bag.EXIT_VERIFY, f'拆分：整疊數量讀不出 / 與背包格疊數 {sc.get("value")} 不一致（不猜）')
             self.split_qty = qty
             if qty < n:                                           # 整疊不夠：取消，呼叫端決定留背包或存回
                 uikit.gui('seq', 'click 828 545; wait 600', note='rebirth_pets 拆分：整疊比要的少，取消')

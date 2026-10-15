@@ -15,6 +15,7 @@ rebirth_pets（--confirm-buy-catch）才會進來。2026-10-15 起不讀石幣�
   read_money_stable(read_fn, sleep_fn)            （舊，不再用於買）連續兩次讀到同一個非 0 石幣才採用
   dia_from_rows(rows)                             鑽石點陣 → '0' / 'px:指紋' / None（純函式）
   read_dia_stable / money()                       開寵物面板讀鑽石點陣（兩次一致才採用）→ (None, 鑽石讀值)；石幣不讀
+  read_count()                                    可抓捕數：numglyph 像素切字（樣板）為主，OCR 只在位數 == 像素字數時採用（2026-10-16：OCR 把 20 讀成 2）
   press_plus(role, limit=None)                    外掛 → 角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)
                                                   limit：按前可抓捕數已 ≥ limit 就不點（回 (0, 前, 前)）
   buy(role, n, money_fn, press_fn, log)           固定按 n 次 → (kind, msg, rc, bought)
@@ -145,9 +146,24 @@ def money() -> tuple:
         return None, read_dia_stable(lambda: (None, read_dia_px()), uikit.sleep)
 
 
+def read_count(log=None):
+    """外掛捉寵設置開著：讀可抓捕數 → int | None（2026-10-16）。像素切字為主（numglyph 'ass'：字數一定準、樣板認得就直接用），
+    樣板認不全才用 OCR，且 **OCR 位數必須等於像素字數**（10-16 p2 OCR 把 20 讀成 2 → 按了「+」讀「2 → 21」誤判停手、白花 50,000）。
+    不再用 zero_ok（「有字樣沒數字 = 0」）：0 由樣板認；位數不合 / 讀不出 → None（呼叫端不按、停手）"""
+    import numglyph
+    import rebirth_pets as rp
+
+    def ocr(*opts):
+        return lambda: parse_count_zero(''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, *opts)))
+    r = numglyph.read_number('ass', numglyph.ASS_COUNT_BOX, [ocr('-Zooms', '2,3,4'), ocr('-Dark', '0', '-Zooms', '3,4')],
+                             uikit.sleep, tries=2, log=log)
+    return r['value']
+
+
 def press_plus(role, limit=None, min_before=None) -> tuple:
     """外掛 → 選角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)。按前讀不到可抓捕數 → 不點。
-    min_before：按前可抓捕數低於這個值（例：背包誘餌數 → 外掛數字沒把背包誘餌算進去）→ 不點、回 (EXIT_BAIT, 前, None)"""
+    min_before：按前可抓捕數低於這個值（例：背包誘餌數 → 外掛數字沒把背包誘餌算進去）→ 不點、回 (EXIT_BAIT, 前, None)。
+    讀值一律走 read_count（像素字數核對位數）；按後不是 +1 時等 0.6 秒再讀一次（數字晚一點才更新），仍不是才回給 _one 判停手"""
     import ass
     import rebirth_pets as rp
     rt = rp.Tools()
@@ -155,9 +171,7 @@ def press_plus(role, limit=None, min_before=None) -> tuple:
     try:
         if rc:
             return rc, None, None
-        def read(zero_ok=False):
-            return parse_count_zero(''.join(t for t, _, _ in rp.ocr_lines(rp.OCR_TAB_CATCH, '-Zooms', '2,3,4')), zero_ok)
-        before = read(zero_ok=True)
+        before = read_count(print)
         if before is None or not ass.panel_open():
             return EXIT_BAIT, before, None
         if limit is not None and before >= limit:
@@ -165,7 +179,10 @@ def press_plus(role, limit=None, min_before=None) -> tuple:
         if min_before is not None and before < min_before:
             return EXIT_BAIT, before, None
         uikit.gui('seq', f'click {PLUS_XY[0]} {PLUS_XY[1]}; wait 800', note=f'{role} 捉寵設置「+」買 1 個可抓捕數（petquest / rebirth_pets --confirm-buy-catch）')
-        after = read()
+        after = read_count(print)
+        if after != before + 1:
+            uikit.sleep(0.6)
+            after = read_count(print)
         return 0, before, after
     finally:
         try:
@@ -192,7 +209,9 @@ def _one(role, money_fn, press_fn, log, limit=None, min_before=None):
         return 'pass', f'{role} 外掛「+」失敗 rc={rc}（按前可抓捕數 {before}）', rc, None, False
     if limit is not None and after == before and before is not None and before >= limit:
         return 'ok', '', 0, None, False                            # 已夠，沒按
-    if after != (before or 0) + 1:
+    if before is None or after is None:                              # 位數核對不過（read_count 回 None）：已按了，但不能確認是 +1 → 停手
+        return 'fail', f'{role}「+」按了，可抓捕數讀值不可信（前 {before}、後 {after}；像素字數與 OCR 位數不合）→ 停手', 0, None, True
+    if after != before + 1:
         return 'fail', f'{role}「+」按了可抓捕數 {before} → {after}（不是 +1）→ 停手', 0, None, True
     _s1, d1 = money_fn()
     rec = {'role': role, 'diamond': [d0, d1]}

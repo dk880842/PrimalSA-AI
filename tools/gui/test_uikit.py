@@ -234,8 +234,17 @@ check('preflight 主畫面 = 0', uikit.preflight('t') == 0)
 g = install(Game(unknown=True))
 g.painted[screen_sigs.BLACK_PTS[0]] = (90, 90, 90)          # 假畫面其餘點是黑色 = 會被當全黑轉場；點亮一點 = 真的不認得
 rc = uikit.preflight('t')
-check('preflight unknown 連 3 次 → 9（每次多讀一次轉場特徵）', rc == 9 and g.reads == 6 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
+check('preflight unknown 連 3 次 → 9（每次多讀轉場特徵 + 已知彈窗各一次）', rc == 9 and g.reads == 9 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
 check('preflight unknown 時 0 點擊', g.clicks == [])
+# 背包上疊道具說明彈窗（2026-10-16 p2 02:40:05 誤停那張，真實取點）：已知彈窗 → 0、不計次、不點
+_ifx = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'bag_itempop_px.json').read_text(encoding='utf-8'))
+_ipts = [tuple(p) for p in _ifx['points']]
+for _f, _want in (('clients/PrimalSA2/watch-alerts/unknown-1792089604.png', 0), ('clients/PrimalSA2/s2.png', 0), ('kr322.png', 9)):
+    _h = next(s for s in _ifx['samples'] if s['f'] == _f)['px']
+    g = install(Game(unknown=True))
+    g.painted.update({pt: (int(_h[i * 6:i * 6 + 2], 16), int(_h[i * 6 + 2:i * 6 + 4], 16), int(_h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(_ipts)})
+    rc = uikit.preflight('t')
+    check(f'preflight {_f.split("/")[-1]}（{"道具彈窗 / 數量輸入窗" if _want == 0 else "提示窗"}）→ {_want}、0 點擊', rc == _want and g.clicks == [], f'rc={rc}')
 
 # 轉場（載入圖 / 全黑）：不計次、等它過去；超過 TRANSITION_MAX_S 才照舊計次 → 9
 _bfx = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'loading_bar_px.json').read_text(encoding='utf-8'))

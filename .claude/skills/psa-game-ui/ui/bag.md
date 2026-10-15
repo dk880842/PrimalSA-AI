@@ -27,6 +27,8 @@
 
 **2026-10-16 誘餌取 / 拆最簡流程（使用者「拆分怎那麼繁瑣」，離線 test_bait_stacks.py）**：每人 ① 背包有誘餌才讀疊數（`find_item` 只讀格名；沒有 = 第一次跑不讀）：總數剛好 keep → 跳過；不是 keep → 全存回公共（`all_copies`，不再有「多疊沒剛好 → 95」）② 公共取整疊（沒有 → keep_short 回報 0、92）③ `_split`：開彈窗 → 拆分 628,648 → **只讀整疊數量（670,430）**：< keep 取消 828,545（keep_short 留背包 / 否則全存回，92）、== keep 取消不存回、> keep 鍵盤輸入 keep → 確認 → 確定；**不再**核對彈窗名稱 / 按鈕列 / 數量視窗標題 ④ 剩的 qty−keep 那疊存回公共。
 
+**2026-10-16 p2 卡坦 catch2 修正（離線 test_bait_stacks.py / test_itemname_match.py）**：① `bait_take` 先 `select_role` 再 `find_item`（舊版沒選人，讀到背包剛開時的「當前登錄」角色 → DKBO7 有 20 個誘餌卻判 0 → 去公共找不到 → 「+」白買）；② 整疊數量改 `bag.split_qty_read`（`stack_qty` 與 `_split` 共用）：`numglyph` 像素切字（字數一定準；樣板 fixtures/num_glyph_tpl.json + 學到的 tools/.cache/num-tpl.json）為主，樣板認不全才用 OCR 且**位數必須 = 像素字數**，再與開彈窗前讀的背包格右下角疊數（`bag.slot_count`）比對，不一致 → 不採用、95（舊版 OCR 預設參數把 20 讀空 → 164）；③ 道具格左上「新」紅標：`itemname_match.new_tag` 偵測到就把名字區左側 20×40 與樣板一起遮掉再比（任何一欄都認得，不靠帶紅標的變體）；④ 道具說明彈窗（背包壓暗 ×0.45～0.60）watch / uikit.preflight 認得（`screen_sigs.bag_itempop`，見 ui/README.md「watch 認得的畫面」），`bag.Session` 開頭看到殘留彈窗先 ESC。
+
 **同名多疊（2026-10-15，未實機，離線 `test_bait_stacks.py`）**：`bag.stack_qty(格, 名)`（彈窗 → 拆分 → 讀數量輸入視窗疊數 → 取消；沒有拆分鈕 = 1）、`bag.stacks_of(名)`（每疊 [(格, 疊數)]）、`bag.pick_stack`（純函式）。`bag.depot_store(..., pick='largest'|'smallest', want_count=N)`：依疊數選格，存之前再讀一次疊數，對不上 / 讀不出 → 不按存入回 95，沒有符合的疊 → 92（根因：舊版 find_item 回第一格，背包有「留 4 個」與「存回 46 個」兩疊時存錯疊）。`rebirth_pets.bait_take` 重跑冪等：背包誘餌總數已 = 要留的數量 → 不取不拆（舊版對剛好那疊仍拆分 → 沒新疊 → 95 / 164 / 175）；單疊 > keep → 拆分後存 `want_count=原疊−keep` 那疊；多疊但沒有剛好 keep 那疊 → 95 停手；疊數讀不出 → 95 不猜。`bait_return` 多疊全存回（all_copies）。
 入口：背包 → 右側「倉庫」1318,467。左半是倉庫格（5×4，倉庫 1/1 頁），右半是背包格（座標同背包）。
 - 分頁：**個人 307,200**（每個角色各自一個）/ **公共 547,200**（全帳號共用，同種道具會疊加，例 5 個角色的誘餌疊成 50）。

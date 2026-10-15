@@ -289,7 +289,7 @@ check('全黑轉場：annotate=[black]、label=黑畫面（轉場）', c['state'
 bk[S.BLACK_PTS[3]] = (S.BLACK_MAX, 0, 0)
 check('黑畫面：任一點亮度 ≥ BLACK_MAX → 不是黑畫面', S.annotate(bk, S.classify(bk)) == [])
 check('黑 / 載入只在 classify=unknown 時附註（idle 畫面剛好暗不算）', S.annotate({**bk, **{pt: (0, 0, 0) for pt in S.BLACK_PTS}}, {'state': 'idle'}) == [])
-check('ANNOT_KNOWN = login / charsel / loading / black + 三種面板上已知彈窗 + 背包刪除確認窗', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok'})
+check('ANNOT_KNOWN = login / charsel / loading / black + 三種面板上已知彈窗 + 背包刪除確認窗 + 道具說明彈窗', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item'})
 
 # ---- 6. 面板上疊已知彈窗（2026-10-12，watch 誤報 #243 #244 #254 #261 #264）----
 PP = json.loads((HERE / 'fixtures' / 'popup_px.json').read_text(encoding='utf-8'))
@@ -459,6 +459,52 @@ check('BAG_DELMODE_SIG 沒有點在 EXP 橫幅區', not [p for p in S.BAG_DELMOD
 _m = dict(_dsmp['del0.png'])
 _m[S.BAG_DELMODE_SIG[1][:2]] = (90, 200, 60)
 check('刪除模式 1 點被蓋 → 仍認；2 點 → 不認', S.bag_delmode(_m) and not S.bag_delmode({**_m, S.BAG_DELMODE_SIG[2][:2]: (0, 0, 0)}))
+
+# ---- 背包道具說明彈窗（2026-10-16 p2 道具彈窗開著 > 10 秒三次誤設驗證停手旗標）----
+_ifx = _json.loads((HERE / 'fixtures' / 'bag_itempop_px.json').read_text(encoding='utf-8'))
+check('bag_itempop fixture 取樣點 == watch 讀的點；watch 的點含 itempop_points',
+      [tuple(p) for p in _ifx['points']] == _dpts and set(S.itempop_points()) <= set(_dpts))
+_ibad, _icnt, _ismp = [], {True: 0, False: 0}, {}
+for smp in _ifx['samples']:
+    px = _hexpx(smp['px'])
+    _ismp[smp['f']] = px
+    c = S.classify(px)
+    a = S.annotate(px, c)
+    want = smp['expect']
+    _icnt[want] += 1
+    ok_ = S.bag_itempop(px) == want
+    if want:                     # watch：不算 unknown、標「面板：背包＋道具說明彈窗」
+        ok_ = ok_ and c['state'] == 'unknown' and a == ['popup_item', 'over_bag'] and S.label(c, a) == '面板：背包＋道具說明彈窗'
+    else:
+        ok_ = ok_ and 'popup_item' not in a
+    if not ok_:
+        _ibad.append((smp['f'], c['state'], a))
+check(f'bag_itempop fixture：道具彈窗 {_icnt[True]} 張（消耗品 ×0.60 / 裝備 ×0.45 壓暗、倉庫取出 / 存入、跑馬燈蓋標題、今天 p2 三張誤停）全認、'
+      f'負例 {_icnt[False]} 張（壓暗背包上的數量輸入 / 刪除確認窗、普通背包、提示窗、外掛）都不認',
+      not _ibad and _icnt[True] >= 22 and _icnt[False] >= 10, str(_ibad[:4]))
+check('數量輸入窗（拆分，s2 整疊 20）仍是 popup_qty（watch 不算 unknown）',
+      S.annotate(_ismp['clients/PrimalSA2/s2.png'], S.classify(_ismp['clients/PrimalSA2/s2.png'])) == ['popup_qty', 'over_bag'])
+_p = _ismp['clients/PrimalSA2/watch-alerts/unknown-1792089604.png']
+check('10-16 02:40 誤停那張：bag_itempop 認得', S.bag_itempop(_p))
+_g = dict(_p)
+for pt in S.ITEMPOP_BTN_PTS:
+    _g[pt] = (53, 41, 34)                        # 沒有藍色按鈕（只有字 / 圖片選項的窗）
+check('拿掉藍色按鈕 → 不認（答題 / 驗證視窗沒有道具彈窗的按鈕列）', not S.bag_itempop(_g) and 'popup_item' not in S.annotate(_g, S.classify(_g)))
+_g = dict(_p)
+for pt in S.ITEMPOP_FRAMES[0][:2]:
+    _g[pt] = (53, 41, 34)
+check('金框 2 點不符 → 不認', not S.bag_itempop(_g))
+_g = dict(_p)
+for x, y, r, g, b in S.BAG_ITEMPOP_BG[:2]:
+    _g[(x, y)] = (r, g, b)                       # 窗外 2 點沒壓暗（不是模態彈窗）
+check('窗外背包 2 點沒壓暗 → 不認', not S.bag_itempop(_g))
+_g = {pt: tuple(min(255, int(v * 1.55)) for v in c) for pt, c in _p.items()}
+check('整張變亮（壓暗比例 ×0.93，超出 0.40～0.66）→ 不認', not S.bag_itempop(_g))
+_g = dict(_p)
+_g[S.BAG_ITEMPOP_BG[3][:2]] = (0, 0, 0)
+check('窗外 1 點被蓋 → 仍認', S.bag_itempop(_g))
+check('bag_itempop 缺點 → False', not S.bag_itempop({}))
+check('ANNOT_KNOWN 含 popup_item', 'popup_item' in S.ANNOT_KNOWN)
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

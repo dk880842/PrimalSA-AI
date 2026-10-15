@@ -172,14 +172,66 @@ def scores(img_int: int, kind: str, tpl: dict) -> dict:
     return out
 
 
-def match_rows(rows, kind: str, tpl: dict | None = None) -> dict:
-    """二值列 → {'name': 名稱或 None, 'score', 'second', 'ink'}（白點不足 NAME_INK_MIN → name None）"""
+# ---- 「新」道具紅標（2026-10-16 p2 卡坦：剛從倉庫取出的誘餌格左上有紅色三角標 + 左邊紅條，蓋住名字區左側）----
+# 紅標位置固定（相對格心）：上緣橫條 cy-47～cy-38、左側直條 x cx-46～cx-36 / y 到 cy-10（背包；倉庫格小一圈，往內 3 px）。
+# 偵測 = 左側直條中段紅點夠多；有紅標的格比對時「名字圖與樣板一起」清掉名字區左側 NEW_MASK 欄（不管樣板是不是帶紅標學的），
+# 只比剩下的字 → 同一道具不論有沒有紅標、在哪一欄都認得（舊版只靠「帶紅標的變體」，換一欄就認不出）。
+NEW_TAG_PROBE = {'bag': (-45, -26, 7, 14), 'depot': (-42, -23, 7, 14)}      # 左側紅條取樣框（相對格心 dx, dy, w, h）
+NEW_TAG_MIN = 40                                                            # 98 點中紅點下限（實測紅標 ≥ 90、一般格 0）
+NEW_MASK = {'bag': (20, 40), 'depot': (20, 40)}                              # 名字區左上清掉的 (寬, 高)（box 座標；紅條右緣 cx-36 = box x 16）
+
+
+def _red(c) -> bool:
+    return c is not None and c[0] > 150 and c[1] < 100 and c[2] < 100
+
+
+def new_tag(img, kind: str, slot: int) -> bool:
+    """這格左上有「新」紅標（純讀像素）"""
+    get = imgmatch.as_getter(img)
+    _, cx, cy = cells_of(kind)[slot]
+    dx, dy, w, h = NEW_TAG_PROBE[kind]
+    return sum(1 for j in range(h) for i in range(w) if _red(get(cx + dx + i, cy + dy + j))) >= NEW_TAG_MIN
+
+
+def mask_rows(rows, kind: str) -> list:
+    """名字區左上 NEW_MASK 範圍清成 0（紅標蓋住的地方）"""
+    mw, mh = NEW_MASK[kind]
+    return [('0' * mw + r[mw:]) if y < mh else r for y, r in enumerate(rows)]
+
+
+def _masked_tpl(tpl: dict, kind: str) -> dict:
+    """樣板同樣清掉 NEW_MASK 範圍（hex → rows → mask → hex；依 book 物件快取）"""
+    book = tpl.get(kind) or {}
+    n = sum(len(v) for v in book.values())
+    hit = _MASKED.get(kind)
+    if hit and hit[0] is book and hit[1] == n:
+        return hit[2]
+    w, h = BOXES[kind][2], BOXES[kind][3]
+    stride = w + 2 * petmatch.PAD
+    mw, mh = NEW_MASK[kind]
+    m = 0
+    for y in range(mh):
+        for x in range(mw):
+            m |= 1 << ((y + petmatch.PAD) * stride + x + petmatch.PAD)
+    out = {kind: {nm: [format(int(hx, 16) & ~m, 'x') for hx in vs] for nm, vs in book.items()}}
+    _MASKED[kind] = (book, n, out)
+    return out
+
+
+_MASKED: dict = {}
+
+
+def match_rows(rows, kind: str, tpl: dict | None = None, new: bool = False) -> dict:
+    """二值列 → {'name': 名稱或 None, 'score', 'second', 'ink'}（白點不足 NAME_INK_MIN → name None）。
+    new = 這格有「新」紅標 → 名字圖與樣板都清掉紅標範圍再比（mask_rows / _masked_tpl）"""
     tpl = load_tpl() if tpl is None else tpl
     ink = petmatch.ink(rows)
     if ink < NAME_INK_MIN or not tpl.get(kind):
         return {'name': None, 'score': 0.0, 'second': 0.0, 'ink': ink}
+    if new:
+        rows, tpl = mask_rows(rows, kind), _masked_tpl(tpl, kind)
     name, best, second = namematch.decide(scores(petmatch.pack(rows), kind, tpl), HIT_MIN, MARGIN)
-    return {'name': name, 'score': round(best, 3), 'second': round(second, 3), 'ink': ink}
+    return {'name': name, 'score': round(best, 3), 'second': round(second, 3), 'ink': ink, 'new': new}
 
 
 def _cell_state(get, kind: str, slot: int):
@@ -197,7 +249,7 @@ def read_cell(img, kind: str, slot: int, tpl: dict | None = None, state=...) -> 
         return {'slot': slot, 'state': 'occluded', 'name': None, 'score': 0.0, 'second': 0.0, 'ink': 0}
     if st is False:
         return {'slot': slot, 'state': 'empty', 'name': None, 'score': 0.0, 'second': 0.0, 'ink': 0}
-    r = match_rows(rows_at(get, kind, slot), kind, tpl)
+    r = match_rows(rows_at(get, kind, slot), kind, tpl, new_tag(get, kind, slot))
     r['slot'] = slot
     r['state'] = 'noname' if r['ink'] < NAME_INK_MIN else ('name' if r['name'] else 'unknown')
     return r
