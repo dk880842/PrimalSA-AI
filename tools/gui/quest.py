@@ -1290,6 +1290,10 @@ def panel_visible() -> bool:
     return len(cols) == len(pts) and all(close(c, (r, g, b)) for c, (_, _, r, g, b, _t) in zip(cols, SIG_PANEL))
 
 
+# 2026-10-15 p2 實測（使用者：關閉鈕可以拖移）：在「關閉」鈕上按住拖到別處，整條列跟著移位置，之後每場戰鬥列都出現在新位置（不再蓋住切換）。
+# 起點 (510,780)（關閉鈕範圍內）→ 終點 (510,560)，實測整條列由 y≈745 移到 y≈380；比「點關閉」可靠（不用等播放結束）。
+CLOSE_ROW_DRAG = ((510, 780), (510, 560))
+CLOSE_ROW_DRAG_TRIES = 2             # 同一場戰鬥偵測到列在原位時先拖幾次（attempt < 此值）；拖不走才退回點「關閉」
 CLOSE_ROW_MAX_CLICKS = 2             # 同一場戰鬥「關閉」點了這麼多次列還在 → 不再點，等列自己消失（review §4.2：一場連點十幾下都收不掉）
 
 
@@ -1304,6 +1308,13 @@ def refresh_characters(full: bool = False, attempt: int = 0, click_row: bool = T
     click_row=False（本場已點 CLOSE_ROW_MAX_CLICKS 次收不掉）→ 列還在就只回 'row_wait'、不點（等它自己消失；推測是全員指令已送出、等回合結算 / 播放中時的狀態列，點「關閉」無效）。
     主迴圈只把 REFRESH_DONE 當成刷新成功（才開始算 REFRESH_GAP）"""
     b = bottom_bar(full)
+    if b == 'row' and attempt < CLOSE_ROW_DRAG_TRIES:
+        (x1, y1), (x2, y2) = CLOSE_ROW_DRAG
+        gui('seq', f'drag {x1} {y1} {x2} {y2}; wait {CLOSE_ROW_SETTLE_MS}', note='戰鬥底部列：拖「關閉」鈕移開（不蓋切換）')
+        (event if attempt == 0 else log)(f'刷新前底部有「關閉 + 頭像」列 → 拖移 {x1},{y1} → {x2},{y2}（第 {attempt + 1} 次嘗試）')
+        b = bottom_bar(full)
+        if b == 'row':
+            return 'row'
     if b == 'row' and not click_row:
         return 'row_wait'
     if b == 'row':

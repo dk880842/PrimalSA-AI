@@ -7,6 +7,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import testenv  # noqa: E402,F401  紀錄檔轉向暫存（不污染真 actions.log / quest-events.log / errlog）
 import quest  # noqa: E402
+
+quest.CLOSE_ROW_DRAG_TRIES = 0   # 舊的「點關閉」測試維持原樣；拖移另有 (t4b) 測試
 _REAL_PS_JSON = quest.ps_json   # 後面測試會把 ps_json 換成假的，這裡留真的給 ps_json 自己的測試
 import battleguard  # noqa: E402
 import tempfile as _tf
@@ -1666,6 +1668,38 @@ quest.read_team_hp = _keep_hp
 s = Script([DIALOG, FULL_ON, FULL_ON, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE])
 rc = run2(['--no-track', '--max-seconds', '3', '--no-refresh'], s)
 ok &= check('任務 BOSS 戰打完領獎後 slice 時間到 → 延後到閒置確認，回 37（舊版回 0「時間到」，questrun 不做 BOSS 後補血）', rc == quest.EXIT_BOSS_DONE, f'rc={rc} t={s.t - 1000:.1f}')
+
+print('(t4b) 戰鬥底部列拖移（2026-10-15 p2 實測：拖「關閉」鈕整條列移走，之後每場都在新位置）')
+quest.CLOSE_ROW_DRAG_TRIES = 2
+
+
+class DragGame(RowGame):
+    def gui(self, *args, note=''):
+        if args[0] == 'seq' and args[1].startswith('drag '):
+            self.clicks.append(args[1])
+            if not self.stuck:
+                self.visible = False
+            return ''
+        return super().gui(*args, note=note)
+
+
+g = DragGame(True)
+quest.gui = g.gui
+r = quest.refresh_characters(True)
+ok &= check('有列 → 先拖一次（510,780→510,560），列移走後按切換、零點關閉', r == 'ok' and g.clicks[0].startswith('drag 510 780 510 560') and n_close(g) == 0 and n_switch(g) == 1, str(g.clicks))
+g = DragGame(False)
+quest.gui = g.gui
+r = quest.refresh_characters(True)
+ok &= check('列已在新位置（不在原位）→ 不拖、直接切換', r == 'ok' and not any(c.startswith('drag') for c in g.clicks), str(g.clicks))
+g = DragGame(True, stuck=True)
+quest.gui = g.gui
+r = quest.refresh_characters(True, attempt=0)
+ok &= check('拖不走 → 回 row（不點切換）', r == 'row' and n_switch(g) == 0 and len(g.clicks) == 1, str(g.clicks))
+g = DragGame(True, stuck=True)
+quest.gui = g.gui
+r = quest.refresh_characters(True, attempt=2)
+ok &= check('拖過 2 次還在 → 退回點「關閉」', r == 'row' and n_close(g) == 1 and not any(c.startswith('drag') for c in g.clicks), str(g.clicks))
+quest.CLOSE_ROW_DRAG_TRIES = 0
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)
