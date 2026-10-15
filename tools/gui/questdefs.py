@@ -25,7 +25,6 @@
   stop_after_rewards（選填）每片 quest.py 加 --stop-after-rewards N：每步領完獎就收片（下一片前 questrun 讀步號，好在 fight 步之前停下補血 / 傳送）
   dragon_required（選填）True = 這任務一定要有龍王的守護 buff 才組隊跑（不看 --dragon）：開始前沒 buff 就吃；背包 / 公共倉庫都沒有 → 156（改走單人逃跑 psa-quest-solo）
   min_level   （選填）5 人等級下限（bag.read_level；任一人不到 / 讀不到 → 110）
-  need_items  （選填）開始前 5 人背包都要有的道具名稱（缺 → 110，提示去哪買）
   post        （選填）任務完成後自動處理獎勵（questrun --no-post 關）：store_personal=[道具…] 5 人存個人倉庫、store_public=[道具…] 5 人存公共倉庫、
               pets_personal=[寵物…] 5 人存個人寵物倉庫（使用者 2026-10-13：英雄的祝福存個人、龍王剩的 / 人龍隨機蛋存公共、摩娜西普存個人）
   drop_items  （選填）可丟的獎勵道具（只給 plan 顯示；要丟由使用者下 --drop-items / --confirm-drop-items，questrun 用 bag.purge 只刪名單內、背包內的，穿著的不動）
@@ -141,11 +140,11 @@ QCAVE = [
 QOTHER = [
     dict(id=2031, detail='英雄島前傳（必做）', track='英雄島前傳', accept_npc='走失孫女的老爺爺 5500:12,18', steps_total=8,
          steps={6: dict(kind='fight', map=5510, xy=(50, 17), warp=(1160, 646), warp_name='龍王守衛', npc='龍王的守衛 5510:53,17', hp_min=80)},
-         bag_slots=6, boss=True, est_min=20, live=False, dragon_required=True, stop_after_rewards=1, min_level=80, need_items=['耐久力回複藥'],
+         bag_slots=6, boss=True, est_min=20, live=False, dragon_required=True, stop_after_rewards=1, min_level=80,
          reward_pets=['巴朵蘭恩'], post=dict(store_personal=['英雄的祝福'], store_public=['龍王的守護']), drop_items=['薩姆吉爾的首飾'],
          solo=dict(group_from=7),   # --solo（沒龍王 156 的退路）：步 1～5 單人逃跑到 NPC 再組隊對話、步 6 fight、步 7 / 8 組隊跑（2026-10-14 02:41～02:55 手動）
          note='紅暴（每轉必解）。使用者 2026-10-13：有龍王效果就組隊打到底（dragon_required，不看 --dragon；完全沒龍王可吃 → 156 改走單人逃跑 psa-quest-solo）。'
-              '前置：成人儀式、5 人 ≥80 級、背包各有耐久力回複藥 ×1（步 1 交掉）。接取標題「英雄島前傳（必做）」。'
+              '前置：成人儀式、5 人 ≥80 級；耐久力回複藥 NPC 會給，不檢查不買。接取標題「英雄島前傳（必做）」。'
               '每步 --stop-after-rewards 1（步 1～5 對話 + 勾玉；步 1 點到同 NPC 閒聊只有再見 → quest.py ESC 回原流程）；'
               '步 6 kind=fight：HP 檢查（<80% 補血）→ 便捷傳送「龍王守衛」5510:50,17 → quest.py --fight --step 6（贏了地圖換 5511）；'
               '步 7 龍王對話每人得龍王的守護 ×2 + 巴朵蘭恩 Lv1（寵物欄滿會卡）；步 8 老爺爺的孫女 1013:14,16，獎勵窗（英雄的祝福 ×5 + 薩姆吉爾的首飾）石幣動畫多，quest.py settle_reward 補關。'

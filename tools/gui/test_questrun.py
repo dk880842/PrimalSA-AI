@@ -1474,7 +1474,7 @@ fight = [q for q in qs if '--fight' in q]
 check('紅暴 happy path：rc 0、5 片 --stop-after-rewards 1 + 1 次 --fight --step 6 + 2 片 + 完成', rc == 0 and len(fight) == 1 and '6' in fight[0]
       and sum('--stop-after-rewards' in q for q in qs) == 8, f'rc={rc} {qs}')
 check('紅暴：不加 --dragon 也吃龍王（dragon_required），且在接取前', 'dragon' in n and n.index('dragon') < n.index('accept'), str(n[:20]))
-check('紅暴：前置 team_read（耐久力回複藥）在接取前', ('team_read', ('耐久力回複藥',)) in f.calls and n.index('team_read') < n.index('accept'))
+check('紅暴：前置 team_read（只讀等級、不查任務道具）在接取前', ('team_read', ()) in f.calls and n.index('team_read') < n.index('accept'))
 check('紅暴步 6：便捷傳送龍王守衛 → --fight → team.check', ('warp', (1160, 646), 5510, '龍王守衛') in f.calls
       and n.index('warp') < n.index('team_check'), str([c for c in f.calls if c[0] in ('warp', 'team_check')]))
 check('紅暴：完成後 英雄的祝福存個人、龍王的守護存公共；不另存 DKBO 那疊（dragon_store）', ('store_many', '英雄的祝福', 'personal') in f.calls
@@ -1493,8 +1493,7 @@ check('龍王 buff 已在 → 不吃、照跑', rc == 0 and 'dragon' not in f.na
 f = hero(HAPPY_Q, HAPPY_S)
 f.have = {'DKBO4': False}
 rc = go(f, [2031], after='none')
-check('有人沒有耐久力回複藥 → 110、不接取、訊息有去哪買', rc == questrun.EXIT_PREFLIGHT and 'accept' not in f.names()
-      and 'DKBO4' in questrun.LAST['info'].get('msg', '') and 'psa.py item' in questrun.LAST['info'].get('msg', ''), questrun.LAST['info'].get('msg'))
+check('有人沒有耐久力回複藥 → 不檢查、照跑（NPC 會給）', rc == 0 and 'accept' in f.names(), f'rc={rc}')
 f = hero(HAPPY_Q, HAPPY_S)
 f.levels = {'DKBO3': (2, 79), 'DKBO5': None}
 rc = go(f, [2031], after='none')
@@ -1547,7 +1546,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     questrun.run([2031], dry_run=True)
 txt = buf.getvalue()
-check('plan 2031：fight 步、前置、龍王必要、post、可丟道具都列出', all(k in txt for k in ('kind=fight', '耐久力回複藥', 'dragon_required', '英雄的祝福 5 人存個人倉庫', '薩姆吉爾的首飾')), txt[-400:])
+check('plan 2031：fight 步、前置、龍王必要、post、可丟道具都列出', all(k in txt for k in ('kind=fight', 'dragon_required', '英雄的祝福 5 人存個人倉庫', '薩姆吉爾的首飾')), txt[-400:])
 
 # ================= 2026-10-13 加速 review 第 2 輪（notes/review-speedup-1013b.md）=================
 # --- §2.2 --rested：petquest 練完已 rest-all → questrun 交件前不重做 ---
@@ -1775,20 +1774,14 @@ f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(2, [])], steps=[1], bag={
 check('--solo：quest.py --solo 回 2（不認得畫面）→ 9', go(f, [2031], after='none', solo=True) == uikit.EXIT_UNKNOWN_SCREEN)
 f = SoloHero(status={D17: [questrun.DOING]}, quest=[(0, [])])
 check('--solo 用在沒有 solo 設定的任務 → 110', go(f, [2017], after='none', solo=True) == questrun.EXIT_PREFLIGHT)
-# 9) 前置缺耐久力回複藥 + --buy-missing → shopbuy → 重讀 → 照跑；沒 --buy-missing 照舊 110；買失敗 110
+# 9) --buy-missing 相容保留 = no-op：缺藥也不買（不呼叫 shopbuy）、照跑
 f = hero(HAPPY_Q, HAPPY_S)
 f.__class__ = SoloHero
 f.have = {'DKBO4': False}
 rc = go(f, [2031], after='none', buy_missing=True)
 n = f.names()
-check('缺藥 + --buy-missing → shopbuy(DKBO4) → 重讀 → 接取照跑', rc == 0 and ('shop_buy', ('DKBO4',)) in f.calls and n.count('team_read') == 2
-      and n.index('shop_buy') < n.index('accept'), f'rc={rc} {n[:14]}')
-f = hero(HAPPY_Q, HAPPY_S)
-f.__class__ = SoloHero
-f.have = {'DKBO4': False}
-f.shop_rc = 182
-rc = go(f, [2031], after='none', buy_missing=True)
-check('shopbuy 失敗 182 → 110、不接取', rc == questrun.EXIT_PREFLIGHT and 'accept' not in f.names() and 'shopbuy' in questrun.LAST['info'].get('msg', ''))
+check('缺藥 + --buy-missing → no-op：不 shopbuy、只讀一次背包、接取照跑', rc == 0 and 'shop_buy' not in n and n.count('team_read') == 1
+      and 'accept' in n, f'rc={rc} {n[:14]}')
 
 
 # 10) walk.pick_away / exit_to / leave_junction（出口來回跳的走開動作；換掉 wait_pos / walk_to / _cells / psa.T，不碰遊戲）

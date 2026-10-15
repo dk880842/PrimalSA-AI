@@ -21,8 +21,8 @@
   inventory  唯讀盤點：exp.py read、bag.py list all、pet.py list --role all（失敗只警告；9 / 10 停）
   adult      questrun.py run 2999 --after none --dragon                                       失敗 172
   yayoi      questrun.py run 2017 --after none --dragon（NO_DRAGON：實際不吃）                  失敗 172
-  hero       questrun.py run 2031 --after none --buy-missing [--drop-reward 巴朵蘭恩 … --drop-items 薩姆吉爾的首飾 …]
-             （--buy-missing：缺耐久力回複藥 → shopbuy 自動買）；156（背包 / 公共倉庫都沒有龍王）→ **自動改跑單人逃跑**
+  hero       questrun.py run 2031 --after none [--drop-reward 巴朵蘭恩 … --drop-items 薩姆吉爾的首飾 …]
+             （耐久力回複藥 NPC 會給，不檢查不買）；156（背包 / 公共倉庫都沒有龍王）→ **自動改跑單人逃跑**
              questrun.py run 2031 --solo …（同樣的丟棄 / 買藥參數；psa-quest-solo：解散 → quest.py --solo 跑到 NPC → 組隊對話 → 步 6 便捷傳送組隊 --fight
              → 步 7 / 8 組隊 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾 → DKBO 戰寵改回；2026-10-14 02:41～02:55 手動流程）；
              單人逃跑也失敗 → 173；其他 172
@@ -134,7 +134,7 @@ def seg_cmds(seg: str, o: dict) -> list:
         'inventory': [('exp.py', ['read']), ('bag.py', ['list', 'all']), ('pet.py', ['list', '--role', 'all', '--json'])],
         'adult': [('questrun.py', ['run', 2999, '--after', 'none', '--dragon'] + vd)],
         'yayoi': [('questrun.py', ['run', 2017, '--after', 'none', '--dragon'] + vd)],
-        'hero': [('questrun.py', ['run', 2031, '--after', 'none', '--buy-missing'] + vd + (HERO_DROP if o.get('confirm_drop') else []))],
+        'hero': [('questrun.py', ['run', 2031, '--after', 'none'] + vd + (HERO_DROP if o.get('confirm_drop') else []))],
         'q182a': [('questrun.py', ['run'] + Q182A + ['--after', 'none', '--dragon'] + vd)],
         'bag1': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE1) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
         'q182b': [('questrun.py', ['run'] + Q182B + ['--after', 'none', '--dragon'] + vd)],

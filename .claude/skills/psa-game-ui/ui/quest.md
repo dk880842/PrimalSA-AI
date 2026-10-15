@@ -301,8 +301,8 @@
 uv run --no-project python tools/gui/questrun.py run 2031 --after none \
     --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾
 ```
-- **前置**（`check_prereq`，背包開一次逐人讀，`bag.team_read`）：5 人 ≥80 級、背包各有耐久力回複藥（步 1 交掉；缺 → 110，訊息附 `psa.py item 耐久力回複藥`）；成人儀式由接取 / 逐人驗證把關；背包每人 ≥ 6 格（questdefs.bag_need）。
-  **`--buy-missing`**（postrebirth hero 段一律帶）：只缺耐久力回複藥 → `shopbuy.run(缺的人, confirm_spend=True)`（回村進醫院 → 解散 → 逐人單人到藥劑師 1005:24,63 買 ×1〔500 石幣，隊員不能和 NPC 互動〕→ 切回 DKBO → 組隊）→ 重讀；買失敗 110（shopbuy 180～184）。shopbuy 腳本本身**未實機**（2026-10-14 修掉舊版 heal.main / char.main 帶參數的 TypeError）。
+- **前置**（`check_prereq`，背包開一次逐人讀，`bag.team_read`）：5 人 ≥80 級（2026-10-15 起不檢查任務道具：耐久力回複藥 NPC 會給，不用買）；成人儀式由接取 / 逐人驗證把關；背包每人 ≥ 6 格（questdefs.bag_need）。
+  **`--buy-missing`**：相容保留的 no-op（postrebirth hero 段已不帶）。shopbuy.py 模組保留但紅暴不再呼叫（腳本本身**未實機**）。
 - **`--solo`：沒龍王的單人逃跑**（2026-10-14 02:41～02:55 手動流程寫成，questdefs `solo=dict(group_from=7)`；**未實機**）：不吃龍王；接取後 `solo_setup`（DKBO 戰寵 首次 防禦〔勾〕/ 一般 攻擊、DKBO 快速戰鬥 關，`ass.set_pet` / `set_states`）→ 每輪讀追蹤步號：
   步 1～5 = 解散 → `quest.py --solo --task 英雄島前傳 --max-seconds 900`（逃跑巡路，到 NPC ESC 對話框 → 20；21 被打飛 → 補血重跑，最多 2 次）→ team.form → `quest.py --stop-after-dialog --disband-after --max-seconds 120`；
   步 6 = 先 team.form → `do_fight`（同組隊模式：HP → 便捷傳送龍王守衛 → --fight → team.check，38 / 21 → bossretry）；步 7 / 8 = 組隊 `quest.py --stop-after-rewards 1 --max-seconds 900`；
@@ -324,7 +324,7 @@ uv run --no-project python tools/gui/questrun.py run 2031 --after none \
 uv run --no-project python tools/gui/postrebirth.py plan [--confirm-drop]                     # 印 13 段完整順序與每段指令
 uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--confirm-buy-bait] [--from 段] [--to 段] [--fresh]
 ```
-- 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031 --buy-missing`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 沒龍王 → **自動改跑 `run 2031 --solo`**〔同一串參數〕，仍失敗才 173）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
+- 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 沒龍王 → **自動改跑 `run 2031 --solo`**〔同一串參數〕，仍失敗才 173）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
 - 收尾 finish 的練功 = `grind.py start`（不帶 --spot = 去練功；`postrebirth.py --spot 點名` 才固定點）。
 - questrun 一律 `--after none`（中段不回練功）、`--dragon`（NO_DRAGON 的任務 questrun 自己不吃；紅暴必吃）。
 - 清背包：bag list 讀空格，**只有空格 < 門檻（① 6、② 8）的人才刪**；名單 = ui/bag.md 白名單（① PURGE1、② 加杉的手環 / 月光的手鐲 / 巴巴洛的許可證），龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪；先 `purge --dry-run`，有 `--confirm-drop` 才實刪；刪完仍不足 → 174（名單外不刪）。四大洞窟產物在 bag.PURGE_FORBID 永不刪。

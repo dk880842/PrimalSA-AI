@@ -7,11 +7,11 @@
         [--max-slices 60] [--slice-s 60] [--max-min 30] [--hp-min 50] [--team-hp-min 0] [--hp-check-every 3] [--no-boss-retry]
         [--verify risk|each|off] [--no-verify-all] [--verify-skipped] [--no-battle-check] [--battle-check-always]
         [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
-        [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post] [--solo] [--buy-missing]
+        [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post] [--solo] [--buy-missing（相容保留，no-op）]
   --solo（2026-10-14，紅暴沒龍王 156 的退路；只限 questdefs 有 solo 的任務，其他 110；**未實機**）：不吃龍王，接取後 DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 →
         每輪讀步號：步 < solo.group_from = 解散 → quest.py --solo 單人逃跑到 NPC（20；21 補血重跑 ≤2）→ team.form → quest.py --stop-after-dialog --disband-after；
         kind=fight = 先組隊再 do_fight；步 ≥ group_from = 組隊 quest.py --stop-after-rewards 1；GONE / 5 = 完成 → DKBO 戰寵改回 → post → --drop-*；同一步 4 次沒前進 112
-  --buy-missing：check_prereq 只缺耐久力回複藥 → shopbuy.run（解散 → 逐人到醫院藥劑師買 → 組隊）→ 重讀；失敗 110（postrebirth hero 段一律帶）
+  --buy-missing：相容保留的 no-op（任務道具如耐久力回複藥由 NPC 給，開跑前不檢查不買；2026-10-15 使用者定）
   龍王的守護（2026-10-12 起）預設**不吃**，要吃加 --dragon；--no-dragon 保留相容（= 預設，no-op）。
   --dragon（2026-10-13 使用者定）對 questdefs 標 dragon（NO_DRAGON = 彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 以外）的任務吃，--dragon-all 全吃；
   questdefs dragon_required（紅暴 2031）不看 --dragon 一定吃，背包 / 公共倉庫都沒有 → 156（改走單人逃跑）；
@@ -70,7 +70,7 @@
                  → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 不開詳情（2026-10-14），下一片 quest.py「任務完成」/ 回 5 = 完成；失敗 150。
                  defs.rest_pets（卡坦的願望 2019：隊長交一次 5 人完成，quest.py 預設流程交）：接取後第一片前先 pet.py rest-all。每任務只試一次
                  --rested（petquest 練完已 rest-all --candidates 且退出碼 0 才帶）：接取後 / 交寵物前都不再 rest-all（2026-10-13 review 1013b §2.2，每次交件省 30～90 秒）
-  紅暴 2031（2026-10-13 起納入；使用者：有龍王效果就組隊打到底；**未實機**）：前置 check_prereq（5 人 ≥80 級、背包各有耐久力回複藥，bag.team_read 開一次；不符 110）
+  紅暴 2031（2026-10-13 起納入；使用者：有龍王效果就組隊打到底；**未實機**）：前置 check_prereq（5 人 ≥80 級，bag.team_read 開一次；不符 110；不檢查任務道具）
                  → require_dragon（接取前沒 buff 就吃；都沒有 → 156）→ 接取「英雄島前傳（必做）」→ 每片 quest.py --stop-after-rewards 1（每步收片）
                  → 步 6 kind=fight（do_fight：全隊 HP < 80% 補血 → 便捷傳送「龍王守衛」5510:50,17 → team.form → quest.py --fight --step 6 → team.check；
                    贏 + 滿 5 人 = 37 續片、不滿 = 38 bossretry、輸 35 補血重打共 2 次）→ 步 7 / 8 預設 → 完成後 post：英雄的祝福 5 人存個人、龍王的守護 5 人存公共（失敗 157）
@@ -195,7 +195,6 @@ RELOGIN_MAX = stuckrecover.RELOGIN_MAX   # 每個任務最多自動全員重登�
 STUCK_SLICES = stuckrecover.STUCK_SLICES   # 連續幾片 quest.py 3 / 30 且座標沒進展 → 卡住（重登 + 離開交界）
 RELOGIN_TEAM = stuckrecover.RELOGIN_TEAM   # relogin.py：重登進遊戲了但隊伍檢查 / 組隊失敗 → questrun 再 team.form --regroup
 BAG_ITEM = 92                   # bag.EXIT_ITEM：背包 / 倉庫找不到該道具
-BUYABLE = ('耐久力回複藥',)      # check_prereq 缺了可以 --buy-missing 自動買的（shopbuy.py medicine）
 NO_TOUCH = (uikit.EXIT_USAGE, uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT, 116, 152)   # 失敗退出時畫面要留給人看（驗證視窗 / 斷線 / 不可逆對話 / 領獎窗）→ 不再開背包存龍王
 LAST: dict = {}
 
@@ -369,11 +368,6 @@ class Tools(rebirth.Tools):
         import ass
         rc, _st, _msg = ass.set_pet(LEADER, dict(SOLO_PET_BACK))
         return rc
-
-    def shop_buy(self, roles):
-        """缺的人去薩姆吉爾醫院藥劑師買耐久力回複藥（shopbuy.run，會解散 → 逐人單人買 → 切回 DKBO → 組隊）→ (rc, info)"""
-        import shopbuy
-        return shopbuy.run(list(roles), confirm_spend=True)
 
     def unbounce(self, pair):
         """出口來回跳：走出口到對面、離開回頭出口（walk.leave_junction）→ 最後座標 / None"""
@@ -616,9 +610,8 @@ def print_plan(defs, opts: dict) -> None:
         print(f'  - team.form（{TEAM_FRESH_S:.0f} 秒內剛確認過就略過）→ questdetail.accept（只開一次詳情）：已完成 → 跳過；待接取 → 接受（不重開詳情）；進行中 → 續跑')
         if d.get('bag_slots'):
             print(f'  - 背包空位：5 人各 ≥ {d["bag_slots"]} 格（bag.find_items；不足先刪 bag.AUTO_PURGE 白名單，仍不足 110）')
-        if d.get('min_level') or d.get('need_items'):
-            print(f'  - 前置：5 人 ≥{d.get("min_level") or "?"} 級' + (f'、背包都有 {d["need_items"]}' if d.get('need_items') else '')
-                  + '（bag.team_read 開背包一次逐人讀；不符 / 讀不到 110）')
+        if d.get('min_level'):
+            print(f'  - 前置：5 人 ≥{d["min_level"]} 級（bag.team_read 開背包一次逐人讀；不符 / 讀不到 110；任務道具不檢查）')
         if d.get('dragon_required'):
             print(f'  - 龍王的守護必要（dragon_required，不看 --dragon）：接取前沒 buff 就吃；背包與公共倉庫都沒有 / 一直吃不到 → {EXIT_NODRAGON}（改走單人逃跑 psa-quest-solo §4）')
         print(f'  - 補血檢查（任務開始前、每次 BOSS 戰後）：隊長 HUD HP < {opts["hp_min"]}%' + (f' 或全隊（bag.hps）任一人 < {opts["team_hp_min"]}%' if opts.get('team_hp_min', TEAM_HP_MIN) > 0 else '（全隊血量不讀：--team-hp-min 0）') + ' → heal.heal_trip --no-return（小護士補整隊）+ team.form')
@@ -680,7 +673,7 @@ def print_plan(defs, opts: dict) -> None:
         print(f'[單人逃跑 --solo] 不吃龍王；{LEADER} 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 < group_from：解散 → quest.py --solo → team.form → '
               f'--stop-after-dialog --disband-after；fight 步：組隊 → do_fight；步 ≥ group_from：組隊 --stop-after-rewards 1 → 完成後 {LEADER} 戰寵改回')
     if opts.get('buy_missing'):
-        print('[--buy-missing] 前置只缺耐久力回複藥 → shopbuy（解散 → 逐人到醫院藥劑師買 500 石幣 → 組隊）→ 重讀；失敗 110')
+        print('[--buy-missing] 相容保留的 no-op（任務道具由 NPC 給，不檢查不買）')
     if opts.get('drop_items'):
         print(f'[丟獎勵道具] 全部成功後：{"、".join(opts["drop_items"])} 5 人 bag.purge（只勾名單內、提示窗清單核對；穿著的不動；失敗 151）')
     if opts.get('drop_reward'):
@@ -851,7 +844,7 @@ class Run:
             self.T.sleep(3)
         why = ('背包與公共倉庫都沒有龍王的守護' if st == 'none' else f'龍王的守護吃不到（{st}，rc={self.info.get("dragon_rc")}）')
         return self.fail(EXIT_NODRAGON, f'任務 {d["id"]}「{d["detail"]}」要有龍王的守護 buff 才組隊跑：{why} → 改走單人逃跑（同一行指令加 --solo：'
-                         f'questrun.py run {d["id"]} --solo --buy-missing …；postrebirth hero 段自動接；手動流程 psa-quest-solo SKILL.md §4）；'
+                         f'questrun.py run {d["id"]} --solo …；postrebirth hero 段自動接；手動流程 psa-quest-solo SKILL.md §4）；'
                          '確認倉庫真的沒有再走逃跑，一時失敗就處理後重跑', dragon=st)
 
     def dragon_return(self, where: str) -> int:
@@ -1189,9 +1182,9 @@ class Run:
         return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：quest.py --fight 退出碼 {last}（36 = 判斷不了輸贏，請看畫面）', quest_rc=last), None
 
     def check_prereq(self, d) -> int:
-        """questdefs min_level / need_items（紅暴：5 人 ≥80 級、背包各有耐久力回複藥）：開背包一次逐人讀；不符 / 讀不到 → 110"""
-        lv, names = d.get('min_level'), list(d.get('need_items') or [])
-        if not lv and not names:
+        """questdefs min_level（紅暴：5 人 ≥80 級）：開背包一次逐人讀等級；不符 / 讀不到 → 110。不檢查任務道具（NPC 會給）"""
+        lv, names = d.get('min_level'), []
+        if not lv:
             return 0
         rc, res = self.T.team_read(ALL_ROLES, names)
         if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
@@ -1200,29 +1193,9 @@ class Run:
             return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 前置檢查讀背包失敗 bag rc={rc}', bag_rc=rc)
         self.info['prereq'] = res
         low = {r: (v or {}).get('level') for r, v in res.items() if lv and not ((v or {}).get('level') and v['level'][1] >= lv)}
-        miss = {r: [n for n in names if not ((v or {}).get('have') or {}).get(n)] for r, v in res.items()}
-        miss = {r: v for r, v in miss.items() if v}
         if low:
             return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 要 5 人 ≥{lv} 級：不到 / 讀不到 {low}', prereq_level=low)
-        if miss and self.o.get('buy_missing') and all(set(v) <= set(BUYABLE) for v in miss.values()):
-            who = sorted(miss)
-            event(f'{d["detail"]} 前置：{who} 缺 {names} → shopbuy 自動買（--buy-missing；解散 → 逐人到薩姆吉爾醫院藥劑師買 → 組隊）')
-            brc, binfo = self.T.shop_buy(who)
-            self.info['shopbuy'] = {'rc': brc, 'info': binfo}
-            self.team_ok_at = 0.0                                      # shopbuy 解散 / 重組過
-            if brc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
-                return brc
-            if brc:
-                return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 前置：shopbuy 買 {names} 失敗 rc={brc}（180～184 見 shopbuy.py）', shopbuy_rc=brc)
-            rc, res = self.T.team_read(ALL_ROLES, names)
-            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
-                return rc
-            miss = {r: [n for n in names if not ((v or {}).get('have') or {}).get(n)] for r, v in (res or {}).items()} if not rc else {r: names for r in who}
-            miss = {r: v for r, v in miss.items() if v}
-        if miss:
-            return self.fail(EXIT_PREFLIGHT, f'{d["detail"]} 開始前背包要有 {names}：缺 / 讀不到 {miss}'
-                             f'（去哪買：uv run --no-project python tools/query/psa.py item {names[0]}；薩姆吉爾的醫院 1005 藥劑師等）', prereq_missing=miss)
-        event(f'{d["detail"]} 前置 OK：等級 {[(r, (v or {}).get("level")) for r, v in res.items()]}' + (f'、背包都有 {names}' if names else ''))
+        event(f'{d["detail"]} 前置 OK：等級 {[(r, (v or {}).get("level")) for r, v in res.items()]}')
         return 0
 
     def post_task(self, d) -> int:
@@ -2163,7 +2136,7 @@ def main() -> int:
         p.add_argument('--no-post', action='store_true', help='任務完成後不做 questdefs post 的獎勵存倉（紅暴：英雄的祝福存個人、龍王的守護存公共）')
         p.add_argument('--rested', action='store_true', help='配 --pet-turnin：呼叫端剛 pet.py rest-all 過（petquest 練完）→ 交寵物前不重做 rest-all')
         p.add_argument('--solo', action='store_true', help='單人逃跑模式（只限 questdefs 有 solo 的任務 = 紅暴 2031；沒龍王 156 的退路，psa-quest-solo）')
-        p.add_argument('--buy-missing', action='store_true', help='前置缺耐久力回複藥 → shopbuy.py 自動買（每人 500 石幣；解散 → 逐人單人買 → 組隊）')
+        p.add_argument('--buy-missing', action='store_true', help='相容保留的 no-op（任務道具由 NPC 給，不檢查不買）')
     p = sub.add_parser('plan')
     common(p)
     p = sub.add_parser('status')

@@ -10,16 +10,16 @@ description: Use when the PrimalSA (精靈王石器) quest chain must be solved 
 （接取前沒龍王 buff 就吃、步 6 便捷傳送 + `--fight`、獎勵存倉 / 丟棄都在裡面，見 `../psa-game-ui/ui/quest.md`「紅暴組隊打到底」；未實機）。
 **只有 questrun 回 156（背包與公共倉庫都沒有龍王的守護）才用本 skill 的第 4 節單人逃跑**；156 但訊息是「吃不到（一時失敗）」→ 先處理再重跑 questrun，不要直接改逃跑。
 **2026-10-14 起紅暴單人逃跑已腳本化**（照 02:41～02:55 手動流程寫，**未實機**）：先跑
-`uv run --no-project python tools/gui/questrun.py run 2031 --solo --buy-missing --after none --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾`
+`uv run --no-project python tools/gui/questrun.py run 2031 --solo --after none --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾`
 （不吃龍王；DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 1～5「解散 → `quest.py --solo` 到 NPC → team.form → `--stop-after-dialog --disband-after`」→ 步 6 組隊 + 便捷傳送 + `--fight` → 步 7 / 8 組隊 `--stop-after-rewards 1`
-→ DKBO 戰寵改回 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾；`--buy-missing` 缺耐久力回複藥自動 shopbuy）。`postrebirth.py` hero 段收到 156 會**自動**改跑這一行。
+→ DKBO 戰寵改回 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾；耐久力回複藥 NPC 會給，不檢查不買）。`postrebirth.py` hero 段收到 156 會**自動**改跑這一行。
 腳本非 0 才照下面第 2～4 節手動做（退出碼見 questrun.py 檔頭；細節 `../psa-game-ui/ui/quest.md`「--solo」）。
 
 **REQUIRED BACKGROUND:** 先載入 psa-game-ui（紅區、驗證視窗立刻停手）。會用到 `/psa-disband-team`、`/psa-quick-team`、`/psa-grind-start`。
 座標是截圖座標（客戶區 2880×1659）。`G="bash tools/gui/gui.sh"`、`Q="uv run --no-project python tools/gui/quest.py"`，在專案根目錄執行。
 介面細節 / 實測：`../psa-game-ui/ui/quest.md`「單人逃跑解任務」、`ui/team.md`、`ui/transfer.md`、`ui/ass.md`。
 
-> 多視窗（第 3c 步，2026-10-15，未實機）：`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/questrun.py run 2031 --solo` 時跑路的人 = 該視窗隊長 DKBO6（本文的「DKB0」都換成視窗名單第 1 個）；戰寵動作改 / 改回、快速戰鬥關都對 DKBO6 做；`--buy-missing` 的 shopbuy 逐人買完切回 DKBO6。沒設 `PSA_CLIENT` = 原本的 DKBO。PrimalSA2 公共倉庫是自己的，通常沒有龍王 → 156 走這條。
+> 多視窗（第 3c 步，2026-10-15，未實機）：`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/questrun.py run 2031 --solo` 時跑路的人 = 該視窗隊長 DKBO6（本文的「DKB0」都換成視窗名單第 1 個）；戰寵動作改 / 改回、快速戰鬥關都對 DKBO6 做。沒設 `PSA_CLIENT` = 原本的 DKBO。PrimalSA2 公共倉庫是自己的，通常沒有龍王 → 156 走這條。
 
 ## 0. 規劃（先查資料，不碰畫面）
 ```bash
@@ -86,7 +86,7 @@ $A pet DKB0 first 防禦 normal 攻擊            # 設定並讀回確認（約 
 - 隊員是單人狀態時被打飛的是各自的角色；補血只補「當前角色」所在隊伍，組隊後再補一次。
 
 ## 4. 紅暴任務（2031 英雄島前傳，每轉必解）專屬 —— 2026-10-13 起只當「沒有龍王的守護」時的退路（平常用 questrun 組隊，見開頭）
-**先跑腳本 `questrun.py run 2031 --solo …`（見開頭）**，下面是它照做的手動步驟 / 腳本失敗時的手動流程。前置缺耐久力回複藥：`uv run --no-project python tools/gui/shopbuy.py medicine --confirm-spend`（每人 500 石幣；隊員不能和 NPC 互動，腳本會解散逐人買再組隊；未實機）。
+**先跑腳本 `questrun.py run 2031 --solo …`（見開頭）**，下面是它照做的手動步驟 / 腳本失敗時的手動流程。耐久力回複藥 NPC 會給，不用自己買、也不檢查。
 步 1～5：照第 2 節的通用流程（NPC：避難洞窟 5500 老爺爺接任務 → 薩姆吉爾 5501 / 5503 / 5505 / 5506 / 5508，座標以 `psa.py steps 2031` 為準，每步對話步）。
 **步 6（戰鬥）不巡路，直接傳送**：
 1. **第 5 步拿到第 5 顆勾玉後不解散隊伍**（全隊直接過去）。BOSS 戰不能逃：`--fight` 會判斷任務戰鬥並自動戰鬥，不會按逃跑。
