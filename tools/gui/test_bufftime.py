@@ -189,6 +189,16 @@ finally:
 check('--dry-run 不寫快取', cp.read_text(encoding='utf-8') == before)
 m = bt.merge_cache({'buffs': 'bad'}, [], ['exp'], ['exp'], 5.0)
 check('merge_cache：壞舊檔當空', m == {'v': 1, 'ts': 5.0, 'buffs': {}})
+# record_eaten：吃的時刻 + 持續時間
+cp.unlink(missing_ok=True)
+bt.record_eaten('exp', 1000.0)
+bt.record_eaten('dragon', 2000.0)
+d = json.loads(cp.read_text(encoding='utf-8'))
+check('record_eaten：exp 6 小時、dragon 10 分鐘、src=eat、read_ts=吃的時刻',
+      d['buffs']['exp'] == {'expires_ts': 1000.0 + 21600, 'read_ts': 1000.0, 'remaining_s': 21600, 'src': 'eat'}
+      and d['buffs']['dragon']['expires_ts'] == 2600.0 and d['buffs']['dragon']['src'] == 'eat')
+check('record_eaten：未知種類不寫 / 不丟例外', bt.record_eaten('zzz', 1.0) is None)
+check('record_eaten：路徑壞（目錄是檔案）→ None 不丟例外', bt.record_eaten('exp', 1.0, path=cp / 'x' / 'y') is None)
 check('p2 快取路徑檔名相同（真路徑在 clients/PrimalSA2）', clients.cpath('bufftime.json', 'PrimalSA2').parts[-3:] == ('clients', 'PrimalSA2', 'bufftime.json'))
 
 print('失敗', fails)

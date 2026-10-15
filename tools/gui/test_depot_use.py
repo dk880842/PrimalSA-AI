@@ -201,10 +201,19 @@ bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('全流程成功 rc 0 buff', rc == 0 and info.get('buff') and calls == ['take', 'use', 'store'])
 check('成功 → 不 tidy', not tidied and 'tidy' not in info)
+import json as _json, time as _time  # noqa: E402
+import bufftime  # noqa: E402
+_cp = bufftime.cache_path()
+_d = _json.loads(_cp.read_text(encoding='utf-8'))
+_dg = _d['buffs']['dragon']
+check('吃成功 → bufftime.json 寫 dragon 到期（src=eat、約 10 分鐘）',
+      info.get('bufftime') == 'eat' and _dg['src'] == 'eat' and 595 <= _dg['expires_ts'] - _time.time() <= 600 and _dg['remaining_s'] == 600)
 calls.clear()
+_cp.unlink(missing_ok=True)
 bag.buff_row = lambda: [None, None, None]
 bag.use_item = lambda r, w, verify_buff=False: (calls.append('use'), 0)[1]
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
+check('沒驗到圖示 → 不寫 bufftime.json', not _cp.exists())
 check('沒看到人形圖示 → 95 但仍存回', rc == bag.EXIT_VERIFY and calls[-1] == 'store')
 bag.goto_page = lambda page: 0
 bag.find_item = lambda *a, **k: None
@@ -213,6 +222,20 @@ bag.buff_row = lambda: ['dragon', None, None]
 calls.clear()
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
 check('人形圖示已在 → 整個跳過（不取不吃不存）', rc == 0 and info['step'] == 'skip' and not calls)
+check('跳過不吃 → 不改 bufftime.json', not _cp.exists())
+# 寫快取失敗不影響 depot_use
+_rec = bufftime.record_eaten
+bufftime.record_eaten = lambda *a, **k: (_ for _ in ()).throw(OSError('disk'))
+_seq = [[None, None, None], ['dragon', None, None]]
+bag.buff_row = lambda: _seq.pop(0) if len(_seq) > 1 else _seq[0]
+bag.find_item = lambda *a, **k: 4
+bag.depot_take = lambda *a: 0
+rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)
+check('record_eaten 丟例外 → depot_use 仍 rc 0、只記警告', rc == 0 and 'warn_bufftime' in info)
+bufftime.record_eaten = _rec
+bag.find_item = lambda *a, **k: None
+bag.depot_take = lambda *a: bag.EXIT_ITEM
+bag.buff_row = lambda: ['dragon', None, None]
 bag.buff_row = lambda: [None, None, None]
 calls.clear()
 rc, info = depot_use.run('DKBO', '龍王的守護', reopen=False)

@@ -12,17 +12,20 @@
 2026-10-14 08:21 / 08:49 / 09:01 rc 90 step=open，Session 判背包沒開所以沒關，面板晚一步才出現 → 下一片 quest.py 誤報 9）：道具彈窗 ESC、NPC 對話框蓋住背包 → ESC（不回答）、背包外框在 → 點 ✕ 1280,113
 （2026-10-13 08:04 rc 90：吃龍王途中自動巡路抵達看門者，對話框把背包藏起來，舊版沒關 → quest.py 誤報 rc 9）。questrun 在遊戲自動巡路中不呼叫本工具。
 questrun --dragon（2026-10-13 起）用 restore=False（剩的留在 DKBO 背包）、之後 have=True 直接從背包吃，run 結束才 bag.depot_store 存回；buff 判斷與 questrun 共用 bag.buff_state。
+吃下並驗到圖示後，以「吃的時刻 + 持續時間」寫本視窗 bufftime.json（bufftime.record_eaten：exp 6 小時、dragon 10 分鐘，src = eat；psa-hud Buff 列倒數，不用再跑 bufftime.py read；跳過不吃 = 不改檔；寫失敗只警告）。
 最後一行 JSON {"ok","rc","step","buff",...}。
 """
 import argparse
 import json
 import re
 import sys
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bag  # noqa: E402
+import bufftime  # noqa: E402
 import heal  # noqa: E402
 import uikit  # noqa: E402
 
@@ -110,6 +113,7 @@ def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict
         # 取出後不管吃成不成功，剩下的都要存回倉庫（借出的道具要還）
         use_rc = bag.use_item(role, item)                             # buff 列被背包面板蓋住，成敗等關背包後再看（見下）
         info['step'] = 'use'
+        eat_ts = time.time()                                          # 吃的時刻（到期 = 這個時刻 + 持續時間）
         if restore:
             st = bag.depot_store(role, item, depot)
             if st == bag.EXIT_ITEM and not use_rc:
@@ -119,6 +123,12 @@ def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict
                 return (use_rc or st), info
     if kind and not use_rc:                                          # 成功判定看 buff 列圖示（龍王 = 人形、2倍智慧果 = EXP）；背包已關才看得到
         info['buff'] = bag._wait(lambda: bag.has_buff(kind), 4.0)
+        if info['buff']:                                             # 驗到圖示 → 到期時間直接算好寫 bufftime.json（psa-hud 倒數；寫失敗只記警告）
+            try:
+                if bufftime.record_eaten(kind, eat_ts):
+                    info['bufftime'] = 'eat'
+            except Exception as e:                                   # noqa: BLE001
+                info['warn_bufftime'] = f'寫到期快取失敗：{e}'
         if not info['buff']:
             use_rc = bag.EXIT_VERIFY
             info['warn_buff'] = f'使用後 buff 列沒看到 {kind} 圖示（沒吃到；剩的已存回倉庫）'

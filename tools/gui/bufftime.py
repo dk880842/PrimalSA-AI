@@ -184,6 +184,8 @@ def merge_cache(old: dict | None, buffs: list, want, row, now: float) -> dict:
         if k in got:
             b = got[k]
             cur[k] = {'expires_ts': b['expires_ts'], 'read_ts': b['read_ts'], 'remaining_s': b['remaining_s']}
+            if b.get('src'):                                   # 來源標記（eat = 吃的時候算出；讀畫面的不帶 src）
+                cur[k]['src'] = b['src']
         elif k not in (row or []):
             cur.pop(k, None)
     return {'v': 1, 'ts': now, 'buffs': cur}
@@ -206,6 +208,26 @@ def save_cache(buffs: list, want, row, now: float | None = None, path: Path | No
         return path
     except OSError as e:
         log(f'寫到期快取失敗：{e}')
+        return None
+
+
+# 吃道具的持續時間（秒）：Item.arg = [RoleBuff ID, 分鐘]（2倍智慧果 arg ["5","360"] = 6 小時，與道具說明「使用時間6小時」相符；
+# 龍王的守護 arg ["13","10"] = 10 分鐘，與 2026-10-11 漆黑一轉實測「約 10 分鐘失效」相符）
+EAT_DURATION_S = {'exp': 360 * 60, 'dragon': 10 * 60}
+
+
+def record_eaten(kind: str, eat_ts: float | None = None, path: Path | None = None) -> Path | None:
+    """depot_use 吃下 buff 道具、圖示驗證到後呼叫：以「吃的時刻 + 持續時間」寫本視窗 bufftime.json（src = eat）。
+    共用 save_cache；任何失敗只記 log、回 None，不影響呼叫端。"""
+    try:
+        dur = EAT_DURATION_S.get(kind)
+        if not dur:
+            return None
+        t = eat_ts if eat_ts is not None else time.time()
+        b = {'kind': kind, 'expires_ts': t + dur, 'read_ts': t, 'remaining_s': dur, 'src': 'eat'}
+        return save_cache([b], (kind,), [kind], now=t, path=path)
+    except Exception as e:                                       # noqa: BLE001
+        log(f'吃道具寫到期快取失敗：{e}')
         return None
 
 
