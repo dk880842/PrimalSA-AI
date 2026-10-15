@@ -52,6 +52,8 @@ uv run --no-project python tools/gui/petquest.py run 3003 --confirm-drop        
 - **drop**（`--confirm-drop` 才做，沒給 → 168 停）：`petdrop.py all 布克布克 / 修寶 / 左迪洛斯 --confirm-name 同名 --max-level 1`。
 - **restore**：卡坦先把獎勵 Lv1 朵拉比斯存個人（store_reward）→ `take-many --depot personal --plan "角色:朵拉比斯@原等級"` → 出戰 → `pet_catch --lock 戰寵 --battle-pet 朵拉比斯` → `ass.py pet all normal 攻擊 --no-resume` → list 驗 5 人朵拉比斯出戰、等級 = 原等級（猜謎 ≥ 原等級）。**不恢復掛機**（交給呼叫端 grind）。
 - 猜謎步 1：quest.py 回 3 時先讀追蹤步號，已 > 1（對話給了金布伊、追蹤進「交77金豬」，2026-10-14 errlog #861）= 步 1 完成，照常驗金布伊；步號仍 1 才 161。
+- **誘餌不夠（2026-10-15 使用者決定）**：公共倉庫誘餌不足時**現有的照用**（pet_catch `--keep-short-bait`：取到的留在抓寵者背包、不存回，印「背包誘餌不足 = n」回 92），只用「+」買缺額 N − n 次（`catchbuy.buy_to(..., min_before=n)`：按到可抓捕數 = N）。例：公共剩 3、DKBO5 要 5 → 取 3、買 2（100,000 石幣）。**「可抓捕數 = 背包誘餌 + 買的次數」是推測、尚未實測**（證據：可抓捕數 = 背包誘餌數〔notes/plan-dino-katan.md 11 行，使用者說明〕；「+」每按 +1、扣 50,000〔notes/quest-log.md 轉生寵物段，當時背包 0 個誘餌〕——兩者都沒在「背包有誘餌」時按過「+」）。所以腳本按前先讀外掛可抓捕數：< 背包誘餌數 = 沒相加 → 一次都不按、163 停手；每次按後仍驗 +1 / 石幣剛好 −50,000 / 鑽石不變。
+- **讀石幣（修 163「石幣 0 不夠 50000」）**：寵物面板剛開就單次 OCR 會讀成 0（實際 6,720,000；actions.log 顯示開面板 20:26:49、1 秒後就關）→ `catchbuy.read_money_stable`：面板開好等 0.6 秒、讀 0 / None 一律當讀錯重讀、連續兩次同一個非 0 石幣才採用、最多 5 次，仍不穩 → (None, None) 回 163（絕不在讀不到時買）並存圖 `ui-log/*catchbuy-money-unreadable*`（根因為推測：p1 沒留下當次截圖；OCR 框 MONEY_BOX 仍待實機量）。
 - 退出碼 160 參數 / 161 接取（猜謎步 1 沒金布伊 → 點任務追蹤重試 / 人工）/ 162 準備 / 163 誘餌 · 買 / 164 抓 / 165 分配 / 166 練 / 167 交 / 168 丟 / 169 換回；9 / 10 透傳。離線測試 `test_petquest.py`（假寵物欄 / 倉庫模擬器）。
 - **待實機**：①石幣讀取框；②「+」按前後讀可抓捕數；③一次抓滿 5（空格 4 → 溢出 1 隻自動進個人倉庫）後的取回整理（騰位 → take-many personal → reset-name → 名字驗證）；溢出牌在個人倉庫認不認得出物種（depot-list personal 計數）；④卡坦第 1 輪交完 questrun 回 117 / 155 + 步號 2；⑤練寵 `pet.py levels` 輪詢在快戰中讀等級、nh 指紋會不會被 EXP 浮字弄亂（亂了只是改讀完整 list）；⑥全流程耗時；⑧抓寵第一次輪詢 100 / 40 秒是否太早（太早只是多開一次外掛面板）。
 

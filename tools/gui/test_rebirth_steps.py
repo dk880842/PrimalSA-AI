@@ -68,12 +68,14 @@ class Shop:
     def money(self):
         return self.stone, self.diamond
 
-    def press(self, role, limit=None):
+    def press(self, role, limit=None, min_before=None):
         if self.rc:
             return self.rc, self.count, None
         if limit is not None and self.count >= limit:
             return 0, self.count, self.count
         b = self.count
+        if min_before is not None and b < min_before:
+            return catchbuy.EXIT_BAIT, b, None
         self.presses += 1
         if not self.noop:
             self.count += 1
@@ -105,6 +107,22 @@ k, msg, rc_, _ = catchbuy.buy('DKBO2', 1, sh.money, sh.press, lambda m: None)
 check('press 回非 0 → pass（原碼）', k == 'pass' and rc_ == 4)
 k, msg, *_ = catchbuy.buy('DKBO2', 1, lambda: (None, None), Shop().press, lambda m: None)
 check('讀不到石幣 → fail 且不按', k == 'fail' and '讀不到石幣' in msg)
+sh = Shop(count=3)
+k, msg, rc, bought = catchbuy.buy_to('DKBO5', 5, sh.money, sh.press, lambda m: None, min_before=3)
+check('誘餌不夠只買缺額：背包 3 個、要 5 → 外掛顯示 3、只按 2 次、扣 100,000', k == 'ok' and sh.presses == 2 and sh.count == 5 and sh.stone == 3000000 - 2 * 50000 and len(bought) == 2)
+sh = Shop(count=0)
+k, msg, rc, bought = catchbuy.buy_to('DKBO5', 5, sh.money, sh.press, lambda m: None, min_before=3)
+check('外掛顯示 0 < 背包誘餌 3（不能相加）→ fail、一次都不按', k == 'fail' and sh.presses == 0 and '不能相加' in msg)
+sh = Shop(count=3)
+k, msg, rc, bought = catchbuy.buy_to('DKBO5', 5, lambda: (None, None), sh.press, lambda m: None, min_before=3)
+check('讀不到石幣 → 不買（誘餌不夠情境）', k == 'fail' and sh.presses == 0)
+seq = iter([(0, 0), (6720000, 0), (6720000, 0)])
+check('石幣讀到 0 → 重讀、連續兩次一致才採用（2026-10-15 單次讀成 0 → 163）', catchbuy.read_money_stable(lambda: next(seq), lambda s: None) == (6720000, 0))
+seq = iter([(6720000, 0), (6720500, 0), (6720000, 0), (6720500, 0), (6720000, 0)])
+check('兩次不一致一直讀不穩 → (None, None)', catchbuy.read_money_stable(lambda: next(seq), lambda s: None) == (None, None))
+check('一直讀 0 / None → (None, None)（不買）', catchbuy.read_money_stable(lambda: (0, 0), lambda s: None) == (None, None) and catchbuy.read_money_stable(lambda: (None, None), None) == (None, None))
+seq = iter([(6720000, 0), (6720000, 5)])
+check('石幣一致但鑽石不一致 → 鑽石 None（不當 0）', catchbuy.read_money_stable(lambda: next(seq), None) == (6720000, None))
 check('CLI：沒給 --confirm-buy 只印計畫、不碰遊戲', quiet(catchbuy.main, ['DKBO2', '5']) == 0)
 import petquest  # noqa: E402
 check('petquest 與 catchbuy 共用常數 / parse_money', petquest.PLUS_COST == catchbuy.PLUS_COST and petquest.PLUS_XY == catchbuy.PLUS_XY and petquest.parse_money is catchbuy.parse_money

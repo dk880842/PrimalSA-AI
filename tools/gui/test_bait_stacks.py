@@ -128,6 +128,17 @@ try:
     check('背包沒有 → 先取公共整疊再拆存', rc == 0 and calls[0] == ('take',) and calls[-1][0] == 'store', str(calls))
     rc = run([(0, 2)])
     check('只有 2 < 4 → 全存回、回 92、split_short=2', rc == bag.EXIT_ITEM and t.split_short == 2 and calls == [('store', {'all_copies': True})], str(calls))
+    calls.clear(); state['stacks'] = [(0, 3)]
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        rc = t.bait_take('DKBO5', 5, keep_short=True)
+    check('keep_short：公共取到 3 < 要 5 → 不存回（沒有 store）、回 92、split_short=3、印「背包誘餌不足 = 3」',
+          rc == bag.EXIT_ITEM and t.split_short == 3 and not calls and '背包誘餌不足 = 3' in out.getvalue(), str(calls))
+    state['stacks'] = []
+    bag.depot_take = lambda *a, **k: calls.append(('take',)) or bag.EXIT_ITEM
+    calls.clear()
+    with contextlib.redirect_stdout(io.StringIO()) as out:
+        rc = t.bait_take('DKBO5', 5, keep_short=True)
+    check('keep_short：公共已空 → 現有 0、回 92、印「不足 = 0」', rc == bag.EXIT_ITEM and t.split_short == 0 and '背包誘餌不足 = 0' in out.getvalue())
     rc = run([(0, None)])
     check('疊數讀不出 → 95、不動', rc == bag.EXIT_VERIFY and not calls)
     rc = run([(0, 10), (1, 20)])

@@ -6,11 +6,15 @@
 
   parse_money(lines)                              OCR 行 → (石幣, 鑽石)：石幣 x<450、鑽石 450～700（x 分區 + 去重；讀不到 None，2026-10-13 三轉）
   parse_count_zero(txt, zero_ok)                  可抓捕數；zero_ok = 有「可抓捕數」字樣但沒數字 → 0（0 時 OCR 常漏「0」，2026-10-13 三轉 163）
-  money()                                         開寵物面板讀 (石幣, 鑽石)；讀不到 (None, None)
+  read_money_stable(read_fn, sleep_fn)            連續兩次讀到同一個非 0 石幣才採用（2026-10-15 單次讀成 0 → 163 的修法；讀 0 / None = 讀錯重讀）
+  money()                                         開寵物面板（等 0.6 秒）讀 (石幣, 鑽石)；讀不穩 (None, None) + 存圖 catchbuy-money-unreadable
   press_plus(role, limit=None)                    外掛 → 角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)
                                                   limit：按前可抓捕數已 ≥ limit 就不點（回 (0, 前, 前)）
   buy(role, n, money_fn, press_fn, log)           固定按 n 次 → (kind, msg, rc, bought)
-  buy_to(role, target, money_fn, press_fn, log)   按到可抓捕數 = target 為止（續跑安全）→ 同上
+  buy_to(role, target, money_fn, press_fn, log, min_before=None)
+                                                  按到可抓捕數 = target 為止（續跑安全）→ 同上；min_before = 背包現有誘餌數：誘餌不夠只買缺額
+                                                  （外掛可抓捕數 = 背包誘餌 + 買的次數，**推測**，按前讀到的數字 < min_before 就不按、停手，
+                                                  每次按後仍驗 +1 / 石幣剛好 −50,000）
     kind = 'ok' / 'fail'（呼叫端 fail(EXIT, msg)）/ 'pass'（rc 是 ass / uikit 退出碼，呼叫端 pass_or）
 """
 import re
@@ -59,18 +63,44 @@ def parse_count_zero(txt, zero_ok: bool = False):
     return n
 
 
+def read_money_stable(read_fn, sleep_fn=None, tries: int = 5, settle: float = 0.6) -> tuple:
+    """讀石幣 / 鑽石要「連續兩次讀到同一個非 0 石幣」才算數（純函式，read_fn() → (石幣, 鑽石)）。
+    2026-10-15 p1 卡坦 163「石幣 0 不夠 50000」（實際約 6,720,000）：面板剛開 1 秒內就讀一次、單次 OCR 讀成 0 → 不買；
+    現在面板開好先等 settle 秒，石幣讀到 None / 0（帳號有 50,000 以上才會走到這裡，0 一律當讀錯）/ 兩次不一致 → 重讀，最多 tries 次，
+    仍不穩 → (None, None)（呼叫端「不買、回錯誤」）。鑽石以兩次一致的那組為準（一致才採用，不一致 → None 不驗鑽石增減由呼叫端略過）"""
+    if sleep_fn:
+        sleep_fn(settle)
+    prev = None
+    for _ in range(tries):
+        stone, dia = read_fn()
+        if stone:                                                  # None / 0 = 讀錯
+            if prev is not None and prev[0] == stone:
+                return stone, (dia if dia == prev[1] else None)
+            prev = (stone, dia)
+        elif sleep_fn:
+            sleep_fn(0.4)
+    return None, None
+
+
 def money() -> tuple:
-    """寵物面板頂部資源列 → (石幣, 鑽石)；面板打不開 / 讀不到 → (None, None)"""
+    """寵物面板頂部資源列 → (石幣, 鑽石)；面板打不開 / 讀不穩 → (None, None)（讀失敗存圖到 ui-log）"""
     import pet
     import rebirth_pets as rp
     with pet.Session(False, True) as s:
         if s.rc:
             return None, None
-        return parse_money(rp.ocr_lines(MONEY_BOX, '-Zooms', '2,3'))
+        r = read_money_stable(lambda: parse_money(rp.ocr_lines(MONEY_BOX, '-Zooms', '2,3,4')), uikit.sleep)
+        if r[0] is None:
+            try:
+                uikit.snap('catchbuy-money-unreadable')
+            except Exception:                                      # noqa: BLE001
+                pass
+        return r
 
 
-def press_plus(role, limit=None) -> tuple:
-    """外掛 → 選角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)。按前讀不到可抓捕數 → 不點"""
+def press_plus(role, limit=None, min_before=None) -> tuple:
+    """外掛 → 選角色 → 捉寵設置 → 讀可抓捕數 → 點「+」一次 → 讀回 → 關面板 → (rc, 按前, 按後)。按前讀不到可抓捕數 → 不點。
+    min_before：按前可抓捕數低於這個值（例：背包誘餌數 → 外掛數字沒把背包誘餌算進去）→ 不點、回 (EXIT_BAIT, 前, None)"""
     import ass
     import rebirth_pets as rp
     rt = rp.Tools()
@@ -85,6 +115,8 @@ def press_plus(role, limit=None) -> tuple:
             return EXIT_BAIT, before, None
         if limit is not None and before >= limit:
             return 0, before, before
+        if min_before is not None and before < min_before:
+            return EXIT_BAIT, before, None
         uikit.gui('seq', f'click {PLUS_XY[0]} {PLUS_XY[1]}; wait 800', note=f'{role} 捉寵設置「+」買 1 個可抓捕數（--confirm-buy-*）')
         after = read()
         return 0, before, after
@@ -95,14 +127,21 @@ def press_plus(role, limit=None) -> tuple:
             pass
 
 
-def _one(role, money_fn, press_fn, log, limit=None):
+def _one(role, money_fn, press_fn, log, limit=None, min_before=None):
     """按一次（含前後石幣檢查）→ (kind, msg, rc, rec | None, pressed)"""
     s0, d0 = money_fn()
     if s0 is None:
         return 'fail', f'{role} 買可抓捕數前讀不到石幣（寵物面板頂部，MONEY_BOX 待實機量）→ 不按「+」', 0, None, False
     if s0 < PLUS_COST:
         return 'fail', f'石幣 {s0} 不夠 {PLUS_COST} → 不買', 0, None, False
-    rc, before, after = press_fn(role) if limit is None else press_fn(role, limit)
+    if limit is None:
+        rc, before, after = press_fn(role)
+    elif min_before is None:
+        rc, before, after = press_fn(role, limit)
+    else:
+        rc, before, after = press_fn(role, limit, min_before)
+    if rc == EXIT_BAIT and min_before is not None and before is not None and before < min_before:
+        return 'fail', f'{role} 外掛可抓捕數 {before} < 背包誘餌 {min_before}：外掛數字沒把背包誘餌算進去（不能相加）→ 不按「+」、停手', 0, None, False
     if rc:
         return 'pass', f'{role} 外掛「+」失敗 rc={rc}（按前可抓捕數 {before}）', rc, None, False
     if limit is not None and after == before and before is not None and before >= limit:
@@ -132,11 +171,13 @@ def buy(role, n, money_fn=money, press_fn=press_plus, log=print) -> tuple:
     return 'ok', '', 0, bought
 
 
-def buy_to(role, target, money_fn=money, press_fn=press_plus, log=print) -> tuple:
-    """按到可抓捕數 = target 為止（先讀、已夠就不按；續跑安全）。最多按 target 次"""
+def buy_to(role, target, money_fn=money, press_fn=press_plus, log=print, min_before=None) -> tuple:
+    """按到可抓捕數 = target 為止（先讀、已夠就不按；續跑安全）。最多按 target 次。
+    min_before：背包現有誘餌數（誘餌不夠只買缺額：外掛可抓捕數 = 背包誘餌 + 買的次數，每次按前後讀回 +1 驗證；
+    按前讀到的數字 < min_before = 外掛沒把背包誘餌算進去 → 不按、fail，避免白花 50,000）"""
     bought = []
     for _ in range(target + 1):
-        kind, msg, rc, rec, pressed = _one(role, money_fn, press_fn, log, limit=target)
+        kind, msg, rc, rec, pressed = _one(role, money_fn, press_fn, log, limit=target, min_before=min_before)
         if rec:
             bought.append(rec)
         if kind != 'ok':

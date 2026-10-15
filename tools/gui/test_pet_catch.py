@@ -41,8 +41,8 @@ class FakeT:
     def bait_take(self, role, keep):
         return self._r('bait', role)
 
-    def bait_take_many(self, roles, keep):
-        self.calls.append(('bait_many', tuple(roles)))
+    def bait_take_many(self, roles, keep, keep_short=False):
+        self.calls.append(('bait_many', tuple(roles)) + ((keep_short,) if keep_short else ()))
         for r in roles:
             rc = self._r('bait', r)
             if rc:
@@ -102,6 +102,8 @@ f = FakeT(fail_at=('bait', 'DKBO2'))
 check('bait 失敗 → rc、不繼續', pet_catch.run(A, stages=('bait',), tools=f) == 7 and f.calls == [('bait_many', ('DKBO2', 'DKBO3')), ('bait', 'DKBO2')])
 f = FakeT()
 check('bait：一次 bait_take_many 帶全部人（背包只開一次）', pet_catch.run(A, stages=('bait',), tools=f) == 0 and f.calls[0] == ('bait_many', ('DKBO2', 'DKBO3')))
+f = FakeT()
+check('keep_short_bait=True → bait_take_many 帶 keep_short', pet_catch.run(A, stages=('bait',), tools=f, keep_short_bait=True) == 0 and f.calls[0] == ('bait_many', ('DKBO2', 'DKBO3'), True))
 fb = FakeT()
 check('baitback：逐人 bait_return、不碰其他階段', pet_catch.run(A, stages=('baitback',), tools=fb) == 0 and fb.calls == [('baitback', 'DKBO2'), ('baitback', 'DKBO3')], str(fb.calls))
 

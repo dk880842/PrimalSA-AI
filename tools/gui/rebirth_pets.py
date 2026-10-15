@@ -574,8 +574,10 @@ class Tools:
             info['personal'].append(nxt)
         return 0, info
 
-    def bait_take(self, role, keep):
-        """背包只留 keep 個誘餌，其餘存回公共（**重跑冪等**，2026-10-15）。先讀背包現有每疊誘餌疊數（bag.stacks_of）：
+    def bait_take(self, role, keep, keep_short=False):
+        """keep_short = True（petquest --confirm-buy-bait）：誘餌不夠時背包 / 公共現有的照留在背包（不存回），印「背包誘餌不足 = n（要 keep）」、
+        回 92，由呼叫端只買缺額 keep − n 次「+」（2026-10-15 使用者決定）。公共倉庫已空（取不到）= n 0。
+        背包只留 keep 個誘餌，其餘存回公共（**重跑冪等**，2026-10-15）。先讀背包現有每疊誘餌疊數（bag.stacks_of）：
         - 總數 == keep → 已完成，不取、不拆（rc 95 / 164 / 175 的根因：DKBO2 背包已只剩一疊 4 個，舊版仍整疊拆分 → 沒拆出新疊）；
         - 沒有 → 公共倉庫取整疊，再往下；總數 < keep → 全存回、記 split_short、回 92（誘餌不夠）；
         - 總數 > keep：有一疊剛好 keep → 其餘疊依疊數存回；只有一疊 → 拆出 keep 個、把「疊數 = 原疊 − keep」那疊存回（不靠格序，不會存到要留的那疊）；
@@ -589,6 +591,10 @@ class Tools:
             return rc
         if not stacks:
             rc = bag.depot_take(role, BAIT, 'public', hint=getattr(self, 'bait_hint', None))
+            if rc == bag.EXIT_ITEM and keep_short:                # 公共倉庫沒有誘餌 = 現有 0 個
+                self.split_short = 0
+                print(f'rebirth_pets：{role} 背包誘餌不足 = 0（要 {keep}）', flush=True)
+                return rc
             if rc:
                 return rc
             self.bait_hint = bag.LAST.get('depot_slot')          # 下一人先點這格核對（整疊存回後多半回到同一格），不逐格掃
@@ -604,6 +610,10 @@ class Tools:
             self.split_noop = True
             print(f'rebirth_pets：{role} 背包誘餌已剛好 {keep} 個 → 不取不拆', flush=True)
             return 0
+        if total < keep and keep_short:                           # 現有的照用：不存回，只回報缺額給呼叫端買「+」
+            self.split_short = total
+            print(f'rebirth_pets：{role} 背包誘餌不足 = {total}（要 {keep}）→ 現有的留背包照用，缺 {keep - total} 個由外掛「+」買', flush=True)
+            return uikit.fail(SRC, bag.EXIT_ITEM, f'{role} {BAIT} 只有 {total} 個，要 {keep}（不夠；現有的留背包）')
         if total < keep:
             st = bag.depot_store(role, BAIT, 'public', all_copies=True)
             self.split_short = total
@@ -639,7 +649,7 @@ class Tools:
                 return rc, []
             return 0, bag.stacks_of(BAIT)
 
-    def bait_take_many(self, roles, keep):
+    def bait_take_many(self, roles, keep, keep_short=False):
         """多人取誘餌（2026-10-13）：背包面板只開一次（左欄頭像切人連續做完才關）；公共倉庫誘餌格號記起來，後面的人直接核對那格。
         → 0 / 第一個失敗的 rc（失敗人在 self.bait_failed）。每人流程同 bait_take（取整疊 → 拆 keep → 其餘存回）"""
         import bag
@@ -647,13 +657,17 @@ class Tools:
         with bag.Session() as s:
             if s.rc:
                 return s.rc
+            short_rc = 0
             for role in roles:
-                rc = self.bait_take(role, keep)
+                rc = self.bait_take(role, keep, keep_short) if keep_short else self.bait_take(role, keep)
+                if rc == bag.EXIT_ITEM and keep_short and self.split_short is not None:
+                    short_rc, self.bait_failed = rc, role           # 不夠的人記起來，後面的人照取（公共空了就 0 個）
+                    continue
                 if rc:
                     self.bait_failed = role
                     return rc
                 print(f'rebirth_pets：{role} 背包誘餌 = {keep}', flush=True)
-        return 0
+        return short_rc
 
     def _split(self, role, name, n, slot=None):
         """背包第一格 name → 拆分鈕 → 數量鍵盤輸入 n → 確定；之後隔壁格要有 name。座標：notes/plan-dino-katan.md（手動實測）"""

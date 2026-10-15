@@ -5,7 +5,8 @@
 用法（專案根目錄；WSL / Windows 原生相同）：
   uv run --no-project python tools/gui/petquest.py plan 2016|2019|3003                 # 不碰遊戲：印每段要跑的指令
   uv run --no-project python tools/gui/petquest.py run 2016|2019|3003 [--confirm-buy-bait] [--confirm-drop] [--dry-run] [--from 段] [--to 段] [--fresh]
-    --confirm-buy-bait  公共倉庫誘餌不夠時，准用外掛捉寵設置「+」買可抓捕數（每按一次 50,000 石幣；按前 / 按後讀寵物面板頂部石幣，
+    --confirm-buy-bait  公共倉庫誘餌不夠時，手上現有的誘餌照用（取到抓寵者背包），只用外掛捉寵設置「+」買缺額 N − 現有 次可抓捕數（每按一次 50,000 石幣；
+                        讀石幣要連續 2 次一致且非 0，2026-10-15 單次讀成 0 → 163；按前 / 按後讀寵物面板頂部石幣，
                         扣款不是剛好 50,000（或鑽石有變）就停手；沒給這個旗標 → 誘餌不夠就 163 停）
     --confirm-drop      准丟獎勵寵（恐龍博士 布克布克、卡坦步 1 修寶、猜謎三兄弟 左迪洛斯；petdrop 驗名 + 只丟 1 級）；沒給 → 到丟寵段 168 停
     --from / --to       只跑某幾段（段名見 plan）；--fresh 不管進度檔從頭（預設：進度檔 tools/.cache/petquest.json 24 小時內記錄過的段直接跳過）
@@ -24,7 +25,7 @@
     catch[N]    **一次抓滿本輪總隻數 N（正常 5，不分批；使用者 2026-10-15）**：外掛捉寵設置已勾「自動存倉庫」，寵物欄滿了多抓的自動進抓寵者個人寵物倉庫，
                 所以可抓捕數 = N、背包誘餌 N 個，一次抓完（舊版依空格分批 [4, 1]，理由「進個人倉庫沒縮圖取不出來」已過時：2026-10-14 起名字為主、reset-name 還原物種名，
                 且實跑 notes/quest-log.md 339 行：欄只有 3 空格各抓 5 隻、2 隻自動進個人倉庫 → 取回成功）：
-                pet_catch.py --count N --stages bait（**每輪每人只取 / 拆一次**：公共倉庫取整疊拆出 N 個、其餘存回；背包已剛好 N 個就不取不拆）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 外掛「+」買 N 次（見上）→
+                pet_catch.py --count N --stages bait（**每輪每人只取 / 拆一次**：公共倉庫取整疊拆出 N 個、其餘存回；背包已剛好 N 個就不取不拆）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 現有誘餌留背包照用、外掛「+」只買缺額 N − 現有（buy_to 按到可抓捕數 = N；按前讀到的數字 < 現有誘餌 = 外掛沒相加 → 不按停手）→
                 pet_catch.py --stages setup,wait,rename,register --count N --expect-bar 角色:min(N, 空格)（wait 第一次輪詢 N×20+20 秒、之後 60 秒；register 只核對「在欄新增」隻數，溢出的在個人倉庫不算）；
                 名字為主（2026-10-14 晚）：rename = pet.reset_soft 還原抓寵者寵物欄的成長字串名字（鉛筆 → 確認，免費）→ register = 名字驗證：
                 比抓寵前快照 catch-pre.json，新多出來的寵物名字 = 該抓寵者 --assign 的物種；名字是別的物種 → 15、在欄隻數不對 → 17；
@@ -395,6 +396,17 @@ def bait_ok_roles(lines) -> set:
     return out
 
 
+def bait_short_counts(lines) -> dict:
+    """pet_catch --stages bait --keep-short-bait 的輸出 →「背包誘餌不足 = n」的角色 → 現有誘餌數（現有的留在背包照用）"""
+    out = {}
+    for ln in lines or []:
+        m = re.search(r'([A-Za-z0-9]+)\s*背包誘餌不足\s*=\s*(\d+)', str(ln))
+        hit = charstate.norm_char(m.group(1), ALL_ROLES) if m else None
+        if hit:
+            out[hit] = int(m.group(2))
+    return out
+
+
 def csv_assign(assign) -> str:
     return ','.join(f'{r}:{f}:{sp}' for r, f, sp in assign)
 
@@ -476,9 +488,9 @@ class Tools:
         """寵物面板頂部資源列 → (石幣, 鑽石)；面板打不開 / 讀不到 → (None, None)"""
         return catchbuy.money()
 
-    def press_plus(self, role) -> tuple:
+    def press_plus(self, role, limit=None, min_before=None) -> tuple:
         """外掛「+」按一次（紅區：只有 petquest --confirm-buy-bait 的 buy_plus 會呼叫）→ (rc, 按前, 按後)"""
-        return catchbuy.press_plus(role)
+        return catchbuy.press_plus(role, limit, min_before)
 
 
 # ---------------------------------------------------------------- 驅動
@@ -632,9 +644,12 @@ class Run:
     def round_conf(self, stage) -> dict:
         return self.q['rounds'][stage_round(stage) - 1]
 
-    def buy_plus(self, role, n) -> int:
-        """外掛「+」買 n 個可抓捕數（catchbuy.buy：每按一次前後讀石幣，要剛好少 PLUS_COST、鑽石不變，否則停）"""
-        kind, msg, rc, bought = catchbuy.buy(role, n, self.T.money, self.T.press_plus, event)
+    def buy_plus(self, role, need, have=0) -> int:
+        """誘餌不夠只買缺額（使用者 2026-10-15）：背包現有 have 個誘餌照用，外掛「+」按到可抓捕數 = need（共 need − have 次）。
+        catchbuy.buy_to：每按一次前後讀石幣，要剛好少 PLUS_COST、鑽石不變、可抓捕數 +1，否則停；
+        按前讀到的可抓捕數 < have（外掛沒把背包誘餌算進去）→ 一次都不按、停手（不猜能不能相加）"""
+        event(f'{role} 誘餌現有 {have}、要 {need} → 外掛「+」買缺額 {need - have} 次（預計最多 {(need - have) * PLUS_COST} 石幣）')
+        kind, msg, rc, bought = catchbuy.buy_to(role, need, self.T.money, self.T.press_plus, event, min_before=have)
         self.info.setdefault('bought', []).extend(bought)
         if kind == 'ok':
             return 0
@@ -722,8 +737,10 @@ class Run:
         event(f'{stage}：{catchers} 還要 {need} 隻 → 一次抓滿（寵物欄空格 {free}，放不下的自動進個人倉庫）')
         # 誘餌：這一輪每個抓寵者開始時一次取出並拆出 need 個（其餘存回公共，例 50 → 留 5、存回 45）；背包已剛好 need 個（續跑 / 重跑）→ pet_catch bait 不取不拆（冪等）
         # （2026-10-15 使用者：舊版每批「取 k 拆 k」是錯的；出處 = 實跑紀錄 notes/quest-log.md、notes/plan-dino-katan.md）
-        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'bait'], 1800)
+        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'bait']
+                             + (['--keep-short-bait'] if self.o.get('confirm_buy') else []), 1800)    # 給 --confirm-buy-bait：不夠的人現有誘餌留背包，只買缺額
         short = []
+        have = bait_short_counts(lines)
         if rc and rc != BAIT_ITEM:
             return self.pass_or(rc, EXIT_CATCH, f'取誘餌失敗 pet_catch rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --assign "{csv_assign(assign)}" --count {need} --stages bait'), rs
         if rc == BAIT_ITEM:
@@ -731,8 +748,8 @@ class Run:
             if not self.o.get('confirm_buy'):
                 return self.fail(EXIT_BAIT, f'公共倉庫誘餌不夠：{short} 各缺（要 {need} 個；每個可抓捕數用「+」買要 {PLUS_COST} 石幣）→ 沒給 --confirm-buy-bait，停手',
                                  f'確認要買就重跑加 --confirm-buy-bait（或手動補誘餌到公共倉庫後重跑）'), rs
-        for r in short:                                                 # 沒有誘餌的人用「+」買 need 次可抓捕數
-            rc = self.buy_plus(r, need)
+        for r in short:                                                 # 誘餌不夠的人：現有的照用，只用「+」買缺額（have 讀不到 = 0 = 全買）
+            rc = self.buy_plus(r, need, have.get(r, 0))
             if rc:
                 return rc, rs
         self.save_pre(rs)                                               # 抓寵前寵物欄快照（pet_catch register 排除騎寵 / 舊寵物，不必再讀一次）
