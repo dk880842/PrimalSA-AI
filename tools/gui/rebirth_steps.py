@@ -27,12 +27,13 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'rebirth_steps'
 EXIT_ACCEPT, EXIT_REWARD = 97, 98
 CN = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五'}
-ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+ALL_ROLES = clients.roster()        # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5
 REWARD = {1: '烏力斯坦', 2: '奇娜'}                  # 轉生獎勵寵（實機：一轉烏力斯坦、二轉奇娜；其餘轉數靠 diff）
 SNAPSHOT = uikit.CACHE / 'rebirth_pets_before.json'
 LAST: dict = {}
@@ -179,7 +180,8 @@ def judge_gate_text(text: str):
         if m[1]:
             try:
                 import charname
-                who = charname.canon(m[1]).replace('DKB0', 'DKBO')       # 顯示用真名（字母 O）
+                import charstate
+                who = charstate.norm_char(m[1], ALL_ROLES) or charname.canon(m[1]).replace('DKB0', 'DKBO')   # 名單內 → 真名；名單外照舊正規化
             except Exception:
                 who = m[1]
     return {'who': who, 'trans': trans, 'level': lv, 'text': t[:80]}

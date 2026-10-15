@@ -65,8 +65,8 @@ import walk  # noqa: E402
 
 SRC = 'grind'
 EXIT_TEAM, EXIT_TELEPORT, EXIT_ASS, EXIT_NO_FAST, EXIT_ENC, EXIT_NO_EXP, EXIT_FULL_BATTLE, EXIT_HEAL, EXIT_CHAR = 50, 51, 52, 53, 54, 55, 56, 57, 58
-LEADER = 'DKBO'                       # 真名字母 O（DKB0 同義）
-ROLE_ORDER = ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5', 'DKBO']      # 讀 / 改順序：隊長最後，結束時外掛面板選在隊長
+LEADER = clients.leader() or ''       # 隊長 = 這個視窗名單第 1 個（主視窗 DKBO，真名字母 O；DKB0 同義；PrimalSA2 DKBO6）
+ROLE_ORDER = clients.leader_last()    # 讀 / 改順序：隊長最後，結束時外掛面板選在隊長（主視窗 DKBO2～DKBO5, DKBO）
 BANNER_WAIT = 8.0
 WANT = {'快速戰鬥': True, '自動戰鬥': True}
 CACHE = uikit.CACHE

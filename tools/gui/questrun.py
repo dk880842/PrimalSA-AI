@@ -135,6 +135,7 @@ sys.path.insert(0, str(HERE))
 import questdefs  # noqa: E402
 import questhandlers  # noqa: E402
 import rebirth  # noqa: E402
+import clients  # noqa: E402
 import stuckrecover  # noqa: E402  卡住自動重登的共用邏輯（rebirth.py 同一份）
 import uikit  # noqa: E402
 
@@ -427,9 +428,9 @@ class Tools(rebirth.Tools):
         return rc, dict(petdrop.LAST)
 
     def team_check(self):
-        """team.check(5)：唯讀驗 1 隊長 + 4 隊員（0 = 滿 5 人）"""
+        """team.check(名單人數)：唯讀驗 1 隊長 + 其餘隊員（0 = 滿員；主視窗 5 人）"""
         import team
-        return team.check(5)
+        return team.check(len(ALL_ROLES))
 
     def warp(self, dest, want_map, name, want_xy):
         """便捷傳送（地圖傳送 → 便捷傳送分頁 259,432 → dest）到 want_map:want_xy；失敗丟 RuntimeError（heal.teleport；戰鬥中會等）"""
@@ -608,7 +609,7 @@ def print_plan(defs, opts: dict) -> None:
                ('戰鬥設定檢查 ass.battle_check（一次開外掛面板逐人：5 人自動戰鬥開、DKBO 人物首次動作 風的精靈 打勾；只改不對的勾選、讀回確認；失敗 109；'
                 f'{BATTLE_OK_S // 60} 分內查過且沒重登 / bossretry → 沿用，--battle-check-always 一定查）'
                 if opts.get('battle_check', True) else '戰鬥設定檢查：--no-battle-check 不做'),
-               'team.form 滿 5 人（同一次切換面板讀「當前登錄」，不是 DKBO 才 char.ensure）'):
+               f'team.form 滿 5 人（同一次切換面板讀「當前登錄」，不是 {LEADER} 才 char.ensure）'):
         print('  - ' + ln)
     for d in defs:
         print(f'[任務 {d["id"]}] {d["detail"]}（追蹤標題「{d["track"]}」，接取 {d["accept_npc"]}，{d["steps_total"]} 步，預估 {d.get("est_min", "?")} 分）')
@@ -631,7 +632,7 @@ def print_plan(defs, opts: dict) -> None:
                       f'（{sd.get("npc", "")}；walk.py 中斷外層重試）')
             elif d.get('turnin') and opts.get('pet_turnin'):
                 print(f'  - 步 {st}：kind={sd["kind"]} → --pet-turnin：pet.py rest-all → team.disband → pet_turnin {d["turnin"]["kind"]} 5 人逐人交'
-                      f'（pet_turnin 步 {list(d["turnin"]["steps"].get(st, ()))}）→ char.ensure DKBO → team.form；失敗 150')
+                      f'（pet_turnin 步 {list(d["turnin"]["steps"].get(st, ()))}）→ char.ensure {LEADER} → team.form；失敗 150')
             else:
                 print(f'  - 步 {st}：kind={sd["kind"]} → 停下交人（115）' + ('（加 --pet-turnin 可自動交，未實機）' if d.get('turnin') else ''))
         if d.get('rest_pets'):
@@ -676,8 +677,8 @@ def print_plan(defs, opts: dict) -> None:
     if opts.get('verify', 'risk') == 'risk':
         print('[逐人驗證] 沒風險事件的任務延後：全部任務結束後其他 4 人每人開一次詳情批次讀（失敗退出留進度檔，下次 run 結束再驗）')
     if opts.get('solo'):
-        print('[單人逃跑 --solo] 不吃龍王；DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 < group_from：解散 → quest.py --solo → team.form → '
-              '--stop-after-dialog --disband-after；fight 步：組隊 → do_fight；步 ≥ group_from：組隊 --stop-after-rewards 1 → 完成後 DKBO 戰寵改回')
+        print(f'[單人逃跑 --solo] 不吃龍王；{LEADER} 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 < group_from：解散 → quest.py --solo → team.form → '
+              f'--stop-after-dialog --disband-after；fight 步：組隊 → do_fight；步 ≥ group_from：組隊 --stop-after-rewards 1 → 完成後 {LEADER} 戰寵改回')
     if opts.get('buy_missing'):
         print('[--buy-missing] 前置只缺耐久力回複藥 → shopbuy（解散 → 逐人到醫院藥劑師買 500 石幣 → 組隊）→ 重讀；失敗 110')
     if opts.get('drop_items'):
@@ -803,7 +804,7 @@ class Run:
         rc, info = self.T.dragon(have)
         info = info or {}
         if rc == BAG_ITEM and have:                                    # 進度檔說在 DKBO 背包、其實沒有（吃完了 / 人工存回）→ 改從公共倉庫取
-            event('龍王的守護：進度檔記在 DKBO 背包但背包找不到 → 改從公共倉庫取出')
+            event(f'龍王的守護：進度檔記在 {LEADER} 背包但背包找不到 → 改從公共倉庫取出')
             self.st['dragon_in_bag'] = False
             rc, info = self.T.dragon(False)
             info = info or {}
@@ -1610,7 +1611,7 @@ class Run:
         if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
             return rc
         if rc:
-            return self.fail(EXIT_HANDOVER, f'任務 {tid} 單人逃跑前 DKBO 外掛設定（戰寵 首次 防禦 / 一般 攻擊、快速戰鬥 關）失敗 ass rc={rc}', solo_rc=rc)
+            return self.fail(EXIT_HANDOVER, f'任務 {tid} 單人逃跑前 {LEADER} 外掛設定（戰寵 首次 防禦 / 一般 攻擊、快速戰鬥 關）失敗 ass rc={rc}', solo_rc=rc)
         event(f'任務 {tid}：單人逃跑模式（步 < {group_from} 單人跑到 NPC 再組隊對話；fight 步便捷傳送組隊打；步 ≥ {group_from} 組隊跑）')
         last, same, unread, knocked, boss_retries = None, 0, 0, 0, 0
         for k in range(self.o['max_slices']):
@@ -1771,7 +1772,7 @@ class Run:
         if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
             return rc
         if rc:
-            self.warn(f'任務 {tid}：DKBO 戰寵動作改回（首次 攻擊 不勾 / 一般 攻擊）失敗 ass rc={rc}，請手動 ass.py pet DKBO first 攻擊 first off normal 攻擊')
+            self.warn(f'任務 {tid}：{LEADER} 戰寵動作改回（首次 攻擊 不勾 / 一般 攻擊）失敗 ass rc={rc}，請手動 ass.py pet {LEADER} first 攻擊 first off normal 攻擊')
         ts.update(state='done', ended=time.strftime('%H:%M:%S'), ended_ts=time.time(), secs=int(time.time() - t0))
         self.save()
         event(f'任務 {tid}「{d["detail"]}」已完成（單人逃跑；追蹤欄找不到該任務；{int(time.time() - t0)} 秒、{k + 1} 輪）')
@@ -1920,7 +1921,7 @@ class Run:
                 if hrc:
                     return hrc
             for d, lag in lags:
-                event(f'任務 {d["id"]}：{lag} 沒完成 → bossretry --who（落後者當隊長組 5 人重打 → 切回 DKBO 重組）')
+                event(f'任務 {d["id"]}：{lag} 沒完成 → bossretry --who（落後者當隊長組 5 人重打 → 切回 {LEADER} 重組）')
                 brc, binfo = T.boss_retry(d['track'], who=lag, **self.br_kw())
                 self.info.setdefault('boss_retry', []).append(binfo)
                 self.st['battle_ok_at'] = 0
@@ -2056,10 +2057,10 @@ def parse_roles(text: str):
         return list(ALL_ROLES)
     out = []
     for n in [x.strip() for x in text.split(',') if x.strip()]:
-        hit = charstate.norm_char(n)
+        hit = charstate.norm_char(n, ALL_ROLES)                      # 只認這個視窗（PSA_CLIENT）的名單，回名單裡的真名
         if not hit:
             return None
-        out.append(charstate.display(hit))
+        out.append(hit)
     return out
 
 
@@ -2191,6 +2192,9 @@ def main() -> int:
     p.add_argument('--battle-check-always', action='store_true', help='交接一定查外掛戰鬥設定（預設 30 分內查過且沒重登 / bossretry → 沿用）')
     p.add_argument('--verify-skipped', action='store_true', help='詳情一開就已完成而跳過的任務也逐人驗（預設只驗本次跑完的）')
     a = ap.parse_args()
+    if not ALL_ROLES:
+        print(f'questrun：PSA_CLIENT={clients.name()} 沒有登錄角色名單（clients.ROSTERS），不跑', file=sys.stderr)
+        return EXIT_PREFLIGHT
     if a.cmd == 'status':
         return cmd_status(a.ids, a.role)
     if a.cmd == 'verify':

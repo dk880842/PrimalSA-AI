@@ -9,7 +9,12 @@ PowerShell 端的同一套規則在 psawin.ps1（Get-PsaClient / Find-PsaProcess
   clients.name()          # 'PrimalSA' / 'PrimalSA2'（去空白、去 .exe）
   clients.is_default()    # 是不是主視窗
   clients.log_tag()       # 操作 log 前綴：主視窗 ''；其他 '[PrimalSA2] '
-  clients.roster()        # 這個視窗的角色名單（寫死；後續階段去硬編碼用，目前還沒有程式用它）
+  clients.roster()        # 這個視窗的角色名單（寫死；第 1 個是隊長）
+  clients.leader()        # 隊長 = roster()[0]（沒有名單 → None）
+  clients.index_of('DKBO7')            # 名字在名單的位置 0～4（O / 0、大小寫、空白視為相同）；不在 → None
+  clients.by_slot([195, 322, 450, 580, 700])   # 依名單位置配座標表 → {'DKBO6': 195, ...}（面板左欄頭像等「第 n 個」的位置）
+  clients.leader_last()   # 名單隊長放最後（外掛 / 寵物面板讀改順序：結束時選在隊長）
+  clients.all_names()     # 所有視窗名單的聯集（顯示真名用）
 
 每個視窗自己的狀態檔（第 3a 步，2026-10-15）：
   clients.cache_dir()     # 主視窗 = tools/.cache（原路徑，零遷移）；其他 = tools/.cache/clients/<程序名>/
@@ -37,7 +42,8 @@ GAME_RE = re.compile(r'^PrimalSA\d*$', re.I)  # 遊戲程序名稱（PrimalSA、
 NAME_RE = re.compile(r'^[A-Za-z0-9_.-]{1,64}$')   # 與 psawin.ps1 相同：只收程序名稱
 
 # 程序名稱 → 角色名單（2026-10-15 使用者確認，寫死即可、不自動讀名單；真名是字母 O）。
-# 第 1 個是隊長。目前只供後續階段（角色名去硬編碼）使用，P1 / P2 沒有程式讀它。
+# 第 1 個是隊長。第 3b 步起 charstate / team / char / ass / pet / bag / exp / grind / watch 等依「名單位置」取座標，
+# 名字只用來驗證 / 顯示（面板左欄頭像、切換面板卡位、外掛頭像都是第 1～5 個的固定位置）。
 ROSTERS = {
     'PrimalSA': ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'],
     'PrimalSA2': ['DKBO6', 'DKBO7', 'DKBO8', 'DKBO9', 'DKBO10'],
@@ -77,6 +83,44 @@ def roster(n: str | None = None) -> list[str]:
         if k.lower() == n.lower():
             return list(v)
     return []
+
+
+def leader(n: str | None = None) -> str | None:
+    """隊長 = 名單第 1 個；沒有名單 → None"""
+    r = roster(n)
+    return r[0] if r else None
+
+
+def _canon(s) -> str:
+    """與 charname.canon 相同規則（大寫、去空白、O → 0、首字 0 → D）；這裡不 import charname，避免循環"""
+    t = re.sub(r'\s+', '', str(s or '')).upper().replace('O', '0')
+    return ('D' + t[1:]) if t.startswith('0') else t
+
+
+def index_of(who, n: str | None = None) -> int | None:
+    """名字在名單的位置（0 起算）；O / 0、大小寫、空白視為相同；不在名單 → None。
+    注意 DKBO10 正規化成 DKB010，與 DKBO1 + 0 之類的寫法不會撞（名單裡沒有 DKBO1）"""
+    k = _canon(who)
+    if not k:
+        return None
+    hits = [i for i, x in enumerate(roster(n)) if _canon(x) == k]
+    return hits[0] if len(hits) == 1 else None
+
+
+def by_slot(values, n: str | None = None) -> dict:
+    """座標表依名單位置配名字：by_slot([195, 322, ...]) → {名單第 1 個: 195, ...}（取兩者較短的長度）"""
+    return dict(zip(roster(n), values))
+
+
+def leader_last(n: str | None = None) -> list[str]:
+    """名單隊長放最後：PrimalSA → DKBO2..DKBO5, DKBO（grind / ass 讀改順序，結束時面板選在隊長）"""
+    r = roster(n)
+    return r[1:] + r[:1]
+
+
+def all_names() -> list[str]:
+    """所有視窗名單的聯集（照 ROSTERS 順序）：顯示真名（charstate.display）用"""
+    return [x for v in ROSTERS.values() for x in v]
 
 
 def dir_name(n: str | None = None) -> str:

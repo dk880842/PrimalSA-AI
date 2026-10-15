@@ -270,9 +270,7 @@ os.environ['PSA_TEST_PROCS'] = 'PrimalSA,PrimalSA2'
 check('relogin.py --dry-run：多視窗 + 設定檔 → 0（不擋）', relogin.run(dry_run=True) == 0 and not rg)
 os.environ['PSA_CLIENT'] = 'PrimalSA2'
 check('relogin.py --dry-run：PrimalSA2 + 設定檔 → 0', relogin.run(dry_run=True) == 0 and not rg)
-check('relogin.default_leader：PrimalSA2 → DKBO6', relogin.default_leader() == 'DKBO6')
 os.environ.pop('PSA_CLIENT')
-check('relogin.default_leader：主視窗 → DKBO', relogin.default_leader() == 'DKBO')
 no_cfg()
 check('relogin.py --dry-run：多視窗沒設定檔 → 109（舊行為）', relogin.run(dry_run=True) == 109 and not rg)
 os.environ['PSA_TEST_PROCS'] = 'PrimalSA'

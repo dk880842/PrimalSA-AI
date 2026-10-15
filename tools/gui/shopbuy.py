@@ -21,8 +21,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import charstate  # noqa: E402
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
+ROLES = clients.roster()      # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
+LEADER = ROLES[0] if ROLES else ''
 ITEM = '耐久力回複藥'
 BUY_NPC = (463, 288)          # 藥劑師，站在 1005:24,63 時的截圖座標（2026-10-14 量；鏡頭最左）
 STAND = (24, 63)
@@ -87,7 +91,7 @@ def log(m: str) -> None:
 
 def run(roles, confirm_spend: bool = False, dry_run: bool = False) -> tuple:
     """→ (rc, info)；info = {'missing', 'bought', 'still_missing'}。confirm_spend=False / dry_run → 只讀誰缺（rc 0）。
-    傳送村子 + 進醫院（heal.heal_trip no_return，不開遇敵）→ 解散 → 逐人 char.switch → 買 → char.ensure DKBO → team.form → 重讀驗證"""
+    傳送村子 + 進醫院（heal.heal_trip no_return，不開遇敵）→ 解散 → 逐人 char.switch → 買 → char.ensure 隊長 → team.form → 重讀驗證"""
     info = {'missing': [], 'bought': []}
     rc, miss = missing_roles(list(roles))
     if rc:
@@ -110,10 +114,10 @@ def run(roles, confirm_spend: bool = False, dry_run: bool = False) -> tuple:
     for r in miss:
         rc = buy_one(r, log)
         if rc:
-            char.ensure('DKBO')
+            char.ensure(LEADER)
             return (rc if rc in PASS else EXIT_BUY), info
         info['bought'].append(r)
-    rc = char.ensure('DKBO')
+    rc = char.ensure(LEADER)
     if rc in PASS:
         return rc, info
     rc = team.form()
@@ -133,9 +137,9 @@ def main(argv=None) -> int:
     ap.add_argument('--confirm-spend', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)
-    roles = list(uikit.CHARS) if a.roles == 'all' else [uikit.norm_char(r) for r in a.roles.split(',')]
-    if not all(roles):
-        print('shopbuy：角色名不在白名單', file=sys.stderr)
+    roles = list(ROLES) if a.roles == 'all' else [charstate.norm_char(r, ROLES) for r in a.roles.split(',')]
+    if not roles or not all(roles):
+        print(f'shopbuy：角色名不在這個視窗的名單 {ROLES}（PSA_CLIENT={clients.name()}）', file=sys.stderr)
         return uikit.EXIT_USAGE
     rc, info = run(roles, a.confirm_spend, a.dry_run)
     print(json.dumps(info, ensure_ascii=False))

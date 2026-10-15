@@ -7,6 +7,7 @@
 - 每個角色一列：狀態（**當前** / 線上）、隊伍狀態（單人 / 隊長 / 隊員）、正常、Lv。**看組隊結果最可靠的地方**。
 - 標「當前」的就是目前操作的角色。
 - **角色真名是字母 O：DKBO、DKBO2～5；本檔與其他舊文件的 DKB0～DKB05（數字 0）同義**（程式比對 O / 0 視為相同，CLI 的 `--leader` / `--set-char` / ass.py 角色參數兩種寫法都收，輸出用真名）。
+- **多視窗（第 3b 步）**：卡片順序 = 該視窗名單順序（`clients.roster()`；`PSA_CLIENT=PrimalSA2` 為 DKBO6～DKBO10），`team.py` 預設隊長 = 名單第 1 個（DKBO6）。OCR 尾碼交叉確認依名單算（PrimalSA2：06～09、010，隊長 DKBO6 的 06 也算；單獨「10」不認）。第一次用 PrimalSA2 先在 5 人在線、切換面板開著時跑 `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/namematch.py learn`（新名字要 OCR 確認才學；樣板檔共用，存檔保留主視窗的名字）。
 - **切換角色優先用 `char.py`**（P3，2026-10-11 實測）：`uv run --no-project python tools/gui/char.py current|switch DKBO2|ensure DKBO`。
   點卡片前先用 namematch 確認名字 + 狀態線上（命中不了 → 61，不猜），點完等「加載中」→ HUD 回來 → 重開面板用「當前藍框 + 名字」驗證，成功才寫 current-char.json；最後一行印 JSON（`changed`、`current`…）。
   退出碼 60 面板打不開 / 61 目標卡找不到或名字沒確認 / 62 點了但當前沒變（不重點）/ 63 當前框 ≠ 1 / 64 名字矛盾 / 65 點了但 HUD 6 s 沒回來，加共用 1 / 2 / 8 / 9 / 10。

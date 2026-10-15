@@ -47,6 +47,7 @@ import namematch  # noqa: E402
 import pngread  # noqa: E402
 import screen_sigs  # noqa: E402
 import uikit  # noqa: E402
+import clients  # noqa: E402
 import winenv  # noqa: E402
 
 ROOT = HERE.parents[1]
@@ -707,16 +708,17 @@ class _CharTools:
             close_detail()
 
 
-ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+ALL_ROLES = clients.roster()        # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；第 1 個 = 隊長（結束切回誰）
 STOP_RC = (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)
 
 
-def status_all(titles, roles=None, leader: str = 'DKBO', tools=None, dy: int | None = None, back: bool = True) -> tuple:
+def status_all(titles, roles=None, leader: str | None = None, tools=None, dy: int | None = None, back: bool = True) -> tuple:
     """逐人讀任務詳情（2026-10-12：四寶玉之謎隊長完成、DKBO3 / DKBO5 被打飛沒完成，questrun 只看隊長沒發現）。
     **任務詳情面板沒有左欄角色頭像**（2026-10-12 實機截圖：只有主線 / 支線分頁 + 列表），所以只能 char.switch 切當前角色、每人開關一次詳情；
     當前是誰就先讀誰（少切一次），每人只讀 titles 所在分頁、讀到就停止捲動。結束 back=True → char.ensure(leader)。
     → (rc, {角色: {標題: 狀態或 None}})；某人切換 / 讀取失敗 → 該人值為 None、rc 記第一個錯（9 / 10 立即停、不再點）"""
     T = tools or _CharTools()
+    leader = leader or (ALL_ROLES[0] if ALL_ROLES else '')
     names = []
     for t in titles:
         n = snap_name(t, 0.9)
@@ -968,9 +970,10 @@ def read_full(dy: int | None = None) -> tuple:
     return 0, out
 
 
-def roles_all(roles=None, leader: str = 'DKBO', tools=None, dy: int | None = None) -> tuple:
+def roles_all(roles=None, leader: str | None = None, tools=None, dy: int | None = None) -> tuple:
     """逐人讀全部任務列（唯讀）→ (rc, {角色: {標題: 狀態} 或 None})；結束切回 leader"""
     T = tools or _CharTools()
+    leader = leader or (ALL_ROLES[0] if ALL_ROLES else '')
     roles = list(roles or ALL_ROLES)
     rc0, cur = T.current()
     if rc0 in STOP_RC:

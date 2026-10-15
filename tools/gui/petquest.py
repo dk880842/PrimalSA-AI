@@ -80,7 +80,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import charstate  # noqa: E402
 import clients  # noqa: E402
+import questdefs  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'petquest'
@@ -92,8 +94,10 @@ PROGRESS = logpaths.p(uikit.CACHE / 'petquest.json')
 (EXIT_ARGS, EXIT_ACCEPT, EXIT_PREP, EXIT_BAIT, EXIT_CATCH, EXIT_DIST, EXIT_TRAIN, EXIT_TURNIN, EXIT_DROP,
  EXIT_RESTORE) = range(160, 170)
 PASS = (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)                  # 驗證視窗 / 斷線：一律透傳
-LEADER = 'DKBO'
-ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+ALL_ROLES = clients.roster()          # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
+LEADER = ALL_ROLES[0] if ALL_ROLES else ''
+
+_r = questdefs.roster_at              # 抓寵分配用卡位（_r(1) = 名單第 2 個）而不是寫死 DKBO2…
 BATTLE_PET = '朵拉比斯'
 BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
 PET_FEE = 67                       # pet.EXIT_FEE：還原名字時讀到費用字樣（鐵則 3）
@@ -110,17 +114,17 @@ TRAIN_SPOT = '波拉島'           # 恐龍博士 / 卡坦練寵：使用者 202
 QUIZ_SPOT = None                # 猜謎三兄弟練金布伊：去練功（grind.py start 不帶 --spot，依等級選點 + follow）；不寫死地雷區
 LAST: dict = {}
 
-# 每任務的設定（物種 / 門檻 / 抓寵者取自 questdefs.pet_prep 與 psa-pet-quest SKILL.md 具體寵物表）
+# 每任務的設定（物種 / 門檻 / 抓寵者取自 questdefs.pet_prep 與 psa-pet-quest SKILL.md 具體寵物表）；抓寵者用名單卡位（_r(1) = 第 2 個人），不寫死名字
 QUESTS = {
     2016: dict(kind='catch', track='恐龍博士', rounds=[
-        dict(assign=[('DKBO2', '呼拔拔系', '魯尼帖斯'), ('DKBO3', '老虎系', '貝魯卡')], need={'魯尼帖斯': 18, '貝魯卡': 30}, drop='布克布克')],
-        count=5),
+        dict(assign=[(_r(1), '呼拔拔系', '魯尼帖斯'), (_r(2), '老虎系', '貝魯卡')], need={'魯尼帖斯': 18, '貝魯卡': 30}, drop='布克布克')],
+        count=len(ALL_ROLES) or 5),
     2019: dict(kind='catch', track='卡坦的願望', rounds=[
-        dict(assign=[('DKBO2', '鯊魚系', '克邦凱斯'), ('DKBO3', '鯊魚系', '加克拉'), ('DKBO4', '鯊魚系', '加格'), ('DKBO5', '鯊魚系', '邦恩吉')],
+        dict(assign=[(_r(1), '鯊魚系', '克邦凱斯'), (_r(2), '鯊魚系', '加克拉'), (_r(3), '鯊魚系', '加格'), (_r(4), '鯊魚系', '邦恩吉')],
              need={'克邦凱斯': 25, '加克拉': 25, '加格': 25, '邦恩吉': 25}, drop='修寶', step=1),
-        dict(assign=[('DKBO2', '火雞系', '火雞'), ('DKBO3', '火雞系', '克克洛斯'), ('DKBO4', '火雞系', '霍爾克'), ('DKBO5', '火雞系', '奇寶')],
+        dict(assign=[(_r(1), '火雞系', '火雞'), (_r(2), '火雞系', '克克洛斯'), (_r(3), '火雞系', '霍爾克'), (_r(4), '火雞系', '奇寶')],
              need={'火雞': 25, '克克洛斯': 25, '霍爾克': 25, '奇寶': 25}, drop=None, step=2)],
-        count=5, store_reward=BATTLE_PET),
+        count=len(ALL_ROLES) or 5, store_reward=BATTLE_PET),
     3003: dict(kind='quiz', track='猜謎三兄弟', pet='金布伊', level=77, drop='左迪洛斯'),
 }
 
@@ -391,9 +395,10 @@ def bait_ok_roles(lines) -> set:
     """pet_catch --stages bait 的輸出 →「背包誘餌 = N」成功的角色"""
     out = set()
     for ln in lines or []:
-        m = re.search(r'(DKB[O0]\d?)\s*背包誘餌\s*=\s*\d+', str(ln))
-        if m:
-            out.add(m.group(1).replace('DKB0', 'DKBO'))
+        m = re.search(r'([A-Za-z0-9]+)\s*背包誘餌\s*=\s*\d+', str(ln))
+        hit = charstate.norm_char(m.group(1), ALL_ROLES) if m else None    # 名單內的名字（DKBO10 也行；舊版 DKB[O0]\d? 只吃 1 位數）
+        if hit:
+            out.add(hit)
     return out
 
 
@@ -988,7 +993,7 @@ class Run:
         orig = self.p.get('orig') or {}
         if self.q['kind'] == 'catch' and not self.p.get('already_done'):
             if [r for r in ALL_ROLES if not orig.get(r)]:
-                return self.fail(EXIT_ARGS, f'進度檔沒有 5 人原{BATTLE_PET}等級 {orig} → 不盲取（同名多隻）', '手動 pet.py take-many --depot personal --plan "DKBO:朵拉比斯@等級,…"')
+                return self.fail(EXIT_ARGS, f'進度檔沒有 5 人原{BATTLE_PET}等級 {orig} → 不盲取（同名多隻）', f'手動 pet.py take-many --depot personal --plan "{LEADER}:{BATTLE_PET}@等級,…"')
             rc0, rs0 = self.pet_list()                                    # 續跑：已有原等級的戰寵在寵物欄的人不再取（take-many 對同名多隻會取到別隻，2026-10-14 恐龍博士手動取回後續跑）
             have = {r for r in ALL_ROLES if rc0 == 0 and any(slot_species(s) == BATTLE_PET and s.get('level') == orig[r] for s in rs0.get(r) or [])}
             todo = [r for r in ALL_ROLES if r not in have]
@@ -1123,6 +1128,9 @@ def main(argv=None) -> int:
     ap.add_argument('--verify-defer', action='store_true', help='內部 questrun 帶 --verify defer（沒風險事件的逐人驗證延到呼叫端收尾；postrebirth 用）')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)
+    if not ALL_ROLES:
+        print(f'petquest：PSA_CLIENT={clients.name()} 沒有登錄角色名單（clients.ROSTERS），不跑', file=sys.stderr)
+        return EXIT_ARGS
     if a.cmd == 'run' and not a.dry_run:
         import winenv
         winenv.enable_server()

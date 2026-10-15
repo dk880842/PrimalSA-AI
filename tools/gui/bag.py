@@ -429,7 +429,7 @@ def goto_page(page: str) -> int:
 def select_role(role: str, ctx: dict | None = None) -> int:
     """左欄點頭像 → 黃框剛好只有該角色 + 名牌 OCR 是該角色（0 / 91）"""
     if role not in petmatch.AVATAR_Y:
-        return _fail(uikit.EXIT_USAGE, f'角色 {role!r} 不在五人白名單')
+        return _fail(uikit.EXIT_USAGE, f'角色 {role!r} 不在這個視窗的名單')
     for k in range(2):
         if k == 0 and _avatar_sel(role):                  # 已經選著（批次連續操作同一人）就不再點頭像（2026-10-13：取誘餌流程一人點 4 次）
             break

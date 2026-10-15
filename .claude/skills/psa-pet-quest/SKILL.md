@@ -55,6 +55,12 @@ uv run --no-project python tools/gui/petquest.py run 3003 --confirm-drop        
 - 退出碼 160 參數 / 161 接取（猜謎步 1 沒金布伊 → 點任務追蹤重試 / 人工）/ 162 準備 / 163 誘餌 · 買 / 164 抓 / 165 分配 / 166 練 / 167 交 / 168 丟 / 169 換回；9 / 10 透傳。離線測試 `test_petquest.py`（假寵物欄 / 倉庫模擬器）。
 - **待實機**：①石幣讀取框；②「+」按前後讀可抓捕數；③分批抓（count 4 → 1）與每批存公共；④卡坦第 1 輪交完 questrun 回 117 / 155 + 步號 2；⑤練寵 `pet.py levels` 輪詢在快戰中讀等級、nh 指紋會不會被 EXP 浮字弄亂（亂了只是改讀完整 list）；⑥全流程耗時；⑦`--reuse-setup` 第 2 批時欄位真的還是第 1 批的物種（遊戲抓完會不會重設欄位）；⑧抓寵第一次輪詢 100 / 40 秒是否太早（太早只是多開一次外掛面板）。
 
+## 多視窗（`PSA_CLIENT=PrimalSA2`，第 3c 步 2026-10-15；**只有離線測試，未實機**）
+名單 = `clients.roster()`（`PSA_CLIENT` 程序名稱 → 寫死的名單；主視窗 PrimalSA = DKBO、DKBO2～5，PrimalSA2 = DKBO6～DKBO10，字母 O；第 1 個 = 隊長）。**沒設 `PSA_CLIENT` 行為與以前完全相同**（`test_roster_quest.py` 快照：名單常數、切換面板卡位、抓寵分配字串、預設值逐字相同）；名單沒登錄的視窗（例 PrimalSA3）CLI 一律拒跑（各腳本的參數 / preflight 退出碼，不點任何東西）。
+- petquest 的抓寵分配改成**卡位**：恐龍博士 = 第 2 人抓魯尼帖斯、第 3 人抓貝魯卡；卡坦 = 第 2～5 人各抓一色鯊魚 / 火雞（主視窗 DKBO2～5，PrimalSA2 = DKBO7～10）；`questdefs.roster_at(i)` 轉名字，questdefs 的 `pet_catch.py --assign` 指令同一份。
+- pet_catch `--roles` 預設 = 名單、`--catch-off` 預設 = 隊長以外；petquest 讀「背包誘餌 = N」認名單內名字（DKBO10 兩位數也認得）。
+- 誘餌 / 任務寵分配 / 原朵拉比斯都經**這個帳號自己的**公共 / 個人倉庫，不跨帳號。
+
 ## 何時用
 - Task 步驟類型是交寵物（`psa.py steps <任務ID>` / `knowledge/quests/`：寵物 ID × 數量 + petLevel），或使用者說抓寵 / 練寵交任務。
 - 條件：petLevel 是「≥」（實測 18 / 25 / 30 都過），交出的寵物會被收走（clean=1），寵物只是消耗品。**每個角色各要一套**。

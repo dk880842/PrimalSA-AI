@@ -2,7 +2,7 @@
 """寵物面板腳本化（P6：list / set-state / rest-all；P7：store / take）。計畫：notes/plan-scriptify.md §5。只用標準函式庫。
 
 用法（專案根目錄；WSL / Windows 原生指令相同；角色名 DKB0 / DKBO 都收，輸出用真名 DKBO）：
-  uv run --no-project python tools/gui/pet.py list [--role DKBO|all] [--json]           # 唯讀：每格 名字 / 狀態 / 等級
+  uv run --no-project python tools/gui/pet.py list [--role DKBO|DKBO,DKBO3|all] [--json]   # 唯讀：每格 名字 / 狀態 / 等級（逗號清單照名單順序）
   uv run --no-project python tools/gui/pet.py levels [--role all] [--slots 2,3,4,5] [--json]   # 唯讀：只讀等級 + 名字框點陣指紋 nh（練寵輪詢；不認名字）
   uv run --no-project python tools/gui/pet.py set-state DKBO 迪基格斯 出戰|等待|騎乘 [--slot N] [--allow-mount]
   uv run --no-project python tools/gui/pet.py rest-all [--role all] [--keep 瑪斯貝卡] [--only 名,名] [--dry-run]
@@ -104,6 +104,7 @@ from pathlib import Path  # noqa: E402
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import charstate  # noqa: E402
+import clients  # noqa: E402
 import petmatch  # noqa: E402
 import uikit  # noqa: E402
 
@@ -257,24 +258,28 @@ def _petwatch():
 
 def check_avatar_name(role: str, ctx: dict) -> bool:
     """頭像下名字樣板核對：有樣板 → 必須吻合；沒有 → 學一次（OCR 讀到別人就不學並判不符）。第 5 個頭像名字在面板外 → 不核對"""
-    if role not in petmatch.AVATAR_Y or role == 'DKBO5':
+    if role not in petmatch.AVATAR_Y or list(petmatch.AVATAR_Y).index(role) == petmatch.AVATAR_NAME_OUT:
         return True
     box = petmatch.avatar_box(role)
     rows, _ = petmatch.grab([box + ('brown',)])
     if not rows:
         return True                              # 讀不到不當不符（主證據是黃框）
-    label, sc, _ = petmatch.match_whole('avatar', rows[0], ctx['tpl'])
+    mine = charstate.chars()      # 頭像名樣板簿全部視窗共用：只跟這個視窗的名單比（2026-10-15 PrimalSA2 DKBO8 被主視窗 DKBO3 樣板判走 → 71）
+    label, sc, _ = petmatch.match_whole('avatar', rows[0], ctx['tpl'], only=mine)
     if label:
         return charstate.same(label, role)
     if petmatch.ink(rows[0]) < petmatch.MIN_INK['avatar']:
         return True
     if ctx['learn']:
-        for t in _petwatch().ocr(box, '-Dark', 150, '-Zooms', '2,3,4'):
-            hit = charstate.norm_char(t)
-            if hit and not charstate.same(hit, role):
+        texts = _petwatch().ocr(box, '-Dark', 150, '-Zooms', '2,3,4')
+        hits = {charstate.norm_char(t) for t in texts} - {None}
+        for hit in hits:
+            if not charstate.same(hit, role):
                 log(f'頭像名字 OCR 讀到 {hit}，與點的 {role} 矛盾')
                 return False
-        if petmatch.learn_whole('avatar', role, rows[0], ctx['tpl'], log):
+        if not clients.is_default() and not hits:
+            return True                          # 非主視窗第一次學（DKBO6～10）：OCR 要精確命中名單上的這個名字才學；讀不出 = 不學、不當不符
+        if petmatch.learn_whole('avatar', role, rows[0], ctx['tpl'], log, only=mine):
             ctx['dirty'] = True
     return True
 
@@ -1107,9 +1112,18 @@ def _out(rc: int, info: dict, t0: float, msg: str = '', as_json_only: bool = Fal
 
 
 def role_list(arg: str) -> list | None:
-    """'all' → 全部頭像角色（照白名單順序）；其他 → 單一角色（寬鬆正規化）；不認得 → None"""
+    """'all' → 全部頭像角色（照白名單順序）；'DKBO,DKBO3'（逗號分隔）→ 照白名單順序、去重；其他 → 單一角色（寬鬆正規化）；
+    任一不認得（含逗號清單裡夾 all、空項）→ None。要保留使用者順序的多角色指令用 roles_multi"""
     if str(arg).lower() == 'all':
         return [r for r in (charstate.display(c) for c in charstate.chars()) if r in petmatch.AVATAR_Y]
+    if ',' in str(arg):
+        got = set()
+        for t in (x.strip() for x in str(arg).split(',')):
+            r = role_list(t) if t and t.lower() != 'all' else None
+            if not r:
+                return None
+            got.add(r[0])
+        return [r for r in role_list('all') if r in got]
     hit = charstate.norm_char(arg)
     r = charstate.display(hit) if hit else None
     return [r] if r in petmatch.AVATAR_Y else None
@@ -1134,7 +1148,7 @@ def list_roles(role_arg: str = 'all', as_json: bool = False, pause: bool = False
     t0 = time.time()
     roles = role_list(role_arg)
     if not roles:
-        print(f'pet：角色 {role_arg!r} 不認得（DKBO、DKBO2～5 或 all）', file=sys.stderr)
+        print(f'pet：角色 {role_arg!r} 不認得（{"、".join(petmatch.AVATAR_Y)} 或 all）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, {'roles': {}}, t0, '角色名不認得')
     info = {'roles': {}}
     ctx = load_ctx(learn, use_icache=True)
@@ -1211,7 +1225,7 @@ def list_levels(role_arg: str = 'all', slots=None, as_json: bool = False, pause:
     t0 = time.time()
     roles = role_list(role_arg)
     if not roles:
-        print(f'pet：角色 {role_arg!r} 不認得（DKBO、DKBO2～5 或 all）', file=sys.stderr)
+        print(f'pet：角色 {role_arg!r} 不認得（{"、".join(petmatch.AVATAR_Y)} 或 all）', file=sys.stderr)
         return _out(uikit.EXIT_USAGE, {'roles': {}}, t0, '角色名不認得')
     if slots and not all(1 <= x <= 5 for x in slots):
         return _out(uikit.EXIT_USAGE, {'roles': {}}, t0, f'--slots {slots} 要 1～5')
@@ -3141,7 +3155,7 @@ def _print_fix(info: dict) -> None:
             print(f'pet：{k} {x}')
 
 
-def depot_fix_names(role_arg: str = 'DKBO', depots=('public',), dry_run: bool = False, pause: bool = False, learn: bool = True,
+def depot_fix_names(role_arg: str = charstate.LEAD, depots=('public',), dry_run: bool = False, pause: bool = False, learn: bool = True,
                     limit: int | None = None) -> int:
     """倉庫裡名字是成長字串的卡：取出到寵物欄 → 還原名字 → 存回原倉庫（公共回公共、個人回個人）。
     **批次**（2026-10-14 加速）：進倉庫前算寵物欄空格數 N，同一次倉庫分頁內連續取出最多 N 張 → 切回寵物分頁一次連續改名 → 再切倉庫分頁一次連續存回；
@@ -3383,14 +3397,14 @@ def main() -> int:
     p.add_argument('--depot', default='personal', choices=['personal', 'public'])
     p.add_argument('--skip-missing', action='store_true')
     p = sub.add_parser('depot-list', help='唯讀：倉庫卡片清單 + 各物種張數（逐張選卡讀名字；公共一次、個人每人一次）', parents=[cp])
-    p.add_argument('--role', default='DKBO', help='個人倉庫要讀的角色（逗號分隔 / all）；只讀公共時用第一個角色選頭像')
+    p.add_argument('--role', default=charstate.LEAD, help='（預設隊長）個人倉庫要讀的角色（逗號分隔 / all）；只讀公共時用第一個角色選頭像')
     p.add_argument('--depot', default='public', help='public / personal / public,personal')
     p = sub.add_parser('reset-name', help='名字框是成長字串的寵物 → 點鉛筆、輸入框留空按確認 → 還原物種名（面板開一次逐人）', parents=[cp])
     p.add_argument('--role', default='all', help='all 或逗號分隔 DKBO2,DKBO3')
     p.add_argument('--slot', type=int, default=None, help='只還原第幾格（1 起算；預設每個成長字串格）')
     p.add_argument('--dry-run', action='store_true', help='只列出要還原的格（會開面板選取讀名字，不點鉛筆）')
     p = sub.add_parser('depot-fix-names', help='倉庫裡成長字串的卡 → 取出 → 還原名字 → 存回原倉庫（寵物欄沒空格就跳過）', parents=[cp])
-    p.add_argument('--role', default='DKBO', help='公共倉庫：用第一個寵物欄有空格的角色；個人倉庫：逐人（逗號分隔 / all）')
+    p.add_argument('--role', default=charstate.LEAD, help='（預設隊長）公共倉庫：用第一個寵物欄有空格的角色；個人倉庫：逐人（逗號分隔 / all）')
     p.add_argument('--depot', default='public', help='public / personal / public,personal')
     p.add_argument('--dry-run', action='store_true', help='只列出要修的卡（唯讀）')
     p.add_argument('--limit', type=int, default=None, help='最多修幾張（實機試跑用；預設全部）')

@@ -286,6 +286,14 @@
     恐龍博士 `--pet-turnin` 接取後已 rest-all，交寵物前不重做；`pet.plan_rest` 名字讀不出但縮圖認得物種（img_species，非騎寵）→ 照改等待（S5 剛抓的貝魯卡沒名字、rest-all 拒絕）。
   - **實機要確認**：①批次驗證的支線捲動能一次讀到多個任務（status_all 多標題）；②DKBO 背包整疊留著時 use_item 找得到、run 結束 depot_store 整疊存回；③relogin `--stuck` 在 VS 牌 / 巡路畫面時設置鈕（1210,760）點得開；④關閉列只點 2 次後，等列消失的時間是否比舊版連點短。
 
+### 多視窗：`PSA_CLIENT=PrimalSA2` 跑任務（第 3c 步，2026-10-15；**只有離線測試，未實機**）
+名單 = `clients.roster()`（`PSA_CLIENT` 程序名稱 → 寫死的名單；主視窗 PrimalSA = DKBO、DKBO2～5，PrimalSA2 = DKBO6～DKBO10，字母 O；第 1 個 = 隊長）。**沒設 `PSA_CLIENT` 行為與以前完全相同**（`test_roster_quest.py` 快照：名單常數、切換面板卡位、抓寵分配字串、預設值逐字相同）；名單沒登錄的視窗（例 PrimalSA3）CLI 一律拒跑（各腳本的參數 / preflight 退出碼，不點任何東西）。
+- 用法：前面加 `PSA_CLIENT=PrimalSA2`，例 `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/questrun.py run 2999 2017 2015`；子程序（quest.py / bossretry / petquest / rebirth…）繼承環境變數，進度檔與事件 log 在 `tools/.cache/clients/PrimalSA2/`、`notes/clients/PrimalSA2/`（第 3a 步）。
+- 改讀名單的：questrun（隊長 / 逐人驗證 / 背包 / 存倉 / 龍王借還 / `--role` 只認自己名單）、quest.py（切換面板 5 張卡的名字 = 名單卡位，`--team-size` 預設 = 名單人數）、questdetail（`status_all` / `roles_all` 切回名單隊長）、questdefs（交寵物分配 `roster_at(卡位)`）、bossretry（隊長 / TEAM_SIZE / `--who`）、shopbuy（`--roles all` = 名單、切回隊長）、relogin（`--leader` / `--size` 預設）。
+- 龍王的守護：只從**這個帳號自己的公共倉庫**借、還回同一個（公共倉庫每個帳號各一份，知識庫字串 31324）；PrimalSA2 公共倉庫沒有龍王 → 紅暴 156 → `--solo`。
+- 還要第 3b 步（team / char / ass / pet / bag / grind 改讀名單）合併後 PrimalSA2 才真的能跑：這些模組的名字白名單、外掛頭像座標、`team.form` / `check` 預設隊長、`ass.QUEST_BATTLE`（隊長「人物首次動作 風的精靈」是 DKBO 的設定）都在 3b。
+- 多視窗不自動重登：`--stuck` 卡住重登 / relogin 在多視窗時 109 → questrun 照「重登失敗」停手交人（第 3a 步規則）。
+
 ### 紅暴（英雄島前傳 2031）組隊打到底：questrun 納入（2026-10-13，**只有離線測試，實機未驗證**）
 使用者 2026-10-13：有龍王效果就不用逃跑 → 改組隊跑；完全沒龍王可吃才退回單人逃跑（`/psa-quest-solo` §4，**2026-10-14 起 `questrun run 2031 --solo` 腳本化**，見下）。questdefs `QOTHER`（不進預設順序，指定 ID 才跑）。
 ```

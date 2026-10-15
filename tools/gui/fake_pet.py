@@ -88,7 +88,7 @@ def mk_pets(**kw):
 class Game:
     def __init__(self, pets=None, hud=True, panel=False, depot=None):
         self.pets = pets or mk_pets()
-        self.depot = depot or mk_depot(DKBO={'personal': ['摩娜西普', '朵拉比斯', '巴朵蘭恩']})
+        self.depot = depot or mk_depot(**{ROLES[0]: {'personal': ['摩娜西普', '朵拉比斯', '巴朵蘭恩']}})   # 隊長（名單第 1 個）
         self.view = 'pet'                # pet | depot
         self.dtab = 'personal'
         self.sel_kind = 'pet'            # pet | card（最後選的是哪種；右側面板與按鈕依它）
@@ -109,13 +109,14 @@ class Game:
         self.tab_clicks = []             # 依序記「寵物 / 倉庫」分頁點擊：'pet' / 'depot'
         self.card_clicks = []            # 倉庫卡點擊（index 0 起算）
         self.hud, self.panel = hud, panel
-        self.role = 'DKBO'
+        self.role = ROLES[0]
         self.sel = 0
         self.locked = False              # 外掛鎖定戰寵：狀態鈕沒反應
         self.battle = False              # 戰鬥中（VS 牌在；狀態鈕沒反應）
         self.avatar_dead = False         # 點頭像沒反應（測 71）
         self.slot_dead = False           # 點寵物格沒反應
         self.avatar_label = {}           # 角色 → 覆寫頭像下名字圖用的標籤（測頭像名字樣板不符）
+        self.avatar_ocr = False          # True = 頭像下名字 OCR 讀得到（回 avatar_label 或角色名；測非主視窗第一次學樣板）
         self.clicks, self.keys, self.seqs = [], [], []
         self.state_clicks = []           # (角色, 格, 狀態) 每次點狀態鈕
         self.ocr_calls = []
@@ -433,6 +434,10 @@ class Game:
             if p and p.get('unnamed'):
                 return [p['unnamed'], p['unnamed'], p['unnamed'].rsplit('/', 2)[0] + '/' + p['unnamed'].split('/')[-1]]
             return [p['name']] * 3 if p else []
+        if self.avatar_ocr:                                   # 頭像下名字 OCR（預設關 = 讀不到，舊測試行為）
+            for r in ROLES:
+                if tuple(box) == petmatch.avatar_box(r):
+                    return [self.avatar_label.get(r, r)]
         import petwatch
         if tuple(box) == tuple(petwatch.LEVEL_BOX) and p:
             if self.ocr_level_mode == 'none':

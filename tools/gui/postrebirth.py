@@ -63,7 +63,7 @@ PROGRESS = logpaths.p(uikit.CACHE / 'postrebirth.json')
 
 EXIT_ARGS, EXIT_INV, EXIT_QUEST, EXIT_HERO, EXIT_BAG, EXIT_PET, EXIT_FINISH = 170, 171, 172, 173, 174, 175, 176
 PASS = (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT)
-ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+ALL_ROLES = clients.roster()        # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10
 PROGRESS_TRUST_S = 24 * 3600
 NODRAGON_RC = 156                  # questrun.EXIT_NODRAGON
 LAST: dict = {}
@@ -417,6 +417,9 @@ def main(argv=None) -> int:
     ap.add_argument('--fresh', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)
+    if not ALL_ROLES:
+        print(f'postrebirth：PSA_CLIENT={clients.name()} 沒有登錄角色名單（clients.ROSTERS），不跑', file=sys.stderr)
+        return EXIT_ARGS
     rc = run(from_seg=a.from_seg, to_seg=a.to_seg, confirm_drop=a.confirm_drop, confirm_buy=a.confirm_buy_bait, spot=a.spot,
              fresh=a.fresh, dry_run=a.cmd == 'plan' or a.dry_run)
     if a.cmd == 'run' and not a.dry_run:

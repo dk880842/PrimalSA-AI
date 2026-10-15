@@ -286,8 +286,8 @@ def read_all(roles, table=None, dry_run: bool = False) -> tuple:
                 v['ts'] = time.time()
                 history_add(dict(v, role=r))
             out[r] = v
-        if not rc and roles[-1] != 'DKBO' and uikit.is_open(ROLEINFO):
-            rc = select_role('DKBO')
+        if not rc and roles[-1] != charstate.LEAD and uikit.is_open(ROLEINFO):
+            rc = select_role(charstate.LEAD)
     finally:
         if not was_open and uikit.is_open(ROLEINFO):
             uikit.close_panel(ROLEINFO, known_open=True)
