@@ -106,8 +106,8 @@ check('2031 在 questdefs、不進預設順序、dragon_required、步 6 fight�
 n31 = npcs.get(sorted((t for t in tasks if t.get('group') == 2031), key=lambda t: t.get('step', 0))[5].get('endNpc'))
 check('2031 步 6 BOSS NPC（龍王的守衛）在 fight map、距落點 ≤ 3 格', bool(n31) and n31.get('map') == d31['steps'][6]['map']
       and abs(n31.get('x') - d31['steps'][6]['xy'][0]) <= 3 and abs(n31.get('y') - d31['steps'][6]['xy'][1]) <= 3, str(n31 and (n31.get('map'), n31.get('x'), n31.get('y'))))
-check('2031 前置：成人儀式 / 80 級 / 耐久力回複藥（Task 表步 1 條件）', questdefs.prereqs(2031, tasks) == [2999] and d31.get('min_level') == 80
-      and '耐久力回複藥' in d31.get('need_items', []))
+check('2031 前置：成人儀式 / 80 級；不再有 need_items（耐久力回複藥 NPC 會給）', questdefs.prereqs(2031, tasks) == [2999] and d31.get('min_level') == 80
+      and not d31.get('need_items'))
 check('2031 獎勵：步 7 龍王的守護 / 步 8 英雄的祝福、薩姆吉爾的首飾 都在 Task 表獎勵', {'龍王的守護', '英雄的祝福', '薩姆吉爾的首飾'}
       <= {items.get(r.get('itemId')) for t in tasks if t.get('group') == 2031 for r in (t.get('reward') or []) if r and r.get('itemId')})
 alld = {n for d in questdefs.ALL for n in d.get('drop_items') or []}

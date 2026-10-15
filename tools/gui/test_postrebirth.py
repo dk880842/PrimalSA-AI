@@ -125,8 +125,8 @@ check('刪完白名單仍不足 → 174（名單外不刪）', rc == pr.EXIT_BAG
 f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 0]})
 rc = go(f, confirm_drop=True, to_seg='hero')
 hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run' and a[1] == '2031']
-check('紅暴 156（沒龍王）→ 自動改跑 questrun --solo（同樣的丟棄 / 買藥參數）→ 0', rc == 0 and len(hr) == 2 and '--solo' not in hr[0] and '--solo' in hr[1]
-      and '--buy-missing' in hr[0] and '--buy-missing' in hr[1] and '--drop-items' in hr[1] and pr.LAST['ran'][-1] == 'hero', str(hr))
+check('紅暴 156（沒龍王）→ 自動改跑 questrun --solo（同樣的丟棄參數）→ 0', rc == 0 and len(hr) == 2 and '--solo' not in hr[0] and '--solo' in hr[1]
+      and '--buy-missing' not in hr[0] and '--buy-missing' not in hr[1] and '--drop-items' in hr[1] and pr.LAST['ran'][-1] == 'hero', str(hr))
 f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 112]})
 rc = go(f, confirm_drop=True)
 check('紅暴單人逃跑也失敗 → 173、訊息帶 --solo 指令、後面不跑', rc == pr.EXIT_HERO and '--solo' in pr.LAST['info']['manual'] and pr.LAST['ran'] == ['inventory', 'adult', 'yayoi']

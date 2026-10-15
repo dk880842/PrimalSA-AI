@@ -9,7 +9,7 @@
   char.py ensure DKBO → team.py form → bag.team_read 再驗每人都有。
 用法：uv run --no-project python tools/gui/shopbuy.py medicine [--roles DKBO,DKBO2] [--confirm-spend] [--dry-run]
   --confirm-spend 才會真的花石幣（每人 500）；沒給只列誰缺。
-可 import：shopbuy.run(roles, confirm_spend=True) → (rc, info)。questrun --buy-missing（紅暴前置缺藥，postrebirth hero 段帶）呼叫這個。
+可 import：shopbuy.run(roles, confirm_spend=True) → (rc, info)。紅暴已不呼叫（2026-10-15 起耐久力回複藥 NPC 會給，不檢查不買），模組保留備用。
 （2026-10-14 修：舊版呼叫 heal.main(['--no-return']) / char.main(['switch', …])，兩者都不收參數 → 一跑就 TypeError；改呼叫 heal.heal_trip / char.switch / char.ensure）
 退出碼：0 完成 / 1 參數 / 2 佈局 / 9 疑似驗證視窗 / 10 netwatch / 180 讀背包失敗 / 181 前置（傳送 / 解散）失敗 /
   182 某人買不到（對話框沒出現 / 商店沒開）/ 183 買完仍缺 / 184 重新組隊失敗（藥已買齊，改手動 team.py form）
