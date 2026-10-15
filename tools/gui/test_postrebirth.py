@@ -177,5 +177,40 @@ with contextlib.redirect_stdout(buf):
 t = buf.getvalue()
 check('plan：13 段、每段指令、退出碼', all(f'[{s}]' in t for s in pr.SEGMENTS) and 'petquest.py run 2019' in t and 'questrun.py run 2031' in t and '170' in t)
 
+# ---------------- dino 帶 --keep-autoswap（後面還有卡坦）+ 中斷保險
+def dino_args(f):
+    return [a for s_, a in f.calls if s_ == 'petquest.py' and a[1] == '2016']
+
+
+check('katan_follows：全跑 / --to katan / --from dino 帶；--to dino 不帶；katan 已完成不帶', pr.katan_follows(None, None) and pr.katan_follows('dino', 'katan')
+      and not pr.katan_follows(None, 'dino') and not pr.katan_follows(None, None, ['katan']) and pr.katan_follows('katan', None, ['katan']))
+f = Fake()
+rc = go(f, from_seg='dino', to_seg='katan')
+check('dino + katan 都在範圍 → dino 帶 --keep-autoswap、katan 不帶；成功後 pending 清掉', rc == 0 and '--keep-autoswap' in dino_args(f)[0]
+      and not any('--keep-autoswap' in a for s_, a in f.calls if s_ == 'petquest.py' and a[1] == '2019') and not pr.LAST['warnings']
+      and not json.loads(pr.PROGRESS.read_text(encoding='utf-8')).get('autoswap_pending'), str(f.calls))
+f = Fake()
+rc = go(f, from_seg='dino', to_seg='dino')
+check('只跑 dino（--to dino）→ 不帶 --keep-autoswap、沒警告', rc == 0 and '--keep-autoswap' not in dino_args(f)[0] and not pr.LAST['warnings'])
+f = Fake(rcs={('petquest.py', 'run'): [0, 164]})
+rc = go(f, from_seg='dino', to_seg='katan')
+check('dino 成功、katan 失敗 → 175、進度檔 autoswap_pending、warnings 提示續跑 + 關法', rc == pr.EXIT_PET and json.loads(pr.PROGRESS.read_text(encoding='utf-8')).get('autoswap_pending')
+      and pr.LAST['warnings'] and 'autoswap off' in pr.LAST['warnings'][-1] and '--from katan' in pr.LAST['warnings'][-1], str(pr.LAST.get('warnings')))
+f = Fake()
+rc = go(f, from_seg='finish', reset=False)
+check('--from finish 且 pending 還在（卡坦沒走完）→ 收尾先 pet_catch --autoswap off、清 pending', rc == 0 and f.calls[0] == ('pet_catch.py', ('--autoswap', 'off'))
+      and not json.loads(pr.PROGRESS.read_text(encoding='utf-8')).get('autoswap_pending'), str(f.calls[:2]))
+f = Fake()
+rc = go(f, from_seg='finish')
+check('pending 沒有 → 收尾不呼叫 autoswap off', not any(s_ == 'pet_catch.py' for s_, _ in f.calls))
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    pr.run(dry_run=True, to_seg='dino')
+check('plan --to dino：不帶 --keep-autoswap', '--keep-autoswap' not in buf.getvalue())
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    pr.run(dry_run=True)
+check('plan 全跑：dino 帶 --keep-autoswap', '2016' in buf.getvalue() and '--keep-autoswap' in buf.getvalue())
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

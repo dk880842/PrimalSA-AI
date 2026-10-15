@@ -229,3 +229,8 @@ uv run --no-project python tools/gui/rebirth_pets.py --from catch               
 - 交：`questrun run 2019 --after none [--pet-turnin]`（`--pet-turnin` = 接取後先自動 `pet.py rest-all`；龍王 10-12 起預設不吃）：**步 1 交完會自動接著對步 2 的卡坦按完成，沒有雞時 quest.py 在「對話 ↔ 選擇對象面板」循環（現已 SELECT_LOOP_MAX=6 次停手 rc 29 → questrun 117）**；步 1 後 5 人各得修寶（`petdrop.py all 修寶 --confirm-name 修寶`）、寵物欄空出後才抓雞。
 - **questrun 退出碼 155（2026-10-13）**：追蹤沒反應且 `questdefs.pet_prep` 標了該步需先抓 / 練寵（卡坦步 1 鯊 / 步 2 雞、恐龍博士、猜謎三兄弟步 2 金布伊）→ 不再刷新重試 6 次（11:54～11:58 卡坦步 2 就是這樣停 112），訊息直接寫下一步 `pet_catch.py --assign …` / `petwatch.py …`；備妥後 `questrun run <ID> --after none` 續跑。步號讀不到仍走舊流程 112；manual 步（115）訊息也附同一提示。
 - 獎勵朵拉比斯（Lv1）存個人倉庫，取回 Lv126 那隻出戰（`take --pet 朵拉比斯 --expect-level 126` 或 take-many plan `朵拉比斯@126`）；外掛鎖定重勾一行 `pet_catch.py --lock 騎寵,戰寵 [--battle-pet 朵拉比斯]`（外掛面板只開一次；寵物欄裡戰寵同名 2 隻會先擋 107，先把多的存倉）。
+
+## 恐龍博士接卡坦：`--keep-autoswap`（2026-10-15）
+`postrebirth` 的 dino 段在「後面還會解卡坦」（katan 在 --from / --to 範圍、進度檔沒完成）時對 `petquest.py run 2016` 帶 `--keep-autoswap`：train 結束不關外掛「自動轉換戰寵」（卡坦 train 開頭本來就要開，`pet_catch --autoswap on` 冪等）、restore 整段跳過。
+理由：自動轉換開著時剛換回的高等朵拉比斯會被外掛換掉，卡坦 prep 又要把它存個人倉庫，換回白做。跳過 restore 時原等級記進 `petquest.json` 的 `carry_orig`，卡坦 prep 沿用（寵物欄已沒有朵拉比斯可讀），卡坦 restore 統一換回 + 鎖定、train 結束照常關。只跑 dino（`--to dino`）不帶旗標，照舊關 + 換回。
+中斷保險：dino 帶旗標成功後 `postrebirth.json` 記 `autoswap_pending`，katan 成功才清；卡坦沒跑完就停 → 結束 event / `LAST['warnings']` 提示（自動轉換還開著、朵拉比斯在個人倉庫、續跑 `--from katan` 或 `pet_catch.py --autoswap off`）；`--from finish` 時 finish 段若 pending 還在，自動先 `pet_catch.py --autoswap off`。離線測試 test_petquest / test_postrebirth，未實機。

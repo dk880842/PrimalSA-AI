@@ -34,6 +34,12 @@
   bag2       清背包②：同上，門檻 8 格（四大洞窟中間品 + 四件產物），名單 PURGE2 = PURGE1 + 杉的手環 / 月光的手鐲 / 巴巴洛的許可證；四大洞窟產物 bag.PURGE_FORBID 永不刪
   caves      questrun.py run 2000 2003 2001 2002 --after none --dragon --max-min 45           失敗 172
   dino       petquest.py run 2016 [--confirm-drop] [--confirm-buy-bait]                       失敗 175
+             後面還會解卡坦（katan 在本次 --from / --to 範圍內、進度檔沒完成）→ 帶 `--keep-autoswap`：train 結束不關外掛「自動轉換戰寵」、restore 整段跳過
+             （自動轉換開著會把剛換回的朵拉比斯換掉、卡坦 prep 又要存倉；原等級記 petquest 進度檔 carry_orig，由卡坦 restore 統一換回，見 petquest.py 檔頭）；
+             只跑 dino（--to dino 等）照舊關。dino 成功帶旗標後進度檔記 autoswap_pending，katan 成功才清。
+             **中斷保險（選「提示 + finish 自動關」）**：dino 之後卡坦沒跑完就停（失敗 / --to 擋掉 / 手動中斷）→ 結束時 event + LAST['warnings'] 提示
+             「自動轉換戰寵還開著、朵拉比斯在個人倉庫」與續跑指令，不在失敗現場自動操作遊戲（可能是斷線 / 驗證視窗 / 戰鬥中）；
+             之後 `--from finish`（沒走卡坦就收尾）時 finish 段開頭若 autoswap_pending 還在 → 自動 pet_catch.py --autoswap off（冪等）再收尾
   katan      petquest.py run 2019 …                                                            失敗 175
   quiz       petquest.py run 3003 …（練金布伊前 petwatch --exp-fruit 吃 2倍智慧果）            失敗 175
   finish     questrun.py status --role all <全部任務>（全員完成的任務自動移出 questrun 待驗清單）→ not_done 不空 → questrun.py verify <落後任務> --role <落後者>
@@ -142,13 +148,21 @@ def seg_cmds(seg: str, o: dict) -> list:
         'q182b': [('questrun.py', ['run'] + Q182B + ['--after', 'none', '--dragon'] + vd)],
         'bag2': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE2) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
         'caves': [('questrun.py', ['run'] + CAVES + ['--after', 'none', '--dragon', '--max-min', 45] + vd)],
-        'dino': [('petquest.py', ['run', 2016] + pq)],
+        'dino': [('petquest.py', ['run', 2016] + pq + (['--keep-autoswap'] if o.get('keep_autoswap') else []))],
         'katan': [('petquest.py', ['run', 2019] + pq)],
         'quiz': [('petquest.py', ['run', 3003] + pq)],
         'finish': [('questrun.py', ['status', '--role', 'all'] + ALL_TASKS), ('pet.py', ['list', '--role', 'all', '--json']),
                    ('grind.py', ['start'] + (['--spot', o['spot']] if o.get('spot') else [])),
                    ('questrun.py', ['verify', '<落後的任務 ID>', '--role', '<落後者>'])],
     }[seg]
+
+
+def katan_follows(from_seg, to_seg, done=()) -> bool:
+    """本次 run 在 dino 之後還會跑 katan 嗎（範圍內、且沒被進度檔跳過）→ dino 帶 --keep-autoswap"""
+    i0 = SEGMENTS.index(from_seg) if from_seg else 0
+    i1 = SEGMENTS.index(to_seg) if to_seg else len(SEGMENTS) - 1
+    k = SEGMENTS.index('katan')
+    return i0 <= k <= i1 and (bool(from_seg) or 'katan' not in done)
 
 
 def fmt(script, args) -> str:
@@ -295,6 +309,12 @@ class Run:
         (script, args), = seg_cmds(seg, self.o)
         rc, _ = self.sub(script, args)
         if not rc:
+            if seg == 'dino' and self.o.get('keep_autoswap'):
+                self.p['autoswap_pending'] = True                      # 自動轉換戰寵留著開，等卡坦解完才關
+                self.save()
+            elif seg == 'katan' and self.p.get('autoswap_pending'):
+                self.p['autoswap_pending'] = False                     # 卡坦 train 結束已關
+                self.save()
             return 0
         if seg == 'hero' and rc == NODRAGON_RC:                        # 2026-10-14：沒龍王 → 自動改單人逃跑（同一串參數加 --solo）
             sargs = list(args) + HERO_SOLO
@@ -345,6 +365,13 @@ class Run:
         return 0
 
     def s_finish(self) -> int:
+        if self.p.get('autoswap_pending'):                             # dino 留著開、卡坦沒走完就收尾 → 先關（冪等）
+            event('收尾：恐龍博士留著開的自動轉換戰寵還沒關（卡坦沒完成）→ pet_catch.py --autoswap off')
+            rc, _ = self.sub('pet_catch.py', ['--autoswap', 'off'], 900)
+            if rc:
+                return rc if rc in PASS else self.fail(EXIT_FINISH, f'收尾關自動轉換戰寵失敗 rc={rc}', fmt('pet_catch.py', ['--autoswap', 'off']))
+            self.p['autoswap_pending'] = False
+            self.save()
         cmds = seg_cmds('finish', self.o)
         script, args = cmds[0]
         rc, lines = self.sub(script, args, 3600)
@@ -409,10 +436,12 @@ def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, conf
             return EXIT_ARGS
     o = dict(confirm_drop=confirm_drop, confirm_buy=confirm_buy, spot=spot, fresh=fresh)
     if dry_run:
+        o['keep_autoswap'] = katan_follows(from_seg, to_seg)
         print_plan(o)
         return 0
     T = tools or Tools()
     r = Run(T, o)
+    o['keep_autoswap'] = katan_follows(from_seg, to_seg, r.p['done'])
     i0 = SEGMENTS.index(from_seg) if from_seg else 0
     i1 = SEGMENTS.index(to_seg) if to_seg else len(SEGMENTS) - 1
     event(f'開始：段 {SEGMENTS[i0:i1 + 1]}（進度檔已完成 {r.p["done"]}）')
@@ -432,6 +461,11 @@ def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, conf
     if not rc and SEGMENTS[i1] == SEGMENTS[-1]:
         r.p = {'done': [], 'finished': time.time()}                   # 全部做完：清進度（下一轉從頭）
         r.save()
+    if r.p.get('autoswap_pending') and not (SEGMENTS[i1] == SEGMENTS[-1] and not rc):   # 中斷保險：dino 留著開，卡坦沒完成就停
+        w = ('恐龍博士帶 --keep-autoswap：外掛「自動轉換戰寵」還開著、原朵拉比斯在個人倉庫（petquest 進度檔 carry_orig 記原等級）→ 續跑 '
+             'postrebirth.py run --from katan（卡坦 train 結束會關、restore 換回）；不解卡坦就 pet_catch.py --autoswap off 再手動換回朵拉比斯')
+        r.warnings.append(w)
+        event('警告：' + w)
     LAST.update(ok=rc == 0, rc=rc, ran=ran, info=r.info, warnings=r.warnings)
     event(f'結束 rc={rc}，跑了 {ran}' + (f'；停在 [{seg}] {TITLES[seg]}，修好後 postrebirth.py run --from {seg}' if rc else ''))
     return rc

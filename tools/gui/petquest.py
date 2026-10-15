@@ -10,6 +10,8 @@
     --confirm-drop      准丟獎勵寵（恐龍博士 布克布克、卡坦步 1 修寶、猜謎三兄弟 左迪洛斯；petdrop 驗名 + 只丟 1 級）；沒給 → 到丟寵段 168 停
     --from / --to       只跑某幾段（段名見 plan）；--fresh 不管進度檔從頭（預設：進度檔 tools/.cache/petquest.json 24 小時內記錄過的段直接跳過）
     --dry-run           = plan
+    --keep-autoswap     （恐龍博士 2016 專用，postrebirth 在後面還要解卡坦時傳）train 結束先不關外掛「自動轉換戰寵」（卡坦 train 開頭本來就要開），
+                        restore 段整段跳過（不換回原朵拉比斯 / 不重鎖 / 不改一般動作）；原戰寵等級記進進度檔 carry_orig 給卡坦 prep 沿用，由卡坦 restore 統一換回、train 結束照常關
     --verify-defer      內部 questrun 帶 --verify defer（postrebirth 傳；沒風險事件的逐人驗證延到 postrebirth 收尾，交寵物仍是風險事件 → 當場驗）
   可 import：petquest.run(qid, tools=…, confirm_buy=…, confirm_drop=…) → 退出碼；結果在 petquest.LAST
 
@@ -57,6 +59,10 @@
     turnin      關遇敵 → questrun.py run 3003 --after none（交金豬 → 會員證 → 藍暴）
     drop        （--confirm-drop）petdrop.py all 左迪洛斯 --confirm-name 左迪洛斯 --max-level 1
     restore     pet_catch.py --lock 戰寵 --battle-pet 朵拉比斯 → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗朵拉比斯出戰、等級 ≥ 原等級（練功中可能升級）
+  --keep-autoswap 的安全結論（2026-10-15 讀程式）：恐龍博士 restore = 取回朵拉比斯 → 出戰 → 鎖定戰寵 → 一般動作；自動轉換戰寵（外掛，轉換級數 30）開著時，
+    剛換回的高等朵拉比斯會被外掛當「超過轉換級數」又換掉，且卡坦 prep 緊接著又要把朵拉比斯存個人倉庫，換回根本白做 → 帶旗標時 dino restore 整段跳過，
+    朵拉比斯留在個人倉庫、原等級用進度檔 carry_orig 交給卡坦 prep（卡坦 prep 讀不到寵物欄的朵拉比斯，沿用 carry_orig；store-many --skip-missing 略過已存的）；
+    卡坦 restore 照常換回 + 鎖定 + 關自動轉換（train 結束就關）。中斷保險見 postrebirth.py 檔頭。
   不做：恢復掛機（交給呼叫端 / postrebirth 收尾的 grind.py start）。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；petquest 自己 160～169）：
@@ -596,6 +602,11 @@ class Run:
             rc = self.solo(EXIT_PREP)
             if rc:
                 return rc
+        carry = self.all.get('carry_orig') or {}
+        if not self.p.get('orig') and carry.get('orig') and 0 <= self.T.clock() - (carry.get('ts') or 0) <= PROGRESS_TRUST_S and carry.get('qid') != self.qid:
+            self.p['orig'] = carry['orig']                              # 恐龍博士帶 --keep-autoswap 沒換回朵拉比斯：沿用它記的原等級（寵物欄已沒有朵拉比斯可讀）
+            event(f'原戰寵 {BATTLE_PET} 等級沿用恐龍博士記的：{carry["orig"]}')
+            self.save()
         if not self.p.get('orig'):
             rc = self.record_orig()
             if rc:
@@ -901,8 +912,13 @@ class Run:
         rc = self.encounter_off()
         if rc:
             return rc
-        for script, args, why in (('pet_catch.py', ['--autoswap', 'off'], '自動轉換戰寵 off'),
-                                  ('pet.py', ['rest-all', '--candidates', cand], '任務寵改等待（rest-all）')):
+        offs = [('pet_catch.py', ['--autoswap', 'off'], '自動轉換戰寵 off'),
+                ('pet.py', ['rest-all', '--candidates', cand], '任務寵改等待（rest-all）')]
+        if self.o.get('keep_autoswap'):
+            event(f'{stage}：後面還有卡坦，自動轉換戰寵先不關（卡坦解完再關）')
+            offs = offs[1:]
+            self.all['autoswap_kept'] = {'qid': self.qid, 'ts': self.T.clock()}
+        for script, args, why in offs:
             rc, _ = self.sub(script, args, 1800)
             if rc:
                 return self.pass_or(rc, EXIT_TRAIN, f'練完：{why} 失敗 rc={rc}', f'uv run --no-project python tools/gui/{script} {" ".join(map(str, args))}')
@@ -1001,6 +1017,11 @@ class Run:
 
     def s_restore(self) -> int:
         orig = self.p.get('orig') or {}
+        if self.o.get('keep_autoswap') and not self.p.get('already_done') and self.q['kind'] == 'catch':
+            self.all['carry_orig'] = {'qid': self.qid, 'orig': orig, 'ts': self.T.clock()}
+            self.save()
+            event(f'{BATTLE_PET} 先不換回（--keep-autoswap：自動轉換戰寵開著會把剛換回的換掉、卡坦 prep 又要存倉）→ 原等級 {orig} 記 carry_orig，由卡坦 restore 統一換回')
+            return 0
         if self.q['kind'] == 'catch' and not self.p.get('already_done'):
             if [r for r in ALL_ROLES if not orig.get(r)]:
                 return self.fail(EXIT_ARGS, f'進度檔沒有 5 人原{BATTLE_PET}等級 {orig} → 不盲取（同名多隻）', f'手動 pet.py take-many --depot personal --plan "{LEADER}:{BATTLE_PET}@等級,…"')
@@ -1068,19 +1089,22 @@ def print_plan(qid: int, o: dict) -> None:
                   f'rename = 抓寵者 reset-name、register = 名字驗證，名字讀不出才登錄成長字串）→ 整理（欄先存公共騰位 → 個人倉庫溢出取回 → 欄留 1、其餘存公共 → 取回的 reset-name）→ list 名字驗證 → pet_catch.py --stages baitback（剩的誘餌存回公共）')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" --candidates {species_csv(a)} → list 驗每人每物種 1 隻')
             print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
-                  f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；連兩輪 ≥ 門檻 {rd["need"]}）→ 關遇敵 → autoswap off → rest-all')
+                  f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；連兩輪 ≥ 門檻 {rd["need"]}）→ 關遇敵 → autoswap off{"（--keep-autoswap 不關）" if o.get("keep_autoswap") else ""} → rest-all')
             print(f'  turnin{sfx}  questrun.py run {qid} --after none --pet-turnin --rested{" --verify defer" if o.get("verify_defer") else ""}'
                   + ('（下一輪前讀步號要進到下一步）' if i < len(q['rounds']) else '（預期 0）'))
             if rd.get('drop'):
                 print(f'  drop{sfx}    petdrop.py all {rd["drop"]} --confirm-name {rd["drop"]} --max-level 1（要 --confirm-drop）')
         if q.get('store_reward'):
             print(f'  store_reward pet.py store-many --role all --pets {q["store_reward"]} --depot personal（獎勵 Lv1）')
-        print(f'  restore  pet.py take-many --depot personal --plan "角色:{BATTLE_PET}@原等級" → set-state-many {BATTLE_PET} 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗')
+        if o.get('keep_autoswap'):
+            print(f'  restore  （--keep-autoswap：整段跳過，原等級記 carry_orig 給卡坦 prep；卡坦 restore 統一換回）')
+        else:
+            print(f'  restore  pet.py take-many --depot personal --plan "角色:{BATTLE_PET}@原等級" → set-state-many {BATTLE_PET} 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗')
     print('退出碼：160 參數 161 接取 162 準備 163 誘餌 / 買 164 抓 165 分配 166 練 167 交 168 丟 169 換回；9 驗證視窗 10 斷線')
 
 
 def run(qid, tools=None, confirm_buy: bool = False, confirm_drop: bool = False, from_stage: str | None = None, to_stage: str | None = None,
-        fresh: bool = False, dry_run: bool = False, verify_defer: bool = False) -> int:
+        fresh: bool = False, dry_run: bool = False, verify_defer: bool = False, keep_autoswap: bool = False) -> int:
     LAST.clear()
     try:
         qid = int(qid)
@@ -1094,7 +1118,7 @@ def run(qid, tools=None, confirm_buy: bool = False, confirm_drop: bool = False, 
         if s and s not in stages:
             print(f'petquest：段名 {s!r} 不在 {stages}', file=sys.stderr)
             return EXIT_ARGS
-    o = dict(confirm_buy=confirm_buy, confirm_drop=confirm_drop, fresh=fresh, verify_defer=verify_defer)
+    o = dict(confirm_buy=confirm_buy, confirm_drop=confirm_drop, fresh=fresh, verify_defer=verify_defer, keep_autoswap=keep_autoswap)
     if dry_run:
         print_plan(qid, o)
         return 0
@@ -1136,6 +1160,7 @@ def main(argv=None) -> int:
     ap.add_argument('--to', dest='to_stage', default=None)
     ap.add_argument('--fresh', action='store_true', help='不管進度檔，從頭')
     ap.add_argument('--verify-defer', action='store_true', help='內部 questrun 帶 --verify defer（沒風險事件的逐人驗證延到呼叫端收尾；postrebirth 用）')
+    ap.add_argument('--keep-autoswap', action='store_true', help='恐龍博士 train 結束先不關自動轉換戰寵、restore 跳過（後面還有卡坦；postrebirth 傳）')
     ap.add_argument('--dry-run', action='store_true')
     a = ap.parse_args(argv)
     if not ALL_ROLES:
@@ -1145,7 +1170,7 @@ def main(argv=None) -> int:
         import winenv
         winenv.enable_server()
     rc = run(a.qid, confirm_buy=a.confirm_buy_bait, confirm_drop=a.confirm_drop, from_stage=a.from_stage, to_stage=a.to_stage,
-             fresh=a.fresh, dry_run=a.cmd == 'plan' or a.dry_run, verify_defer=a.verify_defer)
+             fresh=a.fresh, dry_run=a.cmd == 'plan' or a.dry_run, verify_defer=a.verify_defer, keep_autoswap=a.keep_autoswap)
     if a.cmd == 'run' and not a.dry_run:
         print(json.dumps(LAST, ensure_ascii=False, default=str))
     return rc

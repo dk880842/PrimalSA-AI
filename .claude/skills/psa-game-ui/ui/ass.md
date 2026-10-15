@@ -219,3 +219,5 @@ uv run --no-project python tools/gui/ass.py pet all normal 防禦 --no-resume   
 - 流程：背包穿「溫蒂妮Lv5的金幣」（道具類別「樂器」、附帶技能風的精靈Lv.5）→ 外掛面板選隊長 → 戰鬥設置頂端人物首次動作下拉 1137,313 → 清單 OCR 找唯一「風的精靈」→ 點選項（x 944）→ OCR 讀回 → 勾選框 656,313 沒勾就勾（像素讀回）。已是風的精靈 + 已勾一次都不點。`buywendy._visit_first`（ass._many 的 visit；離線測試 test_buywendy.py，**實機未驗證**）。
 - 沒穿金幣時下拉沒有風的精靈 → 退出碼 12（ass.EXIT_NO_OPTION）、收下拉、不亂點。
 - `ass.LEADER_FIRST`：PrimalSA 與 PrimalSA2 都是「風的精靈」→ questrun 交接 `ass.py battle` 會檢查 DKBO6 的首次動作（值確定不對回 13）。
+
+**自動轉換戰寵與恐龍博士 → 卡坦（2026-10-15）**：`petquest.py run 2016 --keep-autoswap`（postrebirth 在後面還有卡坦時帶）train 結束不關 `pet_catch.py --autoswap`、restore 跳過（朵拉比斯留個人倉庫、原等級記 carry_orig），卡坦解完才關並統一換回；細節見 psa-pet-quest SKILL.md。

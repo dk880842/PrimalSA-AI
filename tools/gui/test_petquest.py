@@ -695,5 +695,26 @@ for r in ROLES:
 rc = go(2016, s, from_stage='distribute', to_stage='distribute')
 check('distribute 後都有名字 → 不跑 reset-name', rc == 0 and not any(a[0] == 'reset-name' for a in names(s, 'pet.py')))
 
+# ---------------- --keep-autoswap（恐龍博士後面還要解卡坦）：train 不關自動轉換、restore 跳過、原等級交給卡坦 prep
+s = grow(Sim(2016))
+rc = go(2016, s, confirm_drop=True, keep_autoswap=True)
+off = [a for a in names(s, 'pet_catch.py') if a[:2] == ('--autoswap', 'off')]
+on = [a for a in names(s, 'pet_catch.py') if a[:2] == ('--autoswap', 'on')]
+check('--keep-autoswap：train 開了自動轉換、結束不關；rest-all 照做', rc == 0 and len(on) == 1 and not off and any(a[0] == 'rest-all' for a in names(s, 'pet.py')), f'rc={rc} {on} {off}')
+check('--keep-autoswap：restore 跳過（不取回朵拉比斯、不鎖定、不改一般動作）',
+      not any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
+      and not [a for a in names(s, 'pet_catch.py') if '--lock' in a] and not names(s, 'ass.py'), str(names(s, 'pet_catch.py')))
+allp = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))
+check('--keep-autoswap：進度檔記 carry_orig（5 人原等級）', sorted(allp.get('carry_orig', {}).get('orig', {})) == sorted(pq.ALL_ROLES), str(allp.get('carry_orig')))
+s2 = Sim(2019)
+for r in pq.ALL_ROLES:
+    s2.bar[r] = [x for x in s2.bar[r] if x['name'] != '朵拉比斯']       # 朵拉比斯還在個人倉庫、寵物欄讀不到
+rc = go(2019, s2, from_stage='prep', to_stage='prep', reset=False)
+check('卡坦 prep 沿用 carry_orig（不因寵物欄沒朵拉比斯失敗）', rc == 0 and json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2019']['orig'] == allp['carry_orig']['orig'], f'rc={rc} {pq.LAST.get("info")}')
+s = grow(Sim(2016))
+rc = go(2016, s, confirm_drop=True)
+check('沒帶 --keep-autoswap：照舊關自動轉換 + restore 換回', rc == 0 and any(a[:2] == ('--autoswap', 'off') for a in names(s, 'pet_catch.py'))
+      and any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py')))
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)
