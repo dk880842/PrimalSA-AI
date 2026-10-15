@@ -109,7 +109,8 @@ Q182 = [
               '步 2、3 預設：金布伊練到 77（約 9 分）後 `questrun run 3003` 續跑，點追蹤直接巡到 810 伊那多，不用重爬塔；交接前 5 人戰寵換金布伊；獎勵左迪洛斯（丟）'),
     dict(id=2016, detail='恐龍博士(1.82)', track='恐龍博士', accept_npc='恐龍博士哈魯 11006:11,11', steps_total=2,
          steps={1: dict(kind='manual'), 2: dict(kind='manual')}, bag_slots=0, boss=False, est_min=45, live=False,
-         turnin=dict(kind='dino', steps={0: (1, 2), 1: (1, 2), 2: (2,)}), rest_pets=True, reward_pets=['布克布克'],
+         turnin=dict(kind='dino', steps={0: (1, 2), 1: (1, 2), 2: (2,)}, maps={1: 11006, 2: 11006}),   # maps = 各步交件 NPC 所在地圖（助手吉魯 11,7 / 哈魯 11,11 都在博士的研究所）：同圖的步合併成一趟整隊走
+         rest_pets=True, reward_pets=['布克布克'],
          pet_prep={1: dict(need='魯尼帖斯（呼拔拔系）Lv18+ 每人 1 隻', assign=_assign((1, '呼拔拔系', '魯尼帖斯')), count=5),
                    2: dict(need='貝魯卡（老虎系）Lv30+ 每人 1 隻', assign=_assign((2, '老虎系', '貝魯卡')), count=5)},
          note='交寵物類（Task type=7，要抓魯尼帖斯 Lv18+ ×5 / 貝魯卡 Lv30+ ×5，見 psa-pet-quest skill）：questrun 預設只負責接取，之後步 1、2 都停 115 交人（加 --pet-turnin：rest-all → 解散 → pet_turnin dino 5 人逐人交 → DKBO 重組，未實機）；交時解散逐人交，跳「選擇寵物」視窗要看名字點卡片（quest.py 不處理）；交前寵物改「等待」；獎勵布克布克（丟）'),

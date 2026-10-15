@@ -221,6 +221,9 @@ class Fake:
     def quest(self, args, timeout=0):
         self.rec('quest', tuple(str(a) for a in args))
         self.timeouts = getattr(self, 'timeouts', []) + [timeout]
+        if '--stop-at-npc' in args:                                    # 交寵物前整隊走到 NPC：walk_q 有就依序取（最後一個重複），沒給 = 20（到了）；不動 quest_q
+            q = getattr(self, 'walk_q', None)
+            return (q.pop(0) if len(q) > 1 else q[0]) if q else (20, [])
         # 2026-10-14：questrun 不再開詳情判完成；quest.py 回 0 沒有「任務完成」= 下一片。
         # 舊測試腳本的 (0, []) 當「這片做完」：最後一個腳本片 / 腳本用完 → 印「任務完成」（模擬追蹤欄找不到任務）
         rc, tail = self.quest_q.pop(0) if self.quest_q else (0, [])
@@ -290,6 +293,9 @@ class Fake:
 
     rest_rc = 0
     disband_rc = 0
+
+    def stop_walk(self):
+        self.rec('stop_walk')
 
     def pet_rest_all(self):
         self.rec('rest_all')
@@ -830,6 +836,53 @@ check('rest-all 失敗 → 150、不解散不交', rc == questrun.EXIT_TURNIN an
 f = Fake(status={D16: [questrun.DOING]}, steps=[1])
 f.disband_rc = 46
 check('解散失敗 → 150、不交', go(f, [2016], after='none', pet_turnin=True) == questrun.EXIT_TURNIN and 'pet_turnin' not in f.names())
+# --- 2026-10-16 交寵物：整隊走到 NPC 旁才解散（使用者指出根因：不是在練功點就解散讓每人長途巡路）---
+f = Fake(status={D16: [questrun.PENDING, questrun.DONE]}, steps=[1], quest=[(0, ['任務完成：x'])])
+go(f, [2016], after='none', pet_turnin=True)
+n = f.names()
+walk_i = [i for i, c in enumerate(f.calls) if c[0] == 'quest' and '--stop-at-npc' in c[1]]
+check('2016 交寵物：rest-all → 整隊 quest.py --stop-at-npc → 到了才解散 → pet_turnin（吉魯 / 哈魯同圖 = 只走一趟、交步 1、2）',
+      len(walk_i) == 1 and n.index('rest_all') < walk_i[0] < n.index('disband') < n.index('pet_turnin')
+      and ('pet_turnin', 'dino', tuple(questrun.ALL_ROLES), (1, 2)) in f.calls, str(f.calls))
+f = Fake(status={D16: [questrun.DOING, questrun.DONE]}, steps=[2], quest=[(0, ['任務完成：x'])])
+go(f, [2016], after='none', pet_turnin=True)
+n = f.names()
+check('步 2（只剩哈魯）也先整隊走到 NPC 才解散', n.index('quest') < n.index('disband') < n.index('pet_turnin') and ('pet_turnin', 'dino', tuple(questrun.ALL_ROLES), (2,)) in f.calls, str(f.calls))
+f = Fake(status={D16: [questrun.DOING]}, steps=[1])
+f.walk_q = [(0, ['時間到']), (43, []), (20, [])]
+rc = go(f, [2016], after='none', pet_turnin=True)
+check('走路片 0（時間到）/ 43（載入卡住）續跑到 20 才解散', rc in (0, questrun.EXIT_MANUAL) and f.names().count('disband') == 1
+      and [c for c in f.calls if c[0] == 'quest' and '--stop-at-npc' in c[1]].__len__() == 3, str(f.names()))
+f = Fake(status={D16: [questrun.DOING]}, steps=[1])
+f.walk_q = [(19, [])]
+rc = go(f, [2016], after='none', pet_turnin=True)
+check('整隊走失敗（19）→ 150、停掉自動巡路、不解散不交', rc == questrun.EXIT_TURNIN and 'stop_walk' in f.names() and 'disband' not in f.names() and 'pet_turnin' not in f.names(), str(f.names()))
+class FormFailAfterRest(Fake):
+    def team_form(self):
+        r = super().team_form()
+        return 44 if 'rest_all' in self.names() else r
+
+
+f = FormFailAfterRest(status={D16: [questrun.DOING]}, steps=[1])
+_old_fresh = questrun.TEAM_FRESH_S
+questrun.TEAM_FRESH_S = -1                                              # 交接剛組完不算新鮮 → 走路前要自己 team.form
+try:
+    rc = go(f, [2016], after='none', pet_turnin=True)
+finally:
+    questrun.TEAM_FRESH_S = _old_fresh
+check('組不起隊（team.form 失敗）→ 不走、不解散、不交（單人不亂走）', 'disband' not in f.names() and 'pet_turnin' not in f.names()
+      and not any(c[0] == 'quest' and '--stop-at-npc' in c[1] for c in f.calls), str(f.names()))
+f = Fake(status={D16: [questrun.DOING]}, steps=[1])
+f.turnin_q = [(123, {'DKBO3': {'step1': False}})]
+go(f, [2016], after='none', pet_turnin=True)
+check('pet_turnin 失敗 → 也停掉自動巡路再切回 DKBO', 'stop_walk' in f.names() and ('char_ensure', 'DKBO') in f.calls, str(f.names()))
+check('turnin_groups：同圖合一趟、不同圖分趟、沒 maps 一趟',
+      questrun.turnin_groups((1, 2), {1: 11006, 2: 11006}) == [(1, 2)] and questrun.turnin_groups((1, 2), {1: 11006, 2: 100}) == [(1,), (2,)]
+      and questrun.turnin_groups((1, 2), {}) == [(1, 2)] and questrun.turnin_groups((2,), {}) == [(2,)])
+f = Fake(status={D19: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2019], after='none', pet_turnin=True)
+check('2019 卡坦（隊長一次交）不走 --stop-at-npc、不解散、不 pet_turnin', not any(c[0] == 'quest' and '--stop-at-npc' in c[1] for c in f.calls)
+      and 'disband' not in f.names() and 'pet_turnin' not in f.names(), str(f.names()))
 f = Fake(status={D16: [questrun.DOING, questrun.DOING]}, steps=[1, 1], quest=[(0, ['時間到，結束（對話 0）']), (0, ['任務完成：x'])])
 rc = go(f, [2016], after='none', pet_turnin=True)
 check('交完（不讀詳情）下一片 quest.py 沒完成、步驟還是 manual → 只試一次就 115', rc == questrun.EXIT_MANUAL and f.names().count('pet_turnin') == 1, str(f.names()))

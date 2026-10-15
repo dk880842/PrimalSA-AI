@@ -66,8 +66,8 @@
                  需要 bossretry 時先做交接（關遇敵 / 戰鬥設定 / 組隊）；驗過的移出待驗清單；仍落後 108
     5 收尾         進度檔記已完成（2 小時內）→ 重跑直接跳過；2026-10-14 起**完成判斷一律不開任務詳情**：quest.py 印「任務完成」或回 5（追蹤欄找不到該任務）= 完成；時間到 / 提前結束 / 模糊結束 = 下一片（下一個任務的接取本來就開一次詳情）→ 進度檔 tools/.cache/questrun.json、notes/quest-log.md 追加一筆
   交寵物（--pet-turnin，預設關 = manual 步照舊 115；**未實機**）
-                 defs.turnin（目前只有恐龍博士 2016：步 1 魯尼帖斯 / 步 2 貝魯卡，逐人「選擇」視窗）：pet.py rest-all（任務寵改等待）→ team.disband
-                 → pet_turnin.run 5 人逐人（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 不開詳情（2026-10-14），下一片 quest.py「任務完成」/ 回 5 = 完成；失敗 150。
+                 defs.turnin（目前只有恐龍博士 2016：步 1 魯尼帖斯 / 步 2 貝魯卡，逐人「選擇」視窗）：pet.py rest-all（任務寵改等待）→ 整隊組隊（不完整先 team.form）quest.py --stop-at-npc 自動巡路走到 NPC 旁（對話框一出現 ESC、退出碼 20；吉魯 / 哈魯同在博士的研究所 11006 = 一趟，defs.turnin.maps）→ **到了才 team.disband**
+                 → pet_turnin.run 5 人逐人（人都在旁，不再長途巡路）（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 不開詳情（2026-10-14），下一片 quest.py「任務完成」/ 回 5 = 完成；失敗 150。
                  defs.rest_pets（卡坦的願望 2019：隊長交一次 5 人完成，quest.py 預設流程交）：接取後第一片前先 pet.py rest-all。每任務只試一次
                  --rested（petquest 練完已 rest-all --candidates 且退出碼 0 才帶）：接取後 / 交寵物前都不再 rest-all（2026-10-13 review 1013b §2.2，每次交件省 30～90 秒）
   紅暴 2031（2026-10-13 起納入；使用者：有龍王效果就組隊打到底；**未實機**）：前置 check_prereq（5 人 ≥80 級，bag.team_read 開一次；不符 110；不檢查任務道具）
@@ -151,6 +151,7 @@ EXIT_LAGGARD = 108                                                   # 逐人驗
 EXIT_BATTLESET = 109                                                 # 戰鬥設定檢查失敗（rebirth_pets 也有 109，但兩者不互相呼叫）
 EXIT_REWARD = 152                                                    # 領獎視窗關不掉（quest.py 18 → 重試仍失敗；152 grep 過沒被用）
 REWARD_RETRY_MAX = 3                                                 # 每個任務最多重試關領獎窗幾次（避免無限迴圈）
+TURNIN_WALK_SLICES, TURNIN_WALK_SLICE_S = 6, 300                  # 交寵物前整隊走到 NPC：最多 6 片 × 300 秒（巡路不計時）
 EXIT_TURNIN, EXIT_DROP = 150, 151                                    # 交寵物 / 丟獎勵寵失敗（150～151 grep 過沒被用）
 EXIT_NEEDPETS = 155                                                   # 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep；155 grep 過沒被用）
 EXIT_BYE, EXIT_BAGMAIL = 153, 154                                    # 任務 NPC 只有再見（背包 / 信箱都不是原因）/ 背包滿自動處理失敗（153～154 grep 過沒被用）
@@ -200,6 +201,17 @@ LAST: dict = {}
 
 
 # ---------------------------------------------------------------- 真實工具（測試換成 Fake，介面相同）
+def turnin_groups(steps, maps: dict) -> list:
+    """交寵物的步驟分趟（純函式）：連續且交件 NPC 同地圖（maps[步]）的步合成一趟（整隊只走一次）；沒給 maps / 地圖相同 = 一趟"""
+    out = []
+    for st in steps:
+        if out and maps.get(st) == maps.get(out[-1][-1]):
+            out[-1] = out[-1] + (st,)
+        else:
+            out.append((st,))
+    return out
+
+
 class Tools(rebirth.Tools):
     """沿用 rebirth.Tools 的 quest / read_pos / team_* / char_* / track / snap，補 questrun 要的"""
 
@@ -213,6 +225,13 @@ class Tools(rebirth.Tools):
 
     def screen_state(self):
         return uikit.screen().get('state')
+
+    def stop_walk(self):
+        """停掉自動巡路：點目前位置附近安全地面一下（walk.unstick_click；沒座標 / 沒通行格資料就不點）"""
+        import walk
+        pos = self.read_pos()
+        if isinstance(pos, tuple) and len(pos) == 3:
+            walk.unstick_click(*pos)
 
     def esc(self):
         uikit.gui('key', '{ESC}', note='questrun 交接：關閉殘留的對話窗')
@@ -931,11 +950,43 @@ class Run:
         """呼叫 bossretry 的額外參數（--no-battle-check 才傳 check=False；預設不傳，讓 bossretry 重打前自己查）"""
         return {} if self.o.get('battle_check', True) else {'check': False}
 
+    def walk_team_to_npc(self, tid, track, step) -> int:
+        """交寵物前：整隊（5 人組隊）點任務追蹤自動巡路走到 NPC 旁，quest.py --stop-at-npc（對話框一出現就 ESC 停下，退出碼 20）。
+        2026-10-16 使用者：解散要等 5 人都到 NPC 旁，不是在練功點就解散讓每個人各自長途巡路。
+        隊伍不完整先 team.form（TEAM_FRESH_S 內剛驗過就略過）；43（載入卡住）原地重跑、0（片時間到、還在走）續跑，最多 TURNIN_WALK_SLICES 片；
+        其他碼 → 失敗，先停掉遊戲裡還在進行的自動巡路（T.stop_walk）。→ 0 到了 / 非 0 退出碼"""
+        T = self.T
+        if not self.team_fresh():
+            rc = self.form(f'任務 {tid} 交寵物前（步 {step} 整隊走）')
+            if rc:
+                return self.fail(EXIT_TURNIN, f'任務 {tid}：交寵物前組隊失敗 rc={rc}', turnin={'stage': 'form', 'rc': rc})
+        qrc = None
+        for k in range(TURNIN_WALK_SLICES):
+            qrc, _tail = T.quest(['--task', track, '--stop-at-npc', '--max-seconds', TURNIN_WALK_SLICE_S, '--team-fresh'], TURNIN_WALK_SLICE_S + 180)
+            event(f'任務 {tid} 步 {step}：整隊走到 NPC（片 {k + 1}）quest.py 退出碼 {qrc}')
+            if qrc == 20:
+                return 0
+            if qrc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return qrc
+            if qrc not in (0, 43):
+                break
+        self.stop_walk_quiet()
+        return self.fail(EXIT_TURNIN, f'任務 {tid} 步 {step}：整隊走到 NPC 旁失敗 quest.py rc={qrc}', turnin={'stage': 'walk', 'rc': qrc})
+
+    def stop_walk_quiet(self):
+        """停掉遊戲裡還在進行的自動巡路（點附近地面一下）；做不到不影響失敗回報"""
+        try:
+            self.T.stop_walk()
+        except Exception as e:                                         # noqa: BLE001
+            event(f'停止自動巡路失敗（忽略）：{e}')
+
     def do_turnin(self, d, step) -> int:
-        """--pet-turnin：交寵物步驟（defs.turnin）。rest-all → 解散 → pet_turnin 5 人逐人 → char.ensure DKBO → team.form。失敗 150"""
+        """--pet-turnin：交寵物步驟（defs.turnin）。rest-all → 整隊組隊走到交件 NPC 旁（walk_team_to_npc）→ **到了才解散** → pet_turnin 5 人逐人
+        （人都在 NPC 旁，不再長途巡路）→ char.ensure DKBO → team.form。交件 NPC 在不同地圖（defs.turnin.maps）的步分成幾趟，每趟重組隊再走。失敗 150"""
         T, tid, tdef = self.T, d['id'], d['turnin']
         steps = tdef['steps'].get(step) or tdef['steps'].get(min(tdef['steps']))
-        event(f'任務 {tid} 步 {step}：--pet-turnin → rest-all → 解散 → pet_turnin {tdef["kind"]} 5 人（pet_turnin 步 {list(steps)}）')
+        groups = turnin_groups(steps, tdef.get('maps') or {})
+        event(f'任務 {tid} 步 {step}：--pet-turnin → rest-all → 整隊走到 NPC → 到了才解散 → pet_turnin {tdef["kind"]} 5 人（pet_turnin 步 {list(steps)}，分 {len(groups)} 趟）')
         if self.rested == tid:                                         # 接取後（rest_pets）剛做過 rest-all：不重做（13～30 秒）
             rc = 0
             event(f'任務 {tid}：接取後已 rest-all 過 → 不重做')
@@ -945,19 +996,31 @@ class Run:
             return rc
         if rc:
             return self.fail(EXIT_TURNIN, f'任務 {tid}：交寵物前 pet.py rest-all 失敗 rc={rc}' + rest_hint(rc), turnin={'stage': 'rest_all', 'rc': rc})
-        rc = T.team_disband()
-        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
-            return rc
-        if rc:
-            return self.fail(EXIT_TURNIN, f'任務 {tid}：交寵物前解散隊伍失敗 rc={rc}', turnin={'stage': 'disband', 'rc': rc})
-        self.team_ok_at = 0.0
-        rc, res = T.pet_turnin(tdef['kind'], ALL_ROLES, steps)
-        self.info['turnin'] = {'stage': 'turnin', 'rc': rc, 'roles': res}
-        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
-            return rc
-        crc = T.char_ensure(LEADER)                                    # 失敗也先切回 DKBO（pet_turnin 不切回）
-        if rc:
-            return self.fail(EXIT_TURNIN, f'任務 {tid}：pet_turnin rc={rc}（{res}）；切回 {LEADER} rc={crc}', turnin=self.info['turnin'])
+        res = {}
+        for gi, grp in enumerate(groups):
+            if gi:                                                     # 第二趟起：上一趟交完人在別處 → 先切回隊長再整隊走
+                crc = T.char_ensure(LEADER)
+                if crc:
+                    return self.fail(EXIT_TURNIN, f'任務 {tid}：切回 {LEADER} 失敗 rc={crc}', turnin=self.info.get('turnin'))
+            rc = self.walk_team_to_npc(tid, d['track'], grp[0])
+            if rc:
+                return rc
+            rc = T.team_disband()                                      # 5 人都到 NPC 旁了才解散
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            if rc:
+                return self.fail(EXIT_TURNIN, f'任務 {tid}：到 NPC 旁解散隊伍失敗 rc={rc}', turnin={'stage': 'disband', 'rc': rc})
+            self.team_ok_at = 0.0
+            rc, r = T.pet_turnin(tdef['kind'], ALL_ROLES, grp)
+            res.update(r or {})
+            self.info['turnin'] = {'stage': 'turnin', 'rc': rc, 'roles': res}
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc
+            if rc:
+                self.stop_walk_quiet()                                 # 失敗：不讓角色自己繼續走
+                crc = T.char_ensure(LEADER)                            # 也先切回 DKBO（pet_turnin 不切回）
+                return self.fail(EXIT_TURNIN, f'任務 {tid}：pet_turnin rc={rc}（{r}）；切回 {LEADER} rc={crc}', turnin=self.info['turnin'])
+        crc = T.char_ensure(LEADER)
         if crc:
             return self.fail(EXIT_TURNIN, f'任務 {tid}：交完切回 {LEADER} 失敗 rc={crc}', turnin=self.info['turnin'])
         rc = self.form('交寵物後')

@@ -13,7 +13,8 @@
   實際伺服器沒收走，下一步才 125）：每 VERIFY_POLL_S 秒唯讀讀追蹤列表步號（quest.read_step_no，最多 VERIFY_WAIT_S 秒）——
   步號 > 交的那步、或最後一步交完任務從追蹤列表消失 = 交出；步號一直等於交的那步 = 沒交到 126；
   步號讀不到 → 開寵物面板讀該角色寵物欄（pet.list_role），交的寵物已不在 = 交出，還在 / 有格認不出 = 126（不猜）。
-前提（呼叫端負責）：隊伍已解散（逐人交）、任務寵都在寵物欄、等級夠（魯尼帖斯 ≥18、貝魯卡 ≥30）、任務寵都已「等待」（pet.py rest-all）、
+前提（呼叫端負責）：隊伍已解散（逐人交）、**人都已站在 NPC 旁**（2026-10-16：questrun do_turnin 先整隊組隊走到 NPC 旁、到了才解散，
+  不要在遠處解散讓每個人自己長途巡路；仍在巡路 / 戰鬥中時 turnin_step 會延長等待，總上限 WAIT_MAX_S）、任務寵都在寵物欄、等級夠（魯尼帖斯 ≥18、貝魯卡 ≥30）、任務寵都已「等待」（pet.py rest-all）、
   已接任務（questrun run 2016 步 1、2 是 manual 會停下）。
 **不切回 DKBO**：全部交完由呼叫端 char.py ensure DKBO。
 
@@ -65,6 +66,8 @@ TRACK_MISS_MAX = 3                      # 列表有內容但沒有該任務：�
 TRACK_LOAD_MAX_S = 40.0                 # 列表一直讀到 0 列（還沒載入）最多等這麼久，之後也判 121
 VERIFY_WAIT_S = 12.0                    # 交後驗證：追蹤步號最多等這麼久前進（伺服器回應 / 列表刷新）
 VERIFY_POLL_S = 2.0
+WAIT_S = 90.0                           # 等對話框 / 選擇視窗：沒進展的期限；人已在 NPC 旁（questrun 整隊走到才解散）90 秒綽綽有餘
+WAIT_MAX_S = 300.0                      # 巡路 / 戰鬥中不斷延長期限，總上限
 
 
 def norm(t: str) -> str:
@@ -173,7 +176,7 @@ def turnin_step(want: str, dry_run: bool = False) -> int:
     追蹤列表剛切完角色可能還沒載入：沒找到不馬上判 121，見 track_miss_action"""
     import quest
     t0 = time.time()
-    t_end = t0 + 90
+    t_end = t0 + WAIT_S
     tracked_at = 0.0
     retry_at = 0.0
     misses = 0
@@ -181,6 +184,8 @@ def turnin_step(want: str, dry_run: bool = False) -> int:
         if select_window_open():
             return pick_in_window(want, dry_run)
         st = quest.read_screen().get('state')
+        if st in ('walking', 'battle'):                                # 還在自動巡路 / 戰鬥 = 有進展：期限往後推，總上限 WAIT_MAX_S（2026-10-16 p2 實跑 90 秒不夠 → 122）
+            t_end = min(t0 + WAIT_MAX_S, max(t_end, time.time() + WAIT_S))
         if st == 'dialog':
             if dry_run:
                 log('對話框開著（dry-run 不點）')

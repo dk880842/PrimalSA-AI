@@ -18,6 +18,7 @@
            遇敵 → 完整戰鬥下指令階段按右上「逃跑」1283,168；自動戰鬥開著（指令框不出現）先按 1380,600 關掉再逃；
            逃跑失敗（還在戰鬥）下一回合再按。要先把 DKB0 外掛的原地遇敵 / 快速戰鬥 / 自動戰鬥關（完整戰鬥畫面才有逃跑鈕；只看到 VS 牌 = 快速戰鬥還開著，只能等，印警告）。
            路上小怪只逃、不刷新角色。到 NPC 跳出對話框 → ESC 關掉（不按任何選項）後停下，退出碼 20；被打飛（回到薩姆吉爾村 1000 儲存點附近）→ 退出碼 21。
+  --stop-at-npc  預設組隊模式走到 NPC 旁：對話框一出現就 ESC（不回答）停下，退出碼 20（questrun 交寵物：整隊走到 NPC 旁才解散）
   --stop-after-dialog  對話步（組隊後單步）：按完對話框、閒置滿 2.5 秒（連續 2 次以上）就結束退出碼 0（有獲得物品視窗的步驟改用 --stop-after-rewards 1）
   --fight  戰鬥步（假設已站在 NPC 旁，**不點追蹤、不巡路**）：--npc X,Y（NPC 地圖座標）或 --npc auto（--task 目前步驟的 NPC，讀追蹤條目說明行對任務表；兩步文字相似時先用「目前所在地圖」分辨，仍分不出退出碼 31；見 --step）→ 依自己座標算畫面位置點 NPC（--at X,Y 可手動給自己座標）
            → 先處理「選擇對象」面板（見下）→ 對話框按左鈕 → 開打。戰鬥分類：開始時距離最後一次點 NPC / 按對話框 <= QUEST_BATTLE_WINDOW(15) 秒 = 任務 / BOSS 戰
@@ -1805,6 +1806,7 @@ def _main() -> int:
     ap.add_argument('--solo', action='store_true', help='單人逃跑風格（手動逃跑）：完整戰鬥按逃跑鈕（自動戰鬥開著先關）；路上小怪不刷新；到 NPC 出對話框 → ESC 後停下（退出碼 20）；被打飛退出碼 21')
     ap.add_argument('--stop-after-dialog', action='store_true', help='對話框按完、回主畫面連續閒置 2 次就結束（沒有獲得物品視窗的對話步用；組隊後單步對話用，避免自動點下一步追蹤開始巡路）')
     ap.add_argument('--disband-after', action='store_true', help='這步完成（--stop-after-dialog / --stop-after-rewards 結束）後立刻解散隊伍：切組隊分頁 → 點隊長列 → 解散，每步驗證，失敗退出碼 %d 且不亂點' % EXIT_DISBAND_FAIL)
+    ap.add_argument('--stop-at-npc', action='store_true', help='預設組隊模式：自動巡路到 NPC、跳出對話框就 ESC（不回答）並停下，退出碼 %d（= --solo 的到達判斷，但保留組隊戰鬥處理 / 刷新；交寵物前整隊走到 NPC 旁用，questrun do_turnin）' % EXIT_AT_NPC)
     ap.add_argument('--fight', action='store_true', help='戰鬥步（要先站在 NPC 附近；不巡路）：點 NPC → 對話左鈕 → 開打；只有點 NPC / 按對話框後 %d 秒內開始的才是任務 / BOSS 戰（開自動戰鬥 + 刷新角色、打完退出碼 0）；其他戰鬥是路上小怪（關自動戰鬥、按逃跑、不刷新）；沒反應退出碼 22、對話後沒開打 23、被打飛 21' % QUEST_BATTLE_WINDOW)
     ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（讀追蹤條目目前步驟說明對 --task 的任務表找 NPC；讀不到退出碼 31，可改 --step N）；不給 = 必須加 --no-click')
     ap.add_argument('--npc-map', type=int, default=0, help='--fight --npc X,Y 用：NPC 所在地圖 ID（不給時，有 --task 會用任務表反查該座標的 NPC 地圖）；與目前所在地圖不同 → 退出碼 %d，不點' % EXIT_NPC_MAP)
@@ -2117,10 +2119,10 @@ def _main() -> int:
             if (rc := team_gate('開始前：', EXIT_TEAM_MISMATCH, force=True)):
                 return rc
             pre_checked = True
-        if st == 'dialog' and a.solo:
+        if st == 'dialog' and (a.solo or a.stop_at_npc):
             shot = snap('npc-dialog')
             gui('key', '{ESC}', note='到達 NPC：ESC 關閉對話框（不回答任何選項）')
-            event(f'--solo 到達 NPC：對話框已 ESC 關閉，停下交給組隊（退出碼 {EXIT_AT_NPC}）', shot)
+            event(f'{"--solo" if a.solo else "--stop-at-npc"} 到達 NPC：對話框已 ESC 關閉，停下交給組隊（退出碼 {EXIT_AT_NPC}）', shot)
             print('到達 NPC（對話框已 ESC 關閉）', flush=True)
             return EXIT_AT_NPC
         if st == 'dialog' and not a.allow_irreversible:

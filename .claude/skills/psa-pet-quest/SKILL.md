@@ -114,11 +114,11 @@ uv run --no-project python tools/gui/petquest.py run 3003 --confirm-drop        
 - **卡坦的願望（2019，薩伊那斯 100:230,180）**：**5 人組隊、隊長 DKB0 交一次，5 人同時完成**（步 1、步 2 都是）。交完逐人確認追蹤進步 2 / 寵物被收走。`quest.py --task 卡坦的願望` 可用，quest.py 偵測到同一 NPC 對話重複無進展會以退出碼 33 停手（2026-10-10 加入）。
 
 ### 4b. 恐龍博士逐人交的腳本（2026-10-12 起）
-`uv run --no-project python tools/gui/pet_turnin.py dino DKBO DKBO2 DKBO3 DKBO4 DKBO5`（隊伍先解散；DKBO 是當前角色就帶 `--no-switch`；每人步 1、2 約 30 秒）：
+`uv run --no-project python tools/gui/pet_turnin.py dino DKBO DKBO2 DKBO3 DKBO4 DKBO5`（隊伍先解散、**人都要已站在 NPC 旁**；DKBO 是當前角色就帶 `--no-switch`；每人步 1、2 約 30 秒）：
 `char.ensure` → 點追蹤「恐龍博士」（2026-10-13：剛切角色時追蹤列表常還沒載入〔DKBO2～5 第一次都 121、重跑才過〕→ 讀到 0 列不算沒找到，4 秒後重掃、最多等 40 秒；有內容但沒有該任務要連 3 次才 121）→ 對話框左鈕 →「選擇」視窗 OCR 卡片名字、**依名字**點卡（卡片變黃底才按確定 706,614；高亮最多等 3 秒）→ 視窗消失 → **交後驗證**（2026-10-14：DKBO 交魯尼帖斯按確定、視窗消失就判 step1 True，伺服器其實沒收走，下一步才 125）：每 2 秒唯讀讀追蹤步號（最多 12 秒），步號 > 交的那步（或最後一步交完任務消失）才算交出；一直停在原步 → **126** 停手不重交；步號讀不到 → 開寵物面板讀該角色寵物欄，交的寵物已不在才算，還在 / 有格認不出 → 126。退出碼 120～126（檔頭）。
 選擇視窗：標題「選擇」（-Dark 0 才讀得到）、卡片名字區 570,305 300×245（-Dark 150，兩個放大倍數會重複，y 差 ≤15 併成一張）、卡 y 約 341 / 446 / 544（第 3 張被截半，要捲）、點卡 x=700、y=名字行 +10。
 接取：`questrun run 2016 --after none` 會接取並在步 1 停 115（2026-10-12 前步號讀不到會落到 quest.py 對話空轉 117，已修：全 manual 任務步號讀不到也當 manual）；questrun 2026-10-12 起預設**不吃**龍王的守護（要吃加 `--dragon`；`--no-dragon` 仍可用、= 預設）。
-**自動交（`--pet-turnin`，離線測試過、未實機）**：`questrun run 2016 --after none --pet-turnin` → 步 1 / 2（manual）改成 `pet.py rest-all` → `team.disband` → `pet_turnin dino` 5 人逐人 → `char.ensure DKBO` → `team.form` → 讀詳情；失敗 150。第一次用建議先照上面手動跑 `pet_turnin.py` 驗過。
+**自動交（`--pet-turnin`，離線測試過、未實機）**：`questrun run 2016 --after none --pet-turnin` → 步 1 / 2（manual）改成 `pet.py rest-all` → **整隊（5 人組隊，不完整先 team.form）`quest.py --stop-at-npc` 點追蹤自動巡路走到 NPC 旁（對話框一出現 ESC、退出碼 20；助手吉魯 11,7 / 哈魯 11,11 同在博士的研究所 11006 = 走一趟，`questdefs.turnin.maps`；不同圖的步分趟、每趟重組隊）→ 到了才 `team.disband`**（2026-10-16 使用者指出：舊版在練功點就解散，每人各自長途巡路〔柯奧山小洞窟 1F→5F 約 5 分鐘、沿路遇敵〕→ 90 秒不夠 122；現在人都在 NPC 旁、`pet_turnin.turnin_step` 巡路 / 戰鬥中也會延長等待，總上限 300 秒）→ `pet_turnin dino` 5 人逐人 → `char.ensure DKBO` → `team.form` → 讀詳情；失敗 150。第一次用建議先照上面手動跑 `pet_turnin.py` 驗過。
 
 ### 5. 獎勵處理
 - **布克布克（恐龍）、修寶（卡坦步 1）可丟**：`uv run --no-project python tools/gui/petdrop.py all 布克布克 --confirm-name 布克布克`（2026-10-12 實機驗證 5 人；先 `--dry-run`）。手動：寵物面板選該格 → 垃圾桶 708,565 → 提示窗「確定要丟棄【名字】嗎?」**確認名稱** → 確定 615,557。**只限這兩種**，其他寵物一律不丟。
