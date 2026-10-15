@@ -212,8 +212,9 @@ check('ass.ROLES：DKBO8 在第 3 個頭像 (461,151)', list(ass.ROLES) == P2 an
 check('ass.MARQUEE_ROLES = 第 3 個（DKBO8）', ass.MARQUEE_ROLES == ('DKBO8',))
 check('ass.norm_role：dkb010 → DKBO10；DKBO → None', ass.norm_role('dkb010') == 'DKBO10' and ass.norm_role('DKBO') is None)
 check('ass.ordered_roles：隊長 DKBO6 放最後', ass.ordered_roles(P2) == P2[1:] + ['DKBO6'])
-check('ass.QUEST_BATTLE：PrimalSA2 只查 5 人自動戰鬥（隊長首次動作沒量過、不查）',
-      ass.QUEST_BATTLE == {r: {'自動戰鬥': True} for r in P2[1:] + ['DKBO6']} and list(ass.QUEST_BATTLE)[-1] == 'DKBO6')
+check('ass.QUEST_BATTLE：PrimalSA2 查 5 人自動戰鬥 + 隊長首次動作 風的精靈（2026-10-15 起，LEADER_FIRST 加 PrimalSA2）',
+      ass.QUEST_BATTLE == {**{r: {'自動戰鬥': True} for r in P2[1:]}, 'DKBO6': {'自動戰鬥': True, 'first': '風的精靈', 'first_on': True}}
+      and list(ass.QUEST_BATTLE)[-1] == 'DKBO6')
 os.environ['PSA_LEADER_FIRST'] = '水的精靈'
 qb = ass.quest_battle()
 check('PSA_LEADER_FIRST 覆寫隊長首次動作', qb['DKBO6'] == {'自動戰鬥': True, 'first': '水的精靈', 'first_on': True})

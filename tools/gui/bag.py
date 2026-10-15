@@ -526,10 +526,10 @@ def team_read(roles=None, names=(), level: bool = True) -> tuple:
             if level:
                 d['level'] = read_level(r)
             if names:
-                r = _names_in_bag(names)
-                d['have'] = {n: r['found'][n] is not None for n in names}
-                d['free'] = r['free'] if r['occ'] is not None else None
-                d['by'] = r['by']
+                nb = _names_in_bag(names)
+                d['have'] = {n: nb['found'][n] is not None for n in names}
+                d['free'] = nb['free'] if nb['occ'] is not None else None
+                d['by'] = nb['by']
             out[r] = d
     return 0, out
 
