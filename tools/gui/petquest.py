@@ -20,7 +20,9 @@
   恐龍博士 2016 / 卡坦的願望 2019（使用者 2026-10-12 S5 / S6 做法；卡坦步 1 鯊、步 2 雞兩輪）
     accept      questrun.py run <ID> --after none：接取後停在寵物步（115 manual / 155 需先抓寵 / 117 對話 ↔ 選擇循環）；0 = 任務已完成 → 只做收尾
                 卡坦接取後讀追蹤步號：已在步 2 → 跳過第 1 輪
-    prep        關原地遇敵 + 等戰鬥結束 → 解散隊伍 → pet.py list 記 5 人原戰寵（朵拉比斯，出戰）等級 → 取消鎖定戰寵 → 朵拉比斯 5 人存個人倉庫
+    prep        關原地遇敵 + 等戰鬥結束 → 解散隊伍 → pet.py list 記每人當下「出戰」的寵物名字（進度檔 battle，各角色可不同：p1 朵拉比斯、p2 迪基格斯；
+                續跑沿用已記的不重讀；讀不到〔沒出戰 / 多隻出戰 / 名字讀不出〕→ 162 不亂猜，僅「沒出戰但寵物欄有朵拉比斯」退回朵拉比斯）+ 等級（orig）
+                → 取消鎖定戰寵 → 各人戰寵存個人倉庫（同名的人一組 store-many；不碰騎寵）
                 （寵物欄只剩騎寵 + 4 空格；抓寵 / 練寵都不帶原戰寵）
     catch[N]    **一次抓滿本輪總隻數 N（正常 5，不分批；使用者 2026-10-15）**：外掛捉寵設置已勾「自動存倉庫」，寵物欄滿了多抓的自動進抓寵者個人寵物倉庫，
                 所以可抓捕數 = N、背包誘餌 N 個，一次抓完（舊版依空格分批 [4, 1]，理由「進個人倉庫沒縮圖取不出來」已過時：2026-10-14 起名字為主、reset-name 還原物種名，
@@ -49,8 +51,9 @@
                 （恐龍：解散逐人 pet_turnin；卡坦：隊長交一次）；卡坦第 1 輪交完讀步號 = 2 才算
     drop[N]     （--confirm-drop）petdrop.py all <獎勵寵> --confirm-name <獎勵寵> --max-level 1（恐龍 布克布克；卡坦第 1 輪 修寶）
     store_reward（卡坦）獎勵朵拉比斯（Lv1）5 人存個人倉庫
-    restore     pet.py take-many --depot personal --plan "角色:朵拉比斯@原等級" → 朵拉比斯 5 人出戰 → pet_catch.py --lock 戰寵 --battle-pet 朵拉比斯（讀回）
-                → ass.py pet all normal 攻擊 --no-resume（一般動作 = 攻擊、讀回）→ pet.py list 驗 5 人朵拉比斯出戰且等級 = 原等級
+    restore     pet.py take-many --depot personal --plan "角色:戰寵名@原等級" → 戰寵出戰（set-state-many，同名一組）→ pet_catch.py --lock 戰寵 --battle-pet 戰寵名（同名一組 --roles，讀回）
+                → ass.py pet all normal 攻擊 --no-resume（一般動作 = 攻擊、讀回）→ pet.py list 驗 5 人各自戰寵出戰且等級 = 原等級
+                （任務本來就完成〔沒跑 prep、進度檔沒戰寵名〕：用當下出戰寵當戰寵，只收尾）
   猜謎三兄弟 3003（使用者 2026-10-12 / 10-13 做法）
     accept      questrun.py run 3003 --after none（步 1 manual → 115；步 2 需練寵 → 155；0 = 已完成）
     step1       追蹤步號 = 1 才做：quest.py --task 猜謎三兄弟 --stop-after-rewards 1（10-12 / 10-13 點追蹤自動巡到 810 伊那多拿金豬，沒爬塔）
@@ -69,14 +72,14 @@
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；petquest 自己 160～169）：
   160 參數錯 / 任務 ID 不支援 / 進度不一致（例：restore 要原等級但進度檔沒有）
   161 接取失敗（questrun 非預期退出碼）/ 猜謎步 1 沒拿到金布伊
-  162 準備失敗（關遇敵、解散、讀寵物欄、取消鎖定、存原戰寵、金布伊出戰 / 鎖定）
+  162 準備失敗（關遇敵、解散、讀寵物欄、讀不到出戰寵名字〔沒出戰 / 多隻出戰 / 名字讀不出〕、取消鎖定、存原戰寵、金布伊出戰 / 鎖定）
   163 誘餌不夠且沒給 --confirm-buy-bait / 買可抓捕數失敗（「+」按了可抓捕數沒變、鑽石有變）
   164 抓寵失敗（pet_catch 非 0：14 系別物種選不到、15 新寵物名字 / 縮圖是別的物種、16 名字讀不出（還原失敗、成長字串也讀不出）、17 新寵物隻數不對 / 沒登錄、103 取誘餌 / 設定 / 逾時…）
   165 分配失敗（store-many / take-many 非 0、數量驗不過）/ 還原名字讀到費用字樣（pet_catch / pet 67，鐵則 3）
   166 練寵失敗（自動轉換戰寵、出戰、verify-battle、grind、等級逾時、petwatch、rest-all）
   167 交寵物失敗（questrun 非預期退出碼、卡坦第 1 輪交完步號不是 2）
   168 丟獎勵寵失敗 / 沒給 --confirm-drop
-  169 換回原戰寵失敗（存獎勵朵拉比斯、取回、出戰、鎖定、一般動作、讀回驗證）
+  169 換回原戰寵失敗（存獎勵寵朵拉比斯〔REWARD_PET，與戰寵無關〕、取回、出戰、鎖定、一般動作、讀回驗證）
 """
 import argparse
 import json
@@ -107,7 +110,8 @@ ALL_ROLES = clients.roster()          # 這個視窗（PSA_CLIENT）的名單：
 LEADER = ALL_ROLES[0] if ALL_ROLES else ''
 
 _r = questdefs.roster_at              # 抓寵分配用卡位（_r(1) = 名單第 2 個）而不是寫死 DKBO2…
-BATTLE_PET = '朵拉比斯'
+BATTLE_PET = '朵拉比斯'            # 讀不到出戰寵時的退路名字（p1 的戰寵；只在寵物欄確實有這隻時才用）；平常用 prep 記進進度檔 battle 的「各角色當下出戰寵」
+REWARD_PET = '朵拉比斯'            # 卡坦任務的獎勵寵（Lv1，與各角色戰寵無關；存個人倉庫）
 BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
 PET_FEE = 67                       # pet.EXIT_FEE：還原名字時讀到費用字樣（鐵則 3）
 import catchbuy  # noqa: E402  外掛「+」買可抓捕數的共用邏輯（rebirth_pets 同一份）
@@ -133,7 +137,7 @@ QUESTS = {
              need={'克邦凱斯': 25, '加克拉': 25, '加格': 25, '邦恩吉': 25}, drop='修寶', step=1),
         dict(assign=[(_r(1), '火雞系', '火雞'), (_r(2), '火雞系', '克克洛斯'), (_r(3), '火雞系', '霍爾克'), (_r(4), '火雞系', '奇寶')],
              need={'火雞': 25, '克克洛斯': 25, '霍爾克': 25, '奇寶': 25}, drop=None, step=2)],
-        count=len(ALL_ROLES) or 5, store_reward=BATTLE_PET),
+        count=len(ALL_ROLES) or 5, store_reward=REWARD_PET),
     3003: dict(kind='quiz', track='猜謎三兄弟', pet='金布伊', level=77, drop='左迪洛斯'),
 }
 
@@ -252,6 +256,48 @@ def battle_levels(roles_slots: dict, pet: str = BATTLE_PET) -> dict:
         hit = next((s for s in hits if s.get('state') == '出戰'), hits[0])
         out[r] = hit.get('level')
     return out
+
+
+def battle_levels_by(roles_slots: dict, names: dict) -> dict:
+    """{角色: [格]} + {角色: 戰寵名} → {角色: 該角色戰寵等級（出戰的優先；沒有 / 讀不到 None 不列）}"""
+    out = {}
+    for r, nm in (names or {}).items():
+        lv = battle_levels({r: (roles_slots or {}).get(r)}, nm)
+        if r in lv:
+            out[r] = lv[r]
+    return out
+
+
+def pick_battle_names(roles_slots: dict, roles=None, fallback: str = BATTLE_PET) -> tuple:
+    """純函式：prep 讀每人當下「出戰」的寵物名字 → ({角色: 名字}, {角色: 失敗原因})
+    名字要「名字框 / 登錄」認得的嚴格身分（strict_species；只有縮圖認出的不算）；恰好 1 隻出戰才採用。
+    沒有出戰時退路：寵物欄確實有 fallback（朵拉比斯）才用它，否則不猜、記原因（由調用端停手）"""
+    names, bad = {}, {}
+    for r in (roles if roles is not None else ALL_ROLES):
+        slots = [s for s in (roles_slots or {}).get(r) or [] if s and not s.get('empty')]
+        on = [s for s in slots if s.get('state') == '出戰']
+        if len(on) == 1:
+            nm = strict_species(on[0])
+            if nm:
+                names[r] = nm
+            else:
+                bad[r] = '出戰寵名字讀不出'
+        elif len(on) > 1:
+            bad[r] = f'出戰寵 {len(on)} 隻（無法判斷哪隻是戰寵）'
+        elif any(strict_species(s) == fallback for s in slots):
+            names[r] = fallback
+        else:
+            bad[r] = '沒有出戰寵、寵物欄也沒有' + fallback
+    return names, bad
+
+
+def group_by_name(names: dict, roles=None) -> list:
+    """{角色: 戰寵名} → [(名字, [角色…])]（照名單順序、名字第一次出現順序；沒記名字的角色不列）"""
+    out: dict = {}
+    for r in (roles if roles is not None else ALL_ROLES):
+        if names.get(r):
+            out.setdefault(names[r], []).append(r)
+    return list(out.items())
 
 
 def recount_plan(assign, roles_slots: dict, public: dict, personal: dict, count: int) -> dict:
@@ -573,17 +619,43 @@ class Run:
         return self.pass_or(rc, EXIT_ACCEPT, f'接取：questrun 退出碼 {rc}（預期 0 / 115 / 155 / 117）',
                             f'uv run --no-project python tools/gui/questrun.py run {self.qid} --after none')
 
+    def battle_names(self) -> dict:
+        """進度檔記的各角色戰寵名（prep 讀到的；沒記的角色不在內）"""
+        if not self.p.get('battle') and self.p.get('orig'):               # 舊進度檔（本功能前跑到一半）只有 orig：當時全員戰寵 = 朵拉比斯，沿用
+            return {r: BATTLE_PET for r in self.p['orig']}
+        return self.p.get('battle') or {}
+
+    def battle_groups(self) -> list:
+        """[(戰寵名, 角色參數)]：角色參數 = 'all'（全員同名）或逗號分隔；給 pet.py / pet_catch.py 的 --role / --roles"""
+        return [(nm, 'all' if rs == ALL_ROLES else ','.join(rs)) for nm, rs in group_by_name(self.battle_names())]
+
+    def common_battle(self) -> str | None:
+        """全員同名才回名字（petwatch --back 只收單一名字）"""
+        g = self.battle_groups()
+        return g[0][0] if len(g) == 1 and g[0][1] == 'all' else None
+
     def record_orig(self) -> int:
         rc, rs = self.pet_list()
         if rc:
             return self.pass_or(rc, EXIT_PREP, f'讀寵物欄失敗 pet rc={rc}', 'uv run --no-project python tools/gui/pet.py list --role all')
-        lv = battle_levels(rs)
+        names = dict(self.battle_names())                                 # 續跑沿用已記的，不重讀覆蓋
+        if [r for r in ALL_ROLES if not names.get(r)]:
+            got, bad = pick_battle_names(rs)
+            for r in ALL_ROLES:
+                if not names.get(r) and got.get(r):
+                    names[r] = got[r]
+            miss = {r: bad.get(r, '讀不到') for r in ALL_ROLES if not names.get(r)}
+            if miss:
+                return self.fail(EXIT_PREP, f'讀不到出戰寵名字（不亂猜；先把戰寵設出戰 / 讓名字讀得出）：{miss}',
+                                 'uv run --no-project python tools/gui/pet.py list --role all（確認每人有 1 隻出戰寵）')
+        self.p['battle'] = names
+        lv = battle_levels_by(rs, names)
         miss = [r for r in ALL_ROLES if not lv.get(r)]
         if miss:
-            return self.fail(EXIT_PREP, f'{miss} 寵物欄找不到{BATTLE_PET}或等級讀不到（換回時要用 --expect-level 原等級）：{lv}',
+            return self.fail(EXIT_PREP, f'{miss} 寵物欄找不到戰寵 {names} 或等級讀不到（換回時要用 --expect-level 原等級）：{lv}',
                              'uv run --no-project python tools/gui/pet.py list --role all（看清楚後手動記下等級）')
         self.p['orig'] = lv
-        event(f'原戰寵 {BATTLE_PET} 等級：{lv}')
+        event(f'原戰寵（各角色出戰寵）：{names}；等級：{lv}')
         self.save()
         return 0
 
@@ -616,10 +688,12 @@ class Run:
                 return rc
         carry = self.all.get('carry_orig') or {}
         if not self.p.get('orig') and carry.get('orig') and 0 <= self.T.clock() - (carry.get('ts') or 0) <= PROGRESS_TRUST_S and carry.get('qid') != self.qid:
-            self.p['orig'] = carry['orig']                              # 恐龍博士帶 --keep-autoswap 沒換回朵拉比斯：沿用它記的原等級（寵物欄已沒有朵拉比斯可讀）
-            event(f'原戰寵 {BATTLE_PET} 等級沿用恐龍博士記的：{carry["orig"]}')
+            self.p['orig'] = carry['orig']                              # 恐龍博士帶 --keep-autoswap 沒換回戰寵：沿用它記的原等級 / 名字（寵物欄已沒有戰寵可讀）
+            if carry.get('battle'):
+                self.p['battle'] = carry['battle']
+            event(f'原戰寵 {carry.get("battle") or BATTLE_PET} 等級沿用恐龍博士記的：{carry["orig"]}')
             self.save()
-        if not self.p.get('orig'):
+        if not self.p.get('orig') or not self.battle_names():
             rc = self.record_orig()
             if rc:
                 return rc
@@ -635,10 +709,11 @@ class Run:
             if rc:
                 return self.pass_or(rc, EXIT_PREP, f'鎖定戰寵 = {pet} 失敗 rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --lock 戰寵 --battle-pet {pet}')
             return 0
-        rc, _ = self.sub('pet.py', ['store-many', '--role', 'all', '--pets', BATTLE_PET, '--depot', 'personal', '--skip-missing'], 1200)   # 續跑時已存過的人略過
-        if rc:
-            return self.pass_or(rc, EXIT_PREP, f'{BATTLE_PET} 存個人倉庫失敗 pet rc={rc}（寵物欄要空出 4 格）',
-                                f'uv run --no-project python tools/gui/pet.py store-many --role all --pets {BATTLE_PET} --depot personal')
+        for nm, ra in self.battle_groups():                                # 各角色戰寵名可不同：同名的一組存
+            rc, _ = self.sub('pet.py', ['store-many', '--role', ra, '--pets', nm, '--depot', 'personal', '--skip-missing'], 1200)   # 續跑時已存過的人略過
+            if rc:
+                return self.pass_or(rc, EXIT_PREP, f'{nm} 存個人倉庫失敗 pet rc={rc}（寵物欄要空出 4 格）',
+                                    f'uv run --no-project python tools/gui/pet.py store-many --role {ra} --pets {nm} --depot personal')
         return 0
 
     def round_conf(self, stage) -> dict:
@@ -949,11 +1024,15 @@ class Run:
         rc, _ = self.sub('grind.py', gargs, 1800)
         if rc:
             return self.pass_or(rc, EXIT_TRAIN, f'grind {" ".join(gargs)}（去練功）失敗 rc={rc}', f'uv run --no-project python tools/gui/grind.py {" ".join(gargs)}')
-        args = ['--pet', q['pet'], '--level', q['level'], '--back', BATTLE_PET, '--exp-fruit']
+        back = self.common_battle()
+        if not back:
+            return self.fail(EXIT_ARGS, f'各角色戰寵名不同 {self.battle_names()}：petwatch --back 只收單一名字 → 不自動練（猜謎）',
+                             '手動 petwatch.py 逐人，或只對同名的人跑')
+        args = ['--pet', q['pet'], '--level', q['level'], '--back', back, '--exp-fruit']
         rc, _ = self.sub('petwatch.py', args, 4 * 3600)
         if rc:
             return self.pass_or(rc, EXIT_TRAIN, f'petwatch 失敗 rc={rc}（4 = 有人換回失敗被放棄）',
-                                f'uv run --no-project python tools/gui/petwatch.py {" ".join(map(str, args))}；放棄的人：pet_catch.py --unlock 戰寵 --roles X → pet.py set-state X {BATTLE_PET} 出戰 → pet_catch.py --lock 戰寵 --roles X --battle-pet {BATTLE_PET}')
+                                f'uv run --no-project python tools/gui/petwatch.py {" ".join(map(str, args))}；放棄的人：pet_catch.py --unlock 戰寵 --roles X → pet.py set-state X {back} 出戰 → pet_catch.py --lock 戰寵 --roles X --battle-pet {back}')
         return 0
 
     def s_step1(self) -> int:
@@ -1034,27 +1113,44 @@ class Run:
 
     def s_restore(self) -> int:
         orig = self.p.get('orig') or {}
+        names = self.battle_names()
+        shown = '、'.join(sorted(set(names.values()))) or BATTLE_PET
         if self.o.get('keep_autoswap') and not self.p.get('already_done') and self.q['kind'] == 'catch':
-            self.all['carry_orig'] = {'qid': self.qid, 'orig': orig, 'ts': self.T.clock()}
+            self.all['carry_orig'] = {'qid': self.qid, 'orig': orig, 'battle': names, 'ts': self.T.clock()}
             self.save()
-            event(f'{BATTLE_PET} 先不換回（--keep-autoswap：自動轉換戰寵開著會把剛換回的換掉、卡坦 prep 又要存倉）→ 原等級 {orig} 記 carry_orig，由卡坦 restore 統一換回')
+            event(f'{shown} 先不換回（--keep-autoswap：自動轉換戰寵開著會把剛換回的換掉、卡坦 prep 又要存倉）→ 原等級 {orig} 記 carry_orig，由卡坦 restore 統一換回')
             return 0
+        if [r for r in ALL_ROLES if not names.get(r)] and self.p.get('already_done'):
+            rc, rs = self.pet_list()                                      # 任務本來就完成（沒跑 prep）：用當下出戰寵當戰寵，只收尾（鎖定 + 一般動作 + 驗）
+            if rc:
+                return self.pass_or(rc, EXIT_RESTORE, f'讀寵物欄失敗 pet rc={rc}', 'uv run --no-project python tools/gui/pet.py list --role all')
+            got, bad = pick_battle_names(rs)
+            if bad:
+                return self.fail(EXIT_RESTORE, f'已完成任務的收尾：讀不到出戰寵名字（不亂猜）：{bad}', 'uv run --no-project python tools/gui/pet.py list --role all')
+            names = self.p['battle'] = got
+        if [r for r in ALL_ROLES if not names.get(r)]:
+            return self.fail(EXIT_ARGS, f'進度檔沒有 5 人的戰寵名 {names} → 不盲換（舊進度檔 / prep 沒跑）',
+                             f'手動 pet.py take-many --depot personal --plan "{LEADER}:戰寵名@等級,…"；或 --fresh 從 prep 重來')
         if self.q['kind'] == 'catch' and not self.p.get('already_done'):
             if [r for r in ALL_ROLES if not orig.get(r)]:
-                return self.fail(EXIT_ARGS, f'進度檔沒有 5 人原{BATTLE_PET}等級 {orig} → 不盲取（同名多隻）', f'手動 pet.py take-many --depot personal --plan "{LEADER}:{BATTLE_PET}@等級,…"')
+                return self.fail(EXIT_ARGS, f'進度檔沒有 5 人原戰寵等級 {orig} → 不盲取（同名多隻）', f'手動 pet.py take-many --depot personal --plan "{LEADER}:{names.get(LEADER) or BATTLE_PET}@等級,…"')
             rc0, rs0 = self.pet_list()                                    # 續跑：已有原等級的戰寵在寵物欄的人不再取（take-many 對同名多隻會取到別隻，2026-10-14 恐龍博士手動取回後續跑）
-            have = {r for r in ALL_ROLES if rc0 == 0 and any(slot_species(s) == BATTLE_PET and s.get('level') == orig[r] for s in rs0.get(r) or [])}
+            have = {r for r in ALL_ROLES if rc0 == 0 and any(slot_species(s) == names[r] and s.get('level') == orig[r] for s in rs0.get(r) or [])}
             todo = [r for r in ALL_ROLES if r not in have]
-            plan = ','.join(f'{r}:{BATTLE_PET}@{orig[r]}' for r in todo)
+            plan = ','.join(f'{r}:{names[r]}@{orig[r]}' for r in todo)
             if todo:
                 rc, _ = self.sub('pet.py', ['take-many', '--depot', 'personal', '--plan', plan], 1800)
                 if rc:
-                    return self.pass_or(rc, EXIT_RESTORE, f'取回原{BATTLE_PET}失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py take-many --depot personal --plan "{plan}"')
-            rc, _ = self.sub('pet.py', ['set-state-many', '--role', 'all', BATTLE_PET, '出戰'], 900)
-            if rc:
-                return self.pass_or(rc, EXIT_RESTORE, f'{BATTLE_PET} 出戰失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-many --role all {BATTLE_PET} 出戰')
-        for script, args, why in (('pet_catch.py', ['--lock', '戰寵', '--battle-pet', BATTLE_PET], f'鎖定戰寵 = {BATTLE_PET}'),
-                                  ('ass.py', ['pet', 'all', 'normal', '攻擊', '--no-resume'], '戰寵一般動作 = 攻擊')):
+                    return self.pass_or(rc, EXIT_RESTORE, f'取回原戰寵失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py take-many --depot personal --plan "{plan}"')
+            for nm, ra in self.battle_groups():
+                rc, _ = self.sub('pet.py', ['set-state-many', '--role', ra, nm, '出戰'], 900)
+                if rc:
+                    return self.pass_or(rc, EXIT_RESTORE, f'{nm} 出戰失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-many --role {ra} {nm} 出戰')
+        steps = []
+        for nm, ra in self.battle_groups():
+            steps.append(('pet_catch.py', ['--lock', '戰寵', '--battle-pet', nm] + ([] if ra == 'all' else ['--roles', ra]), f'鎖定戰寵 = {nm}'))
+        steps.append(('ass.py', ['pet', 'all', 'normal', '攻擊', '--no-resume'], '戰寵一般動作 = 攻擊'))
+        for script, args, why in steps:
             rc, _ = self.sub(script, args, 1200)
             if rc:
                 return self.pass_or(rc, EXIT_RESTORE, f'{why} 失敗 rc={rc}', f'uv run --no-project python tools/gui/{script} {" ".join(map(str, args))}')
@@ -1063,16 +1159,16 @@ class Run:
             return self.pass_or(rc, EXIT_RESTORE, f'收尾讀寵物欄失敗 pet rc={rc}')
         bad = {}
         for r in ALL_ROLES:
-            hits = [s for s in rs.get(r) or [] if slot_species(s) == BATTLE_PET]
+            hits = [s for s in rs.get(r) or [] if slot_species(s) == names[r]]
             st = [(s.get('state'), s.get('level')) for s in hits]
             want = orig.get(r)
             okv = len(hits) == 1 and hits[0].get('state') == '出戰' and (not want or hits[0].get('level') is None
                                                                         or (hits[0]['level'] >= want if self.q['kind'] == 'quiz' else hits[0]['level'] == want))
             if not okv:
-                bad[r] = st
+                bad[r] = (names[r], st)
         if bad:
-            return self.fail(EXIT_RESTORE, f'收尾驗證：{BATTLE_PET} 不是剛好 1 隻出戰 / 等級不對（原 {orig}）：{bad}', 'uv run --no-project python tools/gui/pet.py list --role all')
-        event(f'收尾：5 人 {BATTLE_PET} 出戰、鎖定戰寵、一般動作攻擊')
+            return self.fail(EXIT_RESTORE, f'收尾驗證：戰寵不是剛好 1 隻出戰 / 等級不對（原 {orig}）：{bad}', 'uv run --no-project python tools/gui/pet.py list --role all')
+        event(f'收尾：5 人戰寵 {names} 出戰、鎖定戰寵、一般動作攻擊')
         return 0
 
     def do(self, stage) -> int:
@@ -1090,14 +1186,14 @@ def print_plan(qid: int, o: dict) -> None:
     if q['kind'] == 'quiz':
         print(f'  accept   questrun.py run {qid} --after none（115 / 155 / 0）')
         print(f'  step1    （步號 1）quest.py --task {q["track"]} --stop-after-rewards 1 → pet.py list 5 人有{q["pet"]}')
-        print(f'  prep     關遇敵 → pet.py list 記{BATTLE_PET}等級 → pet_catch --unlock 戰寵 → set-state-many {q["pet"]} 出戰 → pet_catch --lock 戰寵 --battle-pet {q["pet"]}')
-        print(f'  train    grind.py start{" --spot " + QUIZ_SPOT if QUIZ_SPOT else "（去練功，依等級選點 + follow）"} → petwatch.py --pet {q["pet"]} --level {q["level"]} --back {BATTLE_PET} --exp-fruit')
+        print(f'  prep     關遇敵 → pet.py list 記各角色出戰寵名 / 等級 → pet_catch --unlock 戰寵 → set-state-many {q["pet"]} 出戰 → pet_catch --lock 戰寵 --battle-pet {q["pet"]}')
+        print(f'  train    grind.py start{" --spot " + QUIZ_SPOT if QUIZ_SPOT else "（去練功，依等級選點 + follow）"} → petwatch.py --pet {q["pet"]} --level {q["level"]} --back 戰寵名 --exp-fruit')
         print(f'  turnin   關遇敵 → questrun.py run {qid} --after none')
         print(f'  drop     petdrop.py all {q["drop"]} --confirm-name {q["drop"]} --max-level 1（要 --confirm-drop）')
-        print(f'  restore  pet_catch --lock 戰寵 --battle-pet {BATTLE_PET} → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗')
+        print(f'  restore  pet_catch --lock 戰寵 --battle-pet 戰寵名 → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗')
     else:
         print(f'  accept   questrun.py run {qid} --after none（115 / 155 / 117；0 = 已完成）' + ('；讀步號 = 2 → 跳過第 1 輪' if len(q['rounds']) > 1 else ''))
-        print(f'  prep     關遇敵 → team.py disband → pet.py list 記{BATTLE_PET}等級 → pet_catch --unlock 戰寵 → pet.py store-many --role all --pets {BATTLE_PET} --depot personal')
+        print(f'  prep     關遇敵 → team.py disband → pet.py list 記各角色出戰寵名 / 等級 → pet_catch --unlock 戰寵 → pet.py store-many --role <同名的人> --pets 戰寵名 --depot personal')
         for i, rd in enumerate(q['rounds'], 1):
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
@@ -1116,7 +1212,7 @@ def print_plan(qid: int, o: dict) -> None:
         if o.get('keep_autoswap'):
             print(f'  restore  （--keep-autoswap：整段跳過，原等級記 carry_orig 給卡坦 prep；卡坦 restore 統一換回）')
         else:
-            print(f'  restore  pet.py take-many --depot personal --plan "角色:{BATTLE_PET}@原等級" → set-state-many {BATTLE_PET} 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗')
+            print(f'  restore  pet.py take-many --depot personal --plan "角色:戰寵名@原等級" → set-state-many 戰寵名 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗')
     print('退出碼：160 參數 161 接取 162 準備 163 誘餌 / 買 164 抓 165 分配 166 練 167 交 168 丟 169 換回；9 驗證視窗 10 斷線')
 
 
@@ -1158,7 +1254,7 @@ def run(qid, tools=None, confirm_buy: bool = False, confirm_drop: bool = False, 
             r.p['done'].append(st)
         r.save()
     if not rc and stages[i1] == stages[-1]:
-        r.p = {'done': [], 'finished': time.time(), 'orig': r.p.get('orig')}   # 整套做完：清進度（下一轉重做從頭）
+        r.p = {'done': [], 'finished': time.time(), 'orig': r.p.get('orig'), 'battle': r.p.get('battle')}   # 整套做完：清進度（下一轉重做從頭）
         r.save()
     LAST.update(ok=rc == 0, rc=rc, qid=qid, ran=ran, info=r.info)
     event(f'結束 rc={rc}，跑了 {ran}' + (f'；手動：{r.info.get("manual")}' if rc and r.info.get('manual') else ''))

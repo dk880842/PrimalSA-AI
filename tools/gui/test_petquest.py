@@ -37,10 +37,11 @@ def P(name, state='等待', level=1):
 class Sim:
     """假遊戲：每人寵物欄（最多 5 格，第 1 格騎寵）、個人 / 公共寵物倉庫、公共誘餌、石幣 / 鑽石、追蹤步號"""
 
-    def __init__(self, qid, bait=50, orig=125, step=1, stone=3_000_000):
+    def __init__(self, qid, bait=50, orig=125, step=1, stone=3_000_000, battle='朵拉比斯'):
+        self.battle = battle
         self.qid, self.bait, self.stone, self.dia, self.step = qid, bait, stone, 0, step
-        self.bar = {r: [P('布拉奇多斯', '騎乘', 5), P('朵拉比斯', '出戰', orig + i)] for i, r in enumerate(ROLES)}
-        self.personal = {r: [P('朵拉比斯', '等待', 130)] for r in ROLES}
+        self.bar = {r: [P('布拉奇多斯', '騎乘', 5), P(battle, '出戰', orig + i)] for i, r in enumerate(ROLES)}
+        self.personal = {r: [P(battle, '等待', 130)] for r in ROLES}
         self.public = []
         self.bag_bait = {}
         self.plus = {}                       # 角色 → 用「+」買的可抓捕數
@@ -150,7 +151,7 @@ class Sim:
             for p in self.bar[r]:
                 if p['name'] == '金布伊':
                     p['level'], p['state'] = 77, '等待'
-                if p['name'] == '朵拉比斯':
+                if p['name'] == self.battle:
                     p['state'] = '出戰'
         return self.out(0)
 
@@ -293,7 +294,7 @@ def grow(sim, by=2):
         if args[0] in ('list', 'levels') and any(c[0] == 'grind.py' for c in sim.calls) and not any(c == ('enc_off',) for c in sim.calls[[i for i, c in enumerate(sim.calls) if c[0] == 'grind.py'][-1]:]):
             for r in ROLES:
                 for p in sim.bar[r]:
-                    if p['name'] not in ('布拉奇多斯', '朵拉比斯', '金布伊'):
+                    if p['name'] not in ('布拉奇多斯', '朵拉比斯', '迪基格斯', '金布伊'):
                         p['level'] += by
         return orig(args)
     sim.pet = pet
@@ -738,6 +739,48 @@ s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
 check('沒帶 --keep-autoswap：照舊關自動轉換 + restore 換回', rc == 0 and any(a[:2] == ('--autoswap', 'off') for a in names(s, 'pet_catch.py'))
       and any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py')))
+
+# ---------------- 戰寵不是朵拉比斯（p2：迪基格斯出戰 + 瑪斯貝卡騎乘；各角色可不同）
+check('pick_battle_names：每人當下出戰寵', pq.pick_battle_names({'DKBO': [P('瑪斯貝卡', '騎乘', 5), P('迪基格斯', '出戰', 9)]}, roles=['DKBO'])[0] == {'DKBO': '迪基格斯'})
+check('pick_battle_names：沒出戰、欄有朵拉比斯 → 退路朵拉比斯', pq.pick_battle_names({'DKBO': [P('瑪斯貝卡', '騎乘', 5), P('朵拉比斯', '等待', 9)]}, roles=['DKBO'])[0] == {'DKBO': '朵拉比斯'})
+nm, bd = pq.pick_battle_names({'DKBO': [P('瑪斯貝卡', '騎乘', 5), P('迪基格斯', '等待', 9)], 'DKBO2': [P('A', '出戰'), P('B', '出戰')],
+                               'DKBO3': [{'state': '出戰', 'level': 3, 'img_species': '迪基格斯'}]}, roles=['DKBO', 'DKBO2', 'DKBO3'])
+check('pick_battle_names：沒出戰且沒退路 / 多隻出戰 / 只有縮圖 → 不猜、記原因', nm == {} and set(bd) == {'DKBO', 'DKBO2', 'DKBO3'}, str(bd))
+check('group_by_name 依名單順序分組', pq.group_by_name({'DKBO6': 'a', 'DKBO7': 'b', 'DKBO8': 'a'}, roles=['DKBO6', 'DKBO7', 'DKBO8']) == [('a', ['DKBO6', 'DKBO8']), ('b', ['DKBO7'])])
+
+s = grow(Sim(2016, battle='迪基格斯'))
+rc = go(2016, s, confirm_drop=True)
+check('恐龍博士（戰寵迪基格斯）happy：rc 0、進度檔記 battle', rc == 0 and set(json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2016']['battle'].values()) == {'迪基格斯'}, f'rc={rc} {pq.LAST.get("info")}')
+check('存倉 / 取回 / 出戰 / 鎖定都用迪基格斯，沒碰朵拉比斯', any(a[0] == 'store-many' and '迪基格斯' in a for a in names(s, 'pet.py'))
+      and any(a[0] == 'take-many' and '迪基格斯@125' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
+      and ('--lock', '戰寵', '--battle-pet', '迪基格斯') in names(s, 'pet_catch.py')
+      and not any('朵拉比斯' in ' '.join(map(str, a)) for a in names(s, 'pet.py') + names(s, 'pet_catch.py')))
+check('結果：每人 騎寵 + 迪基格斯出戰', all([p['name'] for p in s.bar[r]] == ['布拉奇多斯', '迪基格斯'] and s.bar[r][1]['state'] == '出戰' for r in ROLES))
+
+# 續跑沿用已記的名字（不重讀覆蓋）：進度檔已有 battle，寵物欄現在沒有出戰寵 → 仍成功進 prep
+s = Sim(2016, battle='迪基格斯')
+pq.PROGRESS.write_text(json.dumps({'2016': {'done': [], 'ts': __import__('time').time(), 'battle': {r: '迪基格斯' for r in ROLES}, 'orig': {r: 125 + i for i, r in enumerate(ROLES)}}}), encoding='utf-8')
+for r in ROLES:
+    for p in s.bar[r]:
+        p['state'] = '等待'
+rc = go(2016, s, reset=False, to_stage='prep')
+check('續跑沿用進度檔戰寵名（不重讀）', rc == 0 and any(a[0] == 'store-many' and '迪基格斯' in a for a in names(s, 'pet.py')), f'rc={rc} {pq.LAST.get("info")}')
+
+# 讀不到出戰寵 → 162 停手
+s = Sim(2016, battle='迪基格斯')
+for r in ROLES:
+    for p in s.bar[r]:
+        p['state'] = '等待'
+rc = go(2016, s, to_stage='prep')
+check('沒有出戰寵且沒朵拉比斯 → 162 不亂猜、沒存倉', rc == pq.EXIT_PREP and not any(a[0] == 'store-many' for a in names(s, 'pet.py')), f'rc={rc}')
+
+# 各角色不同戰寵：分組存倉
+s = Sim(2016)
+s.bar[ROLES[0]][1]['name'] = '迪基格斯'
+s.personal[ROLES[0]][0]['name'] = '迪基格斯'
+rc = go(2016, s, to_stage='prep')
+sm = [a for a in names(s, 'pet.py') if a[0] == 'store-many']
+check('各角色戰寵不同 → 分兩組 store-many（隊長迪基格斯 / 其餘朵拉比斯）', rc == 0 and len(sm) == 2 and any('迪基格斯' in a and a[a.index('--role') + 1] == ROLES[0] for a in sm), f'rc={rc} {sm}')
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

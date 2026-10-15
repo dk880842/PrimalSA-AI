@@ -43,7 +43,7 @@
   katan      petquest.py run 2019 …                                                            失敗 175
   quiz       petquest.py run 3003 …（練金布伊前 petwatch --exp-fruit 吃 2倍智慧果）            失敗 175
   finish     questrun.py status --role all <全部任務>（全員完成的任務自動移出 questrun 待驗清單）→ not_done 不空 → questrun.py verify <落後任務> --role <落後者>
-             （進行中 → 交接 → bossretry --who 補人 → 再讀；待接取 / 補不上 108）→ pet.py list（5 人朵拉比斯出戰 + 騎寵騎乘）→ 去練功 grind.py start（不帶 --spot；--spot 給了才帶）
+             （進行中 → 交接 → bossretry --who 補人 → 再讀；待接取 / 補不上 108）→ pet.py list（5 人各 1 隻戰寵出戰 + 騎寵騎乘）→ 去練功 grind.py start（不帶 --spot；--spot 給了才帶）
              （原地遇敵 + 5 人快戰確認）。失敗 176
   逐人驗證：questrun 段一律 --verify defer、petquest 帶 --verify-defer（2026-10-13 review 1013b §2.1）：沒風險事件的任務不在各段結束各驗一次（每次 115～154 秒），
              延到收尾那一次 status --role all；有風險事件（30 / 32 / 38 / 21 / 41 / bossretry / 重登 / BOSS 後 HP 0 / 交寵物）照舊當場驗，依賴任務接取前照舊先驗前置
@@ -169,16 +169,16 @@ def fmt(script, args) -> str:
     return f'uv run --no-project python tools/gui/{script} ' + ' '.join(map(str, args))
 
 
-def pets_ok(roles_slots: dict, battle: str = '朵拉比斯') -> dict:
-    """收尾：每人 battle 出戰剛好 1 隻 + 有一隻騎乘 → 不對的 {角色: 原因}"""
+def pets_ok(roles_slots: dict, battle: str | None = None) -> dict:
+    """收尾：每人剛好 1 隻出戰（battle 有給才再核對名字；預設不限名字 —— 各視窗戰寵不同，p1 朵拉比斯、p2 迪基格斯）+ 有一隻騎乘 → 不對的 {角色: 原因}"""
     bad = {}
     for r in ALL_ROLES:
         slots = [s for s in (roles_slots or {}).get(r) or [] if s and not s.get('empty')]
-        b = [s for s in slots if (s.get('name') or s.get('species')) == battle and s.get('state') == '出戰']
+        b = [s for s in slots if s.get('state') == '出戰' and (not battle or (s.get('name') or s.get('species')) == battle)]
         ride = [s for s in slots if s.get('state') == '騎乘']
         why = []
         if len(b) != 1:
-            why.append(f'{battle}出戰 {len(b)} 隻')
+            why.append(f'{battle or ""}出戰 {len(b)} 隻')
         if not ride:
             why.append('沒有騎乘中的騎寵')
         if why:
@@ -397,7 +397,7 @@ class Run:
             return rc if rc in PASS else self.fail(EXIT_FINISH, f'收尾讀寵物欄 rc={rc}', fmt(script, args))
         bad = pets_ok(last_json(lines).get('roles') or {})
         if bad:
-            return self.fail(EXIT_FINISH, f'收尾寵物狀態不對：{bad}', '看 pet.py list；朵拉比斯出戰、騎寵騎乘後 --from finish 續跑')
+            return self.fail(EXIT_FINISH, f'收尾寵物狀態不對：{bad}', '看 pet.py list；戰寵出戰、騎寵騎乘後 --from finish 續跑')
         script, args = cmds[2]
         rc, _ = self.sub(script, args, 1800)
         if rc:
