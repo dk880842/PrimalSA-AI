@@ -98,8 +98,8 @@ EXIT_LEVEL, EXIT_ITEMS, EXIT_SPACE, EXIT_TEAM, EXIT_QUEST, EXIT_BOSS, EXIT_BAG, 
 EXIT_ACCEPT, EXIT_REWARD = rebirth_steps.EXIT_ACCEPT, rebirth_steps.EXIT_REWARD    # 97 接任務失敗 / 98 轉生獎勵寵無法確認（80～89 已用完）
 
 STAGES = ['preflight', 'accept', 'enter', 'boss10', 'bow16', 'swap', 'heal', 'boss20', 'rebirth', 'cleanup']
-LEADER = 'DKBO'
-ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+ALL_ROLES = clients.roster()          # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
+LEADER = ALL_ROLES[0] if ALL_ROLES else ''     # 名單沒登錄的視窗 = 空 → main 拒跑（EXIT_TEAM）
 CN = {1: '一', 2: '二', 3: '三', 4: '四', 5: '五'}
 CERTS = ['大地的羈絆', '水的戒指', '火的羽毛飾品', '風的鎖']
 BOW = '精靈王之弓'
@@ -215,7 +215,7 @@ class Tools:
 
     def team_check(self):
         import team
-        return team.check(5)
+        return team.check(len(ALL_ROLES))
 
     def team_cards(self):
         import team
@@ -1092,6 +1092,9 @@ def main() -> int:
     ap.add_argument('--no-dragon', action='store_true')
     ap.add_argument('--read-levels', action='store_true', help='preflight 用 bag.levels 逐人讀等級當門檻（舊行為；預設改點追蹤卡看有沒有傳送）')
     a = ap.parse_args()
+    if not ALL_ROLES:
+        print(f'rebirth：PSA_CLIENT={clients.name()} 沒有登錄角色名單（clients.ROSTERS），不跑', file=sys.stderr)
+        return EXIT_TEAM
     rc = run(a.trans, a.from_stage, a.dry_run, a.keep_old_weapon, a.confirm_rebirth, a.pet_action, not a.no_dragon, to_stage=a.to_stage, read_levels=a.read_levels)
     if not a.dry_run:
         print(json.dumps(LAST, ensure_ascii=False, default=str))

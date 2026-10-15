@@ -43,11 +43,13 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import actlog  # noqa: E402
 import charstate  # noqa: E402
+import clients  # noqa: E402
 import netwatch  # noqa: E402
 import screen_sigs  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'relogin'
+ROLES = clients.roster() or list(charstate.DEFAULT_CHARS)   # 這個視窗（PSA_CLIENT）的名單：隊長 = 第 1 個、隊伍人數 = 名單人數（主視窗 DKBO、5 人）
 (EXIT_PANEL, EXIT_NO_PROMPT, EXIT_PROMPT_OTHER, EXIT_NO_LOGIN, EXIT_RELOGIN_FAIL,
  EXIT_TEAM, EXIT_CHAR, EXIT_NOT_IDLE, EXIT_BUSY, EXIT_MULTI) = range(100, 110)
 
@@ -167,7 +169,7 @@ def start_ok(st: dict, stuck: bool = False) -> bool:
     return bool(stuck) and (state == 'walking' or (state == 'battle' and not st.get('full')))
 
 
-def run(confirm: bool = False, dry_run: bool = False, leader: str = charstate.LEAD, size: int = 5, check_team: bool = True,
+def run(confirm: bool = False, dry_run: bool = False, leader: str = ROLES[0], size: int = len(ROLES), check_team: bool = True,
         stuck: bool = False) -> int:
     if not confirm and not dry_run:
         print(f'{SRC}：登出會讓全部角色下線（不可逆），沒有 --confirm 不動；只想看前置檢查用 --dry-run', file=sys.stderr)
@@ -215,8 +217,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('--confirm', action='store_true', help='確認要全員登出（不可逆）')
     ap.add_argument('--dry-run', action='store_true', help='只做前置檢查，不點任何東西')
-    ap.add_argument('--leader', default=charstate.LEAD)
-    ap.add_argument('--size', type=int, default=5)
+    ap.add_argument('--leader', default=ROLES[0])
+    ap.add_argument('--size', type=int, default=len(ROLES))
     ap.add_argument('--no-team', action='store_true', help='重登後不檢查隊伍 / 當前角色')
     ap.add_argument('--stuck', action='store_true', help='卡死時用：起始畫面也接受自動巡路中 / 快速戰鬥 VS 牌（完整戰鬥仍不動）')
     a = ap.parse_args()

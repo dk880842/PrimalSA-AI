@@ -61,12 +61,14 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import clients  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'bossretry'
 (EXIT_TEAM_READ, EXIT_SWITCH, EXIT_STEP, EXIT_HEAL, EXIT_REFIGHT, EXIT_REGROUP, EXIT_QUEST_MANUAL, EXIT_BATTLESET) = range(140, 148)
-LEADER = 'DKBO'
-TEAM_SIZE = 5
+ROLES = clients.roster()         # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
+LEADER = ROLES[0] if ROLES else ''
+TEAM_SIZE = len(ROLES) or 5
 HP_MIN = 60                      # 全隊任一人 HP 低於這個 % → 補血（同 questrun.TEAM_HP_MIN）
 MAX_TRIES = 2                    # 每個掉隊者最多「輸 / 被打飛」幾次
 MAX_SLICES = 6                   # 每個掉隊者最多跑幾片 quest.py
@@ -556,13 +558,16 @@ def main(argv=None) -> int:
         winenv.enable_server()
         return status()
     import charstate
+    if not ROLES:
+        print(f'bossretry：PSA_CLIENT={clients.name()} 沒有登錄角色名單（clients.ROSTERS），不跑', file=sys.stderr)
+        return uikit.EXIT_USAGE
     who = []
     for n in [x.strip() for x in a.who.split(',') if x.strip()]:
-        hit = charstate.norm_char(n)
+        hit = charstate.norm_char(n, ROLES)                             # 只認這個視窗的名單
         if not hit:
-            print(f'bossretry：--who 的 {n} 不在角色白名單', file=sys.stderr)
+            print(f'bossretry：--who 的 {n} 不在這個視窗的名單 {ROLES}', file=sys.stderr)
             return uikit.EXIT_USAGE
-        who.append(charstate.display(hit))
+        who.append(hit)
     ref = int(a.ref_step) if str(a.ref_step).isdigit() else a.ref_step
     kw = dict(max_tries=a.max_tries, max_slices=a.max_slices, slice_s=a.slice_s, hp_min=a.hp_min, who=who, ref_step=ref, battle_check=not a.no_battle_check)
     if a.cmd == 'plan' or a.dry_run:

@@ -8,6 +8,13 @@
 - 先 `--dry-run` 看計畫（完全不碰遊戲）。可 import：`rebirth.run(...)`，結果 dict 在 `rebirth.LAST`。
 - 進度：`tools/.cache/rebirth.json`（階段狀態、龍王最後吃的時間、顆數）；事件：`notes/quest-events.log`（行首 `[rebirth]`）；失敗另寫 errlog。中斷後 `--from <失敗階段> --trans N` 接著做。
 
+## 多視窗（`PSA_CLIENT=PrimalSA2`，第 3c 步 2026-10-15；**只有離線測試，未實機**）
+名單 = `clients.roster()`（`PSA_CLIENT` 程序名稱 → 寫死的名單；主視窗 PrimalSA = DKBO、DKBO2～5，PrimalSA2 = DKBO6～DKBO10，字母 O；第 1 個 = 隊長）。**沒設 `PSA_CLIENT` 行為與以前完全相同**（`test_roster_quest.py` 快照：名單常數、切換面板卡位、抓寵分配字串、預設值逐字相同）；名單沒登錄的視窗（例 PrimalSA3）CLI 一律拒跑（各腳本的參數 / preflight 退出碼，不點任何東西）。
+- rebirth / rebirth_steps / rebirth_pets / postrebirth 的 `LEADER` / `ALL_ROLES` 改讀名單；rebirth_pets `--catcher` 預設 = 名單第 2 個（主視窗 DKBO2、PrimalSA2 = DKBO7），`--count` 預設 = 名單人數，`--catcher` 只認自己名單（DKB07 寫法也收）。
+- 騎寵 / 戰寵物種（布拉奇多斯 / 朵拉比斯）是遊玩選擇，其他帳號要不同就給 `--mount-species` / `--battle-pet`。
+- 轉生禮盒內容、誘餌、龍王都進**這個帳號自己的**公共倉庫；跨帳號只能交易（紅區，不做）。
+- 等級門檻視窗「{名字}未達到N轉M級」：名字在名單內 → 名單真名，名單外照舊正規化。
+
 ## 階段（STAGES）
 | 階段 | 做什麼 | 失敗碼 |
 |---|---|---|

@@ -1372,7 +1372,9 @@ PANEL_CLOSE = (1064, 208)            # 切換角色面板右上 ✕
 # 每張卡片左側有「當前 / 線上」標籤 + 深棕小框，框內是隊伍字樣：「隊長」紅字 ≈(217,33,33)、「隊員」黃字、「單人」（沒量過，顏色不明）。
 # 框內取樣 15×8 點（x 間隔 2、y 間隔 2），紅點 >= TEAM_MIN_PX → 隊長；黃點 >= TEAM_MIN_PX → 隊員；都不是 → 'other'（單人 / 離線 / 卡片不存在）。
 # 左欄卡片（DKB0 / DKB03 / DKB05）框左上 ≈ (452, 卡片 y)；右欄（DKB02 / DKB04）= 左欄 +310。2026-10-10 實機：隊長 DKB0 紅點 30、隊員黃點 42~44。
-TEAM_CARDS = {'DKBO': (452, 275), 'DKBO2': (762, 275), 'DKBO3': (452, 360), 'DKBO4': (762, 360), 'DKBO5': (452, 445)}   # 真名字母 O；DKB0… 同義
+TEAM_CARD_XY = [(452, 275), (762, 275), (452, 360), (762, 360), (452, 445)]   # 卡位 1～5（面板順序固定 = 名單順序）
+# 卡位 → 這個視窗（PSA_CLIENT）名單的名字（主視窗 DKBO、DKBO2～5，真名字母 O；PrimalSA2 = DKBO6～10）；名單沒登錄的視窗用 #1～#5
+TEAM_CARDS = {(clients.roster()[i] if i < len(clients.roster()) else f'#{i + 1}'): xy for i, xy in enumerate(TEAM_CARD_XY)}
 TEAM_SAMPLE = [(dx, dy) for dy in range(8, 23, 2) for dx in range(6, 35, 2)]
 TEAM_MIN_PX = 8
 TEAM_CHECK_GAP = 20.0                # （舊：兩次檢查最短間隔；2026-10-11 起改為只在必要時檢查，不再用這個間隔，保留常數給舊測試 / 文件參照）
@@ -1796,7 +1798,7 @@ def _main() -> int:
     ap.add_argument('--npc', default='', help='--fight 用：NPC 的地圖座標 X,Y，或 auto（讀追蹤條目目前步驟說明對 --task 的任務表找 NPC；讀不到退出碼 31，可改 --step N）；不給 = 必須加 --no-click')
     ap.add_argument('--npc-map', type=int, default=0, help='--fight --npc X,Y 用：NPC 所在地圖 ID（不給時，有 --task 會用任務表反查該座標的 NPC 地圖）；與目前所在地圖不同 → 退出碼 %d，不點' % EXIT_NPC_MAP)
     ap.add_argument('--step', type=int, default=0, help='--fight 用：明確指定任務第 N 步（Task.step）的 endNpc 當 NPC（等於 --npc auto 但不 OCR 追蹤條目；需要 --task）')
-    ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；開始前第一次點 / 按對話框前一定先驗（不符 30）；0 或 1 = 跳過；--solo / --fight --no-click 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
+    ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 = 這個視窗名單人數，主視窗 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；開始前第一次點 / 按對話框前一定先驗（不符 30）；0 或 1 = 跳過；--solo / --fight --no-click 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
     ap.add_argument('--team-fresh', action='store_true', help='呼叫端（questrun）剛驗過 5 人隊伍（≤30 秒：team.form 成功 / 上一片 37）→ 「開始前」那次隊伍檢查略過，不開切換面板；領獎後 / 任務戰後 / BOSS 後的檢查照舊（2026-10-12）')
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
     ap.add_argument('--no-click', action='store_true', help='--fight 用：不點 NPC（已手動點過 / 對話已開），從現在起算開打時間窗')
@@ -1889,7 +1891,7 @@ def _main() -> int:
     refresh_tries = 0            # 本場戰鬥連續幾次刷新沒成功（面板沒開 / 關閉列還在 / 切換鈕沒露出）
     if guard_ko:
         event(f'模式：{"單人逃跑 --solo" if a.solo else "戰鬥步 --fight"}；起點 {last_pos}')
-    team_size = 5 if a.team_size is None else a.team_size
+    team_size = (len(clients.roster()) or 5) if a.team_size is None else a.team_size     # 預設 = 名單人數（主視窗 5）
     team_on = team_size > 1 and not a.solo and (bool(npc_xy) if a.fight else True)     # --solo 本來就是單人跑；--fight --no-click 不點 NPC。預設模式即使 --no-track 也會按對話框 → 一樣要驗隊伍
     last_team_check = 0.0
     team_dirty = False           # 任務 / BOSS 戰剛打完（隊伍可能散）→ 下一次點追蹤 / 黃問號前要驗隊伍；平常的點擊不驗
