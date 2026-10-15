@@ -21,7 +21,9 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py list all|DKBO,DKBO3                                  # 唯讀：每人背包每格名稱 + 空格數（面板開一次逐人切頭像）
   uv run --no-project python tools/gui/bag.py purge all|DKBO2,DKBO3 --names 名稱,名稱 [--dry-run]   # 刪除管理批次刪：只勾名單內道具 → 提示窗綠字清單逐條核對 = 勾選名稱（del_list_check）才按確定，否則存圖 + X 停手
   uv run --no-project python tools/gui/bag.py store all 千年龜的殼 --depot public --all-copies --skip-missing   # 同名多格（不疊加）全部存
-最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / swap_weapon / depot_take / depot_store / drop_item。
+  uv run --no-project python tools/gui/bag.py wear all 新手棍棒 新手鎧甲 新手頭盔 [--strict]          # 多人穿裝備（面板開一次逐人；背包沒有 = 已穿上，預設略過；2026-10-15，實機未驗證）
+  uv run --no-project python tools/gui/bag.py store-items all --public 寵物誘餌,離線水晶 --personal 1轉新手禮盒 [--strict]   # 多人存多樣（面板開一次、每人一次存完；沒有的略過；實機未驗證）
+最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / wear_item / wear_many / swap_weapon / depot_take / depot_store / depot_store_items / drop_item。
 背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
 AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的兩項）。
 道具辨識以名字為主（2026-10-14）：find / find_items / team_read / list / item_slots / find_item 一次截圖 →
@@ -1591,6 +1593,64 @@ def use_item(role: str, want: str, verify_buff: bool = False) -> int:
     return 0
 
 
+def wear_item(role: str, want: str) -> int:
+    """背包找裝備 want → 彈窗名稱核對 → 按「穿戴」→ 驗那一格不再是 want（穿上後格子變空、其他道具不移位；原本有同部位裝備時舊的換到那格，ui/bag.md）。
+    背包沒有 = 92（呼叫端判斷：已穿上 / 這人沒有）。按鈕列不是裝備版型（沒有「穿戴」）= 96 不點。
+    新角色開局（newchar.py）穿新手棍棒 / 鎧甲 / 頭盔用；**2026-10-15 寫成，實機未驗證**（座標同 2026-10-09 手動穿戴實測 618,662）。結果 LAST['slot']"""
+    LAST.clear()
+    with Session() as s:
+        if s.rc:
+            return s.rc
+        rc = select_role(role)
+        if rc:
+            return rc
+        i = find_item(want)
+        if i is None:
+            return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」（已穿上？）', 'bag-noitem')
+        LAST['slot'] = i
+        if not open_slot_popup(i):
+            return _fail(EXIT_PANEL, f'點第 {i + 1} 格沒開彈窗', 'bag-nopopup')
+        nm = popup_name(want)
+        if not name_match(nm, want):
+            close_popup()
+            return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不穿）', 'bag-popup-name')
+        _learn_verified('bag', i, want)
+        rc, _ = click_popup_button('穿戴')
+        if rc:
+            close_popup()
+            return rc
+        if not _wait(lambda: not popup_open(), 2.0):
+            return _fail(EXIT_VERIFY, '按了穿戴但彈窗沒關（不重點）', 'bag-wear-verify')
+
+        def worn(i=i):
+            occ = slot_occupancy()
+            if occ and not occ[i]:
+                return True                              # 格子變空 = 穿上了
+            return find_item(want, popup_fallback=False) != i   # 換下的舊裝備佔了那格：那格不再是 want 也算
+        if not _wait(worn, 4.0):                         # 背包頁更新有延遲（同存入 / 取出）
+            return _fail(EXIT_VERIFY, f'按了穿戴但第 {i + 1} 格仍是「{want}」（不重點）', 'bag-wear-verify')
+    return 0
+
+
+def wear_many(roles, names, skip_missing: bool = True) -> tuple:
+    """多人穿多件（背包面板只開一次，逐人切頭像穿完）。skip_missing：背包沒有（92 = 已穿上 / 沒有）略過。
+    → (rc, {角色: {名稱: rc}})；某人其他失敗立即停"""
+    out: dict = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            res = out.setdefault(r, {})
+            for nm in names:
+                rc = wear_item(r, nm)
+                res[nm] = rc
+                if rc == EXIT_ITEM and skip_missing:
+                    continue
+                if rc:
+                    return rc, out
+    return 0, out
+
+
 def equipped_name() -> str | None:
     """武器格彈窗名稱（空格 = 沒彈窗 → None）；讀完 ESC 關"""
     if not _click(WEAPON_SLOT[0], WEAPON_SLOT[1], BAG, 'bag 點武器格'):
@@ -1911,6 +1971,34 @@ def depot_many(op: str, roles, want: str, depot: str = 'public', kind: str = 'co
     return 0, out
 
 
+def depot_store_items(roles, items, skip_missing: bool = True) -> tuple:
+    """多人存多樣道具（2026-10-15，新角色開局 newchar.py 用）：背包面板只開一次，逐人切頭像、該人的道具一次存完
+    （公共的先存、個人的後存 → 倉庫子分頁每人最多切 2 次）。items = [(名稱, 'public' | 'personal')]。
+    skip_missing：該人沒有（92 = 已存過 / 沒拿到）就略過。動作後驗證失敗（95）等 2 秒重存一次（rebirth_pets 二轉 DKBO4 重跑才過的同一處理；
+    重存回 92 = 第一次其實存進去了）。→ (rc, {角色: {名稱: rc}})；某人其他失敗立即停"""
+    out: dict = {}
+    order = sorted(items, key=lambda t: t[1] != 'public')
+    with Session() as s:
+        if s.rc:
+            return s.rc, out
+        for r in roles:
+            res = out.setdefault(r, {})
+            for nm, dep in order:
+                rc = depot_store(r, nm, dep)
+                if rc == EXIT_VERIFY:
+                    uikit.sleep(2)
+                    rc = depot_store(r, nm, dep)
+                    if rc == EXIT_ITEM:
+                        rc = 0
+                res[nm] = rc
+                if rc == EXIT_ITEM and skip_missing:
+                    log(f'{r} 沒有「{nm}」，略過')
+                    continue
+                if rc:
+                    return rc, out
+    return 0, out
+
+
 # ---- CLI ----
 def _roles(arg: str):
     """'all' / 'DKBO' / 'DKBO2,DKBO3'（逗號 = 多人）→ 角色清單；任一不認得 → None"""
@@ -1945,6 +2033,11 @@ def main() -> int:
     p = sub.add_parser('list'); p.add_argument('role')
     p = sub.add_parser('purge'); p.add_argument('role'); p.add_argument('--names', required=True); p.add_argument('--dry-run', action='store_true')
     p = sub.add_parser('use'); p.add_argument('role'); p.add_argument('name')
+    p = sub.add_parser('wear'); p.add_argument('role'); p.add_argument('names', nargs='+')
+    p.add_argument('--strict', action='store_true', help='背包沒有某件就失敗（92）；預設略過（已穿上）')
+    p = sub.add_parser('store-items'); p.add_argument('role')
+    p.add_argument('--public', default='', help='存公共倉庫的道具（逗號分隔）'); p.add_argument('--personal', default='', help='存個人倉庫的道具（逗號分隔）')
+    p.add_argument('--strict', action='store_true', help='某人沒有某道具就失敗（92）；預設略過')
     p = sub.add_parser('drop-spare-bow'); p.add_argument('role'); p.add_argument('--bow', default='精靈王之弓')
     p = sub.add_parser('swap-weapon'); p.add_argument('role'); p.add_argument('--keep-old', action='store_true'); p.add_argument('--bow', default='精靈王之弓')
     for n in ('take', 'store'):
@@ -1980,6 +2073,17 @@ def main() -> int:
         return _out(rc, {'purge': d, 'dry_run': a.dry_run})
     if a.cmd == 'use':
         return _out(use_item(r, a.name, verify_buff=True), {})
+    if a.cmd == 'wear':
+        rc, d = wear_many(roles, a.names, not a.strict)
+        return _out(rc, {'wear': d})
+    if a.cmd == 'store-items':
+        sp = lambda s: [n.strip() for n in s.replace('，', ',').split(',') if n.strip()]   # noqa: E731
+        items = [(n, 'public') for n in sp(a.public)] + [(n, 'personal') for n in sp(a.personal)]
+        if not items:
+            print('bag：store-items 要給 --public 或 --personal', file=sys.stderr)
+            return _out(uikit.EXIT_USAGE, {})
+        rc, d = depot_store_items(roles, items, not a.strict)
+        return _out(rc, {'stored': d})
     if a.cmd == 'drop-spare-bow':
         return _out(drop_spare_bow(r, a.bow), {})
     if a.cmd == 'swap-weapon':
