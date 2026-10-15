@@ -149,7 +149,7 @@ def _other_running() -> str | None:
         if pid != os.getpid() and battleguard.pid_alive(pid):
             return f'{name}（pid {pid}）'
     proc = Path('/proc')
-    if proc.is_dir():
+    if proc.is_dir() and clients.test_state_dir() is None:   # 離線測試不掃真實程序（主工作樹可能真的有 heal --watch 在跑）
         me = str(os.getpid())
         try:
             for d in proc.iterdir():

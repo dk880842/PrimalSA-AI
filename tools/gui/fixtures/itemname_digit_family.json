@@ -1,0 +1,10 @@
+{
+ "note": "只差數字的同族名稱回歸樣本（2026-10-15）：PrimalSA2 背包「1轉新手禮盒」白字名字圖（store-items 彈窗核對後學到的樣板，人工看過點陣是 1）。與 itemname_samples.json 的「2轉新手禮盒」（b6.png 格 5，裁片人工看過是 2）IoU 0.888 > HIT_MIN 0.85 → 舊版沒有 1轉樣板時被認成 2轉。",
+ "images": [
+  {
+   "kind": "bag",
+   "label": "1轉新手禮盒",
+   "b64": "eNqVzrFOwzAQBuCzXTkMllx1qNwBuQ+BxFLVeRSiDoiNrWNMWTpR0SlbXoGBpRMGXgOkQF+gbAwE9xwROUslepM/3en/zRmkCqa8ZwEg0Z9fO/NNTQUg9C2rLTh69gAw4fpjhJBls1ln9wjyiBsxLLONNZ6cBwzWs/qHVAyz8KyssgJc0mCwSANkg+HTti5yvwqdQoLNVO7vigsEJ+5KYWl/HAL8toHGUq2Xi8uAkxQg58LOAoTDBM7si0ocNTsExe4+BwpHTu9/Z+Murrt4i0/CVhFMeudanCp4ti3qm194/RPxnMG8vZsgdEzwh34jvY0Q710sD0H7KsJ0ceTsASZTUd8="
+  }
+ ]
+}

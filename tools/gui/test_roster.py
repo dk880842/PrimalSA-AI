@@ -69,6 +69,19 @@ def check(name, cond, extra=''):
         fails += 1
 
 
+# ---- 測試隔離：每視窗狀態檔在暫存資料夾（2026-10-15 根因：主工作樹跑本測試時讀到真的 tools/.cache/clients/PrimalSA2/grind.lock，
+#      pid 是正在掛機的 grind.py follow → pet.Session 判 grind 在跑 → list_roles rc 8）----
+import battleguard  # noqa: E402
+_logdir = Path(os.environ['PSA_LOG_DIR'])
+_iso = {'uikit.CACHE': uikit.CACHE, 'grind.LOCK': grind.LOCK, 'battleguard.LOCK_FILE': battleguard.LOCK_FILE, 'watchstate.CACHE': watchstate.CACHE}
+check('狀態檔（grind.lock / battle.lock / state.json）都在 testenv 暫存資料夾，不讀真的 tools/.cache',
+      all(_logdir in Path(v).parents for v in _iso.values()), str(_iso))
+grind.LOCK.parent.mkdir(parents=True, exist_ok=True)
+grind.LOCK.write_text(str(os.getppid()))         # 活著的別的程序（模擬「另一支 grind 在跑」）→ 只影響暫存資料夾
+check('暫存 grind.lock 有活的 pid → _other_running 認得（隔離後的檔案確實被讀）', (grind._other_running() or '').startswith('grind'))
+grind.LOCK.unlink()
+check('暫存 grind.lock 刪掉 → _other_running None（離線測試不掃真實 /proc）', grind._other_running() is None)
+
 # ---- clients helper ----
 check('clients.name = PrimalSA2', clients.name() == 'PrimalSA2' and not clients.is_default())
 check('roster = DKBO6～DKBO10', clients.roster() == P2)

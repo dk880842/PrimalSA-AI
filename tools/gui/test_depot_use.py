@@ -153,10 +153,27 @@ with bag.Session() as _ss:
     _st['dialog'] = True                                      # 巡路抵達 NPC：對話框跳出、背包被藏
 check('Session：自己開的背包被對話框蓋住 → 結束時 ESC + 點 ✕（任何失敗出口都一樣）', _ss.opened and _ops == ['esc', 'close'] and not _st['bag'])
 _ops.clear()
+_st.update(dialog=False, bag=False)
+with bag.Session() as _outer:
+    with bag.Session() as _ss:
+        pass
+    _inner_ops = list(_ops)
+check('Session：巢狀（外層 Session 開的）→ 內層不關', _outer.opened and not _ss.opened and _inner_ops == [])
+check('  外層結束才關', _ops == ['close'] and not _st['bag'])
+_ops.clear()
 _st.update(dialog=False, bag=True)
 with bag.Session() as _ss:
     pass
-check('Session：進來時背包已開（外層 Session）→ 不關', not _ss.opened and _ops == [] and _st['bag'])
+check('Session：最外層、進來時背包已開（手動 / 別的工具留下）→ 結束一樣關（2026-10-15 PrimalSA2 bag list 留面板）',
+      not _ss.opened and _ss.outer and _ops == ['close'] and not _st['bag'])
+_ops.clear()
+_st.update(dialog=False, bag=True)
+try:
+    with bag.Session() as _ss:
+        raise RuntimeError('中途例外')
+except RuntimeError:
+    pass
+check('Session：最外層中途例外 → 一樣關、層數歸零', _ops == ['close'] and not _st['bag'] and bag._DEPTH[0] == 0)
 (uikit.is_open, uikit.close_panel, uikit.screen, uikit.gui, uikit.preflight, uikit.open_panel_ex, bag.popup_open, bag.close_popup, bag.goto_page) = _keep_s
 
 # depot_use.run：吃失敗仍存回；成功全流程

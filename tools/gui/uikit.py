@@ -41,6 +41,7 @@ LAYOUT = '2880x1659'
 
 UNKNOWN_N = 3                    # 連幾次 unknown 才算
 UNKNOWN_GAP_S = 5.0              # 兩次讀之間至少間隔（避開轉場一瞬間）
+PREFLIGHT_CLOSE_MAX = 2            # preflight 最多替別的工具關幾次已知面板殘留（背包 / 寵物 / 倉庫…；close_known_panel）
 
 sleep = time.sleep               # 測試時可替換
 clock = time.time
@@ -200,7 +201,8 @@ def preflight(src: str, fast: bool = True) -> int:
     battle.lock（quest 跑著）→ 8；畫面連 3 次（間隔 ≥5 s）unknown / 讀不到 → 9（疑似驗證視窗，停手通知使用者）；
     載入圖 / 全黑轉場（transition_now）不計次、等它過去（最多 screen_sigs.TRANSITION_MAX_S 秒）。
     fast=True 且 watch 狀態夠新時（watch_preflight_ok）省掉 layout / netwatch / 畫面連讀（約 0.36 s → 約 0.02 s）；battle.lock 一律檢查。
-    全視窗驗證停手旗標（verifyhalt.py）存在 → 一開始就 9（不讀畫面）；連 3 次不認得回 9 時多視窗才設旗標（trip_verify）"""
+    全視窗驗證停手旗標（verifyhalt.py）存在 → 一開始就 9（不讀畫面）；連 3 次不認得回 9 時多視窗才設旗標（trip_verify）。
+    不認得但其實是已知面板殘留（close_known_panel：標題板字 + ✕ 都命中，背包另要外框兩顆鈕）→ 點 ✕ 關掉、不計次（最多 PREFLIGHT_CLOSE_MAX 次）"""
     import battleguard
     vh = verify_halted()
     if vh:                                        # 任一視窗出現過驗證視窗（多視窗）：全部停手，人清旗標前不動
@@ -222,7 +224,7 @@ def preflight(src: str, fast: bool = True) -> int:
     if fast_ok:
         mark('preflight(watch)')
         return EXIT_OK
-    i, t_trans = 0, None
+    i, t_trans, closed = 0, None, 0
     while i < UNKNOWN_N:
         st = screen().get('state')
         if st not in ('unknown', 'error'):
@@ -232,6 +234,13 @@ def preflight(src: str, fast: bool = True) -> int:
             t_trans = clock() if t_trans is None else t_trans
             if clock() - t_trans < screen_sigs.TRANSITION_MAX_S:
                 sleep(1.0)
+                continue
+        if st == 'unknown' and closed < PREFLIGHT_CLOSE_MAX:
+            name = close_known_panel()                    # 別的工具 / 手動留下的已知面板（背包 / 寵物 / 倉庫…，標題板字 + ✕ 都命中）→ 點 ✕ 關掉，不計次
+            if name:                                      # 2026-10-15 PrimalSA2：bag.py 留下背包面板 → pet.py list 連 3 次不認得 → verify-halt
+                closed += 1
+                print(f'{src}：畫面停在「{screen_sigs.PANEL_NAMES.get(name, name)}」面板（別的工具留下）→ 點 ✕ 關掉再檢查', file=sys.stderr)
+                mark(f'preflight close {name}')
                 continue
         i += 1
         if i < UNKNOWN_N:

@@ -58,6 +58,14 @@ def take_calls():
 
 # ================================================================ 1) clients 狀態資料夾
 SH = ROOT / 'tools' / '.cache'
+# 離線測試（testenv）時每視窗狀態檔一律在暫存資料夾（2026-10-15：主工作樹 test_roster 讀到真的 PrimalSA2 grind.lock → rc 8）
+_TS = Path(os.environ['PSA_LOG_DIR']) / 'state'
+check('testenv：test_state_dir = <PSA_LOG_DIR>/state', clients.test_state_dir() == _TS)
+check('testenv：主視窗 cache_dir → 暫存 state（不讀真的 tools/.cache 鎖檔）', clients.cache_dir('') == _TS and clients.SHARED_CACHE == SH)
+check('testenv：PrimalSA2 cache_dir → 暫存 state/clients/PrimalSA2', clients.cache_dir('PrimalSA2') == _TS / 'clients' / 'PrimalSA2'
+      and clients.cpath('grind.lock', 'PrimalSA2') == _TS / 'clients' / 'PrimalSA2' / 'grind.lock')
+_keep_tsd = clients.test_state_dir
+clients.test_state_dir = lambda: None             # 以下檢查真正（非測試）的路徑規則
 check('主視窗 cache_dir = tools/.cache（不變）', clients.cache_dir('') == SH == clients.SHARED_CACHE and clients.cache_dir('PrimalSA') == SH)
 check('主視窗大小寫 / .exe 不分', clients.cache_dir('primalsa.exe') == SH and clients.notes_dir('PRIMALSA') == ROOT / 'notes')
 check('PrimalSA2 → tools/.cache/clients/PrimalSA2', clients.cache_dir('PrimalSA2') == SH / 'clients' / 'PrimalSA2')
@@ -67,6 +75,7 @@ check('不合法名稱不會跳出 clients/', clients.dir_name('../x') == '.._x'
       and clients.cache_dir('..').parent == SH / 'clients')
 check('cpath = cache_dir / 檔名', clients.cpath('grind.lock', 'PrimalSA3') == SH / 'clients' / 'PrimalSA3' / 'grind.lock')
 check('問別的視窗（給 n）不建資料夾', not (SH / 'clients' / 'PrimalSA3').exists())
+clients.test_state_dir = _keep_tsd
 
 # running / multi_window（PSA_TEST_PROCS，不呼叫 powershell）
 os.environ['PSA_TEST_PROCS'] = 'PrimalSA'
