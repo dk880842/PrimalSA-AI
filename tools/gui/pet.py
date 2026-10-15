@@ -2274,6 +2274,14 @@ def _find_target_card(d: dict, depot: str, t: dict, ctx: dict, info: dict, cache
     仍不確定 → 只有「這名字全倉庫就這一張」才選它（取出後再驗等級），否則 None（不取；2026-10-14 卡坦 restore 取到 Lv130 的教訓）"""
     reg = species_reg(ctx)
     filled = [k for k in range(20) if not d['empty'][k]]
+    for _ in range(3):                                   # 剛切角色 / 剛存入後倉庫卡還沒載入 → 整頁讀成全空（2026-10-15 卡坦 take-many 72、讀到 {}）：等一下重掃
+        if filled:
+            break
+        time.sleep(1.5)
+        d2 = scan_depot()
+        if d2 is not None and d2.get('sig'):
+            d = d2
+            filled = [k for k in range(20) if not d['empty'][k]]
     gl = glyph_cards(d)                                  # 卡片字（不選卡）先猜哪張像目標：只決定順序，每張照樣選卡讀名字框
     for k, c in gl.items():
         if k not in cache and (c['name'] or c['growth']):
