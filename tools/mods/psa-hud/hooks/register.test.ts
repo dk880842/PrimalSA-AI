@@ -418,7 +418,7 @@ test('progressLines：任務 / 3 行事件 / 動作 / 警報，≤6 行；壞檔
 })
 
 // ───────── 練功中判斷 ─────────
-import { grindActivity, grindTitle } from './register'
+import { grindActivity, grindTitle, spotIds, mapStale, MAP_STALE_S } from './register'
 
 const GQ = '2026-10-12 15:00:58 [questrun] 結束 rc=0，完成 [3003]\n'
 const GA = '14:43:25 grind 傳送到 地雷區 60049:30,25\n14:43:33 grind ass：DKBO2 快速戰鬥 → 開（已確認）\n14:43:44 grind ass：DKBO 快速戰鬥 → 開（已確認）\n15:44:30 depot_use 原地遇敵：開\n15:44:57 click 1318,90 ass.py 關外掛面板\n'
@@ -462,6 +462,77 @@ test('autoTitle：練功中 → PSA｜練功中 地雷區；使用者自取名�
   expect(await autoTitle(mk(), root, 'PSA｜猜謎三兄弟 已完成')).toBe('PSA｜練功中 地雷區')
   expect(await autoTitle(mk(), root, 'PSA｜練功中 地雷區')).toBeUndefined()
   expect(await autoTitle(mk(), root, '我的名字')).toBeUndefined()
+})
+
+// 2026-10-15 p2 實況：grind 傳送到海主人隧道後換點到五兄弟洞窟，傳送驗證讀不到座標（31706 地圖名折兩行）→ actions 沒有新的「傳送到」行，
+// follow.json 記了抵達（last_switch 13:10:37）；watch 的 map 停在 13:08 的奇努伊的海底通路（等級 13:14 還在更新）
+const SPY = `SPOTS = {
+    '海主人隧道': (862, 656, 31401, 20, '奇努伊的海底通路'),
+    '五兄弟洞窟': (703, 445, 31706, 45, '五兄弟的山寨地下６樓'),
+    '地雷區': (1165, 400, 60049, 120, '庫塔伊洞窟地下一樓'),
+}
+HEAL_SPOTS_1920 = {
+    '海主人隧道': (571, 405, 31401),      # 實測
+}`
+const p2now = new Date(2026, 9, 15, 13, 15, 0).getTime()
+const p2s = p2now / 1000
+const P2A = '12:55:20 grind 傳送到 海主人隧道 31401:91,29\n12:55:49 grind 原地遇敵：開\n13:08:23 grind 原地遇敵：關\n13:10:42 grind 原地遇敵：關\n13:11:18 grind 原地遇敵：開\n'
+const P2F = JSON.stringify({ ts: p2s - 5, state: 'running', spot: '五兄弟洞窟', last_switch: p2s - 263, dry_run: false })
+const P2G = JSON.stringify({ mode: 'check', rc: 0, ts: p2s - 200 })
+const p2st = (map: object, hudTs = p2s - 1) => ({ v: 1, ts: p2s - 1, screen: { enc_on: true }, hud: { ts: hudTs, level: { v: '0轉51級', ts: hudTs }, map } }) as never
+const OLDMAP = { v: '奇努伊的海底通路', id: 31401, ts: p2s - 417 }
+
+test('spotIds：只讀 SPOTS 五欄表', () => {
+  expect([...spotIds(SPY)]).toEqual([['海主人隧道', 31401], ['五兄弟洞窟', 31706], ['地雷區', 60049]])
+})
+
+test('mapStale：watch 標 stale，或比 hud.ts 舊 > MAP_STALE_S（舊版 watch 沒 stale 欄位）', () => {
+  expect(mapStale({ ts: 100, map: { v: 'x', ts: 100 - MAP_STALE_S - 1 } })).toBe(true)
+  expect(mapStale({ ts: 100, map: { v: 'x', ts: 90 } })).toBe(false)
+  expect(mapStale({ ts: 100, map: { v: 'x', ts: 99, stale: true } })).toBe(true)
+  expect(mapStale({ map: { v: 'x' } })).toBe(false)
+  expect(mapStale(null)).toBe(false)
+})
+
+test('練功中地點：map 停在傳送前的舊值（stale）→ 用 follow.json 抵達紀錄（p2 五兄弟洞窟實況）', () => {
+  const sp = spotIds(SPY)
+  // 修正前：只看 actions「傳送到」+ state map → 海主人隧道
+  expect(grindActivity({ actions: P2A, state: p2st(OLDMAP), now: p2now, spots: sp })!.spot).toBe('海主人隧道')
+  expect(grindActivity({ actions: P2A, state: p2st(OLDMAP), now: p2now, follow: P2F, grind: P2G, spots: sp })!.spot).toBe('五兄弟洞窟')
+  // 新版 watch 直接標 stale
+  expect(grindActivity({ actions: P2A, state: p2st({ ...OLDMAP, stale: true }), now: p2now, follow: P2F, spots: sp })!.spot).toBe('五兄弟洞窟')
+  // 不同視窗的 progressLines 走同一條路
+  expect(progressLines({ actions: P2A, state: p2st(OLDMAP), now: p2now, follow: P2F, spots: sp }, NAMES, 1)[0]!.text).toBe('練功中：五兄弟洞窟')
+  // grind.json start rc=0 也是抵達紀錄（沒有 follow 時）
+  const g0 = JSON.stringify({ mode: 'start', rc: 0, spot: '五兄弟洞窟', ts: p2s - 250 })
+  expect(grindActivity({ actions: P2A, state: p2st(OLDMAP), now: p2now, grind: g0, spots: sp })!.spot).toBe('五兄弟洞窟')
+  // grind.json 傳送失敗（rc≠0）不算抵達
+  const g51 = JSON.stringify({ mode: 'start', rc: 51, spot: '五兄弟洞窟', ts: p2s - 250 })
+  expect(grindActivity({ actions: P2A, state: p2st(OLDMAP), now: p2now, grind: g51, spots: sp })!.spot).toBe('海主人隧道')
+  // 壞檔 / dry-run 的 follow.json 略過
+  expect(grindActivity({ actions: P2A, state: p2st(OLDMAP), now: p2now, follow: '{壞', spots: sp })!.spot).toBe('海主人隧道')
+  expect(grindActivity({ actions: P2A, state: p2st(OLDMAP), now: p2now, follow: P2F.replace('"dry_run":false', '"dry_run":true'), spots: sp })!.spot).toBe('海主人隧道')
+})
+
+test('練功中地點：map 是新的 → 以 map 為準；舊值又沒有抵達紀錄 → 加 ?', () => {
+  const sp = spotIds(SPY)
+  // watch 讀到五兄弟（新）→ 五兄弟洞窟，即使 actions 最後傳送是海主人隧道
+  expect(grindActivity({ actions: P2A, state: p2st({ v: '五兄弟的山寨地下６樓', id: 31706, ts: p2s - 2 }), now: p2now, spots: sp })!.spot).toBe('五兄弟洞窟')
+  // 抵達紀錄比 map 新（剛傳送完、watch 還沒讀到新地圖）→ 抵達紀錄
+  const fNew = JSON.stringify({ spot: '五兄弟洞窟', last_switch: p2s - 3, dry_run: false })
+  expect(grindActivity({ actions: P2A, state: p2st({ ...OLDMAP, ts: p2s - 10 }), now: p2now, follow: fNew, spots: sp })!.spot).toBe('五兄弟洞窟')
+  // map 新且不是任何練功點、比抵達紀錄新 → 已離開（不算練功中）
+  expect(grindActivity({ actions: P2A, state: p2st({ v: '薩姆吉爾村', id: 1000, ts: p2s - 2 }), now: p2now, follow: P2F, spots: sp })).toBeUndefined()
+  // 沒有任何抵達紀錄 + map stale → 舊地名加 ?
+  const enc = '13:11:18 grind 原地遇敵：開\n'
+  expect(grindActivity({ actions: enc, state: p2st(OLDMAP), now: p2now, spots: sp })!.spot).toBe('奇努伊的海底通路?')
+  expect(grindActivity({ actions: enc, state: p2st({ ...OLDMAP, ts: p2s - 5 }), now: p2now, spots: sp })!.spot).toBe('海主人隧道')
+})
+
+test('hudText：map stale → 地名 / 座標加 ?', () => {
+  const h = { ...HUD, ts: 1000, map: { ...HUD.map, ts: 1000 - MAP_STALE_S - 5 } }
+  expect(hudText({ v: 1, hud: h }, 0, 0)).toBe('0轉77級  HP 208  MP 45  |  寵 0轉77級 HP 434  |  奇努伊的海底通路? 31401:91,29?')
+  expect(hudText({ v: 1, hud: { ...HUD, map: { ...HUD.map, stale: true } } }, 0, 0)).toBe('0轉77級  HP 208  MP 45  |  寵 0轉77級 HP 434  |  奇努伊的海底通路? 31401:91,29?')
 })
 
 test('練功中：快速戰鬥紀錄在 600 行之前也認得；任一人最後是關就不標', () => {

@@ -156,12 +156,12 @@ export function watchPathFromCwd(cwd: string, pythonPath?: string, file = 'watch
 // state.hud（第 3 階段）：欄位級 {v, ts}；ok = 最近一次讀到資料；stale = 被蓋住 / 太久沒更新（欄位值保留舊的）
 type WF<T> = { v?: T; ts?: number }
 export type WHud = {
-  ok?: boolean; stale?: boolean; age_s?: number | null
+  ok?: boolean; stale?: boolean; age_s?: number | null; ts?: number | null
   level?: WF<string>; hp?: WF<number>; hpPct?: WF<number>; mp?: WF<number>; mpPct?: WF<number>
   name?: WF<string> & { stale?: boolean; conflict?: boolean }
   pet?: { level?: WF<string>; hp?: WF<number>; name?: WF<string> & { stale?: boolean } }
-  map?: WF<string> & { id?: number }
-  pos?: WF<number[]>
+  map?: WF<string> & { id?: number; stale?: boolean }   // stale = 座標太久沒讀到（watch MAP_STALE_S），值是舊的
+  pos?: WF<number[]> & { stale?: boolean }
   buffs?: WF<string[]> & { stale?: boolean }   // 頭像下方 buff：'exp'（2倍智慧果）/ 'dragon'（龍王的守護）
 }
 
@@ -481,10 +481,11 @@ export function hudText(state: WState | null, now: number, seenAt: number): stri
   if (!h) return null
   const v = <T,>(f?: WF<T>): T | undefined => f?.v
   const pos = v(h.pos)
+  const ms = mapStale(h) ? '?' : ''           // 座標太久沒讀到（例：地圖名折兩行）：地名 / 座標是舊值，加 ?
   const s: Stat = {
     ok: true, name: nameText(h.name), petName: nameText(h.pet?.name), level: v(h.level), hp: v(h.hp) ?? null, hpPct: v(h.hpPct) ?? null, mp: v(h.mp) ?? null, mpPct: v(h.mpPct) ?? null,
-    petLevel: v(h.pet?.level), petHp: v(h.pet?.hp) ?? null, map: v(h.map),
-    pos: pos && h.map?.id != null ? `${h.map.id}:${pos[0]},${pos[1]}` : pos ? `${pos[0]},${pos[1]}` : undefined,
+    petLevel: v(h.pet?.level), petHp: v(h.pet?.hp) ?? null, map: v(h.map) ? `${v(h.map)}${ms}` : undefined,
+    pos: pos && h.map?.id != null ? `${h.map.id}:${pos[0]},${pos[1]}${ms}` : pos ? `${pos[0]},${pos[1]}${ms}` : undefined,
   }
   if (!s.level && s.hp == null && s.mp == null && s.hpPct == null && !s.petLevel && !s.map && !s.pos) return null   // 只有名字不算有資料
   let t = format(s)
@@ -822,13 +823,50 @@ export function titleFromLog(log: string, names: Map<number, string> = new Map()
 
 // ───────────────────────── 練功中判斷 ─────────────────────────
 // 規則：最後一筆 [questrun] 行之後，actions.log 最新的「原地遇敵：開 / 關」是「開」，
-// 且 watch 沒說遇敵是關的（screen.enc_on === false 不算）、地圖沒離開最近一次「傳送到 X id:」的練功點。
+// 且 watch 沒說遇敵是關的（screen.enc_on === false 不算）、地圖沒離開最近抵達的練功點。
 // state 太舊（> STATE_FRESH_S）當沒有；沒有 state 時只信遇敵「開」在 GRIND_MAX_S 內（離線上限 2 小時）。
 // 之後只要有更新的 questrun 行（新任務開始）就回到任務顯示。純函式，時間比較用「距今秒數」所以跨午夜也對
+// 地點（2026-10-15 修：p2 進 31706 地圖名折兩行，watch 讀不到座標、map 停在傳送前 → 顯示「練功中 海主人隧道」）：
+//   最近抵達的練功點取三個來源中最新的：actions.log「grind 傳送到 X id:」、follow.json（spot + last_switch，follow 以地圖 ID / 地圖名確認抵達）、
+//   grind.json（mode=start 且 rc=0 的 spot + ts）；再跟 state.hud.map 比：map 是新的（不 stale）且比抵達紀錄新 → 以 map 為準（是練功點就顯示該點、
+//   不是就當已離開）；map stale（watch 標記，或比 hud 其他欄舊 > MAP_STALE_S）→ 不信 map，只用抵達紀錄；都沒有時舊地名加「?」
 const ACT_TAIL_LINES = 600
 const STATE_FRESH_S = 60
 const GRIND_MAX_S = 7200
+export const MAP_STALE_S = 30           // 與 watch.py MAP_STALE_S 相同
 export type Grind = { spot: string; quick: boolean }
+
+// tools/gui/spots.py 的 SPOTS 表 → 練功點名 → 抵達地圖 ID（只認 5 欄的那張表；HEAL_SPOTS_1920 只有 3 欄不會比到）
+export function spotIds(py: string): Map<string, number> {
+  const m = new Map<string, number>()
+  for (const x of py.matchAll(/'([^']+)':\s*\(\s*\d+,\s*\d+,\s*(\d+),\s*\d+,\s*'/g)) m.set(x[1]!, Number(x[2]))
+  return m
+}
+
+// state.hud.map 是不是舊值：watch 標了 stale，或比 hud 最近一次成功讀值（hud.ts）舊超過 MAP_STALE_S（舊版 watch 沒有 stale 欄位時的備援）
+export function mapStale(h?: WHud | null): boolean {
+  const m = h?.map
+  if (!m) return false
+  if (m.stale === true) return true
+  return typeof m.ts === 'number' && typeof h?.ts === 'number' && h.ts - m.ts > MAP_STALE_S
+}
+
+type Arrive = { spot: string; id?: number; age: number }
+// 最近抵達的練功點（三個來源取最新；age = 距今秒數）。follow.json / grind.json 讀不到或壞檔 → 略過
+function lastArrive(acts: string[], i: ProgIn, ids: Map<string, number>): Arrive | undefined {
+  const c: Arrive[] = []
+  const nowS = i.now / 1000
+  for (let k = acts.length - 1; k >= 0; k--) {
+    const m = /grind 傳送到 (\S+) (\d+):/.exec(acts[k]!)
+    if (m) { const a = actionAgeS(acts[k]!, i.now); if (a !== undefined) c.push({ spot: m[1]!, id: Number(m[2]), age: a }); break }
+  }
+  const js = (t?: string): Record<string, unknown> | undefined => { if (!t) return undefined; try { const o = JSON.parse(t); return o && typeof o === 'object' ? o : undefined } catch { return undefined } }
+  const f = js(i.follow)
+  if (f && typeof f.spot === 'string' && f.spot && typeof f.last_switch === 'number' && !f.dry_run) c.push({ spot: f.spot, id: ids.get(f.spot), age: nowS - f.last_switch })
+  const g = js(i.grind)
+  if (g && g.mode === 'start' && g.rc === 0 && typeof g.spot === 'string' && g.spot && typeof g.ts === 'number') c.push({ spot: g.spot, id: ids.get(g.spot), age: nowS - g.ts })
+  return c.length ? c.reduce((a, b) => (b.age < a.age ? b : a)) : undefined
+}
 
 // quest-events.log 行首「YYYY-MM-DD HH:MM:SS」→ 距今秒數
 function questLineAgeS(l: string, now: number): number | undefined {
@@ -855,15 +893,24 @@ export function grindActivity(i: ProgIn): Grind | undefined {
   const st = i.state
   const fresh = !!st && typeof st.ts === 'number' && (i.now / 1000 - st.ts) <= STATE_FRESH_S
   if (fresh && st!.screen?.enc_on === false) return undefined
+  const ids = i.spots ?? new Map<string, number>()
+  const arr = lastArrive(acts, i, ids)
+  const mp = fresh ? st!.hud?.map : undefined
+  const stale = mapStale(st?.hud)
   let spot: string | undefined
-  let spotId: number | undefined
-  for (let k = acts.length - 1; k >= 0; k--) {
-    const m = /grind 傳送到 (\S+) (\d+):/.exec(acts[k]!)
-    if (m) { spot = m[1]; spotId = Number(m[2]); break }
-  }
-  const mapId = fresh ? st!.hud?.map?.id : undefined
-  if (spotId !== undefined && mapId !== undefined && mapId !== spotId) return undefined   // 已離開練功點
-  if (!spot) spot = (fresh ? st!.hud?.map?.v : undefined) || '原地'
+  if (mp && !stale && mp.id !== undefined) {
+    const mapAge = typeof mp.ts === 'number' ? i.now / 1000 - mp.ts : 0       // 沒有 ts（舊格式）當成剛讀到
+    if (arr && arr.age < mapAge) spot = arr.spot                              // 抵達紀錄比地圖讀值新（剛傳送完）
+    else if (arr && arr.id === mp.id) spot = arr.spot
+    else {
+      const here = [...ids].find(([, v]) => v === mp.id)?.[0]
+      if (here) spot = here
+      else if (arr && arr.id !== undefined) return undefined                  // 已離開練功點
+      else spot = arr?.spot ?? (mp.v || undefined)
+    }
+  } else if (arr) spot = arr.spot                                             // map 舊值 / 沒有：只信抵達紀錄
+  else if (mp?.v) spot = stale ? `${mp.v}?` : mp.v
+  if (!spot) spot = '原地'
   // 快速戰鬥：各角色最後一筆「ass：X 快速戰鬥 → 開/關」（掃整份 actions.log，開快戰常在很久以前），至少一人且全部為開才標
   const quickBy = new Map<string, boolean>()
   for (const l of i.actions.split(/\r?\n/)) { const m = /ass：(\S+) 快速戰鬥 → ([開關])/.exec(l); if (m) quickBy.set(m[1]!, m[2] === '開') }
@@ -880,7 +927,8 @@ export function grindTitle(g: Grind): string {
 const PROG_PERIOD_MS = 3000
 const PROG_W = 56            // 每行最多字數（超過加 …）
 const IDLE_S = 120           // 最後動作超過這麼久沒動 → 標「閒置 N 分」
-export type ProgIn = { quest?: string; actions?: string; state?: WState | null; now: number }
+// follow / grind：該視窗的 follow.json / grind.json 原文（練功點抵達紀錄）；spots：spotIds(tools/gui/spots.py)
+export type ProgIn = { quest?: string; actions?: string; state?: WState | null; now: number; follow?: string; grind?: string; spots?: Map<string, number> }
 const cut = (t: string) => (t.length > PROG_W ? `${t.slice(0, PROG_W - 1)}…` : t)
 
 // 事件行去掉日期、截圖路徑、[questrun] / [rebirth] 標籤
@@ -936,8 +984,9 @@ export async function autoTitle($: EngineInterface, cwd: string, cur: string | u
       if (typeof py === 'string') names = questNames(py)
     } catch { /* 沒有 questdefs 就只靠 log 內的名字 */ }
     const rd = async (f: string) => { try { const x = await $.fs.read(`${root}/${f}`); return typeof x === 'string' ? x : undefined } catch { return undefined } }
-    const [actions, stText] = await Promise.all([rd('tools/.cache/actions.log'), rd('tools/.cache/state.json')])
-    const g = grindActivity({ quest: log, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now: await $.clock.now() })
+    const [actions, stText, follow, grind, spy] = await Promise.all([rd('tools/.cache/actions.log'), rd('tools/.cache/state.json'),
+      rd('tools/.cache/follow.json'), rd('tools/.cache/grind.json'), rd('tools/gui/spots.py')])
+    const g = grindActivity({ quest: log, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now: await $.clock.now(), follow, grind, spots: spy ? spotIds(spy) : undefined })
     const t0 = g ? grindTitle(g) : titleFromLog(log, names)
     const t = t0 ? t0 + winSuffix(nWin) : undefined
     return t && t !== cur ? t : undefined
@@ -950,6 +999,7 @@ export async function autoTitle($: EngineInterface, cwd: string, cur: string | u
 // 多視窗：每個視窗讀自己的 quest-events.log / state.json，actions.log 共用一份、依標籤分視窗 → progs（每視窗事件 1 行）
 let progBusy = false
 let questNameCache: Map<number, string> | undefined
+let spotIdCache: Map<string, number> | undefined
 async function tickProg($: EngineInterface): Promise<void> {
   if (progBusy || !projCwd) return
   progBusy = true
@@ -957,17 +1007,22 @@ async function tickProg($: EngineInterface): Promise<void> {
     const root = rootFromCwd(projCwd)
     if (!root) return
     const rd = async (f: string) => { try { const x = await $.fs.read(`${root}/${f}`); return typeof x === 'string' ? x : undefined } catch { return undefined } }
-    const [quest, actions, stText] = await Promise.all([rd('notes/quest-events.log'), rd('tools/.cache/actions.log'), rd('tools/.cache/state.json')])
+    const [quest, actions, stText, follow, grind] = await Promise.all([rd('notes/quest-events.log'), rd('tools/.cache/actions.log'), rd('tools/.cache/state.json'),
+      rd('tools/.cache/follow.json'), rd('tools/.cache/grind.json')])
     if (!questNameCache) { const py = await rd('tools/gui/questdefs.py'); if (py) questNameCache = questNames(py) }
+    if (!spotIdCache) { const py = await rd('tools/gui/spots.py'); if (py) spotIdCache = spotIds(py) }
     const now = await $.clock.now()
-    const lines = progressLines({ quest, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now }, questNameCache)
+    const spots = spotIdCache
+    const main: ProgIn = { quest, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now, follow, grind, spots }
+    const lines = progressLines(main, questNameCache)
     if (JSON.stringify(await read($, prog)) !== JSON.stringify(lines)) await update($, prog, () => lines)
     const ps: WinProg[] = []
     if (ctls.length > 1) {
       for (const c of [...ctls]) {
-        if (isMainClient(c.name)) { ps.push({ client: c.name, lines: progressLines({ quest, actions: actionsFor(actions, MAIN_CLIENT), state: parseState(stText).state, now }, questNameCache, 1) }); continue }
-        const [q, st] = await Promise.all([rd(`${notesRel(c.name)}/quest-events.log`), rd(`${cacheRel(c.name)}/state.json`)])
-        ps.push({ client: c.name, lines: progressLines({ quest: q, actions: actionsFor(actions, c.name), state: parseState(st).state, now }, questNameCache, 1) })
+        if (isMainClient(c.name)) { ps.push({ client: c.name, lines: progressLines(main, questNameCache, 1) }); continue }
+        const cr = cacheRel(c.name)
+        const [q, st, fo, gr] = await Promise.all([rd(`${notesRel(c.name)}/quest-events.log`), rd(`${cr}/state.json`), rd(`${cr}/follow.json`), rd(`${cr}/grind.json`)])
+        ps.push({ client: c.name, lines: progressLines({ quest: q, actions: actionsFor(actions, c.name), state: parseState(st).state, now, follow: fo, grind: gr, spots }, questNameCache, 1) })
       }
     }
     if (JSON.stringify(await read($, progsAtom)) !== JSON.stringify(ps)) await update($, progsAtom, () => ps)
