@@ -6,7 +6,7 @@
   uv run --no-project python tools/gui/petquest.py plan 2016|2019|3003                 # 不碰遊戲：印每段要跑的指令
   uv run --no-project python tools/gui/petquest.py run 2016|2019|3003 [--confirm-buy-bait] [--confirm-drop] [--dry-run] [--from 段] [--to 段] [--fresh]
     --confirm-buy-bait  公共倉庫誘餌不夠時，手上現有的誘餌照用（取到抓寵者背包），只用外掛捉寵設置「+」買缺額 N − 現有 次可抓捕數（每按一次 50,000 石幣；
-                        讀石幣要連續 2 次一致且非 0，2026-10-15 單次讀成 0 → 163；按前 / 按後讀寵物面板頂部石幣，
+                        2026-10-15 起不讀石幣、不因石幣擋（使用者）；保險：只按缺額、每按一次可抓捕數必須 +1、鑽石按前後不變，
                         扣款不是剛好 50,000（或鑽石有變）就停手；沒給這個旗標 → 誘餌不夠就 163 停）
     --confirm-drop      准丟獎勵寵（恐龍博士 布克布克、卡坦步 1 修寶、猜謎三兄弟 左迪洛斯；petdrop 驗名 + 只丟 1 級）；沒給 → 到丟寵段 168 停
     --from / --to       只跑某幾段（段名見 plan）；--fresh 不管進度檔從頭（預設：進度檔 tools/.cache/petquest.json 24 小時內記錄過的段直接跳過）
@@ -70,7 +70,7 @@
   160 參數錯 / 任務 ID 不支援 / 進度不一致（例：restore 要原等級但進度檔沒有）
   161 接取失敗（questrun 非預期退出碼）/ 猜謎步 1 沒拿到金布伊
   162 準備失敗（關遇敵、解散、讀寵物欄、取消鎖定、存原戰寵、金布伊出戰 / 鎖定）
-  163 誘餌不夠且沒給 --confirm-buy-bait / 買可抓捕數失敗（石幣讀不到 / 不夠、「+」按了可抓捕數沒變、扣款不是 50,000、鑽石有變）
+  163 誘餌不夠且沒給 --confirm-buy-bait / 買可抓捕數失敗（「+」按了可抓捕數沒變、鑽石有變）
   164 抓寵失敗（pet_catch 非 0：14 系別物種選不到、15 新寵物名字 / 縮圖是別的物種、16 名字讀不出（還原失敗、成長字串也讀不出）、17 新寵物隻數不對 / 沒登錄、103 取誘餌 / 設定 / 逾時…）
   165 分配失敗（store-many / take-many 非 0、數量驗不過）/ 還原名字讀到費用字樣（pet_catch / pet 67，鐵則 3）
   166 練寵失敗（自動轉換戰寵、出戰、verify-battle、grind、等級逾時、petwatch、rest-all）
@@ -646,7 +646,7 @@ class Run:
 
     def buy_plus(self, role, need, have=0) -> int:
         """誘餌不夠只買缺額（使用者 2026-10-15）：背包現有 have 個誘餌照用，外掛「+」按到可抓捕數 = need（共 need − have 次）。
-        catchbuy.buy_to：每按一次前後讀石幣，要剛好少 PLUS_COST、鑽石不變、可抓捕數 +1，否則停；
+        catchbuy.buy_to：不讀石幣；每按一次前後鑽石不變、可抓捕數 +1，否則停；
         按前讀到的可抓捕數 < have（外掛沒把背包誘餌算進去）→ 一次都不按、停手（不猜能不能相加）"""
         event(f'{role} 誘餌現有 {have}、要 {need} → 外掛「+」買缺額 {need - have} 次（預計最多 {(need - have) * PLUS_COST} 石幣）')
         kind, msg, rc, bought = catchbuy.buy_to(role, need, self.T.money, self.T.press_plus, event, min_before=have)
@@ -1102,7 +1102,7 @@ def print_plan(qid: int, o: dict) -> None:
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
             print(f'  catch{sfx}   一次抓滿 {q.get("count", 5)} 隻（不分批）：先 pet_catch.py --assign "{csv_assign(a)}" --count {q.get("count", 5)} --stages bait（每人取 / 拆一次，背包已剛好就不動）'
-                  f' → [誘餌不夠且 --confirm-buy-bait：外掛「+」買 {q.get("count", 5)} 次，每次讀石幣扣 {PLUS_COST}] → --stages setup,wait,rename,register --expect-bar 角色:min(隻數, 空格)（第一次輪詢 N×20+20 秒、之後 60 秒；'
+                  f' → [誘餌不夠且 --confirm-buy-bait：外掛「+」買 {q.get("count", 5)} 次，不讀石幣、每次驗可抓捕數 +1 / 鑽石不變] → --stages setup,wait,rename,register --expect-bar 角色:min(隻數, 空格)（第一次輪詢 N×20+20 秒、之後 60 秒；'
                   f'rename = 抓寵者 reset-name、register = 名字驗證，名字讀不出才登錄成長字串）→ 整理（欄先存公共騰位 → 個人倉庫溢出取回 → 欄留 1、其餘存公共 → 取回的 reset-name）→ list 名字驗證 → pet_catch.py --stages baitback（剩的誘餌存回公共）')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" --candidates {species_csv(a)} → list 驗每人每物種 1 隻')
             print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
@@ -1171,7 +1171,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('cmd', choices=['plan', 'run'])
     ap.add_argument('qid')
-    ap.add_argument('--confirm-buy-bait', action='store_true', help='誘餌不夠時准用外掛「+」買（每次 50,000 石幣，按前後驗石幣）')
+    ap.add_argument('--confirm-buy-bait', action='store_true', help='誘餌不夠時准用外掛「+」買（每次 50,000 石幣，按前後驗可抓捕數 +1 / 鑽石，不讀石幣）')
     ap.add_argument('--confirm-drop', action='store_true', help='准丟獎勵寵（布克布克 / 修寶 / 左迪洛斯，只丟 1 級）')
     ap.add_argument('--from', dest='from_stage', default=None)
     ap.add_argument('--to', dest='to_stage', default=None)

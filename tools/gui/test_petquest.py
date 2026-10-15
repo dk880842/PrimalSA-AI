@@ -75,6 +75,8 @@ class Sim:
             return 163, b, None
         self.plus[role] = self.plus.get(role, 0) + 1
         self.stone -= self.plus_cost
+        self.dia -= getattr(self, 'dia_drop', 0)
+        self.dia -= getattr(self, 'dia_drop', 0)
         self.calls.append(('plus', role))
         return 0, b, b + 1
 
@@ -392,13 +394,13 @@ s.press_plus = lambda role, limit=None, min_before=None: (163, 0, None) if min_b
 rc = go(2016, s, confirm_drop=True, confirm_buy=True)
 check('外掛數字沒把背包誘餌算進去（按前 < 現有）→ 163、一次都不按', rc == pq.EXIT_BAIT and not [c for c in s.calls if c[0] == 'plus'] and '不能相加' in pq.LAST['info']['msg'], f'rc={rc} {pq.LAST.get("info")}')
 s = grow(Sim(2016, bait=0))
-s.plus_cost = 100000
+s.dia_drop = 5
 rc = go(2016, s, confirm_buy=True)
-check('「+」扣款不是剛好 50,000 → 163 停（只按 1 次）', rc == pq.EXIT_BAIT and len([c for c in s.calls if c[0] == 'plus']) == 1 and '扣' in pq.LAST['info']['msg'])
+check('「+」後鑽石有變 → 163 停（只按 1 次）', rc == pq.EXIT_BAIT and len([c for c in s.calls if c[0] == 'plus']) == 1 and '鑽石' in pq.LAST['info']['msg'])
 s = grow(Sim(2016, bait=0))
 s.money = lambda: (None, None)
 rc = go(2016, s, confirm_buy=True)
-check('石幣讀不到 → 163、不按「+」', rc == pq.EXIT_BAIT and not [c for c in s.calls if c[0] == 'plus'])
+check('石幣 / 鑽石讀不到不擋（2026-10-15 不讀石幣）→ 照按', rc != pq.EXIT_BAIT and [c for c in s.calls if c[0] == 'plus'])
 s = grow(Sim(2016, bait=0))
 _m = s.money
 s.dia_seq = [0, 5]
