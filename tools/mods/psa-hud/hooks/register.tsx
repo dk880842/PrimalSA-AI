@@ -510,14 +510,13 @@ export function buffLine(b: (WF<string[]> & { stale?: boolean }) | null | undefi
 
 // 遇敵狀態：screen.enc_on（watch 依右下「取消遇敵」鈕：true 開 / false 主畫面看不到 / null 戰鬥或面板蓋住不判）。
 // null / 沒欄位時沿用 last（最後已知值）並加 ?；都沒有 → undefined（不顯示）。
-// 龍王的守護是「不遇敵」buff：enc_on=true 又有龍王時只並列說明（推測：實際不會遇敵，未實測），不下結論。warn = 不遇敵（黃字提醒掛機可能停了）
+// 龍王的守護只顯示在 Buff 列（buffLine），這裡不加龍王括號說明（2026-10-15 使用者）。warn = 不遇敵（黃字提醒掛機可能停了）
 export function encText(state: WState | null, last?: boolean): { text: string; warn: boolean; val?: boolean } | undefined {
   const cur = state?.screen?.enc_on
   const val = typeof cur === 'boolean' ? cur : last
   if (val === undefined) return undefined
   const q = typeof cur === 'boolean' ? '' : ' ?'
-  const dragon = (state?.hud?.buffs?.v ?? []).includes('dragon')
-  const text = val ? (dragon ? `遇敵中${q}（龍王：推測實際不遇敵）` : `遇敵中${q}`) : (dragon ? `不遇敵${q}（龍王守護）` : `不遇敵${q}`)
+  const text = val ? `遇敵中${q}` : `不遇敵${q}`
   return { text, warn: !val, val }
 }
 

@@ -560,6 +560,8 @@ test('buffLine：有到期時間 → 剩 H:MM；圖示有但沒時間 / 已過�
   expect(buffLine({ v: [], stale: true }, T('exp', 600), now)?.text).toBe('智慧果 剩 0:10')                              // 圖示是舊值：不下結論
   expect(buffLine(undefined, T('exp', 600), now)?.text).toBe('智慧果 剩 0:10')                                          // watch 不在：只看快取
   expect(buffLine({ v: ['exp', 'dragon'] }, { ...T('exp', 3600), ...T('dragon', 1800) }, now)?.text).toBe('智慧果 剩 1:00 · 龍王 剩 0:30')
+  expect(buffLine({ v: ['dragon'] }, T('dragon', 2700), now)?.text).toBe('龍王 剩 0:45')                                // 只有龍王
+  expect(buffLine({ v: ['dragon'] }, {}, now)).toEqual({ text: '龍王 ?（bufftime.py read）', warn: true })           // 龍王沒時間
   expect(buffLine({ v: ['exp', 'dragon'] }, T('exp', 3600), now)).toEqual({ text: '智慧果 剩 1:00 · 龍王 ?（bufftime.py read）', warn: true })
   expect(parseBuffTimes(undefined)).toEqual({})
   expect(parseBuffTimes('壞')).toEqual({})
@@ -573,15 +575,15 @@ test('hudText 不再帶 buff（buff 改在 pane 的遇敵 / buff 行）；練功
   expect(l0({ v: ['exp'], ts: 1 })).toBe('練功中：地雷區（快速戰鬥）')
 })
 
-test('encText：遇敵狀態；null 沿用最後值加 ?；龍王只並列說明', () => {
+test('encText：遇敵狀態；null 沿用最後值加 ?；有龍王也不加括號說明', () => {
   const b = (k: string[]) => ({ v: k, ts: 1 })
   expect(encText({ v: 1, screen: { enc_on: true } } as never)).toEqual({ text: '遇敵中', warn: false, val: true })
   expect(encText({ v: 1, screen: { enc_on: false } } as never)).toEqual({ text: '不遇敵', warn: true, val: false })
   expect(encText({ v: 1, screen: { enc_on: null } } as never, false)).toEqual({ text: '不遇敵 ?', warn: true, val: false })
   expect(encText({ v: 1, screen: { enc_on: null } } as never, true)?.text).toBe('遇敵中 ?')
   expect(encText({ v: 1, screen: {} } as never)).toBeUndefined()
-  expect(encText({ v: 1, screen: { enc_on: true }, hud: { buffs: b(['dragon']) } } as never)?.text).toContain('龍王')
-  expect(encText({ v: 1, screen: { enc_on: false }, hud: { buffs: b(['dragon']) } } as never)?.text).toBe('不遇敵（龍王守護）')
+  expect(encText({ v: 1, screen: { enc_on: true }, hud: { buffs: b(['dragon']) } } as never)?.text).toBe('遇敵中')
+  expect(encText({ v: 1, screen: { enc_on: false }, hud: { buffs: b(['dragon']) } } as never)?.text).toBe('不遇敵')
 })
 
 // ───────────── pane 空白（2026-10-13）：jsxFactory h 被 hints.map(h => …) 蓋掉；熱重載後 session.start 沒重發 ─────────────
@@ -1022,6 +1024,12 @@ test('winTable：表頭 → ！警示列（去重）→ 人物 / 寵物 / 地圖
   expect(wOf(l.slice(0, 10)).every(n => n === 64)).toBe(true)                          // 表格寬度固定
   // 單視窗：表頭只寫程序名
   expect(winTable({ w: WV(), prog: [] }, 64, false)[0]!.text.startsWith('┌ PrimalSA2')).toBe(true)
+})
+
+test('winTable：龍王在 Buff 列、地圖列不帶龍王字樣', () => {
+  const rows = winTable({ w: WV({ hp: HP(), en: { text: '遇敵中', warn: false }, bf: { text: '智慧果 剩 1:23 · 龍王 剩 0:45', warn: false } }), prog: [] }).map(x => x.text)
+  expect(rows.find(x => x.includes('Buff'))).toContain('龍王 剩 0:45')
+  expect(rows.find(x => x.includes('遇敵中'))).not.toContain('龍王')
 })
 
 test('winTable：沒有 buff 不顯示 Buff 列；不遇敵 / buff 時間未知 → 黃字；沒資料的事件 / 動作列不顯示；無警示不顯示 ！', () => {
