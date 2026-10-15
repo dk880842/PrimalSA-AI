@@ -7,7 +7,7 @@
   uv run --no-project python tools/gui/petquest.py run 2016|2019|3003 [--confirm-buy-bait] [--confirm-drop] [--dry-run] [--from 段] [--to 段] [--fresh]
     --confirm-buy-bait  公共倉庫誘餌不夠時，手上現有的誘餌照用（取到抓寵者背包），只用外掛捉寵設置「+」買缺額 N − 現有 次可抓捕數（每按一次 50,000 石幣；
                         2026-10-15 起不讀石幣、不因石幣擋（使用者）；保險：只按缺額、每按一次可抓捕數必須 +1、鑽石按前後不變，
-                        扣款不是剛好 50,000（或鑽石有變）就停手；沒給這個旗標 → 誘餌不夠就 163 停）
+                        不讀石幣，只驗可抓捕數每按一次 +1、鑽石有變就停手；沒給這個旗標 → 誘餌不夠就 163 停）
     --confirm-drop      准丟獎勵寵（恐龍博士 布克布克、卡坦步 1 修寶、猜謎三兄弟 左迪洛斯；petdrop 驗名 + 只丟 1 級）；沒給 → 到丟寵段 168 停
     --from / --to       只跑某幾段（段名見 plan）；--fresh 不管進度檔從頭（預設：進度檔 tools/.cache/petquest.json 24 小時內記錄過的段直接跳過）
     --dry-run           = plan
@@ -42,7 +42,7 @@
                 take-many 中途失敗：訊息帶已取到的；重跑自動只補缺的（卡坦兩輪同樣套用）
     train[N]    自動轉換戰寵 on（轉換級數使用者設 30）→ 第一種任務寵 5 人出戰 → pet_catch.py --verify-battle → grind.py start --spot 波拉島
                 （使用者 2026-10-15 指定：恐龍博士 / 卡坦練寵固定 80 級練功區「波拉島」，固定點、不起 follow；舊版柯奧4F龜洞）
-                → 每 POLL_S（30）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
+                → 每 POLL_S（10）秒讀等級：第一次 pet.py list（身分 + 格位 + 名字框指紋 nh），之後只 pet.py levels --slots <任務寵格>（不認名字），
                   levels 那格變空 / nh 不同 → 改讀完整 list；全部連兩輪 ≥ 門檻（恐龍 魯尼帖斯 18 / 貝魯卡 30；卡坦 25；逐隻累積：某隻連兩次 ≥ 門檻即鎖定、之後不清；不限升級幅度，誤讀 > 門檻+60 忽略；未鎖定者超過門檻+15 → 強制再讀完整 list，全 ≥ 門檻就結束）
                 → 關遇敵 → 自動轉換戰寵 off → pet.py rest-all（任務寵改等待；成功記進度檔 rested）
     turnin[N]   questrun.py run <ID> --after none --pet-turnin [--rested]（train 段 30 分內 rest-all 成功才帶：questrun 交件前不重做 rest-all）
@@ -112,7 +112,7 @@ BAIT_ITEM = 92                     # bag.EXIT_ITEM：誘餌不夠 / 倉庫沒有
 PET_FEE = 67                       # pet.EXIT_FEE：還原名字時讀到費用字樣（鐵則 3）
 import catchbuy  # noqa: E402  外掛「+」買可抓捕數的共用邏輯（rebirth_pets 同一份）
 PLUS_XY, PLUS_COST, MONEY_BOX = catchbuy.PLUS_XY, catchbuy.PLUS_COST, catchbuy.MONEY_BOX      # 紅區：只有 --confirm-buy-bait 才點
-POLL_S = 30.0                      # 練寵讀等級間隔（2026-10-13 review 1013b §2.3：只讀等級 pet.py levels，跟 petwatch 一樣 30 秒；舊版 120 秒 + 每次讀 5 人全部身分 91 秒）
+POLL_S = 10.0                      # 練寵讀等級間隔（2026-10-15 使用者改 10 秒；是 sleep 間隔，每輪讀 5 人另需約 30 秒；總時限看 TRAIN_MAX_S 牆鐘不看輪數；舊版 30 / 120 秒）
 TRAIN_MISREAD_UP = 60            # 讀值 > 門檻 + 這麼多視為誤讀忽略；TRAIN_OVER：未鎖定的寵物超過門檻這麼多 → 強制再讀完整 list（防過度練）
 TRAIN_OVER = 15
 PET_MAX_LEVEL = 140
