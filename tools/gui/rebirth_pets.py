@@ -799,23 +799,31 @@ class Tools:
         return False
 
     def _checked(self, xy):
+        """外掛勾選框 → True 勾 / False 未勾 / None 讀不到或判讀不確定（ass.read_check 正向辨認，不確定會等一下重讀；
+        2026-10-16 前是「框心不是純白 = 已勾」→ p2 自動轉換戰寵 5 人都被當成已勾、一次都沒點）"""
         import ass
-        cols = ass._px([xy])
-        return None if not cols else cols[0] != ass.UNCHECKED
+        return ass.read_check(xy)
 
     def _toggle(self, xy, want, note):
+        """讀勾選框 → 只在確定不同時點 1 次 → 讀回（還沒變多等一次，不補點）。判讀不確定 = 停手（不當已勾 / 未勾）"""
         import ass
         cur = self._checked(xy)
         if cur is None:
-            return uikit.fail(SRC, 6, f'{note}：讀不到勾選框')
+            uikit.snap('rebirth-ass-check-unsure')
+            return uikit.fail(SRC, 6, f'{note}：勾選框 {xy[0]},{xy[1]} 讀不到 / 判讀不確定（不是白底、也不像打勾：分頁沒畫好、浮字蓋住或位置不對）→ 沒點')
         if cur == want:
+            print(f'rebirth_pets：{note}：已是{"勾" if want else "未勾"}（框內讀到{"打勾筆劃" if want else "全白"}），不點', flush=True)
             return 0
         if not ass.panel_open():
             return uikit.fail(SRC, 6, f'{note}：外掛面板消失，沒點')
         uikit.gui('seq', f'click {xy[0]} {xy[1]}; wait 500', note=f'rebirth_pets {note}')
-        if self._checked(xy) != want:
+        now = self._checked(xy)
+        if now is not None and now != want:
+            uikit.sleep(ass.CONFIRM_WAIT2)
+            now = self._checked(xy)
+        if now != want:
             uikit.snap('rebirth-ass-toggle')
-            return uikit.fail(SRC, 4, f'{note}：點了勾選沒變（不重點）')
+            return uikit.fail(SRC, 4, f'{note}：點了勾選讀回 {now}（不重點）')
         return 0
 
     def lock_get(self, role):
@@ -1104,7 +1112,7 @@ class Run:
             rc, sts = T.lock_get_many(ALL_ROLES)                # 外掛面板只開一次讀 5 人（2026-10-12 批次化）
             if rc:
                 return self.stop(EXIT_PRE, f'讀外掛鎖定狀態失敗（rc {rc}）')
-            todo = [(r, w, False, None) for r in ALL_ROLES for w in ('騎寵', '戰寵') if (sts.get(r) or {}).get(w)]
+            todo = [(r, w, False, None) for r in ALL_ROLES for w in ('騎寵', '戰寵') if (sts.get(r) or {}).get(w) is not False]   # 不確定（None）也進 todo：_toggle 會再讀、仍不確定就停手，不默默略過
         if todo:
             rc, bad = T.lock_set_many(todo)
             if rc:

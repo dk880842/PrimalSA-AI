@@ -13,6 +13,7 @@ import actlog  # noqa: E402
 actlog.add.__defaults__ = (Path(__import__('tempfile').mkdtemp()) / 'actions.log', actlog.KEEP)   # 測試的 log 寫暫存，不污染 tools/.cache/actions.log（psa-hud 顯示）
 import ass  # noqa: E402
 import battleguard  # noqa: E402
+import fake_check  # noqa: E402  勾選框假像素（實機色塊）
 import json  # noqa: E402
 import os
 import tempfile
@@ -50,13 +51,14 @@ class Game:
                 if not self.panel:
                     return (0, 0, 0)    # 黑洞窟地圖（實機就是這樣）
                 return (0, 0, 0) if r == self.role else (197, 227, 255)
-        if (x, y) == ass.PET_FIRST_CHK:
-            return (30, 30, 30) if self.pet['first_on'] and self.panel else (255, 255, 255)
+        c = fake_check.at(x, y, [(ass.PET_FIRST_CHK, self.pet['first_on'] and self.panel)])
+        if c:
+            return c
         for i, xy in ass.ITEMS.items():
-            if (x, y) == xy:
+            if abs(x - xy[0]) <= fake_check.R and abs(y - xy[1]) <= fake_check.R:
                 if not self.panel:
                     return (90, 80, 60)
-                return (30, 30, 30) if self.checks[self.role][i] else (255, 255, 255)
+                return fake_check.at(x, y, [(xy, self.checks[self.role][i])])
         return (1, 2, 3)
 
     def gui(self, *args, note=''):
@@ -757,9 +759,8 @@ class RGame(Game):
         self.rstuck = rstuck
 
     def color(self, x, y):
-        if (x, y) == ass.ROLE_FIRST_CHK:
-            return (30, 30, 30) if self.panel and self.rfirst_on[self.role] else (255, 255, 255)
-        return super().color(x, y)
+        c = fake_check.at(x, y, [(ass.ROLE_FIRST_CHK, self.panel and self.rfirst_on[self.role])])
+        return c or super().color(x, y)
 
     def click(self, x, y):
         if self.panel and (x, y) == ass.ROLE_FIRST_CHK:
@@ -842,9 +843,10 @@ class PGame(Game):
         self.box_clicks = []
 
     def color(self, x, y):
-        for key, xy in (('custom', ass.PT_CUSTOM), ('sync', ass.PT_SYNC)):
-            if (x, y) == xy and self.panel and self.feat:
-                return (30, 30, 30) if self.pt[self.role][key] else (255, 255, 255)
+        if self.panel and self.feat:
+            c = fake_check.at(x, y, [(ass.PT_CUSTOM, self.pt[self.role]['custom']), (ass.PT_SYNC, self.pt[self.role]['sync'])])
+            if c:
+                return c
         return super().color(x, y)
 
     def gui(self, *args, note=''):
@@ -950,8 +952,10 @@ check('parse_heal：三列標籤 y / 下拉 / % 門檻（寵物技能補血不�
       and ph['肉和物品補血']['y'] == 656 and ph['肉和物品補血']['pct'] == [50], str(ph))
 check('parse_heal：標籤與下拉併成一行 → 下拉 = 後面的字', ass.parse_heal([('精靈補血 滋潤的精靈Lv.3', 800, 425)])['精靈補血']['dd'] == '滋潤的精靈Lv.3')
 check('parse_heal：沒有標籤 / 空 → {}', ass.parse_heal([('原地遇敵', 200, 343)]) == {} and ass.parse_heal([]) == {})
-check('heal_checked：全白 = 沒勾、任一點非白 = 勾、空 = None', ass.heal_checked([(255, 255, 255)] * 5) is False
-      and ass.heal_checked([(255, 255, 255), (30, 30, 30)]) is True and ass.heal_checked([]) is None)
+_grid = lambda on: [fake_check.color(dx, dy, on) for dx, dy in ass.CHK_GRID]
+check('heal_checked = check_state：全白 = 沒勾、實機打勾 = 勾、空 = None、舊版「任一點非白 = 勾」的灰點不算勾',
+      ass.heal_checked([(255, 255, 255)] * 36) is False and ass.heal_checked(_grid(True)) is True and ass.heal_checked([]) is None
+      and ass.heal_checked([(255, 255, 255)] * 35 + [(230, 230, 228)]) is None)
 
 
 class HGame(Game):
@@ -974,10 +978,10 @@ class HGame(Game):
         return {} if y is None or self.nolabel else {'精靈補血': y, '寵物技能補血': y + 115, '肉和物品補血': y + 231}
 
     def color(self, x, y):
-        if self.panel and 648 <= x <= 664:
-            for k, ry in self.rows_y().items():
-                if abs(y - ry) <= 6:
-                    return (30, 30, 30) if self.on[self.role][k] and (x, y) == (656, ry) else (255, 255, 255)
+        if self.panel:
+            c = fake_check.at(x, y, [((656, ry), self.on[self.role][k]) for k, ry in self.rows_y().items()])
+            if c:
+                return c
         return super().color(x, y)
 
     def gui(self, *args, note=''):
@@ -1077,6 +1081,50 @@ check('--pause：不重試', ass._retry_nopause(lambda: next(_it), True)[0] == 6
 _it = iter([(4, {}, '', {}), (0, {}, '', {})])
 check('不暫停：其他錯誤碼不重試', ass._retry_nopause(lambda: next(_it), False)[0] == 4)
 ass.sleep = _sl
+
+print('(30) 勾選框正向辨認 check_state / read_check（2026-10-16 p2 自動轉換戰寵：框心不是純白就當已勾 → 5 人都沒點）')
+for _name, _s in fake_check.SAMPLES.items():
+    _get = fake_check.sample(_name)
+    _res = {(ox, oy): ass.check_state([_get(dx + ox, dy + oy) for dx, dy in ass.CHK_GRID]) for ox in (-6, -3, 0, 3, 6) for oy in (-6, -3, 0, 3, 6)}
+    _bad = sorted(k for k, v in _res.items() if v != _s['want'])
+    check(f'實機 {_name}（{_s["img"]} {_s["xy"]}）→ {_s["want"]}（框心 ±6 偏移都對）', not _bad, str(_bad[:5]))
+_bg = fake_check.sample('bg_catch_tab_656_440')(0, 0)
+check('重現舊假陽性：面板底灰 230 框心「不是純白」→ 舊版當已勾；新版 None', _bg != ass.UNCHECKED and ass.check_state([_bg] * 36) is None)
+check('check_state：彩色點（浮字 / 地圖）→ None；全黑（面板沒開、黑洞窟地圖）→ None',
+      ass.check_state([(255, 255, 255)] * 30 + [(200, 60, 40)] * 6) is None and ass.check_state([(0, 0, 0)] * 36) is None)
+
+
+class _PxSeq:
+    """pixel 依序回不同畫面：frames = [每點顏色函式 f(x, y)]，最後一張重複"""
+    def __init__(self, frames):
+        self.frames, self.n, self.sleeps = frames, 0, []
+
+    def gui(self, *args, note=''):
+        assert args[0] == 'pixel', args
+        f = self.frames[min(self.n, len(self.frames) - 1)]
+        self.n += 1
+        return ' '.join('%d,%d,%d' % f(*map(int, p.split(','))) for p in args[1].split())
+
+
+_xy = (656, 440)
+_gray = lambda x, y: fake_check.sample('bg_catch_tab_656_440')(x - _xy[0], y - _xy[1])
+_white = lambda x, y: fake_check.color(x - _xy[0], y - _xy[1], False)
+_gs, _sl2, _logs = ass.gui, ass.sleep, []
+_lg = ass.log
+ass.log = lambda m: _logs.append(m)
+_p = _PxSeq([_gray, _gray, _white])
+ass.gui, ass.sleep = _p.gui, (lambda t: _p.sleeps.append(t))
+check('read_check：第 1、2 次不確定（面板底灰）→ 等一下重讀、第 3 次白 → False', ass.read_check(_xy) is False and _p.n == 3 and _p.sleeps == list(ass.CHK_RETRY))
+_p = _PxSeq([_gray])
+ass.gui, ass.sleep = _p.gui, (lambda t: None)
+check('read_check：重讀仍不確定 → None（不當已勾）並寫 log', ass.read_check(_xy) is None and _p.n == 1 + len(ass.CHK_RETRY) and any('判讀不確定' in m for m in _logs))
+_p = _PxSeq([lambda x, y: fake_check.at(x, y, [((146, 343), True), ((484, 343), False)]) or (255, 255, 255)])
+ass.gui = _p.gui
+check('read_check_many：一次 pixel 讀兩框（勾 / 未勾）', ass.read_check_many([(146, 343), (484, 343)]) == [True, False] and _p.n == 1)
+_p = _PxSeq([lambda x, y: (230, 230, 228)])
+ass.gui = _p.gui
+check('read_checks：任一項不確定 → None（呼叫端停手，不會拿 None 當「要改」去點）', ass.read_checks() is None)
+ass.gui, ass.sleep, ass.log = _gs, _sl2, _lg
 
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

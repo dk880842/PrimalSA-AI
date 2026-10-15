@@ -502,5 +502,65 @@ check('setup 前沒有抓寵前快照 → 讀一次寵物欄存起來', getattr(
 f5 = FakeT()
 pet_catch.run(A, stages=('setup',), tools=f5)
 check('setup 前已有新鮮快照（petquest 存的）→ 不重讀', getattr(f5, 'listed', 0) == 0)
+# ---- 自動轉換戰寵勾選：真 _toggle / _checked（ass.read_check 正向辨認）+ 假外掛像素 ----
+# 2026-10-16 00:07 p2：`--autoswap on` rc 0、印「= 開」，實際 5 人都沒勾、actions.log 沒有任何 656,440 點擊（舊版框心不是純白就當已勾）
+import ass  # noqa: E402
+import fake_check  # noqa: E402
+
+
+class SwapT(rp.Tools):
+    """ass_each 不開真面板：逐人直接跑 fn；勾選框像素依 self.box[角色] = 'on' / 'off' / 'gray'（面板底灰，實機 g1.png 656,440）/ 'banner'（浮字暗帶，h7a.png）"""
+    def __init__(self, box, stuck=False):
+        self.box, self.role, self.clicks, self.stuck = dict(box), None, [], stuck
+
+    def ass_each(self, roles, tab, fn):
+        out = {}
+        for r in roles:
+            self.role = r
+            rc, v = fn(r)
+            if rc:
+                return rc, out, r
+            out[r] = v
+        return 0, out, None
+
+    def px(self, *args, note=''):
+        assert args[0] == 'pixel', args
+        x0, y0 = pet_catch.AUTOSWAP_XY
+        st = self.box[self.role]
+        src = {'gray': 'bg_catch_tab_656_440', 'banner': 'banner_over_656_313'}.get(st)
+        get = fake_check.sample(src) if src else (lambda dx, dy: fake_check.color(dx, dy, st == 'on'))
+        return ' '.join('%d,%d,%d' % get(int(q.split(',')[0]) - x0, int(q.split(',')[1]) - y0) for q in args[1].split())
+
+    def click(self, *args, note=''):
+        self.clicks.append((self.role, args[1]))
+        if not self.stuck and self.box[self.role] in ('on', 'off'):
+            self.box[self.role] = 'off' if self.box[self.role] == 'on' else 'on'
+        return ''
+
+
+def swap(box, on=True, stuck=False):
+    t = SwapT(box, stuck)
+    saved = (ass.gui, ass.sleep, ass.panel_open, uikit.gui, uikit.snap, uikit.sleep)
+    ass.gui, ass.sleep, ass.panel_open = t.px, (lambda s: None), (lambda: True)
+    uikit.gui, uikit.snap, uikit.sleep = t.click, (lambda *a, **k: None), (lambda s: None)
+    try:
+        return pet_catch.set_autoswap(list(box), on, tools=t), t
+    finally:
+        ass.gui, ass.sleep, ass.panel_open, uikit.gui, uikit.snap, uikit.sleep = saved
+
+
+rc, t = swap({'DKBO6': 'off', 'DKBO7': 'off'})
+check('autoswap on：實機未勾（全白）→ 每人點 1 次 656,440、讀回勾', rc == 0 and len(t.clicks) == 2 and set(t.box.values()) == {'on'}, f'{rc} {t.clicks}')
+rc, t = swap({'DKBO6': 'on', 'DKBO7': 'off'})
+check('autoswap on：已勾的不點、未勾的點', rc == 0 and [r for r, _ in t.clicks] == ['DKBO7'], f'{rc} {t.clicks}')
+rc, t = swap({'DKBO6': 'gray', 'DKBO7': 'off'})
+check('autoswap on：框讀到面板底灰（不是框 / 分頁沒畫好）→ 不當已勾、不點、rc 6 停手（舊版 rc 0 跳過）', rc == 6 and not t.clicks, f'{rc} {t.clicks}')
+rc, t = swap({'DKBO6': 'banner'})
+check('autoswap on：浮字暗帶蓋住 → rc 6、不點', rc == 6 and not t.clicks, f'{rc} {t.clicks}')
+rc, t = swap({'DKBO6': 'on'}, on=False)
+check('autoswap off：已勾 → 點 1 次、讀回未勾', rc == 0 and len(t.clicks) == 1 and t.box['DKBO6'] == 'off', f'{rc} {t.clicks}')
+rc, t = swap({'DKBO6': 'off'}, stuck=True)
+check('autoswap on：點了沒變 → rc 4、不補點', rc == 4 and len(t.clicks) == 1, f'{rc} {t.clicks}')
+
 print('\n失敗 %d' % fails if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

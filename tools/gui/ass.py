@@ -31,7 +31,8 @@
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
   是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
   --no-wait：戰鬥中不等，直接回退出碼 8（排程 / 腳本不想卡住時用）。面板已經開著時視為不在戰鬥（外掛面板戰鬥中打不開）。
-勾選判讀（2026-10-10 實測）：未勾 = 框心 255,255,255；已勾 = 其他值（30,30,30 / 151 / 223 視打勾筆劃而定）。
+勾選判讀（2026-10-16 改正向辨認，check_state / read_check）：框心 ±10 取 36 點，全白 = 未勾；黑筆劃 + 白底 = 勾；
+  其他（面板底灰、浮字暗帶、分頁沒畫好）= 不確定 → 等一下重讀，仍不確定就停手（舊版「框心不是純白 = 已勾」會把這些當成已勾而跳過，2026-10-16 p2 自動轉換戰寵事故）。
 只動點到的角色；不改其他角色，不碰其他項目。外掛面板不能用 ESC 關。
 給其他腳本 import：ass.get_states(role) / ass.set_states(role, {項目: bool}) → (rc, 狀態 dict 或 None, 訊息)；
 ass.set_many({角色: {項目: bool} 或 None}) 一次開面板逐人讀 / 改 → (rc, {角色: 狀態}, 訊息, info)（P8，grind 用）。
@@ -74,7 +75,7 @@ X_SIG = (1318, 90, 195, 127, 8)
 AVATAR_SEL = (0, 0, 0)
 AVATAR_OFF = (197, 227, 255)
 TOL = 25
-UNCHECKED = (255, 255, 255)      # 框心純白 = 未勾；其他 = 已勾
+UNCHECKED = (255, 255, 255)      # 框心純白 = 未勾（舊判讀；勾選一律改用 check_state / read_check 正向辨認）
 
 OPEN_TIMEOUT = 40.0              # 等外掛面板能開的最長秒數（戰鬥 / 載入中 / 對話會擋）
 OPEN_RETRY_GAP = 1.5
@@ -103,6 +104,76 @@ def _px(pts):
 
 def _close(c, ref, tol=TOL):
     return all(abs(a - b) <= tol for a, b in zip(c, ref))
+
+
+# ---- 勾選框判讀：正向辨認（2026-10-16 改）----
+# 舊做法「框心 != 純白 = 已勾」的假陽性：框心讀到面板底灰（221 / 225 / 230：分頁沒畫好 / 右半捲動 / 位置不是框）、
+#   升級 / EXP 浮字暗帶（117～177）→ 都當成已勾、跳過不點（2026-10-16 00:07 p2 恐龍博士 `pet_catch.py --autoswap on` 5 人都沒點 656,440，實際都沒勾）。
+#   已勾的框心也可能只是淺灰（筆劃沒經過框心），所以不能只看框心一點。
+# 新做法：框內 6×6 格點（框心 ±10，框約 40×40 白底）分類每點 → 白 / 黑（勾的筆劃 000000～464646）/ 其他：
+#   勾 = 黑 ≥ CHK_DARK_MIN 且白 ≥ CHK_WHITE_MIN 且中間灰 ≤ CHK_MID_MAX 且沒有彩色點；未勾 = 全部是白；其他 = 不確定 → 等一下重讀，仍不確定回 None（呼叫端停手，不當已勾）。
+# 樣本：fixtures/ass_check_px.json（tools/.cache 實機截圖 14 塊：勾 7、未勾 4、面板底 / 捲動 / 浮字暗帶 3）。
+CHK_GRID = tuple((dx, dy) for dy in (-10, -6, -2, 2, 6, 10) for dx in (-10, -6, -2, 2, 6, 10))
+CHK_WHITE = 240                  # 三通道都 ≥ 這個 = 框底白（實測未勾 255 / 反鋸齒邊 fcfcfc）
+CHK_DARK = 80                    # 三通道都 ≤ 這個 = 勾的黑筆劃（實測 000000～5c5c5c；浮字暗帶 117 以上）
+CHK_GRAY_SPREAD = 24             # 通道最大差 > 這個 = 彩色（浮字、地圖、面板外）→ 不確定
+CHK_DARK_MIN, CHK_WHITE_MIN, CHK_MID_MAX = 3, 16, 12   # 實測 36 點：勾 = 黑 4～12 / 白 20～29 / 中間灰 0～10（框心 ±6 偏移都算）；浮字暗帶白 ≤ 8、面板底白 ≤ 2
+CHK_RETRY = (0.6, 1.0)           # 不確定時再讀的等待（秒）：分頁剛切 / 浮字飄過
+
+
+def check_state(cols) -> bool | None:
+    """純函式：一個勾選框 CHK_GRID 格點的顏色 → True 勾 / False 未勾 / None 不確定（讀不到、不像勾選框）"""
+    if not cols:
+        return None
+    white = dark = mid = 0
+    for c in cols:
+        r, g, b = c[:3]
+        if max(r, g, b) - min(r, g, b) > CHK_GRAY_SPREAD:
+            return None
+        if min(r, g, b) >= CHK_WHITE:
+            white += 1
+        elif max(r, g, b) <= CHK_DARK:
+            dark += 1
+        else:
+            mid += 1
+    if white == len(cols):
+        return False
+    if dark >= CHK_DARK_MIN and white >= CHK_WHITE_MIN and mid <= CHK_MID_MAX:
+        return True
+    return None
+
+
+def _chk_summary(cols) -> str:
+    """不確定時寫 log 的摘要：框心附近 4 點顏色"""
+    mid = [cols[i] for i in (14, 15, 20, 21) if i < len(cols)] if cols else []
+    return ' '.join('%d,%d,%d' % tuple(c[:3]) for c in mid) or '讀不到'
+
+
+def read_check_many(xys, waits=CHK_RETRY) -> list:
+    """面板開著時一次讀多個勾選框（一次 pixel 呼叫）→ [True / False / None]；不確定的等 waits 重讀，仍不確定 = None（寫 log）"""
+    xys = list(xys)
+    res, last = [None] * len(xys), {}
+    pend = list(range(len(xys)))
+    n = len(CHK_GRID)
+    for w in (0,) + tuple(waits):
+        if w:
+            sleep(w)
+        cols = _px([(xys[i][0] + dx, xys[i][1] + dy) for i in pend for dx, dy in CHK_GRID])
+        if cols:
+            for k, i in enumerate(pend):
+                last[i] = cols[k * n:(k + 1) * n]
+                res[i] = check_state(last[i])
+        pend = [i for i in pend if res[i] is None]
+        if not pend:
+            break
+    for i in pend:
+        log(f'ass：勾選框 {xys[i][0]},{xys[i][1]} 判讀不確定（不是白底、也不像打勾；框心附近 {_chk_summary(last.get(i))}）→ 不當已勾')
+    return res
+
+
+def read_check(xy, waits=CHK_RETRY) -> bool | None:
+    """讀一個勾選框 → True / False / None（不確定，呼叫端要停手）"""
+    return read_check_many([xy], waits)[0]
 
 
 # 頂部跑馬燈（伺服器公告：「恭喜玩家【…】」「翻倍成功」等，文字由右往左捲；一則約 7～10 秒，可能接連多則）。
@@ -329,12 +400,12 @@ def select_role(role: str, tries: int = SELECT_TRIES, timeout: float = SELECT_TI
 
 
 def read_checks(items=None) -> dict | None:
-    """面板開著、角色已選好時讀四項（或指定項）勾選狀態：True = 開；讀不到回 None"""
+    """面板開著、角色已選好時讀四項（或指定項）勾選狀態：True = 開；讀不到 / 任一項判讀不確定（重讀後仍不確定）回 None（呼叫端停手，不當已勾）"""
     items = list(items or ITEMS)
-    cols = _px([ITEMS[i] for i in items])
-    if not cols:
+    res = read_check_many([ITEMS[i] for i in items])
+    if any(v is None for v in res):
         return None
-    return {i: c != UNCHECKED for i, c in zip(items, cols)}
+    return dict(zip(items, res))
 
 
 def norm_item(name: str) -> str | None:
@@ -430,10 +501,10 @@ def read_pet_value(which: str) -> str | None:
 
 
 def read_pet() -> dict | None:
-    cols = _px([PET_FIRST_CHK])
-    if not cols:
+    on = read_check(PET_FIRST_CHK)
+    if on is None:
         return None
-    return {'first_on': cols[0] != UNCHECKED, 'first': read_pet_value('first'), 'normal': read_pet_value('normal')}
+    return {'first_on': on, 'first': read_pet_value('first'), 'normal': read_pet_value('normal')}
 
 
 def _pet_session(role: str, want: dict | None, no_wait: bool = False):
@@ -701,8 +772,7 @@ def _visit_pet_get(role):
     """多人唯讀：戰寵 首次動作（勾選 + 欄位文字）/ 一般動作（欄位文字）。回 (退出碼, dict, 訊息, [])"""
     if not pet_on_top():
         return EXIT_NOT_TOP, None, f'{role}：右半面板不在頂端（讀不到「戰寵動作」標題）；不點', []
-    cols = _px([PET_FIRST_CHK])
-    on = None if not cols else cols[0] != UNCHECKED
+    on = read_check(PET_FIRST_CHK)
     return EXIT_OK, {'first_on': on, 'first': _dedup(read_pet_text('first')) or '?', 'normal': _dedup(read_pet_text('normal')) or '?'}, '', []
 
 
@@ -756,11 +826,11 @@ QUEST_BATTLE = quest_battle()
 
 
 def read_role_first(ocr: bool = True) -> dict | None:
-    """面板開著、角色已選好：人物首次動作 → {'first_on': 勾?, 'first': 欄位文字（去空白；ocr=False 時 None）}；像素讀不到回 None"""
-    cols = _px([ROLE_FIRST_CHK])
-    if not cols:
+    """面板開著、角色已選好：人物首次動作 → {'first_on': 勾?, 'first': 欄位文字（去空白；ocr=False 時 None）}；像素讀不到 / 勾選判讀不確定回 None"""
+    on = read_check(ROLE_FIRST_CHK)
+    if on is None:
         return None
-    return {'first_on': cols[0] != UNCHECKED, 'first': _ocr(ROLE_FIRST_FIELD, '-Zooms', '2,3,4').replace(' ', '') if ocr else None}
+    return {'first_on': on, 'first': _ocr(ROLE_FIRST_FIELD, '-Zooms', '2,3,4').replace(' ', '') if ocr else None}
 
 
 def first_value_verdict(text: str | None, want: str) -> str:
@@ -984,10 +1054,10 @@ def _visit_points(want_plan, apply: bool, read_plan: bool = True):
                 return EXIT_PANEL_LOST, None, f'{role}：切便捷功能前面板已不在 / 角色不對 → 不點', []
             if '加點' not in _ocr(PT_FEAT_BOX, '-Zooms', '2,3,4'):
                 return EXIT_POINTS_READ, None, f'{role}：特色設定分頁讀不到「加點」字樣（OCR 框未實機量）；不點勾選', []
-            cols = _px([PT_CUSTOM, PT_SYNC])
-            if not cols:
-                return EXIT_PANEL_LOST, None, f'{role}：讀不到加點勾選框像素', []
-            st['自定義加點'], st['同步加點'] = cols[0] != UNCHECKED, cols[1] != UNCHECKED
+            cols = read_check_many([PT_CUSTOM, PT_SYNC])
+            if None in cols:
+                return EXIT_PANEL_LOST, None, f'{role}：加點勾選框讀不到 / 判讀不確定（不當已勾）', []
+            st['自定義加點'], st['同步加點'] = cols
             if read_plan:
                 rc, plan, msg = _points_read_plan(role)
                 st['plan'] = plan
@@ -1006,8 +1076,7 @@ def _visit_points(want_plan, apply: bool, read_plan: bool = True):
                 todo.append(item)
                 for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
                     sleep(w)
-                    now = _px([xy])
-                    if now and now[0] != UNCHECKED:
+                    if read_check(xy, ()) is True:
                         st[item] = True
                         log(f'ass：{role} {item} → 勾（已確認）')
                         break
@@ -1068,7 +1137,7 @@ def _main_points(a) -> int:
 HEAL_CHK_X = 656                                    # 三個補血勾選框的 x
 HEAL_BOX = (640, 330, 700, 430)                     # OCR 區：自動補血整段（x y w h）；未捲動時精靈補血約 y 612（區內 → 不用捲）、捲過後約 y 425
 HEAL_Y_MIN, HEAL_Y_MAX = 340, 740                   # 標籤 y 要落在這範圍才點（太靠面板邊緣 = 被切到一半）
-HEAL_DOTS = ((0, 0), (-6, -5), (6, 5), (-6, 5), (6, -5))   # 勾選框取樣點（相對框中心）：全純白 = 沒勾；任一點不是白 = 勾（p2 實機 2026-10-15：框心 656,612 未勾 255,255,255 / 已勾 40,40,40）
+# 勾選判讀共用 read_check（CHK_GRID 框心 ±10 正向辨認，標籤 y 偏 ±6 內都認得；p2 實機 2026-10-15：框心 656,612 未勾 255,255,255 / 已勾 40,40,40）
 HEAL_SCROLL = (700, 563, 700, 430)                  # 往下露出自動補血（ui/ass.md：慣性後約再多捲一點）
 HEAL_UNSCROLL = (700, 300, 700, 700)                # 回頂端
 HEAL_SCROLL_TRIES = 2
@@ -1109,10 +1178,8 @@ def parse_heal(lines) -> dict:
 
 
 def heal_checked(cols) -> bool | None:
-    """純函式：勾選框取樣點顏色 → 勾 / 沒勾；空 / 讀不到回 None"""
-    if not cols:
-        return None
-    return any(c != UNCHECKED for c in cols)
+    """純函式：勾選框 CHK_GRID 取樣點顏色 → 勾 / 沒勾 / None（讀不到、不確定）；同 check_state"""
+    return check_state(cols)
 
 
 def _heal_read(box=HEAL_BOX) -> dict:
@@ -1120,8 +1187,7 @@ def _heal_read(box=HEAL_BOX) -> dict:
 
 
 def _heal_chk(y: int) -> bool | None:
-    cols = _px([(HEAL_CHK_X + dx, y + dy) for dx, dy in HEAL_DOTS])
-    return heal_checked(cols)
+    return read_check((HEAL_CHK_X, y))
 
 
 def _heal_find(role: str) -> tuple:
@@ -1169,7 +1235,7 @@ def _visit_heal(want: bool | None, rows_wanted=('精靈補血',)):
             for k, r in rows.items():
                 on = _heal_chk(r['y'])
                 if on is None:
-                    return EXIT_PANEL_LOST, st, f'{role}：讀不到 {k} 勾選框像素', []
+                    return EXIT_PANEL_LOST, st, f'{role}：{k} 勾選框讀不到 / 判讀不確定（不當已勾）', []
                 st[k] = {'on': on, 'dd': r['dd'], 'pct': r['pct']}
             if want is None:
                 return EXIT_OK, st, '', []
@@ -1187,7 +1253,7 @@ def _visit_heal(want: bool | None, rows_wanted=('精靈補血',)):
                     sleep(w)
                     if not panel_open():
                         return EXIT_PANEL_LOST, st, f'點 {k} 後面板消失', todo
-                    if _heal_chk(y) == want:
+                    if read_check((HEAL_CHK_X, y), ()) == want:
                         st[k]['on'] = want
                         log(f'ass：{role} {k} → {"勾" if want else "取消"}（已確認）')
                         break
