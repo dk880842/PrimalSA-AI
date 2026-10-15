@@ -114,7 +114,7 @@ uv run --no-project python tools/gui/errlog.py list
 - **帳號特有設定**（主視窗預設不變，其他視窗可覆寫）：隊長人物首次動作（`ass.py battle` / questrun 交接；主視窗 風的精靈，其他視窗預設**不查**首次動作，只查 5 人自動戰鬥；`PSA_LEADER_FIRST=技能名` 或 `ass.py battle all --leader-first 技能名`）；騎寵名單 `uikit.MOUNTS`（存倉保護；`PSA_MOUNTS=物種,物種` 追加）；petwatch 練功寵 / 換回戰寵（`--pet` / `--back`，預設 金布伊 / 朵拉比斯）。
 - **PrimalSA2 現在能用的**（離線測試過，**未實機**）：gui.sh、mirror.sh、讀圖 .ps1、`walk.py`、`heal.py`、`verifyhalt.py`、`team.py`（status / check / form / disband，預設隊長 DKBO6）、`char.py`、`ass.py`、`pet.py`、`bag.py`、`exp.py`、`depot_use.py`、`grind.py start|ensure|check|follow`（依 DKBO6 等級換點）、`petwatch.py`（`--exp-fruit` 吃給隊長）、`watch.py`（認 DKBO6～10）、`netwatch.py --watch`（斷線只點確定 + halt，不自動登錄；人登入回來後 recover 的 team.form / grind ensure 用 PrimalSA2 名單）、`namematch.py learn`。
   第一次用 PrimalSA2 建議：5 人在線、切換面板開著 → `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/namematch.py learn`（學名字樣板；沒樣板時 team / char 走順序 + OCR，較慢但可用）。
-- **還不能給 PrimalSA2 用的**（第 3c 步，另一批）：quest / questrun / questdetail / rebirth* / postrebirth / petquest / pet_catch / petdrop / pet_turnin / shopbuy / mail / relogin / stuckrecover / bossretry 等任務 / 轉生腳本（寫死 DKBO 名字或帳號設定）。
+- **任務 / 轉生腳本**（第 3c 步，離線測試過，**未實機**）：quest / questrun / questdetail / rebirth* / postrebirth / petquest / pet_catch / petdrop / pet_turnin / shopbuy / relogin / bossretry 也改讀視窗名單（隊長 = 名單第 1 個、抓寵者 = 第 2 個）；名單沒登錄的視窗（例 PrimalSA3）CLI 拒跑。多視窗時 relogin / `--stuck` 重登回 109 停手（不自動登錄）。用法見 ui/quest.md「多視窗」。
 - 離線測試：`test_multiclient.py`、`test_roster.py`（第 3b 步：PSA_CLIENT=PrimalSA2 名單情境 + 主視窗常數逐字核對，0 次 powershell 呼叫）、`test_clientctx.py`（假 powershell.exe 守門：路徑快照〔沒設 PSA_CLIENT 時 63 個路徑常數與改版前逐字相同〕、verify-halt、netwatch 多視窗不登錄、gui.sh 退出碼）、`test_psawin.ps1`（真 powershell，只測不存在 / 同名多個的程序名與自用 Mutex，碰不到遊戲）。
 
 ## 移動：先用 walk.py（不要自己算座標點地面）

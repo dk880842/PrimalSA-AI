@@ -56,7 +56,7 @@ def child(case: str) -> None:
     out['pq_assign'] = {q: [[list(a) for a in r['assign']] for r in v['rounds']] for q, v in petquest.QUESTS.items() if v.get('rounds')}
     out['pq_count'] = {q: v.get('count') for q, v in petquest.QUESTS.items()}
     out['rp_defaults'] = {k: rebirth_pets.DEFAULTS[k] for k in ('catcher', 'count', 'mount_species', 'battle_pet')}
-    out['relogin'] = [relogin.ROLES[0], len(relogin.ROLES), relogin.run.__defaults__[2:4]]
+    out['relogin'] = [relogin.ROLES[0] if relogin.ROLES else '', len(relogin.ROLES), relogin.run.__defaults__[2:4]]
     out['bait'] = sorted(petquest.bait_ok_roles(['rebirth_pets：DKBO2 背包誘餌 = 4', 'rebirth_pets：DKB03 背包誘餌 = 4',
                                                  'rebirth_pets：DKBO7 背包誘餌 = 4', 'rebirth_pets：DKB010 背包誘餌 = 3', 'x']))
     out['parse'] = {t: questrun.parse_roles(t) for t in ('all', 'DKB03,dkbo5', 'DKB08,dkbo10', 'DKBO2')}

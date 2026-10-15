@@ -169,8 +169,11 @@ def start_ok(st: dict, stuck: bool = False) -> bool:
     return bool(stuck) and (state == 'walking' or (state == 'battle' and not st.get('full')))
 
 
-def run(confirm: bool = False, dry_run: bool = False, leader: str = ROLES[0], size: int = len(ROLES), check_team: bool = True,
+def run(confirm: bool = False, dry_run: bool = False, leader: str = ROLES[0] if ROLES else '', size: int = len(ROLES), check_team: bool = True,
         stuck: bool = False) -> int:
+    if not ROLES or not leader:
+        print(f'{SRC}：這個視窗（{clients.name()}）沒有登錄角色名單（clients.ROSTERS），不動', file=sys.stderr)
+        return uikit.EXIT_USAGE
     if not confirm and not dry_run:
         print(f'{SRC}：登出會讓全部角色下線（不可逆），沒有 --confirm 不動；只想看前置檢查用 --dry-run', file=sys.stderr)
         return uikit.EXIT_USAGE
