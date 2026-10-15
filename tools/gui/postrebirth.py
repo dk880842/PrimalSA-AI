@@ -35,7 +35,7 @@
   caves      questrun.py run 2000 2003 2001 2002 --after none --dragon --max-min 45           失敗 172
   dino       petquest.py run 2016 [--confirm-drop]（先存第 2 格 → 抓 / 練 → 才接任務，見 petquest.py 檔頭）  失敗 175
              後面還會解卡坦（katan 在本次 --from / --to 範圍內、進度檔沒完成）→ 帶 `--keep-autoswap`：train 結束不關外掛「自動轉換戰寵」、restore 整段跳過
-             （自動轉換開著會把剛換回的戰寵換掉、卡坦 prep 又要存倉；第 2 格名字 + 原等級記 petquest 進度檔 carry_orig，由卡坦 restore 統一換回，見 petquest.py 檔頭）；
+             （自動轉換開著會把剛換回的戰寵換掉、卡坦 prep 又要存倉；第 2 格名字 + 原等級留在 petquest 進度檔共用紀錄 slot2_stored，卡坦 prep 直接沿用、由卡坦 restore 統一換回並清掉，見 petquest.py 檔頭）；
              只跑 dino（--to dino 等）照舊關。dino 成功帶旗標後進度檔記 autoswap_pending，katan 成功才清。
              **中斷保險（選「提示 + finish 自動關」）**：dino 之後卡坦沒跑完就停（失敗 / --to 擋掉 / 手動中斷）→ 結束時 event + LAST['warnings'] 提示
              「自動轉換戰寵還開著、朵拉比斯在個人倉庫」與續跑指令，不在失敗現場自動操作遊戲（可能是斷線 / 驗證視窗 / 戰鬥中）；
@@ -462,7 +462,7 @@ def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, conf
         r.p = {'done': [], 'finished': time.time()}                   # 全部做完：清進度（下一轉從頭）
         r.save()
     if r.p.get('autoswap_pending') and not (SEGMENTS[i1] == SEGMENTS[-1] and not rc):   # 中斷保險：dino 留著開，卡坦沒完成就停
-        w = ('恐龍博士帶 --keep-autoswap：外掛「自動轉換戰寵」還開著、原朵拉比斯在個人倉庫（petquest 進度檔 carry_orig 記原等級）→ 續跑 '
+        w = ('恐龍博士帶 --keep-autoswap：外掛「自動轉換戰寵」還開著、原朵拉比斯在個人倉庫（petquest 進度檔 slot2_stored 記原等級）→ 續跑 '
              'postrebirth.py run --from katan（卡坦 train 結束會關、restore 換回）；不解卡坦就 pet_catch.py --autoswap off 再手動換回朵拉比斯')
         r.warnings.append(w)
         event('警告：' + w)

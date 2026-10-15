@@ -425,11 +425,16 @@ check('卡坦 happy：兩輪、rc 0、5 人 騎寵 + 原朵拉比斯出戰；獎
       and all(any(p['name'] == '朵拉比斯' and p['level'] == 1 for p in s.personal[r]) for r in ROLES)
       and not any(p['name'] == '修寶' for r in ROLES for p in s.bar[r]), f'rc={rc} {pq.LAST.get("info")} {s.bar["DKBO"]}')
 check('卡坦誘餌 50 → 10（鯊 20 + 雞 20）', s.bait == 10, str(s.bait))
-s = grow(Sim(2019, step=2))
+s = Sim(2019, step=2)
 s.bar = {r: [P('布拉奇多斯', '騎乘', 5), P('朵拉比斯', '出戰', 125 + i)] for i, r in enumerate(ROLES)}
-rc = go(2019, s, confirm_drop=True)
-check('prep 開頭讀到步號已是 2 → 第 1 輪全跳過（不抓鯊、不交 / 丟修寶），第 2 輪照跑', rc == 0 and not any('鯊魚系' in ' '.join(a) for a in names(s, 'pet_catch.py'))
-      and any('火雞系' in ' '.join(a) for a in names(s, 'pet_catch.py')) and not names(s, 'petdrop.py'), f'rc={rc} {pq.LAST.get("info")}')
+reads = []
+s.read_step = lambda t: reads.append(t) or 2
+rc = go(2019, s, to_stage='prep')
+check('卡坦 prep 不讀追蹤步號、不取消鎖定戰寵（2026-10-16 精簡）：關遇敵 → 解散 → 讀第 2 格 → 存倉',
+      rc == 0 and not reads and not any('--unlock' in a for a in names(s, 'pet_catch.py')) and ('enc_off',) in s.calls
+      and ('disband',) in names(s, 'team.py') and any(a[0] == 'store-many' for a in names(s, 'pet.py')), f'rc={rc} {names(s, "pet_catch.py")}')
+check('單獨跑卡坦 prep 後寫共用紀錄 slot2_stored（名字 / 等級 / ts）',
+      sorted(json.loads(pq.PROGRESS.read_text(encoding='utf-8')).get('slot2_stored', {}).get('orig', {})) == sorted(pq.ALL_ROLES))
 s = grow(Sim(2019))
 rc = go(2019, s, confirm_drop=True)
 seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'pet_catch.py')]
@@ -805,18 +810,25 @@ check('--keep-autoswap：restore 跳過（不取回朵拉比斯、不鎖定、�
       not any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
       and not [a for a in names(s, 'pet_catch.py') if '--lock' in a] and not names(s, 'ass.py'), str(names(s, 'pet_catch.py')))
 allp = json.loads(pq.PROGRESS.read_text(encoding='utf-8'))
-check('--keep-autoswap：進度檔記 carry_orig（5 人原等級 + 第 2 格名字）', sorted(allp.get('carry_orig', {}).get('orig', {})) == sorted(pq.ALL_ROLES)
-      and allp['carry_orig'].get('battle') == {r: '朵拉比斯' for r in ROLES}, str(allp.get('carry_orig')))
-s2 = Sim(2019)
-s2.t = s.t                                                            # 同一條時間線（carry_orig 的 ts 不能在未來）
+check('--keep-autoswap：進度檔頂層共用紀錄 slot2_stored 留著（5 人原等級 + 第 2 格名字）', sorted(allp.get('slot2_stored', {}).get('orig', {})) == sorted(pq.ALL_ROLES)
+      and allp['slot2_stored'].get('battle') == {r: '朵拉比斯' for r in ROLES}, str(allp.get('slot2_stored')))
+s2 = grow(Sim(2019))
+s2.t = s.t                                                            # 同一條時間線（紀錄的 ts 不能在未來）
 for r in pq.ALL_ROLES:
-    s2.bar[r] = [x for x in s2.bar[r] if x['name'] != '朵拉比斯']       # 朵拉比斯還在個人倉庫、寵物欄讀不到
+    s2.bar[r] = [x for x in s2.bar[r] if x['name'] != '朵拉比斯']       # 朵拉比斯還在個人倉庫、寵物欄第 2 格已空
+    s2.personal[r] = [dict(x) for x in s.personal[r]]
 rc = go(2019, s2, from_stage='prep', to_stage='prep', reset=False)
-check('卡坦 prep 沿用 carry_orig（不因寵物欄沒朵拉比斯失敗）', rc == 0 and json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2019']['orig'] == allp['carry_orig']['orig'], f'rc={rc} {pq.LAST.get("info")}')
+check('恐龍博士後卡坦 prep：沿用 slot2_stored，不讀寵物欄、不存倉、不 unlock（只關遇敵 + 解散）',
+      rc == 0 and json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['2019']['orig'] == allp['slot2_stored']['orig']
+      and not names(s2, 'pet.py') and not any('--unlock' in a for a in names(s2, 'pet_catch.py')) and ('disband',) in names(s2, 'team.py'), f'rc={rc} {pq.LAST.get("info")} {names(s2, "pet.py")}')
+rc = go(2019, s2, from_stage='catch1', confirm_drop=True, reset=False)
+check('卡坦 restore 用共用紀錄換回原等級戰寵並清掉 slot2_stored', rc == 0 and 'slot2_stored' not in json.loads(pq.PROGRESS.read_text(encoding='utf-8'))
+      and all(s2.bar[r][1]['name'] == '朵拉比斯' and s2.bar[r][1]['level'] == allp['slot2_stored']['orig'][r] for r in ROLES), f'rc={rc} {pq.LAST.get("info")} {s2.bar["DKBO"]}')
 s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
-check('沒帶 --keep-autoswap：照舊關自動轉換 + restore 換回', rc == 0 and any(a[:2] == ('--autoswap', 'off') for a in names(s, 'pet_catch.py'))
-      and any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py')))
+check('沒帶 --keep-autoswap：照舊關自動轉換 + restore 換回 + 清 slot2_stored', rc == 0 and any(a[:2] == ('--autoswap', 'off') for a in names(s, 'pet_catch.py'))
+      and any(a[0] == 'take-many' and '朵拉比斯@' in a[a.index('--plan') + 1] for a in names(s, 'pet.py'))
+      and 'slot2_stored' not in json.loads(pq.PROGRESS.read_text(encoding='utf-8')))
 
 # ---------------- 戰寵不是朵拉比斯（p2：迪基格斯出戰 + 瑪斯貝卡騎乘；各角色可不同）
 check('pick_battle_names：每人當下出戰寵', pq.pick_battle_names({'DKBO': [P('瑪斯貝卡', '騎乘', 5), P('迪基格斯', '出戰', 9)]}, roles=['DKBO'])[0] == {'DKBO': '迪基格斯'})

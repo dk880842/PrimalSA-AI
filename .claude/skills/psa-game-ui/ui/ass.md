@@ -224,4 +224,4 @@ uv run --no-project python tools/gui/ass.py pet all normal 防禦 --no-resume   
 - 沒穿金幣時下拉沒有風的精靈 → 退出碼 12（ass.EXIT_NO_OPTION）、收下拉、不亂點。
 - `ass.LEADER_FIRST`：PrimalSA 與 PrimalSA2 都是「風的精靈」→ questrun 交接 `ass.py battle` 會檢查 DKBO6 的首次動作（值確定不對回 13）。
 
-**自動轉換戰寵與恐龍博士 → 卡坦（2026-10-15）**：`petquest.py run 2016 --keep-autoswap`（postrebirth 在後面還有卡坦時帶）train 結束不關 `pet_catch.py --autoswap`、restore 跳過（朵拉比斯留個人倉庫、原等級記 carry_orig），卡坦解完才關並統一換回；細節見 psa-pet-quest SKILL.md。
+**自動轉換戰寵與恐龍博士 → 卡坦（2026-10-15）**：`petquest.py run 2016 --keep-autoswap`（postrebirth 在後面還有卡坦時帶）train 結束不關 `pet_catch.py --autoswap`、restore 跳過（朵拉比斯留個人倉庫、原等級留共用紀錄 slot2_stored），卡坦解完才關並統一換回；細節見 psa-pet-quest SKILL.md。

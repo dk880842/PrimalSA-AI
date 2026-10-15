@@ -12,8 +12,8 @@
     --from / --to       只跑某幾段（段名見 plan）；--fresh 不管進度檔從頭（預設：進度檔 tools/.cache/petquest.json 24 小時內記錄過的段直接跳過）
     --dry-run           = plan
     --keep-autoswap     （恐龍博士 2016 專用，postrebirth 在後面還要解卡坦時傳）train 結束先不關外掛「自動轉換戰寵」（卡坦 train 開頭本來就要開），
-                        restore 段整段跳過（不取回第 2 格的寵物 / 不重鎖 / 不改一般動作）；第 2 格的名字 + 等級記進進度檔 carry_orig（battle / orig）給卡坦 prep 沿用，
-                        由卡坦 restore 統一換回、train 結束照常關
+                        restore 段整段跳過（不取回第 2 格的寵物 / 不重鎖 / 不改一般動作）；第 2 格紀錄（進度檔頂層 slot2_stored：名字 / 等級 / ts，恐龍博士 prep 存倉後寫）留著給卡坦 prep 沿用，
+                        由卡坦 restore 統一換回並清掉紀錄、train 結束照常關
     --verify-defer      內部 questrun 帶 --verify defer（postrebirth 傳；沒風險事件的逐人驗證延到 postrebirth 收尾，交寵物仍是風險事件 → 當場驗）
   可 import：petquest.run(qid, tools=…, confirm_drop=…) → 退出碼（confirm_buy 參數保留、無作用）；結果在 petquest.LAST
 
@@ -22,11 +22,12 @@
     段順序：恐龍 prep → catch → distribute → train → accept → turnin → drop → restore；
             卡坦 prep → catch1 → distribute1 → train1 → accept → turnin1 → drop1 → catch2 → distribute2 → train2 → turnin2 → store_reward → restore
             （第 2 輪〔雞〕要第 1 輪交完、追蹤進步 2 才能進）
-    prep        （不先接任務）關原地遇敵 + 等戰鬥結束 → 解散隊伍 → pet.py list 讀每人寵物欄**第 2 格**（pet.py list slot == 2，1 起算；第 1 格 = 騎寵位置）
+    prep        （不先接任務）關原地遇敵 + 等戰鬥結束 → 解散隊伍（使用者 2026-10-16 精簡：不讀追蹤步號、不取消鎖定戰寵、不檢查空格數；accept 後讀步號 = 2 跳過第 1 輪的既有邏輯保留）
+                → 進度檔頂層有 slot2_stored（24 小時內）= 恐龍博士 prep 已存過第 2 格 → 沿用紀錄，**不讀不存**（卡坦接在恐龍博士後面就是這樣）
+                → 沒有（單獨跑 / 恐龍博士）才做：pet.py list 讀每人寵物欄**第 2 格**（pet.py list slot == 2，1 起算；第 1 格 = 騎寵位置）
                 的寵物，名字 + 等級記進度檔 battle / orig（各角色可不同：p1 朵拉比斯、p2 迪基格斯；續跑沿用已記的不重讀）
                 保險：第 2 格空 / 名字讀不出 / 等級讀不到 / 是騎寵（騎乘中、名字像騎寵）→ 162 停手、一隻都不存
-                → 取消鎖定戰寵 → 第 2 格的寵物存個人倉庫（同名的人一組 store-many；不碰騎寵）→ 寵物欄只剩騎寵 + 4 空格（不是 4 只記事件，抓寵溢出的自動進個人倉庫）
-                卡坦：prep 開頭（解散後）先讀一次追蹤步號，= 2（第 1 輪早已交）→ 第 1 輪各段跳過，不白抓鯊、也不讓鯊佔滿寵物欄
+                → 第 2 格的寵物存個人倉庫（同名的人一組 store-many；不碰騎寵）→ 寫 slot2_stored（restore 成功才清）；抓寵溢出的自動進個人倉庫
     catch[N]    **一次抓滿本輪總隻數 N（正常 5，不分批）→ 改名 → 存公共 → 取個人倉庫溢出的改名**（使用者 2026-10-16 最簡流程：
                 「抓完先把各角色的數字寵都改完名、馬上存入公倉，之後再把個人倉庫的拿出來改名，這樣抓的那隻人物就有自己需要的寵物」）。
                 外掛捉寵設置已勾「自動存倉庫」，寵物欄滿了多抓的自動進抓寵者個人寵物倉庫（在欄 = min(N, 空格)、其餘溢出；抓前讀一次寵物欄算出，抓完不再讀）。
@@ -68,8 +69,8 @@
     restore     pet_catch.py --lock 戰寵 --battle-pet 朵拉比斯 → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗朵拉比斯出戰、等級 ≥ 原等級（練功中可能升級）
   --keep-autoswap 的安全結論（2026-10-15 讀程式）：恐龍博士 restore = 取回第 2 格的戰寵（p1 朵拉比斯）→ 出戰 → 鎖定戰寵 → 一般動作；自動轉換戰寵（外掛，轉換級數 30）開著時，
     剛換回的高等朵拉比斯會被外掛當「超過轉換級數」又換掉，且卡坦 prep 緊接著又要把朵拉比斯存個人倉庫，換回根本白做 → 帶旗標時 dino restore 整段跳過，
-    朵拉比斯留在個人倉庫、原等級用進度檔 carry_orig 交給卡坦 prep（卡坦 prep 讀不到寵物欄的朵拉比斯，沿用 carry_orig；store-many --skip-missing 略過已存的）；
-    卡坦 restore 照常換回 + 鎖定 + 關自動轉換（train 結束就關）。carry_orig 帶的是恐龍 prep 記的第 2 格名字（battle）+ 等級（orig）。中斷保險見 postrebirth.py 檔頭。
+    朵拉比斯留在個人倉庫、原等級用進度檔頂層共用紀錄 slot2_stored 交給卡坦 prep（卡坦 prep 看到紀錄〔24 小時內〕就不讀寵物欄、不存倉）；
+    卡坦 restore 照常換回 + 鎖定 + 關自動轉換（train 結束就關）。slot2_stored = {qid, orig, battle, ts}，restore 真正換回原寵成功才清。中斷保險見 postrebirth.py 檔頭。
   不做：恢復掛機（交給呼叫端 / postrebirth 收尾的 grind.py start）。
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；petquest 自己 160～169）：
@@ -663,7 +664,6 @@ class Run:
             return self.fail(EXIT_PREP, f'第 {BATTLE_SLOT} 格不能記 / 存（不猜、存倉不碰騎寵）：{bad}',
                              f'uv run --no-project python tools/gui/pet.py list --role all（確認每人第 {BATTLE_SLOT} 格是戰寵、名字讀得出）')
         self.p['battle'], self.p['orig'] = names, lv
-        self.p['free_before'] = {r: free_slots(rs.get(r)) for r in ALL_ROLES}
         event(f'第 {BATTLE_SLOT} 格（戰寵）：{names}；等級：{lv}')
         self.save()
         return 0
@@ -685,30 +685,35 @@ class Run:
             return self.pass_or(rc, code, f'解散隊伍失敗 team rc={rc}', 'uv run --no-project python tools/gui/team.py disband')
         return 0
 
+    def slot2_shared(self) -> dict | None:
+        """進度檔頂層共用紀錄 slot2_stored（第 2 格戰寵名 / 等級已存個人倉庫；24 小時內才算）；沒有 / 過期 → None"""
+        rec = self.all.get('slot2_stored') or {}
+        if rec.get('orig') and rec.get('battle') and 0 <= self.T.clock() - (rec.get('ts') or 0) <= PROGRESS_TRUST_S:
+            return rec
+        return None
+
     def s_prep(self) -> int:
         if self.p.get('already_done'):
             return 0
         rc = self.solo(EXIT_PREP) if self.q['kind'] == 'catch' else self.encounter_off()   # solo = 關遇敵 + 等戰鬥結束 + 解散
         if rc:
             return rc
-        if self.q['kind'] == 'catch' and len(self.q['rounds']) > 1 and not self.p.get('step'):
-            self.skip_done_rounds()
-        carry = self.all.get('carry_orig') or {}
-        if not self.p.get('orig') and carry.get('orig') and 0 <= self.T.clock() - (carry.get('ts') or 0) <= PROGRESS_TRUST_S and carry.get('qid') != self.qid:
-            self.p['orig'] = carry['orig']                              # 恐龍博士帶 --keep-autoswap 沒換回戰寵：沿用它記的原等級 / 名字（寵物欄已沒有戰寵可讀）
-            if carry.get('battle'):
-                self.p['battle'] = carry['battle']
-            event(f'原戰寵 {carry.get("battle") or BATTLE_PET} 等級沿用恐龍博士記的：{carry["orig"]}')
-            self.save()
+        if self.q['kind'] == 'catch':
+            rec = self.slot2_shared()
+            if rec and not self.p.get('stored'):                          # 恐龍博士 prep 已存過第 2 格：直接沿用紀錄，不讀不存（使用者 2026-10-16）
+                self.p['orig'], self.p['battle'], self.p['stored'] = rec['orig'], rec['battle'], True
+                event(f'第 {BATTLE_SLOT} 格戰寵 {rec["battle"]} 已存個人倉庫（共用紀錄 slot2_stored）→ 沿用原等級 {rec["orig"]}，不讀不存')
+                self.save()
+                return 0
         if not self.p.get('orig') or not self.battle_names():
             rc = self.record_orig()
             if rc:
                 return rc
-        rc, _ = self.sub('pet_catch.py', ['--unlock', '戰寵'], 900)
-        if rc:
-            return self.pass_or(rc, EXIT_PREP, f'取消鎖定戰寵失敗 rc={rc}', 'uv run --no-project python tools/gui/pet_catch.py --unlock 戰寵')
         if self.q['kind'] == 'quiz':
             pet = self.q['pet']
+            rc, _ = self.sub('pet_catch.py', ['--unlock', '戰寵'], 900)   # 猜謎：金布伊要換出戰，要先解鎖（只有猜謎才取消鎖定）
+            if rc:
+                return self.pass_or(rc, EXIT_PREP, f'取消鎖定戰寵失敗 rc={rc}', 'uv run --no-project python tools/gui/pet_catch.py --unlock 戰寵')
             rc, _ = self.sub('pet.py', ['set-state-many', '--role', 'all', pet, '出戰'], 900)
             if rc:
                 return self.pass_or(rc, EXIT_PREP, f'{pet} 5 人出戰失敗 pet rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-many --role all {pet} 出戰')
@@ -722,10 +727,7 @@ class Run:
                 return self.pass_or(rc, EXIT_PREP, f'{nm} 存個人倉庫失敗 pet rc={rc}（寵物欄要空出 4 格）',
                                     f'uv run --no-project python tools/gui/pet.py store-many --role {ra} --pets {nm} --depot personal')
         self.p['stored'] = True                                            # restore 要取回（接任務回 0 = 已完成時也要）
-        fb = self.p.get('free_before') or {}
-        not4 = {r: fb[r] + 1 for r in ALL_ROLES if r in fb and fb[r] + 1 != 4}
-        if not4:                                                           # 抓寵仍可跑（放不下的自動進個人倉庫），只記事件
-            event(f'存倉後寵物欄空格不是 4：{not4}（第 1 格騎寵 + 第 2 格存走以外還有別的寵物？）→ 照跑，抓寵溢出的自動進個人倉庫')
+        self.all['slot2_stored'] = {'qid': self.qid, 'orig': self.p['orig'], 'battle': self.p['battle'], 'ts': self.T.clock()}   # 共用紀錄：接著跑的卡坦 prep 直接沿用，restore 成功才清
         self.save()
         return 0
 
@@ -1063,9 +1065,7 @@ class Run:
         # 第 2 格存過個人倉庫 → 要取回（2026-10-15 起 prep 在接任務前，接取回 0 = 已完成時也存過；舊進度檔沒有 stored → 照舊「沒完成 = 存過」）
         took = self.q['kind'] == 'catch' and bool(self.p.get('stored') or not self.p.get('already_done'))
         if self.o.get('keep_autoswap') and took:
-            self.all['carry_orig'] = {'qid': self.qid, 'orig': orig, 'battle': names, 'ts': self.T.clock()}
-            self.save()
-            event(f'{shown} 先不換回（--keep-autoswap：自動轉換戰寵開著會把剛換回的換掉、卡坦 prep 又要存倉）→ 原等級 {orig} 記 carry_orig，由卡坦 restore 統一換回')
+            event(f'{shown} 先不換回（--keep-autoswap：自動轉換戰寵開著會把剛換回的換掉、卡坦 prep 又要存倉）→ 共用紀錄 slot2_stored 留著（原等級 {orig}），由卡坦 restore 統一換回並清掉')
             return 0
         if [r for r in ALL_ROLES if not names.get(r)] and self.p.get('already_done'):
             rc, rs = self.pet_list()                                      # 任務本來就完成（沒跑 prep）：用當下出戰寵當戰寵，只收尾（鎖定 + 一般動作 + 驗）
@@ -1116,6 +1116,8 @@ class Run:
         if bad:
             return self.fail(EXIT_RESTORE, f'收尾驗證：戰寵不是剛好 1 隻出戰 / 等級不對（原 {orig}）：{bad}', 'uv run --no-project python tools/gui/pet.py list --role all')
         event(f'收尾：5 人戰寵 {names} 出戰、鎖定戰寵、一般動作攻擊')
+        if self.q['kind'] == 'catch' and self.all.pop('slot2_stored', None) is not None:   # 真正換回原寵了：清共用紀錄
+            self.save()
         return 0
 
     def do(self, stage) -> int:
@@ -1139,8 +1141,9 @@ def print_plan(qid: int, o: dict) -> None:
         print(f'  drop     petdrop.py all {q["drop"]} --confirm-name {q["drop"]} --max-level 1（要 --confirm-drop）')
         print(f'  restore  pet_catch --lock 戰寵 --battle-pet 戰寵名 → ass.py pet all normal 攻擊 --no-resume → pet.py list 驗')
     else:
-        print(f'  prep     （不先接任務）關遇敵 + 等戰鬥結束 → team.py disband → pet.py list 記每人第 {BATTLE_SLOT} 格名字 / 等級（空 / 讀不出 / 騎寵 → 162）'
-              f' → pet_catch --unlock 戰寵 → pet.py store-many --role <同名的人> --pets 第 {BATTLE_SLOT} 格名字 --depot personal（寵物欄剩騎寵 + 4 空格）')
+        print(f'  prep     （不先接任務）關遇敵 + 等戰鬥結束 → team.py disband；有共用紀錄 slot2_stored（24 小時內，恐龍博士已存）→ 到此為止，沿用不讀不存；'
+              f'沒有（單獨跑）才 → pet.py list 記每人第 {BATTLE_SLOT} 格名字 / 等級（空 / 讀不出 / 騎寵 → 162）'
+              f' → pet.py store-many --role <同名的人> --pets 第 {BATTLE_SLOT} 格名字 --depot personal → 寫 slot2_stored')
         for i, rd in enumerate(q['rounds'], 1):
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
@@ -1161,9 +1164,9 @@ def print_plan(qid: int, o: dict) -> None:
         if q.get('store_reward'):
             print(f'  store_reward pet.py store-many --role all --pets {q["store_reward"]} --depot personal（獎勵 Lv1）')
         if o.get('keep_autoswap'):
-            print(f'  restore  （--keep-autoswap：整段跳過，第 {BATTLE_SLOT} 格名字 + 原等級記 carry_orig 給卡坦 prep；卡坦 restore 統一換回）')
+            print(f'  restore  （--keep-autoswap：整段跳過，共用紀錄 slot2_stored 留給卡坦 prep；卡坦 restore 統一換回）')
         else:
-            print(f'  restore  pet.py take-many --depot personal --plan "角色:第 {BATTLE_SLOT} 格名字@原等級" → set-state-many 名字 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗')
+            print(f'  restore  pet.py take-many --depot personal --plan "角色:第 {BATTLE_SLOT} 格名字@原等級" → set-state-many 名字 出戰 → pet_catch --lock 戰寵 → ass.py pet all normal 攻擊 --no-resume → list 驗 → 清 slot2_stored')
     print('退出碼：160 參數 161 接取 162 準備 163 誘餌 / 買 164 抓 165 分配 166 練 167 交 168 丟 169 換回；9 驗證視窗 10 斷線')
 
 
