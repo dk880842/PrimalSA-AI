@@ -90,8 +90,8 @@ PROGRESS = logpaths.p(uikit.CACHE / 'rebirth_pets.json')
 EXIT_PRE, EXIT_BOX, EXIT_STORE, EXIT_CATCH, EXIT_DIST, EXIT_RIDE, EXIT_BATTLE, EXIT_LOCK, EXIT_CLEAN, EXIT_ARGS = 100, 101, 102, 103, 104, 105, 106, 107, 108, 109
 
 STAGES = ['preflight', 'boxes', 'store', 'catch', 'distribute', 'ride', 'battle', 'lock', 'cleanup']
-LEADER = 'DKBO'
-ALL_ROLES = ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+ALL_ROLES = clients.roster()          # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
+LEADER = ALL_ROLES[0] if ALL_ROLES else ''
 FAMILY_NEIGHBORS = {'鯊魚系': (('犀牛', '牛系'), ('飛天蛙', '飛夭蛙', '蛙系'))}          # 外掛系別清單的上下鄰居（2026-10-12 實機）
 FAMILY_BELOW = {'雷龍系': '大象系'}                         # 系別清單中該列正下方的列（該列被清單上緣切掉時用下一列的位置判斷要往回捲）
 FAMILY_ROW_H = 42                                          # 系別清單列距（FAMILY_NEIGHBORS 兩列約 70～100）；往回捲後目標列仍讀不到字 → 用下一列 y - 列距點，點完照樣讀欄位驗證
@@ -334,7 +334,7 @@ def plan(o: dict) -> list:
     fam = family_for(sp, o.get('family')) or '（--family 必填）'
     box, nxt = box_names(o['trans'])
     return [
-        ('preflight', ['確認當前 = DKBO', '解散隊伍', '外掛：5 人鎖定騎寵 / 戰寵先取消', '讀 5 人寵物欄']),
+        ('preflight', [f'確認當前 = {LEADER}', '解散隊伍', '外掛：5 人鎖定騎寵 / 戰寵先取消', '讀 5 人寵物欄']),
         ('boxes', [f'5 人開 {box}（內容存公共，{nxt} 存個人；bag 95 驗證失敗各步自動重試 1 次）'] if not o['no_boxes'] else ['（--no-boxes 跳過）']),
         ('store', ['5 人寵物欄全存個人倉庫'] + ([f'舊騎寵 {o["store_mount"]} 先設等待再存（--store-mount）'] if o['store_mount'] else ['舊騎寵不碰（沒給 --store-mount）'])),
         ('catch', ([f'{ct} 外掛捉寵設置「+」花石幣買可抓捕數到 {n}（--confirm-buy-catch，每個 50,000，前後驗石幣 / 鑽石）', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 {n}、自動存倉庫 + 自動抓寵（直接抓，不試抓）', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才縮圖 + 成長字串登錄）', f'確認 {ct} 共 {n} 隻 {sp}'] if o.get('confirm_buy_catch') else [f'{ct} 公共倉庫取誘餌、拆到只剩 1', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 1、自動存倉庫 + 自動抓寵', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才學物種）', f'再留 {n - 1} 個誘餌重複 → reset-name', f'確認 {ct} 共 {n} 隻 {sp}'])),
@@ -342,7 +342,7 @@ def plan(o: dict) -> list:
         ('ride', [f'5 人 {sp} 設騎乘']),
         ('battle', [f'5 人從個人倉庫取 {bp}@1（Lv1）、設出戰；同名多隻讀不出等級 → 逐隻取出驗 Lv1、不對存回換下一隻']),
         ('lock', [f'外掛 5 人：鎖定騎寵 = {sp}（下拉比物種名，找不到退回成長字串）、鎖定戰寵 = {bp}、兩項都勾']),
-        ('cleanup', [f'{ct} 多餘誘餌存回公共', '當前 DKBO、遇敵關', '寫 quest-log']
+        ('cleanup', [f'{ct} 多餘誘餌存回公共', f'當前 {LEADER}、遇敵關', '寫 quest-log']
                     + (['（--no-grind：不去練功）'] if o.get('no_grind') else [f'去練功：grind.go(trans_hint={o["trans"]})（依等級選點；未滿地雷區背景起 follow）'])),
     ]
 
@@ -1361,7 +1361,8 @@ def write_quest_log(o: dict, prog: dict, final: dict) -> None:
         pass
 
 
-DEFAULTS = dict(trans=1, mount_species='布拉奇多斯', battle_pet='朵拉比斯', catcher='DKBO2', count=5, family=None, store_mount=None,
+# 帳號特有預設：抓寵者 = 名單第 2 個（主視窗 DKBO2、PrimalSA2 = DKBO7）；隻數 = 名單人數；騎寵 / 戰寵物種是遊玩選擇，其他視窗要不同就給 --mount-species / --battle-pet
+DEFAULTS = dict(trans=1, mount_species='布拉奇多斯', battle_pet='朵拉比斯', catcher=(ALL_ROLES[1:2] or [''])[0], count=len(ALL_ROLES) or 5, family=None, store_mount=None,
                 no_boxes=False, keep_lock=False, direct_catch=False, confirm_buy_catch=False, no_grind=False)
 
 
@@ -1369,11 +1370,11 @@ def run(trans=1, from_stage: str = 'preflight', to_stage: str = 'cleanup', dry_r
     o = dict(DEFAULTS, trans=level_n(trans), **kw)
     LAST.clear()
     import charstate
-    cc = charstate.norm_char(o['catcher'])
-    if cc is None or charstate.display(cc) not in ALL_ROLES:
-        print(f'{SRC}：--catcher {o["catcher"]!r} 不認得（DKBO / DKBO2～5）', file=sys.stderr)
+    cc = charstate.norm_char(o['catcher'], ALL_ROLES)                  # 只認這個視窗（PSA_CLIENT）的名單
+    if not ALL_ROLES or cc is None:
+        print(f'{SRC}：--catcher {o["catcher"]!r} 不認得（這個視窗的名單：{ALL_ROLES or "沒有登錄（clients.ROSTERS）"}）', file=sys.stderr)
         return EXIT_ARGS
-    o['catcher'] = charstate.display(cc)
+    o['catcher'] = cc
     if from_stage not in STAGES or to_stage not in STAGES or STAGES.index(from_stage) > STAGES.index(to_stage):
         print(f'{SRC}：--from / --to 階段不對（{STAGES}）', file=sys.stderr)
         return EXIT_ARGS

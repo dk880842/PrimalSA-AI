@@ -36,9 +36,24 @@
                review §3.2 曾改成只吃長巡路，使用者否決。walk_s 仍保留供參考）
 前置依賴：prereqs(id) 讀 Task 表第 1 步的 finishTasks（1.82 全部要先完成成人儀式 2999）；questrun 逐人驗證延後時，依賴任務接取前先批次驗
 """
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import clients  # noqa: E402
+
+
+def roster_at(i: int) -> str:
+    """這個視窗（PSA_CLIENT）名單第 i 個（0 起算；主視窗 0 = DKBO、1 = DKBO2…；PrimalSA2 1 = DKBO7）；
+    名單不夠長 → '#i+1'（不是真名，用到的腳本 preflight 會擋）。交寵物任務的抓寵分配用卡位，不寫死名字"""
+    r = clients.roster()
+    return r[i] if i < len(r) else f'#{i + 1}'
+
+
+def _assign(*pairs) -> str:
+    """抓寵分配字串 '角色:系別:物種,…'：pairs = (卡位, 系別, 物種)，卡位經 roster_at 轉這個視窗的名字"""
+    return ','.join(f'{roster_at(i)}:{fam}:{sp}' for i, fam, sp in pairs)
 
 Q182 = [
     dict(id=2999, detail='成人儀式', track='成人儀式', accept_npc='儀式的審判 10204:14,6', steps_total=2,
@@ -96,13 +111,13 @@ Q182 = [
     dict(id=2016, detail='恐龍博士(1.82)', track='恐龍博士', accept_npc='恐龍博士哈魯 11006:11,11', steps_total=2,
          steps={1: dict(kind='manual'), 2: dict(kind='manual')}, bag_slots=0, boss=False, est_min=45, live=False,
          turnin=dict(kind='dino', steps={0: (1, 2), 1: (1, 2), 2: (2,)}), rest_pets=True, reward_pets=['布克布克'],
-         pet_prep={1: dict(need='魯尼帖斯（呼拔拔系）Lv18+ 每人 1 隻', assign='DKBO2:呼拔拔系:魯尼帖斯', count=5),
-                   2: dict(need='貝魯卡（老虎系）Lv30+ 每人 1 隻', assign='DKBO3:老虎系:貝魯卡', count=5)},
+         pet_prep={1: dict(need='魯尼帖斯（呼拔拔系）Lv18+ 每人 1 隻', assign=_assign((1, '呼拔拔系', '魯尼帖斯')), count=5),
+                   2: dict(need='貝魯卡（老虎系）Lv30+ 每人 1 隻', assign=_assign((2, '老虎系', '貝魯卡')), count=5)},
          note='交寵物類（Task type=7，要抓魯尼帖斯 Lv18+ ×5 / 貝魯卡 Lv30+ ×5，見 psa-pet-quest skill）：questrun 預設只負責接取，之後步 1、2 都停 115 交人（加 --pet-turnin：rest-all → 解散 → pet_turnin dino 5 人逐人交 → DKBO 重組，未實機）；交時解散逐人交，跳「選擇寵物」視窗要看名字點卡片（quest.py 不處理）；交前寵物改「等待」；獎勵布克布克（丟）'),
     dict(id=2019, detail='卡坦的願望(1.82)', track='卡坦的願望', accept_npc='卡坦 100:230,180', steps_total=2,
          steps={}, bag_slots=0, boss=False, est_min=80, live=False, rest_pets=True, reward_pets=['修寶', '朵拉比斯'],
-         pet_prep={1: dict(need='4 色鯊魚各 Lv25+，每人各 1 隻', assign='DKBO2:鯊魚系:克邦凱斯,DKBO3:鯊魚系:加克拉,DKBO4:鯊魚系:加格,DKBO5:鯊魚系:邦恩吉', count=5),
-                   2: dict(need='4 色火雞各 Lv25+，每人各 1 隻（步 1 交完、修寶丟掉、寵物欄空出後才抓）', assign='DKBO2:火雞系:火雞,DKBO3:火雞系:克克洛斯,DKBO4:火雞系:霍爾克,DKBO5:火雞系:奇寶', count=5)},
+         pet_prep={1: dict(need='4 色鯊魚各 Lv25+，每人各 1 隻', assign=_assign((1, '鯊魚系', '克邦凱斯'), (2, '鯊魚系', '加克拉'), (3, '鯊魚系', '加格'), (4, '鯊魚系', '邦恩吉')), count=5),
+                   2: dict(need='4 色火雞各 Lv25+，每人各 1 隻（步 1 交完、修寶丟掉、寵物欄空出後才抓）', assign=_assign((1, '火雞系', '火雞'), (2, '火雞系', '克克洛斯'), (3, '火雞系', '霍爾克'), (4, '火雞系', '奇寶')), count=5)},
          note='交寵物（4 色鯊魚 / 4 色雞各 ≥25 級）；**交前先 `pet.py rest-all`**（10-10 一隻在出戰 → 按完成 21 次不前進）；隊長交一次 5 人完成；步 1 獎勵修寶（丟）、步 2 朵拉比斯（存個人倉庫）；寵物準備是手動流程'),
 ]
 

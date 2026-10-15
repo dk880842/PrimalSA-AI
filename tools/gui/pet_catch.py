@@ -509,11 +509,11 @@ def main(argv=None) -> int:
     ap.add_argument('--verify-battle', action='store_true', help='改做：逐人讀回出戰寵（開遇敵練寵前；沒有出戰寵退出碼 105）')
     ap.add_argument('--lock', default=None, metavar='騎寵,戰寵', help='改做：外掛鎖定重勾（騎寵 / 戰寵 / 兩者；下拉讀字選、讀回）')
     ap.add_argument('--unlock', default=None, metavar='騎寵,戰寵', help='改做：外掛取消鎖定（換練功寵前）')
-    ap.add_argument('--catch-off', action='store_true', help='改做：外掛捉寵設置「自動抓寵」取消勾選（--roles，預設 DKBO2,DKBO3,DKBO4,DKBO5）')
+    ap.add_argument('--catch-off', action='store_true', help='改做：外掛捉寵設置「自動抓寵」取消勾選（--roles，預設隊長以外全部：主視窗 DKBO2～5）')
     ap.add_argument('--battle-pet', default='朵拉比斯')
     ap.add_argument('--mount-species', default='布拉奇多斯')
-    ap.add_argument('--roles', default='DKBO,DKBO2,DKBO3,DKBO4,DKBO5')
-    ap.add_argument('--count', type=int, default=5)
+    ap.add_argument('--roles', default=','.join(rp.ALL_ROLES), help='預設 = 這個視窗（PSA_CLIENT）的名單（主視窗 DKBO,DKBO2～5）')
+    ap.add_argument('--count', type=int, default=len(rp.ALL_ROLES) or 5)
     ap.add_argument('--stages', default='bait,setup,wait,rename,register')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--timeout', type=float, default=rp.CATCH_TIMEOUT_S)
@@ -523,7 +523,7 @@ def main(argv=None) -> int:
     if a.catch_off:
         import winenv
         winenv.enable_server()
-        roles = a.roles.split(',') if a.roles != ap.get_default('roles') else ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']
+        roles = a.roles.split(',') if a.roles != ap.get_default('roles') else rp.ALL_ROLES[1:]     # 預設隊長以外（隊長不抓）
         return catch_off(roles)
     if a.verify_battle:
         import winenv

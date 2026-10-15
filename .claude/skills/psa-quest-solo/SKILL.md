@@ -19,6 +19,8 @@ description: Use when the PrimalSA (精靈王石器) quest chain must be solved 
 座標是截圖座標（客戶區 2880×1659）。`G="bash tools/gui/gui.sh"`、`Q="uv run --no-project python tools/gui/quest.py"`，在專案根目錄執行。
 介面細節 / 實測：`../psa-game-ui/ui/quest.md`「單人逃跑解任務」、`ui/team.md`、`ui/transfer.md`、`ui/ass.md`。
 
+> 多視窗（第 3c 步，2026-10-15，未實機）：`PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/questrun.py run 2031 --solo` 時跑路的人 = 該視窗隊長 DKBO6（本文的「DKB0」都換成視窗名單第 1 個）；戰寵動作改 / 改回、快速戰鬥關都對 DKBO6 做；`--buy-missing` 的 shopbuy 逐人買完切回 DKBO6。沒設 `PSA_CLIENT` = 原本的 DKBO。PrimalSA2 公共倉庫是自己的，通常沒有龍王 → 156 走這條。
+
 ## 0. 規劃（先查資料，不碰畫面）
 ```bash
 uv run --no-project python tools/query/psa.py steps <任務組ID或任務名>     # 例：steps 2031
