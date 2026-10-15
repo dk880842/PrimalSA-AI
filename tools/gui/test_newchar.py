@@ -69,7 +69,7 @@ check('存倉清單：4 樣公共 + 1轉新手禮盒 個人', nc.STORE_ITEMS[-1]
 check('present 照順序只回有的', nc.present({'a': 3, 'b': None, 'c': 0}, ['c', 'b', 'a', 'z']) == ['c', 'a'])
 check('quest_args', nc.quest_args('初入石器', 5) == ['--task', '初入石器', '--max-seconds', nc.QUEST_SLICE_S, '--team-size', 5])
 st = dict((s, status) for s, status, _ in nc.plan({}))
-check('plan 標出 points 座標待量測 / buy 未支援', st['points'] == '座標待量測' and st['buy'] == '未支援' and list(st) == nc.STAGES)
+check('plan 標出 points 座標待量測 / buy 走 buywendy（未實機）', st['points'] == '座標待量測' and 'buywendy' in st['buy'] and list(st) == nc.STAGES)
 
 
 # ---------------- 假 Tools ----------------
@@ -117,6 +117,10 @@ class FakeTools:
 
     def sleep(self, s):
         pass
+
+    def buy_wendy(self):
+        self.calls.append(('buy_wendy',))
+        return self._rc('buy_wendy')
 
     def bag_session(self):
         return Sess(self, self._rc('bag_session'))
@@ -314,11 +318,24 @@ T8.quest_rc = {'初入石器': 0, '覲見村長': 30}
 rc, out = quiet(nc.run, tools=T8, fresh=True)
 check('quest.py 30 → 197（quest_rc）', rc == nc.EXIT_QUEST and nc.LAST.get('quest_rc') == 30)
 
-# --confirm-buy：未支援 → 記待手動、最後 199；--no-grind
+# --confirm-buy：呼叫 buywendy（買 + 穿 + 首次動作 + 回村組隊）；失敗 = 待手動 199；8 / 9 / 10 原碼停手；--no-grind
 T9 = FakeTools()
 T9.points_rc = 0
 rc, out = quiet(nc.run, tools=T9, fresh=True, confirm_buy=True, no_grind=True)
-check('--confirm-buy → buy 待手動（未支援）、--no-grind 不呼叫 grind → 199', rc == nc.EXIT_PENDING and set(nc.LAST['pending']) == {'buy'} and 'grind' not in T9.names())
+check('--confirm-buy → 呼叫 buy_wendy、buy 完成、--no-grind 不呼叫 grind → 0', rc == 0 and 'buy_wendy' in T9.names() and 'buy' in nc.LAST['done'] and not nc.LAST['pending'] and 'grind' not in T9.names())
+T9 = FakeTools(rc={'buy_wendy': 205})
+T9.points_rc = 0
+rc, out = quiet(nc.run, tools=T9, fresh=True, confirm_buy=True)
+check('buywendy 205 → buy 待手動、後面的 grind 照跑 → 199', rc == nc.EXIT_PENDING and set(nc.LAST['pending']) == {'buy'} and 'grind' in T9.names() and nc.LAST.get('buywendy_rc') == 205)
+for code in (8, 9, 10):
+    T9 = FakeTools(rc={'buy_wendy': code})
+    T9.points_rc = 0
+    rc, out = quiet(nc.run, tools=T9, fresh=True, confirm_buy=True)
+    check(f'buywendy {code} → 原碼停手、不練功', rc == code and 'grind' not in T9.names())
+T9 = FakeTools()
+T9.points_rc = 0
+rc, out = quiet(nc.run, tools=T9, fresh=True)
+check('沒給 --confirm-buy → 不呼叫 buy_wendy', rc == 0 and 'buy_wendy' not in T9.names())
 T9 = FakeTools(rc={'grind': 52})
 T9.points_rc = 0
 rc, out = quiet(nc.run, tools=T9, fresh=True)

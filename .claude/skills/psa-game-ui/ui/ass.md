@@ -214,3 +214,8 @@ uv run --no-project python tools/gui/ass.py pet all normal 防禦 --no-resume   
 2026-10-13 三轉實跑寫回（離線測試）：系別清單雷龍系切半的位置備援、成長字串漏段比對、失敗出口收下拉 + 保險關面板，見 `ui/rebirth.md`「三轉實跑寫回」。
 腳本 `tools/gui/rebirth_pets.py` 自動做「鎖定騎寵 / 戰寵」「捉寵設置」，座標沿用上面實測值（鎖定：勾選 656,313 / 656,377、下拉 1285,312 / 1285,377；捉寵：自動抓寵 656,315、自動存倉庫 820,315、系別下拉 921,377、寵物下拉 1283,377、清單捲動 drag 750,650→750,480）。
 下拉選項**不用固定列距**：用 `ocr.ps1` 回傳的文字中心座標，剛好 1 列吻合（名字 snap 到 Monster 表同一名、或成長字串整行相同）才點，點完再 OCR 欄位確認才勾。**這些 OCR 框是猜的、沒量過**（rebirth_pets.py 的 OCR_TAB_* / OCR_*_FIELD / CATCH_LIST_* / LOCK_LIST_*），第一次實跑要看 snap（tools/.cache/ui-log/rebirth-*.png）修正；讀不到就停手（退出碼 103 / 107），不會盲點。程式不點可抓捕數「+」、不碰丟棄區塊。鎖定下拉顯示的是成長字串（沒名字的新寵物），順序每人不同。
+
+## 人物首次動作 = 風的精靈（新視窗隊長；2026-10-15 `buywendy.py`）
+- 流程：背包穿「溫蒂妮Lv5的金幣」（道具類別「樂器」、附帶技能風的精靈Lv.5）→ 外掛面板選隊長 → 戰鬥設置頂端人物首次動作下拉 1137,313 → 清單 OCR 找唯一「風的精靈」→ 點選項（x 944）→ OCR 讀回 → 勾選框 656,313 沒勾就勾（像素讀回）。已是風的精靈 + 已勾一次都不點。`buywendy._visit_first`（ass._many 的 visit；離線測試 test_buywendy.py，**實機未驗證**）。
+- 沒穿金幣時下拉沒有風的精靈 → 退出碼 12（ass.EXIT_NO_OPTION）、收下拉、不亂點。
+- `ass.LEADER_FIRST`：PrimalSA 與 PrimalSA2 都是「風的精靈」→ questrun 交接 `ass.py battle` 會檢查 DKBO6 的首次動作（值確定不對回 13）。
