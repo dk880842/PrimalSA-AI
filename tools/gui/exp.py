@@ -260,6 +260,18 @@ def read_current(table: dict) -> dict | None:
     return None
 
 
+BATTLE_WAIT_S, BATTLE_POLL_S = 240.0, 3.0
+
+
+def wait_not_battle(max_s: float = BATTLE_WAIT_S) -> bool:
+    """開面板前畫面是戰鬥（快戰 VS 牌 / 完整戰鬥）就等打完（共用 questrun.wait_battle_end 的邏輯；exp 唯讀，不關遇敵）→ True = 可開；逾時 False"""
+    class _T:
+        screen_state = staticmethod(lambda: uikit.screen().get('state'))
+        sleep = staticmethod(uikit.sleep)
+    import questrun
+    return questrun.wait_battle_end(_T, 'exp 開面板前', max_s)
+
+
 def read_all(roles, table=None, dry_run: bool = False) -> tuple:
     """開人物資訊一次逐人讀 → (rc, {role: dict|None})。每筆加 ts；已寫入 history。最後切回 DKBO 並關面板"""
     table = table or load_table()
@@ -270,6 +282,8 @@ def read_all(roles, table=None, dry_run: bool = False) -> tuple:
     rc = uikit.preflight(SRC)
     if rc:
         return rc, out
+    if not wait_not_battle():
+        return _fail(EXIT_PANEL, f'畫面還在戰鬥（等了 {BATTLE_WAIT_S:.0f} 秒），不開人物資訊面板', 'exp-battle'), out
     was_open = uikit.is_open(ROLEINFO)
     if not was_open:
         ok, _ = uikit.open_panel_ex(ROLEINFO, timeout=4.0, hud_wait=PANEL_WAIT_S)

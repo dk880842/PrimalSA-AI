@@ -18,7 +18,8 @@
   驗證視窗 9 / 斷線 10 一律透傳。
 
 段（SEGMENTS）與退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；postrebirth 自己 170～179）：
-  inventory  唯讀盤點：exp.py read、bag.py list all、pet.py list --role all（失敗只警告；9 / 10 停）
+  inventory  唯讀盤點：exp.py read、bag.py list all、pet.py list --role all（失敗只警告；9 / 10 停）；開頭先 quiet（2026-10-15：follow 停 + 關原地遇敵 + 等戰鬥結束，共用 questrun.Tools.encounter_off_wait / wait_battle_end）
+  bag1 / bag2 開頭同樣先 quiet（失敗 174）；questrun / petquest 各段交接自己會關遇敵，不重複
   adult      questrun.py run 2999 --after none --dragon                                       失敗 172
   yayoi      questrun.py run 2017 --after none --dragon（NO_DRAGON：實際不吃）                  失敗 172
   hero       questrun.py run 2031 --after none --buy-missing [--drop-reward 巴朵蘭恩 … --drop-items 薩姆吉爾的首飾 …]
@@ -199,6 +200,22 @@ def save_progress(d: dict) -> None:
 
 
 class Tools:
+    def quiet(self) -> int:
+        """開面板前先靜下來（共用 questrun 交接的同一套）：follow 還在跑先停 → 關原地遇敵並等這場打完（Tools.encounter_off_wait）
+        → 畫面還是戰鬥就等到結束（wait_battle_end，最多 BATTLE_WAIT_S）。→ 0 = 靜了；非 0 = 失敗（調用端決定警告或停）。
+        2026-10-15 19:09：p2 在地雷區掛機中被 exp.py 開人物資訊讀經驗，快戰 / 轉場疊上來 → preflight 連 3 次不認得 → 9 + 停手旗標"""
+        import questrun
+        qt = questrun.Tools()
+        if qt.follow_active():
+            qt.follow_stop()
+            if qt.follow_active():
+                return 1
+        try:
+            qt.encounter_off_wait()
+        except RuntimeError:
+            return 2
+        return 0 if questrun.wait_battle_end(qt, '開面板前') else 3
+
     def sub(self, script: str, args, timeout: float = 6 * 3600) -> tuple:
         """子程序跑 tools/gui/<script>（輸出即時印出）→ (退出碼, 最後 80 行)"""
         cmd = [sys.executable, str(HERE / script)] + [str(x) for x in args]
@@ -251,7 +268,18 @@ class Run:
         event(f'← {script} rc={rc}')
         return rc, lines
 
+    def quiet(self, where: str) -> int:
+        """面板類段落（inventory / bag1 / bag2）開頭：關遇敵 + 等戰鬥結束（T.quiet；測試用 Fake 沒有就略過）→ 0 或失敗碼"""
+        q = getattr(self.T, 'quiet', None)
+        if q is None:
+            return 0
+        rc = q()
+        event(f'{where}：開面板前關原地遇敵 + 等戰鬥結束 → ' + ('OK' if not rc else f'失敗 rc={rc}（1 follow 停不掉 / 2 關遇敵失敗 / 3 等不到戰鬥結束）'))
+        return rc
+
     def s_inventory(self) -> int:
+        if self.quiet('盤點'):
+            self.warnings.append('盤點前關遇敵 / 等戰鬥沒成功（照跑）')
         for script, args in seg_cmds('inventory', self.o):
             rc, lines = self.sub(script, args, 1800)
             if rc in PASS:
@@ -281,6 +309,8 @@ class Run:
 
     def s_bag(self, seg) -> int:
         need, names = (NEED1, PURGE1) if seg == 'bag1' else (NEED2, PURGE2)
+        if self.quiet(TITLES[seg]):
+            return self.fail(EXIT_BAG, f'{TITLES[seg]}：開背包前關遇敵 / 等戰鬥結束失敗（請人看畫面）', f'postrebirth.py run --from {seg}')
         rc, lines = self.sub('bag.py', ['list', 'all'], 1200)
         if rc:
             return rc if rc in PASS else self.fail(EXIT_BAG, f'{TITLES[seg]}：bag.py list rc={rc}', fmt('bag.py', ['list', 'all']))

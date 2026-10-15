@@ -326,6 +326,7 @@ uv run --no-project python tools/gui/postrebirth.py plan [--confirm-drop]       
 uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--confirm-buy-bait] [--from 段] [--to 段] [--fresh]
 ```
 - 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031 --buy-missing`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 沒龍王 → **自動改跑 `run 2031 --solo`**〔同一串參數〕，仍失敗才 173）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
+- **開面板前先靜下來（2026-10-15）**：inventory / bag1 / bag2 開頭呼叫 `Tools.quiet()`（follow 停 → `questrun.Tools.encounter_off_wait` 關原地遇敵並等這場打完 → `questrun.wait_battle_end` 畫面還是戰鬥就等，最多 240 秒）；inventory 失敗只警告、bag 失敗 174。起因：p2 地雷區掛機中 exp.py 開人物資訊，快戰畫面疊上來 → 9 + 停手旗標。questrun / petquest 段交接自己會做。`exp.py` 單獨跑也會先 `wait_not_battle()`（只等、不關遇敵；逾時 100）。
 - 收尾 finish 的練功 = `grind.py start`（不帶 --spot = 去練功；`postrebirth.py --spot 點名` 才固定點）。
 - questrun 一律 `--after none`（中段不回練功）、`--dragon`（NO_DRAGON 的任務 questrun 自己不吃；紅暴必吃）。
 - 清背包：bag list 讀空格，**只有空格 < 門檻（① 6、② 8）的人才刪**；名單 = ui/bag.md 白名單（① PURGE1、② 加杉的手環 / 月光的手鐲 / 巴巴洛的許可證），龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪；先 `purge --dry-run`，有 `--confirm-drop` 才實刪；刪完仍不足 → 174（名單外不刪）。四大洞窟產物在 bag.PURGE_FORBID 永不刪。
