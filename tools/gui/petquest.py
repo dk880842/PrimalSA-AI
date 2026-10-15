@@ -20,8 +20,8 @@
     prep        關原地遇敵 + 等戰鬥結束 → 解散隊伍 → pet.py list 記 5 人原戰寵（朵拉比斯，出戰）等級 → 取消鎖定戰寵 → 朵拉比斯 5 人存個人倉庫
                 （寵物欄只剩騎寵 + 4 空格；抓寵 / 練寵都不帶原戰寵）
     catch[N]    每輪每批可抓 = 抓寵者寵物欄空格（最少那人；正常 4）：分批抓到 5 隻，滿了會自動進個人倉庫（沒縮圖、成長字串沒登錄就取不出來）→ 所以一批 ≤ 空格數：
-                pet_catch.py --stages bait（公共倉庫誘餌取 k 拆 k）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 外掛「+」買 k 次（見上）→
-                pet_catch.py --stages setup,wait,rename,register --count k [--reuse-setup：第 2 批起沿用捉寵設置]（wait 第一次輪詢 k×20+20 秒、之後 60 秒）
+                pet_catch.py --count 本輪總隻數 --stages bait（**每輪每人只取 / 拆一次**：公共倉庫取整疊拆出本輪總共要抓的隻數 N〔正常 5〕、其餘存回；背包已剛好 N 個就不取不拆；之後分批直接用背包誘餌）→ 有人誘餌不夠（92）且 --confirm-buy-bait → 每批外掛「+」買 k 次（見上）→
+                pet_catch.py --stages setup,wait,rename,register --count k [--reuse-setup：第 2 批起沿用捉寵設置]（wait 第一次輪詢 k×20+20 秒、之後 60 秒）；最後一批後 pet_catch.py --stages baitback 把背包剩的誘餌存回公共
                 名字為主（2026-10-14 晚）：rename = pet.reset_soft 還原抓寵者寵物欄的成長字串名字（鉛筆 → 確認，免費）→ register = 名字驗證：
                 比抓寵前快照 catch-pre.json，新多出來的寵物名字 = 該抓寵者 --assign 的物種、隻數 = k → 通過；名字是別的物種 → 15、隻數不對 → 17；
                 只有還原失敗 / 名字讀不出的那隻才走舊的成長字串登錄（備援，16 / 17 / 15 照舊）。
@@ -715,20 +715,24 @@ class Run:
         if not plan:
             return self.fail(EXIT_CATCH, f'抓寵者寵物欄沒有空格（{ {r: free_slots(rs.get(r)) for r, _, _ in assign} }）→ 先存 / 丟寵物', 'uv run --no-project python tools/gui/pet.py list --role all'), rs
         event(f'{stage}：{[r for r, _, _ in assign]} 還要 {need} 隻，寵物欄空格 {free} → 分批 {plan}')
+        # 誘餌：這一輪每個抓寵者開始時一次取出並拆出 need 個（其餘存回公共，例 50 → 留 5、存回 45）；之後分批抓直接用背包剩的，不再每批取 / 拆
+        # （2026-10-15 使用者：舊版每批「取 k 拆 k」是錯的；出處 = 實跑紀錄 notes/quest-log.md、notes/plan-dino-katan.md：公共誘餌 50 → DKBO2 取出拆 5、餘 45 存回 → DKBO3 取 45 拆 5、餘 40 存回，
+        # 每個抓寵者一次拆該輪總數 5；分批只影響外掛可抓捕數，不再重複取 / 拆；寵物欄空格不夠時多抓的會自動進個人寵物倉庫，所以才分批）。背包已剛好 need 個（續跑 / 重跑）→ pet_catch bait 不取不拆（冪等）
+        rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'bait'], 1800)
+        short = []
+        if rc and rc != BAIT_ITEM:
+            return self.pass_or(rc, EXIT_CATCH, f'取誘餌失敗 pet_catch rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --assign "{csv_assign(assign)}" --count {need} --stages bait'), rs
+        if rc == BAIT_ITEM:
+            short = [r for r, _, _ in assign if r not in bait_ok_roles(lines)]
+            if not self.o.get('confirm_buy'):
+                return self.fail(EXIT_BAIT, f'公共倉庫誘餌不夠：{short} 各缺（要 {need} 個；每個可抓捕數用「+」買要 {PLUS_COST} 石幣）→ 沒給 --confirm-buy-bait，停手',
+                                 f'確認要買就重跑加 --confirm-buy-bait（或手動補誘餌到公共倉庫後重跑）'), rs
         for bi, k in enumerate(plan):
             last = bi == len(plan) - 1
-            rc, lines = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', k, '--stages', 'bait'], 1800)
-            if rc and rc != BAIT_ITEM:
-                return self.pass_or(rc, EXIT_CATCH, f'取誘餌失敗 pet_catch rc={rc}', f'uv run --no-project python tools/gui/pet_catch.py --assign "{csv_assign(assign)}" --count {k} --stages bait'), rs
-            if rc == BAIT_ITEM:
-                short = [r for r, _, _ in assign if r not in bait_ok_roles(lines)]
-                if not self.o.get('confirm_buy'):
-                    return self.fail(EXIT_BAIT, f'公共倉庫誘餌不夠：{short} 各缺 {k} 個（每個可抓捕數用「+」買要 {PLUS_COST} 石幣）→ 沒給 --confirm-buy-bait，停手',
-                                     f'確認要買就重跑加 --confirm-buy-bait（或手動補誘餌到公共倉庫後重跑）'), rs
-                for r in short:
-                    rc = self.buy_plus(r, k)
-                    if rc:
-                        return rc, rs
+            for r in short:                                             # 沒有誘餌的人每批用「+」買 k 次可抓捕數
+                rc = self.buy_plus(r, k)
+                if rc:
+                    return rc, rs
             self.save_pre(rs)                                           # 抓寵前寵物欄快照（pet_catch register 排除騎寵 / 舊寵物，不必再讀一次）
             reuse = ['--reuse-setup'] if bi > 0 else []                 # 第 2 批起沿用第 1 批的捉寵設置（讀回驗證照舊，review 1013b §2.5-A）
             # 2026-10-14 名字為主：setup,wait → rename（reset-name 抓寵者：成長字串還原成物種名）→ register（名字驗證；名字讀不出的才登錄成長字串）
@@ -765,6 +769,11 @@ class Run:
             self.p[f'caught_{stage}'] = min(got.values())
             self.save()
             event(f'{stage}：第 {bi + 1}/{len(plan)} 批抓 {k} 隻完成（累計 {got}）')
+        rc, _ = self.sub('pet_catch.py', ['--assign', csv_assign(assign), '--count', need, '--stages', 'baitback'], 1800)   # 背包剩的誘餌存回公共
+        if rc in PASS:
+            return rc, rs
+        if rc:
+            event(f'{stage}：剩餘誘餌存回公共失敗 pet_catch rc={rc}（不影響任務；之後手動 bag.py store 或下次取誘餌時會冪等處理）')
         return 0, rs
 
     def reset_names(self, roles) -> int:
@@ -1053,9 +1062,9 @@ def print_plan(qid: int, o: dict) -> None:
         for i, rd in enumerate(q['rounds'], 1):
             sfx = str(i) if len(q['rounds']) > 1 else ''
             a = rd['assign']
-            print(f'  catch{sfx}   每批 ≤ 4 隻（{batches(q.get("count", 5), 4)}）：pet_catch.py --assign "{csv_assign(a)}" --count k --stages bait'
-                  f' → [誘餌不夠且 --confirm-buy-bait：外掛「+」買 k 次，每次讀石幣扣 {PLUS_COST}] → --stages setup,wait,rename,register（第 2 批 --reuse-setup；第一次輪詢 k×20+20 秒、之後 60 秒；'
-                  f'rename = 抓寵者 reset-name、register = 名字驗證，名字讀不出才登錄成長字串）→ pet.py store-many（抓寵者存公共，最後一批留 1）→ list 驗')
+            print(f'  catch{sfx}   每批 ≤ 4 隻（{batches(q.get("count", 5), 4)}）：先一次 pet_catch.py --assign "{csv_assign(a)}" --count {q.get("count", 5)} --stages bait（每人取 / 拆一次，背包已剛好就不動）'
+                  f' → [誘餌不夠且 --confirm-buy-bait：每批外掛「+」買 k 次，每次讀石幣扣 {PLUS_COST}] → --stages setup,wait,rename,register（第 2 批 --reuse-setup；第一次輪詢 k×20+20 秒、之後 60 秒；'
+                  f'rename = 抓寵者 reset-name、register = 名字驗證，名字讀不出才登錄成長字串）→ pet.py store-many（抓寵者存公共，最後一批留 1）→ list 驗 → 最後一批後 pet_catch.py --stages baitback（剩的誘餌存回公共）')
             print(f'  distribute{sfx} pet.py take-many --depot public --plan "{",".join(f"{r}:{sp}" for r, sp in take_plan(a))}" --candidates {species_csv(a)} → list 驗每人每物種 1 隻')
             print(f'  train{sfx}   autoswap on → set-state-many {a[0][2]} 出戰 → verify-battle → grind.py start --spot {TRAIN_SPOT} → 每 {POLL_S:.0f} 秒讀等級'
                   f'（第一次 pet.py list，之後 pet.py levels --slots 任務寵格；連兩輪 ≥ 門檻 {rd["need"]}）→ 關遇敵 → autoswap off → rest-all')

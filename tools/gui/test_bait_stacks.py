@@ -48,7 +48,9 @@ names = ('Session', 'select_role', 'find_item', 'stacks_of', 'stack_qty', 'open_
          '_ocr_join', '_learn_verified', 'goto_page', '_wait', 'slot_xy', 'close_popup', '_fail')
 keep = {k: getattr(bag, k) for k in names}
 clicks = []
+old_dc = bag.DCLICK
 try:
+    bag.DCLICK = False                               # 先驗彈窗流程（雙擊在下一段）
     bag.Session, bag.select_role = _S, lambda r: 0
     bag.find_item = lambda w, **k: 0
     bag.open_depot = lambda d: 0
@@ -85,6 +87,7 @@ try:
         rc = bag.depot_store('DKBO2', rp.BAIT, 'public', want_count=46)
     check('有疊數讀不出的格 → 95 不存', rc == bag.EXIT_VERIFY)
 finally:
+    bag.DCLICK = old_dc
     for k, v in keep.items():
         setattr(bag, k, v)
 
@@ -133,6 +136,87 @@ finally:
     for k, v in keep.items():
         setattr(bag, k, v)
     rp.ocr_lines, uikit.gui, uikit.fail, uikit.is_open = keep_ocr, keep_gui, keep_fail, keep_open
+
+# ---- 雙擊存取（未實機）----
+names = ('Session', 'select_role', 'find_item', 'stacks_of', 'stack_qty', 'open_depot', '_click', 'popup_open', 'popup_name', 'name_match', '_ocr_join',
+         '_learn_verified', 'goto_page', '_wait', 'slot_xy', 'depot_xy', 'close_popup', '_fail', 'read_slot_name', 'slot_occupancy', 'protected')
+keep = {k: getattr(bag, k) for k in names}
+keep_dc, keep_sd = uikit.safe_dclick, bag.DCLICK
+ev = []
+st = {'popup': False, 'bag': {0: rp.BAIT, 1: rp.BAIT}, 'depot': {5: rp.BAIT}, 'dc_effect': True}
+try:
+    bag.DCLICK = True
+    bag.Session, bag.select_role = _S, lambda r: 0
+    bag.find_item = lambda w, depot=False, hint=None, **k: 5 if depot else 1
+    bag.stacks_of = lambda w: [(0, 4), (1, 46)]
+    live = {0: 4, 1: 46}
+    bag.stack_qty = lambda i, w: live.get(i)
+    bag.open_depot = lambda d: 0
+    bag.goto_page = lambda p: ev.append(('page', p)) or 0
+    bag._wait = lambda pred, secs=0: pred()
+    bag.slot_xy, bag.depot_xy = (lambda i: (100 + i, 100)), (lambda i: (500 + i, 100))
+    bag.protected = lambda w: False
+    bag.name_match = lambda a, b, *r: a == b
+    bag.popup_open = lambda: st['popup']
+    bag.close_popup = lambda: st.update(popup=False) or True
+    bag._fail = lambda rc, msg, tag='': rc
+    bag._click = lambda *a, **k: ev.append(('popupclick', a[3])) or True
+    bag.popup_name = lambda w=None: w
+    bag._ocr_join = lambda box, o: '存入 取出'
+    bag._learn_verified = lambda *a: None
+    bag.read_slot_name = lambda i, depot=False: (st['depot'] if depot else st['bag']).get(i, '')
+    bag.slot_occupancy = lambda: [i in st['bag'] for i in range(15)]
+
+    def fake_dclick(x, y, panel, note='', **k):
+        ev.append(('dclick', x, note))
+        if st['dc_effect']:
+            if x >= 500:
+                st['depot'].pop(x - 500, None)
+                st['bag'][2] = rp.BAIT
+            else:
+                st['bag'].pop(x - 100, None)
+        return True
+    uikit.safe_dclick = fake_dclick
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = bag.depot_store('DKBO2', rp.BAIT, 'public', want_count=46)
+    check('雙擊存入：雙擊第 2 格（46 那疊）、驗該格變空、不開彈窗不按存入', rc == 0 and [e[1] for e in ev if e[0] == 'dclick'] == [101] and not any(e[0] == 'popupclick' for e in ev), str(ev))
+    ev.clear()
+    st['bag'] = {0: rp.BAIT, 1: rp.BAIT}
+    st['dc_effect'] = False
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = bag.depot_store('DKBO2', rp.BAIT, 'public', want_count=46)
+    check('雙擊存入無效（格沒變空）→ 退回彈窗 + 存入鈕', any(e[0] == 'dclick' for e in ev) and any(e[0] == 'popupclick' for e in ev), str(ev))
+    ev.clear()
+    st['bag'] = {0: rp.BAIT, 1: '別的道具'}
+    with contextlib.redirect_stdout(io.StringIO()):
+        bag.depot_store('DKBO2', rp.BAIT, 'public')
+    check('雙擊前該格名稱對不上 → 不雙擊、走彈窗', not any(e[0] == 'dclick' for e in ev))
+    # 取出
+    ev.clear()
+    st.update(bag={0: '別的'}, depot={5: rp.BAIT}, dc_effect=True)
+
+    def finder(w, depot=False, hint=None, **k):
+        return 5 if depot else (2 if 2 in st['bag'] else None)
+    bag.find_item = finder
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = bag.depot_take('DKBO2', rp.BAIT, 'public')
+    check('雙擊取出：雙擊倉庫第 6 格、倉庫格清空、背包讀到、不按取出鈕', rc == 0 and any(e[0] == 'dclick' and e[1] == 505 for e in ev) and not any(e[0] == 'popupclick' for e in ev), str(ev))
+    ev.clear()
+    st.update(bag={0: '別的'}, depot={5: rp.BAIT}, dc_effect=False)
+    with contextlib.redirect_stdout(io.StringIO()):
+        bag.depot_take('DKBO2', rp.BAIT, 'public')
+    check('雙擊取出無效 → 退回彈窗取出鈕', any(e[0] == 'dclick' for e in ev) and any(e[0] == 'popupclick' for e in ev), str(ev))
+    ev.clear()
+    st.update(depot={5: rp.BAIT}, dc_effect=True, popup=False)
+    bag.DCLICK = False
+    with contextlib.redirect_stdout(io.StringIO()):
+        bag.depot_take('DKBO2', rp.BAIT, 'public')
+    check('PSA_DEPOT_DCLICK=0 → 不雙擊', not any(e[0] == 'dclick' for e in ev))
+finally:
+    for k, v in keep.items():
+        setattr(bag, k, v)
+    uikit.safe_dclick, bag.DCLICK = keep_dc, keep_sd
 
 print('全部通過' if not fails else f'{fails} 項失敗')
 sys.exit(1 if fails else 0)

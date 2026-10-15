@@ -518,6 +518,16 @@ def safe_click(x: int, y: int, panel: Panel, note: str = '', allow=(), wait_ms: 
     return True
 
 
+def safe_dclick(x: int, y: int, panel: Panel, note: str = '', allow=(), wait_ms: int = 300) -> bool:
+    """面板內雙擊（倉庫 / 背包道具格整疊搬運；2026-10-15，未實機）：同 safe_click 的禁區 + 面板特徵檢查"""
+    check_forbidden(panel, x, y, allow)
+    if not is_open(panel):
+        return False
+    gui('dclick', str(x), str(y), note=note or f'uikit {panel.name} 雙擊 ({x},{y})')
+    gui('wait', str(wait_ms), note='雙擊後等待')
+    return True
+
+
 # ---- OCR ----
 def ocr_lines(box, *opts) -> list:
     """ocr.ps1 → 原始行 [{'text','x','y','zoom'}]（-Zooms 多倍率時每行帶 zoom、y = 截圖座標中心）；逾時 / 失敗回 []"""

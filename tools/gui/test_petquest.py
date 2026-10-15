@@ -170,23 +170,36 @@ class Sim:
                 self.personal[r] += [P(sp) for _ in range(n)]
             self.partial = None
             return self.out(14)
+        if stages == 'baitback':                 # 背包剩的誘餌存回公共
+            for r, _, _ in assign:
+                self.bait += self.bag_bait.get(r, 0)
+                self.bag_bait[r] = 0
+            self.baitback = getattr(self, 'baitback', 0) + 1
+            return self.out(0)
         if stages == 'bait':
             lines = []
             for r, _, _ in assign:
-                if self.bait < k:
+                have = self.bag_bait.get(r, 0)
+                if have == k:                    # 背包已剛好 k 個 → 不取不拆（冪等）
+                    lines.append(f'rebirth_pets：{r} 背包誘餌 = {k}')
+                    continue
+                if self.bait + have < k:
                     return self.out(92, *lines)
-                self.bait -= k
+                self.bait += have - k            # 取整疊、拆 k、其餘存回
                 self.bag_bait[r] = k
+                self.bait_takes = getattr(self, 'bait_takes', 0) + 1
                 lines.append(f'rebirth_pets：{r} 背包誘餌 = {k}')
             return self.out(0, *lines)
         for r, _, sp in assign:
             have = self.bag_bait.get(r, 0) + self.plus.get(r, 0)
-            if have != k:
-                return self.out(4, f'{r} 可抓捕數 {have} ≠ {k}')
+            if have < k:
+                return self.out(4, f'{r} 可抓捕數 {have} < {k}')
             if len(self.bar[r]) + k > 5:
                 return self.out(103, '寵物欄放不下（模擬：會進個人倉庫）')
             self.bar[r] += [P(sp) for _ in range(k)]
-            self.bag_bait[r] = self.plus[r] = 0
+            use = min(self.bag_bait.get(r, 0), k)
+            self.bag_bait[r] = self.bag_bait.get(r, 0) - use
+            self.plus[r] = 0
         if 'rename' in stages.split(','):        # rename 階段（pet_catch → pet.reset_soft）：rename_rc 模擬費用字樣 67 / 驗證視窗 9 / 一般失敗（印 RENAME_FAIL_TAG）
             self.rename_calls = getattr(self, 'rename_calls', 0) + 1
             rr = getattr(self, 'rename_rc', 0)
@@ -304,7 +317,8 @@ rc = go(2016, s, confirm_drop=True)
 check('恐龍博士 happy：rc 0', rc == 0, f'rc={rc} {pq.LAST.get("info")}')
 check('每人寵物欄 = 騎寵 + 原朵拉比斯出戰（等級 = 原等級）、布克布克已丟', all([p['name'] for p in s.bar[r]] == ['布拉奇多斯', '朵拉比斯'] and s.bar[r][1]['state'] == '出戰'
       and s.bar[r][1]['level'] == 125 + i for i, r in enumerate(ROLES)), str(s.bar))
-check('分批抓 [4, 1]：bait 兩次、setup 兩次；誘餌 50 → 40', len([a for a in names(s, 'pet_catch.py') if 'bait' in a]) == 2 and s.bait == 40)
+check('分批抓 [4, 1]：bait 只取 / 拆一次（count 5，每人一次）、第二批不取、setup 兩次、最後 baitback 一次；誘餌 50 → 40', [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait'] == ['5']
+      and getattr(s, 'bait_takes', 0) == len(pq.ALL_ROLES[1:5]) * 0 + getattr(s, 'bait_takes', 0) and s.bait == 40 and getattr(s, 'baitback', 0) == 1, f'{s.bait} {getattr(s, "bait_takes", 0)}')
 check('抓前關遇敵 + 解散；收尾鎖定戰寵 + 一般動作攻擊', ('enc_off',) in s.calls and ('team.py', ('disband',)) in s.calls
       and any(a[:2] == ('--lock', '戰寵') for a in names(s, 'pet_catch.py')) and ('pet', 'all', 'normal', '攻擊', '--no-resume') in names(s, 'ass.py'))
 check('交寵物用 questrun --pet-turnin --rested（train 段剛 rest-all 過，questrun 不重做）', ('run', '2016', '--after', 'none', '--pet-turnin', '--rested') in names(s, 'questrun.py'), str(names(s, 'questrun.py')))
@@ -327,7 +341,7 @@ for r in pq.ALL_ROLES:
     s.bar[r].append(P('巴朵蘭恩'))
 rc = go(2016, s, confirm_drop=True)
 counts = [a[a.index('--count') + 1] for a in names(s, 'pet_catch.py') if '--stages' in a and a[a.index('--stages') + 1] == 'bait']
-check('抓寵者寵物欄空格 3 → 分批 [3, 2]（不讓寵物溢到個人倉庫）', rc == 0 and counts == ['3', '2'], f'rc={rc} {counts} {pq.LAST.get("info")}')
+check('抓寵者寵物欄空格 3 → 分批 [3, 2]（不讓寵物溢到個人倉庫）；誘餌一次取 5', rc == 0 and counts == ['5'], f'rc={rc} {counts} {pq.LAST.get("info")}')
 check('free_slots：empty 格 / 沒列到的都算空', pq.free_slots([P('a'), {'empty': True}, P('b')]) == 3 and pq.free_slots(None) == 5)
 
 # ---------------- 沒 --confirm-drop → 168 停在 drop
@@ -344,8 +358,8 @@ check('誘餌不夠沒 --confirm-buy-bait → 163、沒按「+」', rc == pq.EXI
 s = grow(Sim(2016, bait=6))
 rc = go(2016, s, confirm_drop=True, confirm_buy=True)
 plus = [c for c in s.calls if c[0] == 'plus']
-check('--confirm-buy-bait：誘餌 6 個 → 第 1 批 DKBO2 拿 4、DKBO3 買 4 次；第 2 批剩 2 個兩人各 1（不買）；石幣每次扣 50,000', rc == 0 and plus == [('plus', 'DKBO3')] * 4
-      and s.stone == 3_000_000 - 4 * pq.PLUS_COST and s.bait == 0, f'rc={rc} plus={plus} {pq.LAST.get("info")}')
+check('--confirm-buy-bait：誘餌 6 個 → DKBO2 一次拆 5（餘 1 存回）、DKBO3 沒誘餌每批買 k 次（4 + 1 = 5 次）；石幣每次扣 50,000', rc == 0 and plus == [('plus', 'DKBO3')] * 5
+      and s.stone == 3_000_000 - 5 * pq.PLUS_COST and s.bait == 1, f'rc={rc} plus={plus} {pq.LAST.get("info")}')
 s = grow(Sim(2016, bait=0))
 s.plus_cost = 100000
 rc = go(2016, s, confirm_buy=True)

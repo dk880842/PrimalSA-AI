@@ -5,7 +5,7 @@
   uv run --no-project python tools/gui/pet_catch.py --assign "DKBO2:鯊魚系:克邦凱斯,DKBO3:鯊魚系:加克拉,DKBO4:鯊魚系:加格,DKBO5:鯊魚系:邦恩吉" --count 5 [--stages bait,setup,wait] [--dry-run]
     --assign 角色:系別:物種,…   每人抓一種（誘餌數 = 隻數）
     --count N                  每人抓幾隻（預設 5）= 背包放 N 個誘餌 = 可抓捕數
-    --stages                   bait（公共倉庫取整疊 → 拆 N → 其餘存回）/ setup（外掛捉寵設置 + 勾自動存倉庫 + 勾自動抓寵）/ wait（輪詢到全部抓完）/
+    --stages                   bait（公共倉庫取整疊 → 拆 N → 其餘存回；背包已剛好 N 個就不取不拆）/ baitback（背包剩的誘餌全存回公共，petquest 最後一批後用）/ setup（外掛捉寵設置 + 勾自動存倉庫 + 勾自動抓寵）/ wait（輪詢到全部抓完）/
                                rename（抓寵者寵物欄成長字串名字還原成物種名）/ register（名字驗證 + 備援登錄：見下）；預設全做
   uv run --no-project python tools/gui/pet_catch.py --assign "..." --stages rename,register     # 只還原名字 + 驗證（抓完後補做 / 重做）
   名字為主（2026-10-14 晚，使用者定；實機已驗 reset-name 8 隻布拉奇多斯，本流程離線測試）：
@@ -378,6 +378,20 @@ def run(assign: list, count: int = 5, stages=('bait', 'setup', 'wait', 'rename',
         if tools is None and uikit.is_open(bag.BAGANY):         # 2026-10-12 實機：拆分 / 存入後背包面板仍開著，外掛打不開
             uikit.close_panel(bag.BAGANY, known_open=True)
     roles = [r for r, _, _ in assign]
+    if 'baitback' in stages:                                    # 抓完後背包剩的誘餌存回公共（petquest 最後一批後；一輪只取 / 拆一次，2026-10-15）
+        import contextlib
+        import bag
+        with (bag.Session() if tools is None else contextlib.nullcontext()) as bs:
+            if bs is not None and bs.rc:
+                return bs.rc
+            for role in roles:
+                rc = T.bait_return(role)
+                if rc:
+                    print(f'pet_catch：{role} 剩餘誘餌存回公共失敗 rc {rc}')
+                    return rc
+                print(f'pet_catch：{role} 剩餘誘餌已存回公共（沒有就略過）', flush=True)
+        if tools is None and uikit.is_open(bag.BAGANY):
+            uikit.close_panel(bag.BAGANY, known_open=True)
     if 'setup' in stages:
         rc = ensure_pre(roles, T)
         if rc:

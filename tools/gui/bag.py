@@ -1905,8 +1905,75 @@ def open_depot(sub: str) -> int:
     return _fail(EXIT_PANEL, f'點了 {sub} 子分頁 {SUB_RETRIES + 1} 次底色都沒變', 'bag-depot-sub')
 
 
+DCLICK = os.environ.get('PSA_DEPOT_DCLICK', '1') != '0'     # 雙擊存取（0 = 一律走彈窗 + 按鈕）
+
+
+def _dclick_move(i: int, want: str, take: bool) -> bool:
+    """**雙擊存取（2026-10-15 使用者指示，未實機）**：雙擊道具格整疊搬到另一邊，不開彈窗、不按存入 / 取出鈕。
+    take=True：目前在倉庫頁，雙擊倉庫左半第 i 格；take=False：目前在倉庫頁，雙擊右半（背包）第 i 格。
+    雙擊前先讀該格名稱核對 = want（讀不出 / 不符 → False 走原彈窗流程）；雙擊後驗證：
+    - 取出：倉庫該格名稱不再吻合 want，切回背包頁後背包讀得到 want；
+    - 存入：切回背包頁後該格像素變空（沒像素時退回「背包找不到 want」）。
+    雙擊後若彈出了道具彈窗 / 驗證不到 → 關彈窗、回 False（呼叫端退回原流程；原流程自己再核對，已搬走的會回 92 / 名稱不符，不會重複搬）。
+    成功 → True（存入時已在背包頁）。要拆分的情境不走這裡（雙擊一次搬整疊）。PSA_DEPOT_DCLICK=0 關閉"""
+    if not DCLICK:
+        return False
+    nm = read_slot_name(i, True) if take else read_slot_name(i, False)
+    if not (nm and name_match(nm, want)):
+        return False
+    x, y = depot_xy(i) if take else slot_xy(i)
+    _SHOT.clear()
+    if not uikit.safe_dclick(x, y, DEPOT, f'bag 雙擊{"取出" if take else "存入"}「{want}」第 {i + 1} 格', wait_ms=900):
+        return False
+    if popup_open():                                   # 雙擊變成開了彈窗：不再補點，關掉退回原流程
+        close_popup()
+        return False
+    if take:
+        if not _wait(lambda: not name_match(read_slot_name(i, True) or '', want), 3.0):
+            return False
+        if goto_page('bag'):
+            return False
+        return _wait(lambda: find_item(want) is not None, 4.0)
+    if goto_page('bag'):
+        return False
+
+    def gone():
+        occ = slot_occupancy()
+        return (not occ[i]) if occ else find_item(want) is None
+    return _wait(gone, 4.0)
+
+
+def _take_via_popup(i: int, want: str, kind: str) -> int:
+    """倉庫第 i 格 → 彈窗核對名稱 / 按鈕 → 按「取出」→ 切回背包頁驗證（原流程，已實機）"""
+    if not open_slot_popup(i, depot=True):
+        return _fail(EXIT_PANEL, f'點倉庫第 {i + 1} 格沒開彈窗（空格不要點取出，會進刪除管理）', 'bag-depot-nopopup')
+    nm = popup_name(want)
+    if not name_match(nm, want):
+        close_popup()
+        return _fail(EXIT_NAME, f'倉庫彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不取）', 'bag-depot-name')
+    _learn_verified('depot', i, want)
+    txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
+    if '取出' not in re.sub(r'\s+', '', txt):
+        close_popup()
+        return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn')
+    uikit.sleep(POPUP_SETTLE_S)                      # 彈窗出現動畫期間點「取出」會落空（2026-10-11 實測：彈窗關了但道具沒動）
+    x, y = (722, 662) if kind == 'equip' else (732, 648)
+    _SHOT.clear()                                    # 取出後倉庫 / 背包格內容會變
+    if not _click(x, y, POPUP, f'bag 倉庫取出「{want}」', allow=(), wait_ms=700):
+        return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone')
+    if not _wait(lambda: not popup_open(), 2.5):
+        return _fail(EXIT_VERIFY, '按了取出但彈窗沒關（不重點）', 'bag-depot-verify')
+    rc = goto_page('bag')
+    if rc:
+        return rc
+    # 切回背包頁後格子要約 1～3 秒才更新（2026-10-11 實測：立刻找會找不到而誤判失敗並回滾存回），輪詢最多 4 秒
+    if not _wait(lambda: find_item(want) is not None, 4.0):
+        return _fail(EXIT_VERIFY, f'取出後背包讀不到「{want}」', 'bag-depot-verify')
+    return 0
+
+
 def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consumable', hint: int | None = None) -> int:
-    """倉庫取出 want（整疊）。kind=equip 時取出鈕在 722,662。成功 = 倉庫左半該格不再吻合，且切回背包能找到"""
+    """倉庫取出 want（整疊）。**雙擊取出為主（未實機）**：先 `_dclick_move`，驗證不到才退回彈窗 + 取出鈕。kind=equip 時取出鈕在 722,662。成功 = 倉庫左半該格不再吻合，且切回背包能找到"""
     LAST.clear()
     with Session() as s:
         if s.rc:
@@ -1921,35 +1988,47 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
         if i is None:
             return _fail(EXIT_ITEM, f'{depot} 倉庫找不到「{want}」', 'bag-depot-noitem')
         LAST['depot_slot'] = i                           # 呼叫端（多人取同一物）下一人當 hint
-        if not open_slot_popup(i, depot=True):
-            return _fail(EXIT_PANEL, f'點倉庫第 {i + 1} 格沒開彈窗（空格不要點取出，會進刪除管理）', 'bag-depot-nopopup')
-        nm = popup_name(want)
-        if not name_match(nm, want):
-            close_popup()
-            return _fail(EXIT_NAME, f'倉庫彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不取）', 'bag-depot-name')
-        _learn_verified('depot', i, want)
-        txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
-        if '取出' not in re.sub(r'\s+', '', txt):
-            close_popup()
-            return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn')
-        uikit.sleep(POPUP_SETTLE_S)                      # 彈窗出現動畫期間點「取出」會落空（2026-10-11 實測：彈窗關了但道具沒動）
-        x, y = (722, 662) if kind == 'equip' else (732, 648)
-        _SHOT.clear()                                    # 取出後倉庫 / 背包格內容會變
-        if not _click(x, y, POPUP, f'bag 倉庫取出「{want}」', allow=(), wait_ms=700):
-            return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone')
-        if not _wait(lambda: not popup_open(), 2.5):
-            return _fail(EXIT_VERIFY, '按了取出但彈窗沒關（不重點）', 'bag-depot-verify')
-        rc = goto_page('bag')
+        if _dclick_move(i, want, True):                  # 雙擊取出（2026-10-15，未實機）：成功 = 倉庫該格不再是 want，切回背包頁讀得到 want
+            return 0
+        if DCLICK:                                       # 雙擊失敗可能已切回背包頁 → 回倉庫頁再走彈窗
+            rc = open_depot(depot)
+            if rc:
+                return rc
+        rc = _take_via_popup(i, want, kind)
         if rc:
             return rc
-        # 切回背包頁後格子要約 1～3 秒才更新（2026-10-11 實測：立刻找會找不到而誤判失敗並回滾存回），輪詢最多 4 秒
-        if not _wait(lambda: find_item(want) is not None, 4.0):
-            return _fail(EXIT_VERIFY, f'取出後背包讀不到「{want}」', 'bag-depot-verify')
+    return 0
+
+
+def _store_via_popup(i: int, want: str) -> int:
+    """目前在倉庫頁：點右半（背包）第 i 格 → 彈窗核對名稱 / 按鈕 → 按「存入」→ 切回背包頁（原流程，已實機）"""
+    # 倉庫頁右半是背包，座標同背包頁；面板特徵要用倉庫頁的（背包頁特徵在倉庫頁不吻合，safe_click 會擋）
+    x, y = slot_xy(i)
+    if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
+        return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
+    nm = popup_name(want)
+    if not name_match(nm, want):
+        close_popup()
+        return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
+    _learn_verified('bag', i, want)                  # 倉庫頁右半 = 背包格（同座標同渲染）
+    txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
+    if '存入' not in re.sub(r'\s+', '', txt):
+        close_popup()
+        return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「存入」（不點）', 'bag-store-btn')
+    uikit.sleep(POPUP_SETTLE_S)                      # 同取出：彈窗動畫期間點會落空
+    _SHOT.clear()                                    # 存入後背包 / 倉庫格內容會變
+    if not _click(732, 648, POPUP, f'bag 存入「{want}」', wait_ms=700):
+        return _fail(EXIT_PANEL, '彈窗特徵消失，沒點存入', 'bag-store-gone')
+    if not _wait(lambda: not popup_open(), 2.5):
+        return _fail(EXIT_VERIFY, '按了存入但彈窗沒關（不重點）', 'bag-store-verify')
+    rc = goto_page('bag')
+    if rc:
+        return rc
     return 0
 
 
 def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = False, all_copies: bool = False, pick: str | None = None, want_count: int | None = None) -> int:
-    """背包 want 存入倉庫（彈窗「存入」鈕；整疊）。keep_ok = 背包另有同名道具（拆分後的新疊）時不驗「消失」。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存。
+    """背包 want 存入倉庫（**雙擊存入為主，未實機**：`_dclick_move` 雙擊整疊、驗該格變空，驗證不到才退回彈窗「存入」鈕；整疊）。keep_ok = 背包另有同名道具（拆分後的新疊）時不驗「消失」。沒有 want = 已存過（回 92，呼叫端自行判斷）。PROTECT 名稱一律不存。
     all_copies = 同名多格（不疊加的道具，例：千年龜的殼每個佔一格）一格一格存到背包沒有為止。
     同名多疊（2026-10-15）：pick = 'largest' / 'smallest' 或 want_count = 疊數剛好 N 的那疊（例：存回 46 個那疊、留下 4 個那疊）；
     指定時先逐疊讀疊數（stack_qty，拆分視窗讀完取消）選格，存之前再讀一次選中格疊數，對不上（或讀不出）→ 不按存入、回 95（EXIT_VERIFY）；找不到符合的疊 → 92。
@@ -1987,26 +2066,17 @@ def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = Fal
             rc = open_depot(depot)
             if rc:
                 return rc
-            # 倉庫頁右半是背包，座標同背包頁；面板特徵要用倉庫頁的（背包頁特徵在倉庫頁不吻合，safe_click 會擋）
-            x, y = slot_xy(i)
-            if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
-                return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
-            nm = popup_name(want)
-            if not name_match(nm, want):
-                close_popup()
-                return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不存）', 'bag-store-name')
-            _learn_verified('bag', i, want)                  # 倉庫頁右半 = 背包格（同座標同渲染）
-            txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
-            if '存入' not in re.sub(r'\s+', '', txt):
-                close_popup()
-                return _fail(EXIT_NAME, f'彈窗按鈕列 OCR 是 {txt!r}，沒有「存入」（不點）', 'bag-store-btn')
-            uikit.sleep(POPUP_SETTLE_S)                      # 同取出：彈窗動畫期間點會落空
-            _SHOT.clear()                                    # 存入後背包 / 倉庫格內容會變
-            if not _click(732, 648, POPUP, f'bag 存入「{want}」', wait_ms=700):
-                return _fail(EXIT_PANEL, '彈窗特徵消失，沒點存入', 'bag-store-gone')
-            if not _wait(lambda: not popup_open(), 2.5):
-                return _fail(EXIT_VERIFY, '按了存入但彈窗沒關（不重點）', 'bag-store-verify')
-            rc = goto_page('bag')
+            if _dclick_move(i, want, False):             # 雙擊存入（未實機）：成功時已切回背包頁且該格已空
+                stored += 1
+                LAST['stored'] = stored
+                if keep_ok or not all_copies:
+                    return 0
+                continue
+            if DCLICK:                                   # 雙擊失敗可能已切回背包頁 → 回倉庫頁（open_depot 已在該頁時不動）再走彈窗
+                rc = open_depot(depot)
+                if rc:
+                    return rc
+            rc = _store_via_popup(i, want)
             if rc:
                 return rc
             if keep_ok:

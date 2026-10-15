@@ -23,6 +23,8 @@
 ## 倉庫（2026-10-09 實測）
 **多人批次（2026-10-12）**：`bag.py store|take all|DKBO2,DKBO3 名稱 --depot public [--skip-missing]`（`bag.depot_many`）：外層 `bag.Session` 開一次，逐人點左欄頭像 → 存 / 取 → 下一人；內層 Session 巢狀時不重開不關。pet_catch 取誘餌（取整疊 → 拆分 → 存回）也包在同一個 Session。
 
+**雙擊存取（2026-10-15 使用者指示，未實機）**：`bag.depot_store` / `depot_take` 先 `_dclick_move`（`uikit.safe_dclick` → gui.ps1 `dclick`）直接雙擊道具格整疊搬運，不開彈窗；雙擊前讀該格名稱核對、多疊同名照下面的選格規則選對那疊；雙擊後驗證（取出：倉庫格名稱不再吻合 + 背包讀得到；存入：背包該格像素變空），彈出彈窗 / 驗證不到 → 關彈窗、回倉庫頁、退回原「彈窗 + 存入 / 取出」流程。要拆分的情境仍走拆分。`PSA_DEPOT_DCLICK=0` 關閉。離線 test_bait_stacks.py。
+
 **同名多疊（2026-10-15，未實機，離線 `test_bait_stacks.py`）**：`bag.stack_qty(格, 名)`（彈窗 → 拆分 → 讀數量輸入視窗疊數 → 取消；沒有拆分鈕 = 1）、`bag.stacks_of(名)`（每疊 [(格, 疊數)]）、`bag.pick_stack`（純函式）。`bag.depot_store(..., pick='largest'|'smallest', want_count=N)`：依疊數選格，存之前再讀一次疊數，對不上 / 讀不出 → 不按存入回 95，沒有符合的疊 → 92（根因：舊版 find_item 回第一格，背包有「留 4 個」與「存回 46 個」兩疊時存錯疊）。`rebirth_pets.bait_take` 重跑冪等：背包誘餌總數已 = 要留的數量 → 不取不拆（舊版對剛好那疊仍拆分 → 沒新疊 → 95 / 164 / 175）；單疊 > keep → 拆分後存 `want_count=原疊−keep` 那疊；多疊但沒有剛好 keep 那疊 → 95 停手；疊數讀不出 → 95 不猜。`bait_return` 多疊全存回（all_copies）。
 入口：背包 → 右側「倉庫」1318,467。左半是倉庫格（5×4，倉庫 1/1 頁），右半是背包格（座標同背包）。
 - 分頁：**個人 307,200**（每個角色各自一個）/ **公共 547,200**（全帳號共用，同種道具會疊加，例 5 個角色的誘餌疊成 50）。

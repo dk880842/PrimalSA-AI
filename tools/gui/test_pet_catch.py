@@ -50,6 +50,9 @@ class FakeT:
                 return rc
         return 0
 
+    def bait_return(self, role):
+        return self._r('baitback', role)
+
     def catch_setup(self, role, fam, sp, count):
         return self._r('setup', role)
 
@@ -99,6 +102,8 @@ f = FakeT(fail_at=('bait', 'DKBO2'))
 check('bait 失敗 → rc、不繼續', pet_catch.run(A, stages=('bait',), tools=f) == 7 and f.calls == [('bait_many', ('DKBO2', 'DKBO3')), ('bait', 'DKBO2')])
 f = FakeT()
 check('bait：一次 bait_take_many 帶全部人（背包只開一次）', pet_catch.run(A, stages=('bait',), tools=f) == 0 and f.calls[0] == ('bait_many', ('DKBO2', 'DKBO3')))
+fb = FakeT()
+check('baitback：逐人 bait_return、不碰其他階段', pet_catch.run(A, stages=('baitback',), tools=fb) == 0 and fb.calls == [('baitback', 'DKBO2'), ('baitback', 'DKBO3')], str(fb.calls))
 
 # register_growths：撞到別的物種 → 兩種都記著（登錄檔 v2），推導的唯一對照拿掉
 import tempfile

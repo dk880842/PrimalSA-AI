@@ -48,6 +48,7 @@ for label, seq, want_rc, want_calls in (('61 → 重讀 → 成功', [NONAME, GO
 
 # ---- bag 彈窗 / 找格 / 流程（龍王的守護短彈窗）----
 import bag  # noqa: E402
+bag.DCLICK = False                      # 本檔測彈窗 + 按鈕流程；雙擊存取見 test_bait_stacks.py
 
 # 彈窗特徵：只有第三組（短彈窗）吻合也算開著；全不吻合 = 沒開
 sigs = {'s1': bag.POPUP_SIG, 's2': bag.POPUP_SIG2, 's3': bag.POPUP_SIG3, 's4': bag.POPUP_SIG4}
