@@ -95,7 +95,7 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 250 200; wait 400
   - 沒登錄 = 不知道是什麼：`--pet 布拉奇多斯` 找不到（72，訊息提示 learn-species）、store 拒絕（73）。物種是騎寵 → mountlike，store 要 `--allow-mount-store 布拉奇多斯`（同名、狀態須是等待）。
   - **待實機量**：倉庫卡的縮圖版面沒量（所以倉庫卡只靠字串）；同物種不同個體 / 不同等級的縮圖是否仍相同（假設相同，騎寵位的選取光暈只影響最右欄，已排除）。第一次實跑先 `learn-species DKBO 1 布拉奇多斯 --confirm-growth 49/9/8/2` 再 `list` 看 5 人的 species 是不是都認出來。
 - **store 後驗證（#84）**：倉庫存入後會**重新排序**（舊版驗「新增的那一格名字」會讀到別張卡 → 誤報 76，實際已存入）。新版：寵物欄空格 +1 且倉庫張數 +1（`wait_counts`）→ 再逐張選卡讀名字框（`find_card`，先看新增格再依序其他格；沒名字的比成長字串），倉庫裡找得到該寵物才算成功；張數對但找不到才 76。選卡只是選取，無副作用。
-- **批次存取**：`pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 名,名] [--skip-missing] [--pick first|last]`、`store-many --plan "DKBO2:克邦凱斯×4,DKBO3:加克拉×4"`（每人存不同寵物，面板只開一次、頭像連續換人；×N = 重複 N 隻；與 --role / --pets 擇一；petquest catch 存公共用，2026-10-16，離線測試）、`take-many --role ... --pets ...`、`take --pet 名`（不給格號，現場逐張找）。一個 Session（面板只開關一次）、角色間直接點左欄頭像（`select_role`：黃框剛好只有該角色 + 頭像名字樣板），子分頁（個人 / 公共）每次存取前都現場驗。每隻都走 store / take 同一套驗證，失敗立即停（不重點、後面的角色不做）。騎寵只放行 `--allow-mount-store` 名單內的名字。每隻之間會切回寵物分頁（狀態鈕 / 狀態標在倉庫分頁讀不到），所以「省」的是 preflight / 開關面板 / 重新 session，不是每隻的 list（約 3～5 s）。同物種多隻（新抓的 4 隻）要 `--pick last`（保留第 1 格）。
+- **批次存取**：`pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 名,名] [--skip-missing] [--pick first|last]`、`store-many --plan "DKBO2:克邦凱斯×4,DKBO3:加克拉×4"`（每人存不同寵物，面板只開一次、頭像連續換人；×N = 重複 N 隻；與 --role / --pets 擇一；petquest catch 存公共用，2026-10-16，離線測試）、`take-many --role ... --pets ...`、`take --pet 名`（不給格號，現場逐張找）。一個 Session（面板只開關一次）、角色間直接點左欄頭像（`select_role`：黃框剛好只有該角色 + 頭像名字樣板），子分頁（個人 / 公共）每次存取前都現場驗。每隻都走 store / take 同一套驗證，失敗立即停（不重點、後面的角色不做）。騎寵只放行 `--allow-mount-store` 名單內的名字。**2026-10-16 起 store-many 改連續存**：寵物分頁逐人讀一次寵物欄 + 數字名寵物逐隻點鉛筆還原（不 OCR 確認）→ 倉庫分頁只開一次 → 倉庫分頁內直接換頭像，每人由格號大往小（前面的格不補位位移）每隻：點寵物 → 讀名字核對（硬守門）→ 存入鈕底色 → 點存入 → 等寵物欄空格 / 倉庫張數 +1（像素）→ 全部人存完才切回寵物分頁逐人只數空格數 + 第 1 格騎寵縮圖。不再每隻切回寵物分頁、不逐隻到倉庫找卡 / 縮圖簽名 / 按鈕 OCR（要驗用 depot-list）。每人倉庫張數在該人切頭像後現讀（個人倉庫每人不同）。離線測試，未實機。同物種多隻（新抓的 4 隻）要 `--pick last`（保留第 1 格）。
 - 退出碼補充：72 也代表「倉庫裡逐張看不到」（take --pet / take-many 沒給 `--skip-missing`）。
 
 ## 批次取出 / 不准盲取（2026-10-12；實機驗過 take-many 2 人 / 倉庫分頁內換頭像 / store-many --skip-missing）
@@ -114,7 +114,7 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 250 200; wait 400
   - 選卡（`_find_target_card`）：名字吻合的卡讀等級，相等就取；**讀不到或讀成目標的尾巴（123 → 23 / 3，`level_uncertain`）= 不確定，不當「不是」**；看完沒有相等的 → 不確定的卡逐張加讀，讀到相等才取；
     仍不確定 → 只有「這名字全倉庫就這一張」才取（取出後切寵物分頁驗等級，不符 76），否則 72 不取（訊息列出每張讀到的等級）。`--index N --expect-level` 取前讀到尾巴也不擋（取出後驗）。
 - 實測（actions.log 2026-10-12 07:58～08:01）：舊流程每取一隻 = 開面板 → 頭像 → 逐格讀 2～4 格 → 倉庫分頁 → 子分頁 → 逐張找卡 → 取出 → 選新格 → 寵物分頁 → 關，12～14 下點擊、15～20 s。新流程（假面板）4 人各取 1 隻共 23 下（開 / 倉庫分頁 / 子分頁 / 切回 / 關各 1 + 每人頭像 1 + 找卡 + 取出 + 選新格），預估每隻 7～9 s（含找卡；快取命中時找卡 1 下）。
-- `store-many`：每個角色只完整讀一次寵物欄，存走一隻後用 `shift_slots` 推算（後面往前補位），`_store_body` 選格後重讀名字 / 狀態核對；推算不符才重讀一次。
+- `store-many`（2026-10-16 起）：每個角色只完整讀一次寵物欄，由後往前存（不位移、不用 `shift_slots` 推算），整段在倉庫分頁內連續做；單隻 `store` 仍走 `_store_body` 的完整驗證。
 - `set-state-many --role all 朵拉比斯 出戰`：一個 session 逐人改狀態（rebirth_pets ride / battle 也改用它）。
 
 

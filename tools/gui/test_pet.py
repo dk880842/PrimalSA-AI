@@ -1122,8 +1122,11 @@ check('set-state-many 騎寵沒 --allow-mount → 73、不點', rc == 73 and len
 fresh_tpl()
 g = new(pets=mk(), depot=mkdp())
 rc, out, err = run(pet.store_many, 'DKBO,DKBO2', ['迪基格斯', '魯尼帖斯'], 'personal')
-check('store-many 每人 2 隻：每人頭像只點 1 次（第 2 隻用推算的欄位、選格重讀核對）', rc == 0 and depot_free(g) == 4
-      and g.clicks.count((83, petmatch.AVATAR_Y['DKBO'])) == 1 and g.clicks.count((83, petmatch.AVATAR_Y['DKBO2'])) == 1, f'rc={rc} {err[-300:]}')
+check('store-many 每人 2 隻：存 4 隻、倉庫分頁只開 1 次、寵物分頁只切回 1 次（全存完才切）、存入鈕 4 下', rc == 0 and depot_free(g) == 4
+      and g.clicks.count(pet.DEPOT_TAB_XY) == 1 and g.clicks.count(pet.PET_TAB_XY) == 1 and g.clicks.count(pet.DEPOT_BTN_XY) == 4, f'rc={rc} {err[-300:]}')
+iT = g.clicks.index(pet.PET_TAB_XY)
+check('  切回寵物分頁之前：連續 4 下存入鈕都在倉庫分頁內（倉庫分頁後、寵物分頁前）', g.clicks.index(pet.DEPOT_TAB_XY) < min(i for i, c in enumerate(g.clicks) if c == pet.DEPOT_BTN_XY)
+      and max(i for i, c in enumerate(g.clicks) if c == pet.DEPOT_BTN_XY) < iT)
 fresh_tpl()
 g = new(pets=mk_pets(DKBO=[unn(0, '騎乘'), {'name': '朵拉比斯', 'state': '出戰', 'level': 1}, None, None, None]))
 rc, out, err = run(pet.store_many, 'DKBO', ['摩娜西普'], 'public', skip_missing=True)

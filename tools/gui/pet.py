@@ -10,7 +10,7 @@
   uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N --expect 迪基格斯|--expect-growth 35/7/3/8|--expect-level 126   # --index 一定要配 --expect-*（不准盲取）
   uv run --no-project python tools/gui/pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 瑪斯貝卡] [--skip-missing] [--pick first|last]
   uv run --no-project python tools/gui/pet.py take DKBO --depot public --pet 朵拉比斯        # 不給格號：現場逐張選卡讀名字找（沒名字的卡靠成長字串登錄檔）
-  uv run --no-project python tools/gui/pet.py store-many --plan "DKBO2:克邦凱斯×4,DKBO3:加克拉×4" --depot public --pick last   # 每人存不同寵物：面板開一次、左欄頭像連續換人（petquest catch 存公共用）
+  uv run --no-project python tools/gui/pet.py store-many --plan "DKBO2:克邦凱斯×4,DKBO3:加克拉×4" --depot public --pick last   # 每人存不同寵物：面板開一次、倉庫分頁只開一次、在倉庫分頁內直接換頭像連續存、全存完才回寵物分頁只數格數（2026-10-16，不逐隻確認；petquest catch 存公共用）
   uv run --no-project python tools/gui/pet.py take-many --role all --pets 朵拉比斯 [--depot personal|public] [--skip-missing]
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO2:克邦凱斯,DKBO3:#35/7/3/8,DKBO:朵拉比斯@126"   # 每人不同目標
   uv run --no-project python tools/gui/pet.py take-many --depot public --plan "DKBO4:#34/7/4/8~7,DKBO5:#31/7/4/8~8"   # ~N = 格號提示（撞號 / 同字串多張時指定哪張）
@@ -34,7 +34,7 @@
     - 存 / 取後核對用卡片字形（petglyph.read_cards 整頁一次、0 點擊）：存回後找卡 find_card(glyph_first)——字形讀得出且名字 / 成長字串吻合就當找到（info['glyph_verified']）；
       take 找目標卡 _find_target_card——字形吻合的卡直接挑、不逐張選卡（info['glyph_pick']；有等級目標仍逐張）；字形讀不出 / 不吻合 / 取前名字框核對不符 → 退回舊的逐張選卡
       （glyph_retry），所以字形讀錯只會慢、不會取錯。取前核對、取後 / 存後驗名字、寵物欄 / 倉庫張數核對全部照舊。
-  還原名字（2026-10-14 使用者實測 + 實機量；同日使用者簡化流程）：等鉛筆特徵 → 點鉛筆 700,180 → 固定等 1 秒 → 點確認 607,520（「修改名字」視窗特徵守門，不在不點 → 66）→ 視為成功
+  還原名字（2026-10-14 使用者實測 + 實機量；同日使用者簡化流程）：等鉛筆特徵 → 點鉛筆 700,180 → 等視窗特徵一到（最多 1 秒）就點確認 607,520（「修改名字」視窗特徵守門，不在不點 → 66）→ 視為成功
     （不再讀標題 / 費用字樣 / 輸入框、不重讀名字、不登錄物種）。單按確認不花錢，花錢一定要第二個提示窗：按確認後正常零成本等視窗關；出現 CONFIRM 提示窗 / 視窗沒關 →
     讀字、按取消 822,520 / 提示的取消，有費用字樣 67 停手（鐵則 3），其他 66；絕不點提示窗的確定。
     時機：store / store-many 存倉前名字框是成長字串 → 先還原再存（失敗不存；--no-rename 關）；depot-fix-names 修倉庫卡（寵物欄沒空格 → 跳過列在 skipped）；
@@ -2626,56 +2626,142 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
             rc = uikit_fail(EXIT_FORBID, f'拒絕存倉：{nm} 是 / 像騎寵，--allow-mount-store 沒列它；零點擊')
             return _out(rc, info, t0, '騎寵不能存倉')
     ctx = load_ctx(learn)
-    final = 0
     with Session(pause, need_calm=True) as s:
         if s.rc:
             return _out(s.rc, info, t0)
         try:
-            for r, names in plan_roles:
-                slots, predicted = None, False                         # 每個角色只完整讀一次寵物欄（每格約 3.5 s）；存走一隻後用 shift_slots 推算，_store_body 選格後會重讀核對
-                for nm in names:
-                    op = {'role': r, 'pet': nm, 'depot': depot, 'clicked': False}
-                    info['ops'].append(op)
-                    _back_to_pet_tab()
-                    for attempt in range(2):
-                        rc = 0
-                        if slots is None:
-                            rc, slots = list_role(r, ctx)
-                            predicted = False
-                        if rc:
-                            break
-                        sl, why = find_slot(slots, nm, None, pick)
-                        unknown = [x for x in slots if (x.get('unnamed') or x.get('unreadable')) and not x.get('species') and not x.get('name')
-                                   and not (x.get('state') == '騎乘' and nm not in uikit.MOUNTS)]   # 名字框讀不出的格也算不知道是什麼 → 不略過（2026-10-14 40/9/6/5）；騎乘中的不可能是非騎寵目標（2026-10-12 DKBO2 騎寵 ?(49/9/7/2)）
-                        if sl is None and skip_missing and not predicted and not unknown:
-                            op['skipped'] = why
-                            print(f'pet：{r} 沒有 {nm}，略過')
-                            break
-                        if sl is None and predicted:                   # 推算的欄位找不到：重讀一次再判斷
-                            slots = None
-                            continue
-                        rc = _store_body(r, nm, depot, sl['slot'] if sl else None, allow_slot1, ctx, op, nm if nm in ams else None, pre=(0, slots))
-                        if rc in (EXIT_NAME, EXIT_FORBID, EXIT_SELECT) and not op['clicked'] and predicted and attempt == 0:
-                            log(f'{r}：推算的寵物欄與現場不符（{op.get("msg")}），重讀一次')
-                            uikit.mark('store-many relist')
-                            slots = None
-                            _back_to_pet_tab()
-                            op.pop('msg', None)
-                            continue
-                        break
-                    if op.get('skipped'):
-                        continue
-                    op['rc'] = rc
-                    if rc:
-                        final = rc
-                        break
-                    slots, predicted = shift_slots(slots, op['slot']), True
-                if final:
-                    break
+            final = _store_all_roles(plan_roles, depot, allow_slot1, ams, skip_missing, pick, ctx, info)
         finally:
             save_ctx(ctx)
             _back_to_pet_tab()
     return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
+
+
+def _batch_targets(r: str, names: list, slots: list, allow_slot1: bool, ams: list, skip_missing: bool, pick, info: dict) -> tuple:
+    """一次讀好的寵物欄 → (要存的 [(op, slot dict)], rc)。同一格不重複選；每隻過 guard_store；找不到且沒 --skip-missing → 72"""
+    todo, used = [], set()
+    for nm in names:
+        op = {'role': r, 'pet': nm, 'depot': info['depot'], 'clicked': False}
+        info['ops'].append(op)
+        avail = [{'slot': x['slot'], 'empty': True} if x['slot'] in used else x for x in slots]
+        sl, why = find_slot(avail, nm, None, pick)
+        unknown = [x for x in avail if (x.get('unnamed') or x.get('unreadable')) and not x.get('species') and not x.get('name')
+                   and not (x.get('state') == '騎乘' and nm not in uikit.MOUNTS)]
+        if sl is None and skip_missing and not unknown:
+            op['skipped'] = why
+            print(f'pet：{r} 沒有 {nm}，略過')
+            continue
+        if sl is None:
+            op['msg'] = why
+            op['rc'] = uikit_fail(EXIT_NAME, why)
+            return todo, op['rc']
+        reason = guard_store(sl, allow_slot1, nm if nm in ams else None)
+        if reason:
+            op['msg'] = f'拒絕存倉：{reason}'
+            op['rc'] = uikit_fail(EXIT_FORBID, op['msg'])
+            return todo, op['rc']
+        op['slot'] = sl['slot']
+        used.add(sl['slot'])
+        todo.append((op, sl))
+    return todo, 0
+
+
+def _store_all_roles(plan_roles: list, depot: str, allow_slot1: bool, ams: list, skip_missing: bool, pick, ctx: dict, info: dict) -> int:
+    """多人連續存（2026-10-16 使用者：面板一次開、倉庫分頁一次開、不回寵物分頁、不逐隻確認）：
+    A 寵物分頁：逐人切頭像、讀一次寵物欄、把成長字串（數字）名字的寵物逐隻點鉛筆還原（不 OCR 確認）；
+    B 倉庫分頁只開一次：逐人在倉庫分頁內直接切頭像，由後往前（前面的格不會補位位移）每隻 點寵物 → 名字核對 → 存入鈕底色 → 點存入 → 等寵物欄 / 倉庫張數 +1（像素）；
+    C 全部存完才回寵物分頁，逐人只數寵物欄空格 + 第 1 格騎寵縮圖。不逐隻到倉庫找卡（要驗用 depot-list）"""
+    jobs = []                                                      # [(角色, todo, 讀到的 slots)]
+    for r, names in plan_roles:
+        rc, slots = list_role(r, ctx)
+        if rc:
+            return rc
+        todo, rc = _batch_targets(r, names, slots, allow_slot1, ams, skip_missing, pick, info)
+        if rc:
+            return rc
+        for op, sl in todo:                                        # 還原名字（寵物分頁；不重讀、不確認）
+            if RENAME_ON and not sl.get('name') and sl.get('unnamed') and slot_ident(sl) == op['pet']:
+                rc = select_slot(sl['slot'] - 1, scan_frames() or {'sel': [False] * 5})
+                if not rc:
+                    rc = rename_selected(r, sl['slot'] - 1, sl, ctx, op)
+                if rc:
+                    op['msg'] = f'存倉前還原名字失敗 rc={rc}，不存'
+                    op['rc'] = rc
+                    return rc
+                sl['name'], sl['renamed'] = op['pet'], True
+        if todo:
+            pre_mount = uikit.px(thumb_pts(0))
+            if pre_mount is None:
+                return uikit_fail(EXIT_PANEL, '讀不到縮圖簽名')
+            jobs.append((r, todo, sum(1 for x in slots if x.get('empty')), pre_mount))
+    if not jobs:
+        return 0
+    expect = {}                                                    # 角色 → 存完後寵物欄空格數
+    rc, d = open_depot(depot)                                      # 倉庫分頁只開這一次
+    if rc:
+        return rc
+    for r, todo, pre_empty, pre_mount in jobs:
+        rc = select_role(r, ctx)                                   # 倉庫分頁內直接換頭像
+        if rc:
+            return rc
+        rc, d = open_depot(depot)                                  # 換人後仍在倉庫分頁 / 子分頁就不點（open_depot 先看特徵）；個人倉庫每人不同，順便讀張數
+        if rc:
+            return rc
+        n = len(todo)
+        free = sum(d['empty'])
+        if free < n:
+            todo[0][0]['msg'] = f'{r} 的 {depot} 倉庫只剩 {free} 格，要存 {n} 隻，沒點存入鈕'
+            todo[0][0]['rc'] = uikit_fail(EXIT_FULL, todo[0][0]['msg'])
+            return EXIT_FULL
+        depot_n = 20 - free
+        for op, sl in sorted(todo, key=lambda t: -t[1]['slot']):
+            i, want = sl['slot'] - 1, op['pet']
+
+            def bad(rc, msg, op=op):
+                op['msg'], op['rc'] = msg, rc
+                return uikit_fail(rc, msg)
+            f = scan_frames()
+            if f is None:
+                return bad(EXIT_PANEL, '讀不到面板像素')
+            rc = select_slot(i, f)                                 # 倉庫分頁左側的寵物欄一樣能點
+            if rc:
+                return bad(rc, f'倉庫分頁中選不到第 {i + 1} 格')
+            ident = read_ident(ctx)
+            if not ident_confirms(ident, sl, 'slot', i, ctx):
+                return bad(EXIT_DEPOT, f'倉庫分頁中選取的是 {ident["name"] or ident["growth"]}（要 {want}），不點存入')
+            d = scan_depot()
+            if d is None or not d['sig'] or d['btn'] != 'store':
+                uikit.snap('pet-store-btn')
+                return bad(EXIT_DEPOT, f'存入鈕底色不是 store（{d and d["btn"]}）；不點')
+            if not click(DEPOT_BTN_XY[0], DEPOT_BTN_XY[1], f'pet store {r} {want} → {depot}'):
+                return bad(EXIT_PANEL, '面板特徵不在，沒點存入鈕')
+            op['clicked'] = True
+            pre_empty, depot_n = pre_empty + 1, depot_n + 1
+            ok, f2, d2 = wait_counts(depot, pre_empty, depot_n, op, allow_confirm=True)
+            if not ok:
+                path = uikit.snap('pet-store-nochange')
+                return bad(EXIT_VERIFY, f'點了存入但寵物欄 / 倉庫張數沒照預期變（寵物空格 {f2 and sum(f2["empty"])}→要 {pre_empty}；倉庫 {d2 and 20 - sum(d2["empty"])}→要 {depot_n}）；不重點，請人看截圖{"：" + path if path else ""}')
+            op['rc'] = 0
+            if sl.get('unnamed') and sl.get('species') and petmatch.learn_species(species_reg(ctx), sl['species'], None, sl['unnamed']):
+                ctx['rdirty'] = True
+            print(f'pet：{r} 的 {want}（原第 {sl["slot"]} 格）存入{"個人" if depot == "personal" else "公共"}倉庫')
+        expect[r] = pre_empty
+    if not goto_pet_tab():                                         # 全部存完才回寵物分頁驗一次（只數格數）
+        return uikit_fail(EXIT_DEPOT, '存完切不回寵物分頁')
+    for r, todo, _, pre_mount in jobs:
+        rc = select_role(r, ctx)
+        if rc:
+            return rc
+        f = scan_frames()
+        if f is None or sum(f['empty']) != expect[r]:
+            return uikit_fail(EXIT_VERIFY, f'{r} 存 {len(todo)} 隻後寵物欄空格數 {f and sum(f["empty"])}，預期 {expect[r]}')
+        if not any(sl['slot'] == 1 for _, sl in todo):
+            m = uikit.px(thumb_pts(0))
+            if m is None or not mount_same(pre_mount, m):
+                uikit.snap('pet-store-mount')
+                return uikit_fail(EXIT_VERIFY, f'{r} 存入後第 1 格（騎寵）縮圖變了！請人立刻看截圖確認')
+    uikit.mark('store batch done')
+    return 0
 
 
 def parse_plan(text: str) -> list | None:
@@ -3102,7 +3188,7 @@ def rename_selected(role: str, i: int, cur: dict, ctx: dict, info: dict) -> int:
         return uikit_fail(EXIT_PANEL, f'{tag}：寵物面板特徵不在，沒點鉛筆')
     info['rename_clicked'] = True
     uikit.mark('rename pencil')
-    uikit.sleep(RENAME_OPEN_S)
+    wait_sig(RENAME_SIG, RENAME_OPEN_S)                                  # 視窗特徵一到就按確認，不固定睡滿
     if not uikit.safe_click(RENAME_OK_XY[0], RENAME_OK_XY[1], RENAME, note=f'pet 改名 {tag} 輸入框留空 → 確認'):
         if uikit.is_open(CONFIRM):
             return _rename_popup(info, f'{tag}：點了鉛筆後出現的是提示窗')
