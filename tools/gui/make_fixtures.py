@@ -203,6 +203,37 @@ def make_popup_fixture() -> list:
     return miss
 
 
+# ---- 背包刪除管理：刪除模式 / 刪除確認窗（screen_sigs.bag_delmode / bag_delok；2026-10-15 p1 purge 誤設驗證停手旗標）----
+# 檔名 → 期望 'delmode' / 'delok' / None（負例：兩者都不能中）；人工看圖確認
+BAG_DEL_SRC = {
+    # 刪除確認窗（綠字清單 1～5 行；1792078474 有 EXP 橫幅、問句蓋到舊 DELCONFIRM 點 690,470）
+    'del2.png': 'delok', 'watch-alerts/unknown-1792078474.png': 'delok', 'watch-alerts/unknown-1792078745.png': 'delok',
+    'ui-log/032408-bag-purge-list-DKBO.png': 'delok', 'ui-log/062510-bag-purge-noconfirm.png': 'delok', 'ui-log/062858-bag-purge-list-DKBO3.png': 'delok',
+    'ui-log/063112-bag-purge-list-DKBO5.png': 'delok', 'ui-log/160211-bag-purge-list-DKBO2.png': 'delok', 'ui-log/160515-bag-purge-list-DKBO2.png': 'delok',
+    # 刪除模式（紅框 + 刪除選中 / 取消刪除）
+    'del0.png': 'delmode', 'del3.png': 'delmode', 'ui-log/233248-bag-purge-gone.png': 'delmode',
+    # 負例：同一個「提示」單鈕窗框（網路 / 任務條件不達標 / 疊在任務詳情上）、創角確認窗、普通背包、壓暗寵物上的確定 / 取消窗
+    'kr322.png': None, 'net1.png': None, 'qd-after.png': None, 'clients/PrimalSA3/watch-alerts/unknown-1792077376.png': None,
+    'del4.png': None, 'ui-log/032112-bag-purge-list-DKBO.png': None, 'ui-log/022843-bag-noitem.png': None, 'c470.png': None,
+}
+
+
+def make_bag_del_fixture() -> list:
+    """bag_del_px.json：points = watch 實際讀的全部點（points + annot_points + loading_points）；每張存 hex 與期望。回缺的檔案"""
+    pts = list(dict.fromkeys(screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()))
+    samples, miss = [], []
+    for rel, want in BAG_DEL_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = {tuple(map(int, k.split(','))): tuple(v) for k, v in grab(p, pts).items()}
+        samples.append({'f': rel, 'expect': want, 'px': ''.join('%02x%02x%02x' % px[pt] for pt in pts)})
+    write('bag_del_px.json', {'note': '背包刪除模式 / 刪除確認窗樣本（2026-10-15）：expect = delmode / delok / null（負例）；points = watch 讀的全部點',
+                              'points': [list(p) for p in pts], 'samples': samples})
+    return miss
+
+
 # ---- 追蹤列表 ▲ / ▼ 捲動箭頭（quest.classify_arrows；2026-10-12 解救老爺爺冗餘捲動修正）----
 # 檔名 → 期望 {'up','down'}（None = 遮罩 / 不可信）；人工看圖確認
 QUESTLIST_SRC = {
@@ -315,11 +346,11 @@ def make_world_fixture() -> list:
 
 
 def main() -> int:
-    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge
+    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del）
         names = sys.argv[sys.argv.index('--only') + 1].split(',')
         for n in names:
             miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture,
-                    'panel': make_panel_fixture, 'popup': make_popup_fixture}[n]()
+                    'panel': make_panel_fixture, 'popup': make_popup_fixture, 'bag_del': make_bag_del_fixture}[n]()
             print(n, '缺', miss) if miss else None
         return 0
     done, skipped = [], []
@@ -376,7 +407,8 @@ def main() -> int:
     done.append('popup_px.json' + (f'（缺 {miss_pp}）' if miss_pp else ''))
     miss_ql = make_questlist_fixture()
     done.append('questlist_px.json' + (f'（缺 {miss_ql}）' if miss_ql else ''))
-    for n, fn in (('bag_slots_px.json', make_bag_slots_fixture), ('leader_badge_px.json', make_leader_badge_fixture), ('world_px.json', make_world_fixture)):
+    for n, fn in (('bag_slots_px.json', make_bag_slots_fixture), ('leader_badge_px.json', make_leader_badge_fixture), ('world_px.json', make_world_fixture),
+                  ('bag_del_px.json', make_bag_del_fixture)):
         m = fn()
         done.append(n + (f'（缺 {m}）' if m else ''))
     print('完成：', done)

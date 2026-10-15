@@ -61,6 +61,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import charstate  # noqa: E402
 import petmatch  # noqa: E402
+import screen_sigs  # noqa: E402
 import uikit  # noqa: E402
 
 SRC = 'bag'
@@ -366,7 +367,14 @@ class Session:
 
     def __enter__(self):
         self.was_open = uikit.is_open(BAGANY)            # 已開著（外層 Session / 呼叫端開的）就不再 preflight：背包開著時 screen() 會判 unknown，巢狀進入會誤報驗證視窗
-        if not self.was_open:
+        if not self.was_open and stuck_in_delmode():
+            # 上次 purge 中斷、背包停在刪除模式 / 刪除確認窗（BAGANY 外框不認得）：舊版會走 preflight → 連 3 次 unknown → 誤設驗證停手旗標（10-15 23:33）
+            log('背包停在刪除模式 / 刪除確認窗（上次中斷？）→ X / 取消刪除，回普通背包頁（不按確定）')
+            if not _leave_delmode():
+                self.rc = _fail(EXIT_PANEL, '背包停在刪除模式，按 X / 取消刪除後仍回不到普通背包頁', 'bag-delmode-stuck')
+                return self
+            self.opened = True                           # 殘留的面板當成自己開的：結束時關掉
+        elif not self.was_open:
             self.rc = uikit.preflight(SRC)
             if self.rc:
                 return self
@@ -402,6 +410,10 @@ def close_leftover(dialog_esc: bool = True) -> str:
         if popup_open():
             close_popup()
             did.append('popup')
+            continue
+        if stuck_in_delmode():                            # 刪除模式 / 刪除確認窗：BAGANY 不認得、✕ 不知道會怎樣 → 先 X / 取消刪除（不按確定）
+            _leave_delmode()
+            did.append('delmode')
             continue
         if uikit.is_open(BAGANY):
             uikit.close_panel(BAGANY, known_open=True)
@@ -1217,13 +1229,35 @@ def item_slots(want: str) -> list:
 # 只有一顆「確定」715,557、右上 X 947,208（X 後仍在刪除模式、勾選保留）。**968,688 在普通模式是「整理背包」**，只准在 DELMODE 特徵吻合時點。
 DEL_BTN, DEL_CANCEL = (968, 625), (968, 688)
 DELOK_XY, DELX_XY = (715, 557), (947, 208)
-DELMODE_SIG = [(1280, 113, 197, 70, 43, 30), (700, 350, 245, 69, 82, 26), (1232, 350, 245, 69, 82, 26), (965, 192, 241, 65, 82, 26),
-               (1150, 688, 191, 127, 63, 26), (1150, 625, 177, 70, 38, 30)]     # 取消刪除（金）/ 刪除選中右段；避開底部關閉列（同 CHROME）
-DELMODE = uikit.Panel('BAGDEL', None, DELMODE_SIG, None, esc_close=False, forbidden={'delete_sel': FORBID['delete_mgr'], 'expand': FORBID['expand']})
-# 提示窗：X 紅、確定鈕藍（兩側）、底色米黃；560,545 是米黃（丟寵等兩顆鈕的提示窗這裡是藍「確定」→ 不會混淆 pet.CONFIRM）
-DELCONFIRM_SIG = [(946, 208, 197, 73, 49, 24), (645, 557, 57, 101, 159, 24), (785, 557, 56, 104, 163, 24), (690, 470, 243, 215, 179, 24),
-                  (520, 300, 237, 211, 175, 24), (560, 545, 245, 213, 179, 24)]
-DELCONFIRM = uikit.Panel('BAGDELOK', None, DELCONFIRM_SIG, DELX_XY, esc_close=False)
+# 特徵定義在 screen_sigs（watch 同一份，2026-10-15 改）：
+#  刪除模式 = 紅框左 / 右 / 下緣 + 取消刪除（金）/ 刪除選中右段 + ✕，7 中 6；舊點 965,192（紅框上緣）會被快速戰鬥的「獲得 EXP」橫幅蓋住
+#  （10-15 23:32 DKBO2 勾到第 4 格判「刪除模式特徵消失」rc 90、取消刪除也沒按 → 背包卡在刪除模式 → 重跑時 preflight 誤設驗證停手旗標）。
+#  提示窗 = 「提示」單鈕窗框 8 中 7（避開清單 / 問句：舊點 690,470 在 4 行清單時是問句白字、520,300 在 5 行時是綠字）；
+#  560,545 是米黃（丟寵等兩顆鈕的提示窗這裡是藍「確定」→ 不會混淆 pet.CONFIRM）。單鈕窗框和網路 / 任務提示窗相同，按確定前靠清單 OCR 核對。
+DELMODE_SIG = screen_sigs.BAG_DELMODE_SIG
+DELMODE = uikit.Panel('BAGDEL', None, DELMODE_SIG, None, esc_close=False, forbidden={'delete_sel': FORBID['delete_mgr'], 'expand': FORBID['expand']},
+                      is_open_fn=lambda: uikit.sig_need(DELMODE_SIG, screen_sigs.BAG_DELMODE_NEED))
+DELCONFIRM_SIG = screen_sigs.BAG_DELOK_FRAME
+DELCONFIRM = uikit.Panel('BAGDELOK', None, DELCONFIRM_SIG, DELX_XY, esc_close=False,
+                         is_open_fn=lambda: uikit.sig_need(DELCONFIRM_SIG, screen_sigs.BAG_DELOK_NEED))
+
+
+def _delok_strict() -> bool:
+    """嚴格的刪除確認窗（screen_sigs.bag_delok：單鈕窗框 + 壓暗的刪除模式背包 + 背包標題壓暗 + 綠字清單）。
+    清殘留時用：只靠窗框會把網路 / 任務提示窗也當成刪除確認窗去點 X"""
+    pts = screen_sigs.delok_points()
+    cols = uikit.px(pts)
+    return bool(cols) and screen_sigs.bag_delok(dict(zip(pts, cols)))
+
+
+DELOK_STRICT = uikit.Panel('BAGDELOK_STRICT', None, None, None, esc_close=False, is_open_fn=_delok_strict)
+
+
+def stuck_in_delmode() -> bool:
+    """背包停在刪除模式或刪除確認窗（Session 開頭 / close_leftover 清殘留用）"""
+    return uikit.is_open(DELMODE) or uikit.is_open(DELOK_STRICT)
+
+
 DEL_LIST_BOX = (500, 300, 430, 160)
 # 提示窗清單 OCR（2026-10-14 根因）：清單是亮綠字 (40,240,0)、置中、名稱會在行尾斷開（「…|龍」+「的魅力之笛*1|…」），3 種以上就 2～3 行。
 # 舊版 `-Dark 0` 不二值化、每個 zoom 各叫一次 ocr.ps1：Windows OCR 常整行漏讀（062858 樣本 zoom 2 / 3 / 5 都漏中間行）→ 條數不符 96；
@@ -1512,7 +1546,7 @@ def _leave_delmode() -> bool:
     if uikit.is_open(DELCONFIRM):
         uikit.safe_click(DELX_XY[0], DELX_XY[1], DELCONFIRM, note='bag purge 提示窗 X（取消）', wait_ms=500)
         _wait(lambda: not uikit.is_open(DELCONFIRM), 1.5)
-    if uikit.is_open(DELMODE):
+    if uikit.is_open(DELMODE) or (not uikit.is_open(BAG) and _wait(lambda: uikit.is_open(DELMODE), 1.5)):   # 一時被 EXP 橫幅等蓋住：多等 1.5 s 再看
         uikit.safe_click(DEL_CANCEL[0], DEL_CANCEL[1], DELMODE, note='bag purge 取消刪除', wait_ms=500)
     return _wait(lambda: uikit.is_open(BAG), 2.0)
 
@@ -1544,7 +1578,9 @@ def purge_role(role: str, names, dry_run: bool = False) -> tuple:
         return _fail(EXIT_GUARD, f'剛進刪除模式就有勾選 {pre}（或讀不到），不動', 'bag-purge-premark'), info
     for i in want:
         x, y = slot_xy(i)
-        if not _click(x, y, DELMODE, f'bag purge {role} 勾第 {i + 1} 格 {tg[i]}', wait_ms=250):
+        note = f'bag purge {role} 勾第 {i + 1} 格 {tg[i]}'
+        if not _click(x, y, DELMODE, note, wait_ms=250) and not (_wait(lambda: uikit.is_open(DELMODE), 2.0) and _click(x, y, DELMODE, note, wait_ms=250)):
+            # 特徵一時不在（EXP 橫幅等）先等 2 s 再試一次；還是不在才放棄
             _leave_delmode()
             return _fail(EXIT_PANEL, '刪除模式特徵消失，停止勾選', 'bag-purge-gone'), info
     uikit.sleep(0.3)

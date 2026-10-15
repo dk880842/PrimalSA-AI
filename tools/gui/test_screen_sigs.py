@@ -289,7 +289,7 @@ check('全黑轉場：annotate=[black]、label=黑畫面（轉場）', c['state'
 bk[S.BLACK_PTS[3]] = (S.BLACK_MAX, 0, 0)
 check('黑畫面：任一點亮度 ≥ BLACK_MAX → 不是黑畫面', S.annotate(bk, S.classify(bk)) == [])
 check('黑 / 載入只在 classify=unknown 時附註（idle 畫面剛好暗不算）', S.annotate({**bk, **{pt: (0, 0, 0) for pt in S.BLACK_PTS}}, {'state': 'idle'}) == [])
-check('ANNOT_KNOWN = login / charsel / loading / black + 三種面板上已知彈窗', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm'})
+check('ANNOT_KNOWN = login / charsel / loading / black + 三種面板上已知彈窗 + 背包刪除確認窗', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok'})
 
 # ---- 6. 面板上疊已知彈窗（2026-10-12，watch 誤報 #243 #244 #254 #261 #264）----
 PP = json.loads((HERE / 'fixtures' / 'popup_px.json').read_text(encoding='utf-8'))
@@ -395,6 +395,70 @@ check('loading_probe_points 含舊三點 + 字形 + 進度條、無重複', len(
       and set(S.loading_bar_points()) <= set(S.loading_probe_points()) and {(x, y) for x, y, _ in S.LOADING_TEXT_PTS} <= set(S.loading_probe_points()))
 check('watch 用的 loading_points 含進度條點（英文版載入圖 watch 也標 loading）',
       set(S.loading_bar_points()) <= set(S.loading_points()) | set(S.points()) | set(S.annot_points()))
+
+# ---- 背包刪除管理：刪除模式 / 刪除確認窗（2026-10-15 p1 purge 誤設驗證停手旗標）----
+_dfx = _json.loads((HERE / 'fixtures' / 'bag_del_px.json').read_text(encoding='utf-8'))
+_dpts = [tuple(p) for p in _dfx['points']]
+check('bag_del fixture 取樣點 == watch 讀的點（points + annot_points + loading_points）',
+      _dpts == list(dict.fromkeys(S.points() + S.annot_points() + S.loading_points())))
+check('watch 的點含 delok_points（確認窗框 + 壓暗背景 + 綠字格 + 標題板）', set(S.delok_points()) <= set(_dpts))
+
+
+def _hexpx(h):
+    return {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(_dpts)}
+
+
+_dbad, _dcnt = [], {'delok': 0, 'delmode': 0, None: 0}
+_dsmp = {}
+for smp in _dfx['samples']:
+    px = _hexpx(smp['px'])
+    _dsmp[smp['f']] = px
+    c = S.classify(px)
+    a = S.annotate(px, c)
+    want = smp['expect']
+    _dcnt[want] += 1
+    ok_ = S.bag_delok(px) == (want == 'delok') and S.bag_delmode(px) == (want == 'delmode')
+    if want == 'delok':          # watch：不算 unknown、標「面板：背包＋刪除確認窗」
+        ok_ = ok_ and c['state'] == 'unknown' and a == ['popup_delok', 'over_bag'] and S.label(c, a) == '面板：背包＋刪除確認窗'
+    elif want == 'delmode':      # 刪除模式本來就靠標題板認成背包面板
+        ok_ = ok_ and c['state'] == 'panel' and c['panel'] == 'bag'
+    else:
+        ok_ = ok_ and 'popup_delok' not in a
+    if not ok_:
+        _dbad.append((smp['f'], c['state'], a))
+check(f'bag_del fixture：刪除確認窗 {_dcnt["delok"]} 張（1～5 行清單、EXP 橫幅、問句蓋舊點）全認、刪除模式 {_dcnt["delmode"]} 張全認、'
+      f'負例 {_dcnt[None]} 張（網路 / 任務條件提示窗、疊在任務詳情上的提示窗、創角確認窗、普通背包、寵物確定 / 取消窗）都不認',
+      not _dbad and _dcnt['delok'] >= 9 and _dcnt['delmode'] >= 3 and _dcnt[None] >= 8, str(_dbad[:4]))
+_net = _dsmp['net1.png']
+check('網路提示窗：annotate 仍是 notice_dialog（不在 ANNOT_KNOWN）→ watch 照舊算 unknown',
+      S.annotate(_net, S.classify(_net)) == ['notice_dialog'] and 'notice_dialog' not in S.ANNOT_KNOWN)
+_ok = _dsmp['watch-alerts/unknown-1792078474.png']
+check('刪除確認窗（4 行清單）：bag.py 用的窗框 7/8 中（舊 690,470 是問句白字）', S.need_match(_ok, S.BAG_DELOK_FRAME, S.BAG_DELOK_NEED))
+_g = dict(_ok)
+for pt in S.DELOK_GREEN_PTS:
+    _g[pt] = (243, 213, 175)                     # 綠字全塗成米色 = 沒有綠字清單的單鈕提示窗（驗證 / 網路窗）
+check('拿掉綠字清單 → 不是刪除確認窗（壓暗的刪除模式背包上疊別的單鈕窗照舊 unknown）', not S.bag_delok(_g) and 'popup_delok' not in S.annotate(_g, S.classify(_g)))
+_g = dict(_ok)
+for x, y, r, g, b in S.BAG_DELOK_CTX[:2]:
+    _g[(x, y)] = (60, 45, 30)                    # 背景 2 點不是壓暗紅框 / 按鈕 = 不在刪除模式
+check('窗外 2 點不是壓暗的刪除模式背包 → 不認', not S.bag_delok(_g))
+_g = dict(_ok)
+for x, y, *_ in S.PANEL_TITLE['bag']:
+    _g[(x, y)] = _dsmp['del0.png'][(x, y)]        # 背包標題沒壓暗（不是模態窗）
+check('背包標題板沒壓暗 → 不認', not S.bag_delok(_g))
+_g = dict(_ok)
+for x, y, *_ in S.BAG_DELOK_FRAME[:2]:
+    _g[(x, y)] = (0, 0, 0)
+check('窗框 2 點不符 → 不認', not S.bag_delok(_g) and not S.need_match(_g, S.BAG_DELOK_FRAME, S.BAG_DELOK_NEED))
+_g = dict(_ok)
+_g[S.BAG_DELOK_FRAME[0][:2]] = (0, 0, 0)
+check('窗框 1 點被蓋（EXP 橫幅）→ 仍認', S.bag_delok(_g))
+check('bag_delok 缺點 → False', not S.bag_delok({}))
+# 刪除模式：舊點 965,192（紅框上緣）在 EXP 橫幅區，新特徵沒有任何點落在橫幅區（x 470～1000、y 140～310）
+check('BAG_DELMODE_SIG 沒有點在 EXP 橫幅區', not [p for p in S.BAG_DELMODE_SIG if 470 <= p[0] <= 1000 and 140 <= p[1] <= 310])
+_m = dict(_dsmp['del0.png'])
+_m[S.BAG_DELMODE_SIG[1][:2]] = (90, 200, 60)
+check('刪除模式 1 點被蓋 → 仍認；2 點 → 不認', S.bag_delmode(_m) and not S.bag_delmode({**_m, S.BAG_DELMODE_SIG[2][:2]: (0, 0, 0)}))
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

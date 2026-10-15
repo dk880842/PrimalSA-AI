@@ -385,6 +385,71 @@ POPUP_SIGS = {
 }
 POPUP_PANELS = ('bag', 'pet')          # 只有這兩種面板上有正例樣本；其他面板上的彈窗仍不認得
 
+# ---- 背包「刪除管理」：刪除模式 + 「刪除選中」後的單鈕刪除確認窗（2026-10-15，watch / bag.py 共用）----
+# 根因（10-15 23:32～23:39 p1 bag.py purge）：
+#  (1) 快速戰鬥中「獲得 EXP」浮動橫幅（約 x 470～1000、y 140～310，可疊 3 條）蓋住舊 DELMODE 點 965,192（紅框上緣）
+#      → bag.py 以為刪除模式消失（rc 90）且「取消刪除」也不點 → 背包卡在刪除模式 → 重跑時背包外框（BAGANY）不認得 → preflight 連 3 次 unknown → 誤設驗證停手旗標。
+#  (2) 刪除確認窗（綠字清單 + 「是否批量刪除道具?」+ 單顆「確定」）會把整個背包壓暗 ×0.48，watch 只認得兩顆鈕的確認窗（POPUP_SIGS['confirm']）
+#      → 核對清單 OCR 期間 unknown 超過 10 秒 → watch 誤設停手旗標。
+# 刪除模式特徵：紅框左 / 右 / 下緣 + 「刪除選中」紅、「取消刪除」金 + 背包 ✕；全部避開 EXP 橫幅區，7 點中 BAG_DELMODE_NEED 點吻合即可
+# （tools/.cache 3034 張 1440×830 樣本：刪除模式 5 張 7/7、其餘任一點 neg 0～1 張；紅框點在普通背包是棕 / 米色）。
+BAG_DELMODE_SIG = [(1280, 113, 197, 70, 43, 30), (700, 410, 246, 70, 83, 26), (1232, 350, 246, 70, 83, 26), (1232, 410, 245, 69, 82, 26),
+                   (1050, 508, 244, 68, 82, 26), (1150, 688, 191, 127, 63, 26), (1150, 625, 177, 70, 38, 30)]
+BAG_DELMODE_NEED = 6
+# 刪除確認窗本體：「提示」單鈕窗的框（✕、標題板、藍「確定」兩側、米色底；避開清單 / 問句字的範圍，5 行清單 + 問句也不碰）。
+# 這個框和網路異常 / 「接取任務條件不達標」等所有單鈕「提示」窗**完全相同**（kr322 / qd-after / net1 樣本），所以只當 bag.py 腳本內的「窗開了沒」；
+# watch 要認成已知畫面還得加下面三個條件。
+BAG_DELOK_FRAME = [(946, 208, 197, 73, 49, 24), (715, 190, 139, 85, 57, 24), (645, 557, 56, 99, 156, 24), (785, 557, 56, 104, 161, 24),
+                   (560, 545, 244, 215, 177, 24), (880, 545, 245, 217, 179, 24), (520, 520, 237, 209, 171, 24), (900, 500, 243, 213, 175, 24)]
+BAG_DELOK_NEED = 7
+# 條件 2：窗外露出的是「壓暗 ×0.48 的刪除模式背包」（BAG_DELMODE_SIG 在確認窗外面的點，6 點中 5 點），加上 dim_panel = bag（標題板）
+DELOK_DIM_K = 0.48
+DELOK_DIM_TOL = 16
+_DELOK_BOX = (470, 175, 495, 465)                  # 確認窗範圍 (x, y, w, h)：BAG_DELMODE_SIG 落在這裡的點被窗蓋住，不拿來當壓暗背景
+BAG_DELOK_CTX = [(x, y, round(r * DELOK_DIM_K), round(g * DELOK_DIM_K), round(b * DELOK_DIM_K)) for x, y, r, g, b, _ in BAG_DELMODE_SIG
+                 if not (_DELOK_BOX[0] <= x < _DELOK_BOX[0] + _DELOK_BOX[2] and _DELOK_BOX[1] <= y < _DELOK_BOX[1] + _DELOK_BOX[3])]
+BAG_DELOK_CTX_NEED = len(BAG_DELOK_CTX) - 1
+# 條件 3：窗內有亮綠字清單（40,240,0）。清單垂直置中、行距 41：奇數行時中間行在 y 354～383、偶數行時中間兩行在 333～363 / 374～404，
+# 所以 y 356 / 366 / 376 / 386 四列一定穿過某一行字；x 642～786 是最短清單（單條「馬祖的斧頭*1|」x 628～797）也會蓋到的中段。
+# 12 張正例（1～5 行）命中 10～44 點，其餘 3000 多張（含「提示」單鈕窗、獎勵窗）最多 13 點、而且都不滿足條件 1 + 2。
+DELOK_GREEN_PTS = [(x, y) for y in (356, 366, 376, 386) for x in range(642, 790, 6)]
+DELOK_GREEN_MIN = 4
+
+
+def _green_text(c) -> bool:
+    r, g, b = c
+    return g >= 190 and r <= 110 and b <= 70
+
+
+def need_match(px: dict, sig, need: int) -> bool:
+    """sig（6 元素）至少 need 點在各自容差內；缺點當不符"""
+    return sum(1 for x, y, r, g, b, tol in sig if (x, y) in px and close(px[(x, y)], (r, g, b), tol)) >= need
+
+
+def bag_delmode(px: dict) -> bool:
+    """背包刪除模式（紅框 + 刪除選中 / 取消刪除鈕），容許 1 點被 EXP 橫幅等蓋住"""
+    return need_match(px, BAG_DELMODE_SIG, BAG_DELMODE_NEED)
+
+
+def bag_delok(px: dict) -> bool:
+    """壓暗的刪除模式背包上疊「刪除確認窗」（watch 認成已知畫面用）：四個條件全要——
+    單鈕提示窗框 7/8、窗外是壓暗的刪除模式紅框 + 按鈕、背包標題板壓暗（dim_panel = bag）、窗內有亮綠字清單。
+    驗證 / 答題視窗（選項是圖片）、網路異常提示（白字、沒有綠字清單）、疊在普通背包或其他面板上的提示窗都不符 → 照舊 unknown"""
+    if not need_match(px, BAG_DELOK_FRAME, BAG_DELOK_NEED):
+        return False
+    if _count_ok(px, BAG_DELOK_CTX, DELOK_DIM_TOL) < BAG_DELOK_CTX_NEED:
+        return False
+    if dim_panel(px) != 'bag':
+        return False
+    return sum(1 for pt in DELOK_GREEN_PTS if pt in px and _green_text(px[pt])) >= DELOK_GREEN_MIN
+
+
+def delok_points() -> list:
+    """bag_delok 要讀的全部點（框 + 壓暗背景 + 綠字探測格 + dim_panel 要的各面板標題板點），不重複"""
+    pts = [(x, y) for x, y, *_ in BAG_DELOK_FRAME] + [(x, y) for x, y, *_ in BAG_DELOK_CTX] + DELOK_GREEN_PTS + \
+          [(x, y) for ps in PANEL_TITLE.values() for x, y, *_ in ps]
+    return list(dict.fromkeys(pts))
+
 
 def dim_panel(px: dict):
     """被模態彈窗壓暗的已知面板名（PANEL_TITLE 同一比例 k 縮暗）或 None。缺點一律不符。未壓暗（k≈1）的面板不算"""
@@ -412,7 +477,7 @@ def popup_over_panel(px: dict):
     return (pn, kinds[0]) if pn in POPUP_PANELS else None
 
 
-ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗）
+ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗）
 
 
 def annot_points() -> list:
@@ -431,9 +496,10 @@ def annot_points() -> list:
 
 
 def loading_points() -> list:
-    """「加載中」字形遮罩 + 英文版進度條的取樣點（不在 points() / annot_points()，那兩組被凍結 fixture 綁住；watch 另外加讀）"""
+    """watch 另外加讀的點：「加載中」字形遮罩 + 英文版進度條 + 背包刪除確認窗（delok_points，2026-10-15）。
+    不在 points() / annot_points()（那兩組被凍結 fixture 綁住）"""
     seen, out = set(points()) | set(annot_points()), []
-    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points():
+    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points() + delok_points():
         if pt not in seen:
             seen.add(pt)
             out.append(pt)
@@ -446,8 +512,10 @@ def _match_safe(px: dict, sig) -> bool:
 
 
 def annotate(px: dict, base: dict) -> list:
-    """watch 專用附註 → ['notice_dialog' | 'login' | 'charsel']（至多一個）。不影響 classify。
+    """watch 專用附註 → ['notice_dialog' | 'login' | 'charsel'] / ['loading'] / ['black'] / ['popup_*', 'over_面板']。不影響 classify。
     遇敵鈕（enc_on）不在這裡：用 enc_on() 另外取"""
+    if base.get('state') == 'unknown' and bag_delok(px):      # 刪除確認窗的框和「提示」單鈕窗相同（notice_dialog 也會中），所以先判
+        return ['popup_delok', 'over_bag']
     for name, sig in ANNOT_SIGS.items():
         if _match_safe(px, sig):
             return [name]
@@ -476,7 +544,7 @@ _LABELS = {'idle': '主畫面', 'walking': '自動跑路中', 'dialog': '對話�
            'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
 
 _ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面', 'loading': '載入畫面', 'black': '黑畫面（轉場）',
-               'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗'}
+               'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗', 'popup_delok': '刪除確認窗'}
 
 
 def label(d: dict, annot=None) -> str:

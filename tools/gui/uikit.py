@@ -124,6 +124,13 @@ def sig_match(sig) -> bool:
     return bool(cols) and all(screen_sigs.close(c, (r, g, b), tol) for c, (_, _, r, g, b, tol) in zip(cols, sig))
 
 
+def sig_need(sig, need: int) -> bool:
+    """screen_sigs 格式特徵至少 need 點吻合（容許個別點被 EXP 橫幅等蓋住）；讀不到 = False"""
+    pts = [(x, y) for x, y, *_ in sig]
+    cols = px(pts)
+    return bool(cols) and screen_sigs.need_match(dict(zip(pts, cols)), sig, need)
+
+
 def screen(full: bool = False) -> dict:
     """一次讀 screen_sigs.points() → classify（同 quest.read_screen；不 import quest）。讀不到 → {'state': 'error'}。
     full=True 多讀 panel_points()（寵物 / 背包 / 外掛等面板與主畫面多組特徵，watch 用的同一套）：認得的面板回 state=panel + panel 名。

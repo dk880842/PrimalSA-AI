@@ -736,8 +736,8 @@ class FakeDelBag(FakeBag):
 
     def is_open(self, p):
         if self.delconfirm:
-            return p.name == 'BAGDELOK'
-        if p.name == 'BAGDELOK':
+            return p.name in ('BAGDELOK', 'BAGDELOK_STRICT')
+        if p.name in ('BAGDELOK', 'BAGDELOK_STRICT'):
             return False
         if p.name == 'BAGDEL':
             return self.mode == 'del'
@@ -843,6 +843,35 @@ check('purge：進模式就有名單外的勾 → 93、取消、沒刪', rc == 9
 fb = FakeDelBag({'DKBO2': W}).install()
 rc, d = quiet(bag.purge, ['DKBO2'], B, True)
 check('purge --dry-run：列出目標、不按刪除管理', rc == 0 and d['DKBO2']['targets'] == {2: '巴巴洛的許可證'} and bag.DEL_BTN not in fb.clicks and fb.deleted == [])
+# 2026-10-15 23:32 根因：快速戰鬥 EXP 橫幅一時蓋住刪除模式特徵 → 勾到一半判「刪除模式特徵消失」90、取消刪除也沒按 → 背包卡在刪除模式
+fb = FakeDelBag({'DKBO2': W + ['巴巴洛的許可證']}).install()
+_io, _n = fb.is_open, {'k': 0}
+def _flaky(p):
+    if p.name == 'BAGDEL' and fb.mode == 'del' and len(fb.marks) == 1 and _n['k'] < 3:
+        _n['k'] += 1
+        return False                                          # 勾完第 1 格後特徵消失約 3 次讀圖
+    return _io(p)
+fb.is_open = _flaky
+uikit.is_open = _flaky
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：勾到一半刪除模式特徵一時不在（EXP 橫幅）→ 等一下再勾、照樣刪完', rc == 0 and fb.deleted == B * 2 and fb.mode == 'normal', str((rc, fb.deleted, fb.mode)))
+# 上次中斷：背包停在刪除模式（有殘留勾選）→ Session 開頭先「取消刪除」回普通模式（舊版走 preflight → 連 3 次 unknown → 誤設驗證停手旗標）
+fb = FakeDelBag({'DKBO2': W}).install()
+fb.mode, fb.marks = 'del', {1}
+uikit.preflight = lambda src, fast=True: (_ for _ in ()).throw(AssertionError('不該 preflight'))
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：開頭背包停在刪除模式 → 先取消刪除（清掉殘留勾）、不 preflight、照常只刪名單內', rc == 0 and fb.clicks[0] == bag.DEL_CANCEL
+      and fb.deleted == ['巴巴洛的許可證'], str((rc, fb.clicks[:3], fb.deleted)))
+fb = FakeDelBag({'DKBO2': W}).install()
+fb.mode, fb.marks, fb.delconfirm = 'del', {1}, True               # 停在刪除確認窗（千年龜的殼被勾）
+uikit.preflight = lambda src, fast=True: (_ for _ in ()).throw(AssertionError('不該 preflight'))
+rc, d = quiet(bag.purge, ['DKBO2'], B)
+check('purge：開頭停在刪除確認窗 → 按 X（不按確定）+ 取消刪除、殘留勾的道具沒被刪', rc == 0 and fb.clicks[:2] == [bag.DELX_XY, bag.DEL_CANCEL]
+      and fb.deleted == ['巴巴洛的許可證'] and '千年龜的殼' in fb.slots, str((rc, fb.clicks[:3], fb.deleted)))
+fb = FakeDelBag({'DKBO2': W}).install()
+fb.mode = 'del'
+_cl = bag.close_leftover()                                    # 假 close_panel 不改狀態 → 之後每輪都再「關」一次
+check('close_leftover：刪除模式 → 取消刪除 → 再關背包', _cl.startswith('delmode+closed') and fb.clicks[0] == bag.DEL_CANCEL and fb.mode == 'normal', _cl)
 try:
     uikit.check_forbidden(bag.DELMODE, *bag.DEL_BTN)
     check('DELMODE 刪除選中鈕是禁區（沒 allow 會擋）', False)

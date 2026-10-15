@@ -737,6 +737,29 @@ for _ in range(13):
     w.cycle(); clk.t += 0.9
 check('壓暗的背包 + 不認得的彈窗 ≥ 10 s → 照樣 unknown_long + verify_suspect', watchstate.read()['flags']['verify_suspect'] is True)
 
+# ---- 背包刪除確認窗（2026-10-15 23:34 / 23:39 p1 purge 核對清單時 watch 誤設驗證停手旗標）：用真截圖取點 fixture ----
+_dfx = json.loads((HERE / 'fixtures' / 'bag_del_px.json').read_text(encoding='utf-8'))
+check('bag_del fixture 點順序 = watch.pts', [tuple(p) for p in _dfx['points']] == list(dict.fromkeys(ALLPTS)) == ALLPTS)
+
+
+def px_fixture(f):
+    h = next(s['px'] for s in _dfx['samples'] if s['f'] == f)
+    return ' '.join(f'{int(h[i:i + 2], 16)},{int(h[i + 2:i + 4], 16)},{int(h[i + 4:i + 6], 16)}' for i in range(0, len(h), 6))
+
+
+w, clk, fk = make('popup-delok')
+fk.pixel = (0, px_fixture('watch-alerts/unknown-1792078474.png'), '')
+for _ in range(40):                  # 36 s（清單 OCR 核對期間）
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('背包刪除確認窗開 36 s：不觸發 unknown_long、label = 面板：背包＋刪除確認窗', st['alerts'] == [] and st['flags']['verify_suspect'] is False
+      and st['screen']['label'] == '面板：背包＋刪除確認窗' and not errlog._read(errlog.LOG), str(st['screen']))
+w, clk, fk = make('popup-netnotice')
+fk.pixel = (0, px_fixture('kr322.png'), '')                                 # 同一個「提示」單鈕窗框、沒有綠字清單、底下不是刪除模式背包
+for _ in range(13):
+    w.cycle(); clk.t += 0.9
+check('同框的單鈕提示窗（任務條件不達標）≥ 10 s → 照樣 unknown_long + verify_suspect', watchstate.read()['flags']['verify_suspect'] is True)
+
 
 # ---- 面板辨識 / 主畫面多組 / 載入 / 黑畫面 / 警報截圖（2026-10-11：使用者開寵物視窗被誤報疑似驗證）----
 def px_panel(name):
