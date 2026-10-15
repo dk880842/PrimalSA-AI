@@ -11,6 +11,9 @@
   uv run --no-project python tools/gui/ass.py pet all normal 防禦        # 多人：5 人戰寵 一般動作 = 防禦（也可 DKBO,DKBO3 指定幾人；選項依文字找，可填已學的寵物技能名）
   uv run --no-project python tools/gui/ass.py battle all [--dry-run]       # 解任務前戰鬥設定（QUEST_BATTLE）：5 人自動戰鬥開、DKBO 人物首次動作 風的精靈Lv.5 打勾；
         一次開面板逐人讀、只改不對的、讀回確認（值不對不改，回 13）；不關遇敵、戰鬥中不開（8）。questrun 交接 / bossretry 重打前自動跑（battle_check）
+  uv run --no-project python tools/gui/ass.py points all get [--no-plan]   # 唯讀：便捷功能 → 特色設定 自定義加點 / 同步加點 勾選 + SET 視窗讀方案（按取消）
+  uv run --no-project python tools/gui/ass.py points DKBO set              # 隊長方案 = 速度80 / 體力50 / 腕力999 / 耐力0 才勾自定義 + 同步加點；方案不同 → 15 不改（輸入流程未實測）
+        （2026-10-15 寫成，**未實機**：OCR 框推估；做完一律切回右半「戰鬥設置」）
     多人流程（--pause）：關原地遇敵 + 等戰鬥結束 → 一次開面板逐人（讀現值 → 不同才改 → 讀回確認；隊長最後）→ grind.py ensure 恢復掛機。
     預設不暫停遇敵（快速戰鬥中開外掛面板不用停遇敵，2026-10-12 使用者；戰鬥打斷 rc 6 / 12 自動等 3 秒重試 2 次）。旗標：--pause 強制先關遇敵 + 等戰鬥結束、改完 grind ensure 恢復、--no-resume 搭 --pause 時不恢復、--dry-run 只讀不改。只動「一般動作」，首次動作 / 對象都不碰。
 角色：這個視窗的名單（主視窗 DKBO / DKBO2～DKBO5；PSA_CLIENT=PrimalSA2 為 DKBO6～DKBO10；真名字母 O；DKB0… 同義；不分大小寫）。頭像位置依名單第 1～5 個。
@@ -20,7 +23,8 @@
 安全：每次點面板內座標前都先 pixel 驗證面板還開著（面板沒開時點這些座標會穿透到地面讓角色走掉）；
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
 退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色（面板開著但頭像被遮住 / 點了不變）/ 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到；選角色時面板被遊戲關掉、重開 2 次仍不行）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
-        12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 13 battle：人物首次動作的值確定不對（不自動改）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
+        12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 13 battle：人物首次動作的值確定不對（不自動改）/
+        15 points：加點方案不是 POINTS_PLAN（目標值輸入流程未實測 = 座標待量測，不改不勾）/ 16 points：特色設定分頁 / 加點視窗 OCR 讀不到（不點勾選）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
 戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
   是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
@@ -37,6 +41,7 @@ ass.set_many({角色: {項目: bool} 或 None}) 一次開面板逐人讀 / 改 �
 跑馬燈在時 selected_role 用其他 4 人推斷（4 人都沒選中 = 選中的是被蓋住的 DKBO3）。
 """
 import argparse
+import re
 import sys
 import time
 from pathlib import Path
@@ -888,6 +893,173 @@ def run_pet_many(roles, value: str, dry_run: bool = False, pause: bool = True, r
     return rc, sts, msg, info
 
 
+# ---- 便捷功能 → 特色設定：角色自動加點（2026-10-15，新角色開局 newchar.py 用）----
+# 座標取自 ui/ass.md「便捷功能 → 特色設定：角色自動加點」2026-10-09 實測（右上核取 / 分頁 / 勾選框 / SET / 視窗確認取消）。
+# **未實機**：OCR 框（PT_FEAT_BOX / PT_DLG_TITLE_BOX / PT_ROWS_BOX）是依實測座標推估的，讀不到 → 16 停手、不點勾選；
+# 視窗裡「改目標值」的輸入流程沒實測過（ui/ass.md：未實測輸入流程）→ **不自動改方案**：方案跟 POINTS_PLAN 不同 → 15，請人手動設。
+# 勾「自定義加點 / 同步加點」只在讀到的方案 = POINTS_PLAN 時才做（方案不對就勾，會把點數加錯地方，點數加下去不可逆）。
+RIGHT_BATTLE, RIGHT_CONV = (647, 148), (815, 148)    # 右上核取：右半顯示「戰鬥設置」/「便捷功能」那組分頁（擇一）
+BATTLE_TAB = (696, 206)                             # 戰鬥設置分頁（做完還原，其他功能依賴右半在戰鬥設置頂端）
+FEAT_TAB = (840, 207)                               # 便捷功能 → 特色設定分頁
+PT_CUSTOM, PT_RECOMMEND, PT_SYNC = (666, 315), (666, 368), (666, 421)   # 自定義加點 / 使用推薦加點 / 同步加點 勾選框
+PT_SET = (1280, 315)                                # 自定義加點 SET → 開「自定義加點設定」視窗
+PT_OK, PT_CANCEL = (610, 509), (766, 509)           # 視窗 確認 / 取消（只看 → 取消）
+PT_FEAT_BOX = (690, 295, 330, 150)                  # 特色設定三列標籤文字（含「加點」）；**未實機量**
+PT_DLG_TITLE_BOX = (470, 185, 400, 45)              # 「自定義加點設定」標題（含「加點」）；**未實機量**
+PT_ROWS_BOX = (470, 265, 380, 210)                  # 4 列：順序（屬性名 x≈540）/ 當前 669 / 目標 770；**未實機量**
+PT_ROW_TOL = 18                                     # 同一列的 y 容差（列距約 52）
+STAT_NAMES = ('體力', '腕力', '耐力', '速度')
+POINTS_PLAN = [('速度', 80), ('體力', 50), ('腕力', 999), ('耐力', 0)]   # 本帳號方案（ui/ass.md，使用者 2026-10-09 設定，5 角色同步）
+EXIT_POINTS_PLAN = 15                               # 方案不是 POINTS_PLAN：目標值輸入流程未實測（座標待量測）→ 不改、不勾，請人手動設
+EXIT_POINTS_READ = 16                               # 特色設定分頁 / 加點視窗讀不到（OCR 框未實機量）→ 不點勾選
+
+
+def parse_points(lines) -> list | None:
+    """純函式：加點視窗 OCR 行 [(文字, x, y)] → [(屬性, 目標)]（由上往下）。一列 = y 相近（±PT_ROW_TOL）的字串依 x 接起來；
+    要剛好 1 個屬性名、而且至少 2 個整數（當前 + 目標，取最後一個當目標；只讀到 1 個數字 = 分不出當前 / 目標 → 不採用）。
+    讀到的列不是 4 列 → None（讀不準，不猜）"""
+    rows: list = []
+    for t, x, y in sorted(lines or [], key=lambda l: l[2]):
+        for r in rows:
+            if abs(r['y'] - y) <= PT_ROW_TOL:
+                r['parts'].append((x, str(t)))
+                break
+        else:
+            rows.append({'y': y, 'parts': [(x, str(t))]})
+    out = []
+    for r in rows:
+        txt = ' '.join(t for _, t in sorted(r['parts']))
+        names = [n for n in STAT_NAMES if n in txt]
+        if len(names) != 1:
+            continue
+        nums = re.findall(r'\d+', txt.split(names[0], 1)[1])
+        if len(nums) < 2:
+            return None
+        out.append((names[0], int(nums[-1])))
+    return out if len(out) == 4 else None
+
+
+def _points_click(role: str, xy, note: str, wait_ms: int = 400) -> bool:
+    """點特色設定 / 加點視窗內的座標前先驗面板還開著、角色沒變（沒開時這些座標會穿透到地面）"""
+    if not panel_open() or selected_role() != role:
+        return False
+    gui('seq', f'click {xy[0]} {xy[1]}; wait {wait_ms}', note=f'ass.py {role} {note}')
+    return True
+
+
+def _points_restore(role: str) -> None:
+    """右半切回「戰鬥設置」分頁組（其他功能 pet_on_top / battle_check 依賴右半在戰鬥設置頂端）；面板不在就不點"""
+    if panel_open():
+        gui('seq', f'click {RIGHT_BATTLE[0]} {RIGHT_BATTLE[1]}; wait 400; click {BATTLE_TAB[0]} {BATTLE_TAB[1]}; wait 400',
+            note=f'ass.py {role} 右半切回戰鬥設置')
+
+
+def _points_read_plan(role: str) -> tuple:
+    """特色設定頁：SET 開視窗 → 驗標題 → OCR 4 列 → 取消關窗。→ (rc, [(屬性, 目標)] | None, 訊息)"""
+    if not _points_click(role, PT_SET, '自定義加點 SET（開視窗看方案）', 700):
+        return EXIT_PANEL_LOST, None, f'{role}：點 SET 前面板已不在 / 角色不對 → 不點'
+    if '加點' not in _ocr(PT_DLG_TITLE_BOX, '-Zooms', '2,3,4'):
+        gui('key', '{ESC}', note=f'ass.py {role} 加點視窗標題讀不到 → ESC（外掛面板可能一起關）')
+        return EXIT_POINTS_READ, None, f'{role}：點了 SET 但讀不到「自定義加點設定」標題（OCR 框未實機量）；已 ESC、沒改任何東西'
+    plan = parse_points(_ocr_lines(PT_ROWS_BOX, '-Zooms', '2,3,4'))
+    gui('seq', f'click {PT_CANCEL[0]} {PT_CANCEL[1]}; wait 500', note=f'ass.py {role} 加點視窗 取消（只看）')
+    if '加點設定' in _ocr(PT_DLG_TITLE_BOX, '-Zooms', '2,3'):
+        gui('key', '{ESC}', note=f'ass.py {role} 加點視窗取消後還在 → ESC')
+        return EXIT_POINTS_READ, plan, f'{role}：按了取消但加點視窗還在（已 ESC）'
+    if plan is None:
+        return EXIT_POINTS_READ, None, f'{role}：加點視窗 4 列讀不準（OCR 框未實機量）；沒改任何東西'
+    return EXIT_OK, plan, ''
+
+
+def _visit_points(want_plan, apply: bool, read_plan: bool = True):
+    """points_get / points_set 的逐人動作（_many 用）：右半切便捷功能 → 特色設定 → 讀兩個勾選 →（read_plan）SET 視窗讀方案 →
+    （apply 且方案 = want_plan）勾自定義加點 / 同步加點、讀回確認 → 一律切回戰鬥設置。回 (退出碼, 狀態, 訊息, 改了哪些)"""
+    def visit(role):
+        st, todo = {}, []
+        try:
+            if not _points_click(role, RIGHT_CONV, '右半切便捷功能') or not _points_click(role, FEAT_TAB, '特色設定分頁', 500):
+                return EXIT_PANEL_LOST, None, f'{role}：切便捷功能前面板已不在 / 角色不對 → 不點', []
+            if '加點' not in _ocr(PT_FEAT_BOX, '-Zooms', '2,3,4'):
+                return EXIT_POINTS_READ, None, f'{role}：特色設定分頁讀不到「加點」字樣（OCR 框未實機量）；不點勾選', []
+            cols = _px([PT_CUSTOM, PT_SYNC])
+            if not cols:
+                return EXIT_PANEL_LOST, None, f'{role}：讀不到加點勾選框像素', []
+            st['自定義加點'], st['同步加點'] = cols[0] != UNCHECKED, cols[1] != UNCHECKED
+            if read_plan:
+                rc, plan, msg = _points_read_plan(role)
+                st['plan'] = plan
+                if rc:
+                    return rc, st, msg, []
+            if not apply:
+                return EXIT_OK, st, '', []
+            if st.get('plan') != list(want_plan):
+                return (EXIT_POINTS_PLAN, st, f'{role}：加點方案是 {st.get("plan")}，不是 {list(want_plan)}；視窗改目標值的輸入流程未實測（座標待量測），'
+                        f'不自動改、也不勾自定義 / 同步加點 → 請人手動設定方案（ui/ass.md「自定義加點設定視窗」）', [])
+            for item, xy in (('自定義加點', PT_CUSTOM), ('同步加點', PT_SYNC)):
+                if st[item]:
+                    continue
+                if not _points_click(role, xy, f'{item} → 勾', 300):
+                    return EXIT_PANEL_LOST, st, f'{role}：點 {item} 前面板已不在 / 角色不對 → 不點', todo
+                todo.append(item)
+                for w in (CONFIRM_WAIT, CONFIRM_WAIT2):
+                    sleep(w)
+                    now = _px([xy])
+                    if now and now[0] != UNCHECKED:
+                        st[item] = True
+                        log(f'ass：{role} {item} → 勾（已確認）')
+                        break
+                else:
+                    return EXIT_CONFIRM, st, f'{role}：{item} 點了沒變（不補點）', todo
+            return EXIT_OK, st, '', todo
+        finally:
+            _points_restore(role)
+    return visit
+
+
+def points_get(roles, read_plan: bool = True, no_wait: bool = False) -> tuple:
+    """唯讀：一次開面板逐人讀 自定義加點 / 同步加點 勾選（read_plan = 另開 SET 視窗讀方案、按取消）。回值同 set_many"""
+    return _many({r: None for r in roles}, _visit_points(POINTS_PLAN, False, read_plan), no_wait)
+
+
+def points_set(leader: str | None = None, verify=(), want_plan=None, no_wait: bool = False) -> tuple:
+    """隊長（預設名單第 1 個）讀方案 = want_plan（預設 POINTS_PLAN）才勾自定義加點 + 同步加點（同步 = 其他角色套用同一方案，ui/ass.md 實測）；
+    verify = 之後唯讀看哪些角色的勾選（不開視窗）。方案不同 → 15（不改、不勾）；讀不到 → 16。回值同 set_many"""
+    leader = leader or LEADER
+    want = list(want_plan or POINTS_PLAN)
+    plan = {leader: 'set', **{r: 'get' for r in verify if r != leader}}
+    visits = {'set': _visit_points(want, True, True), 'get': _visit_points(want, False, False)}
+    return _many(plan, lambda role: visits[plan[role]](role), no_wait)
+
+
+def _main_points(a) -> int:
+    rest = [x.lower() for x in a.rest]
+    if rest not in (['get'], ['set']):
+        print('points 用法：ass.py points all|DKBO,DKBO2 get [--no-plan] | ass.py points DKBO set（只對隊長：方案 = 速度80 / 體力50 / 腕力999 / 耐力0 才勾自定義 + 同步加點）')
+        return EXIT_USAGE
+    roles = list(ROLES) if a.role.lower() == 'all' else [norm_role(r) for r in a.role.split(',')]
+    if not roles or not all(roles):
+        print(f'角色要是 all 或逗號分隔的 {" / ".join(ROLES)}')
+        return EXIT_USAGE
+    if rest == ['set'] and len(roles) != 1:
+        print('points set 只給一個角色（隊長；同步加點會套用到其他角色）')
+        return EXIT_USAGE
+    if layout.current() != '2880x1659':
+        print('ass.py 只量過 2880×1659 版面，先跑 gui.sh max')
+        return EXIT_LAYOUT
+    import winenv
+    winenv.enable_server()
+    if rest == ['get']:
+        rc, sts, msg, _ = points_get(roles, not a.no_plan, a.no_wait)
+    else:
+        rc, sts, msg, _ = points_set(roles[0], [r for r in ROLES if r != roles[0]], None, a.no_wait)
+    for r, st in sts.items():
+        print(f'{r}：自定義加點={"勾" if st.get("自定義加點") else "不勾"}  同步加點={"勾" if st.get("同步加點") else "不勾"}'
+              + (f'  方案={st["plan"]}' if 'plan' in st else ''))
+    if rc:
+        print(f'失敗（退出碼 {rc}）：{msg}')
+    return rc
+
+
 def fmt(states: dict, items=None) -> str:
     return '  '.join(f'{i}={"開" if states[i] else "關"}' for i in (items or ITEMS) if i in states)
 
@@ -1007,7 +1179,7 @@ def _main_pet_many(a) -> int:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='外掛 ASS 左欄戰鬥設定讀 / 設')
-    ap.add_argument('cmd', choices=['get', 'set', 'pet', 'battle'])
+    ap.add_argument('cmd', choices=['get', 'set', 'pet', 'battle', 'points'])
     ap.add_argument('role', help='名單內角色：主視窗 DKBO / DKBO2~5、PrimalSA2 DKBO6~10（DKB0… 同義）')
     ap.add_argument('rest', nargs='*', help='get：項目…；set：項目 on|off 成對')
     ap.add_argument('--dry-run', action='store_true', help='多人 pet：只讀不改')
@@ -1015,10 +1187,13 @@ def main(argv=None) -> int:
     ap.add_argument('--no-pause', action='store_true', help='（相容舊旗標；現為預設，無作用）')
     ap.add_argument('--no-resume', action='store_true', help='多人 pet：改完不跑 grind ensure 恢復掛機（遇敵會維持關閉）')
     ap.add_argument('--leader-first', default=None, help='battle：隊長人物首次動作期望值（預設主視窗 風的精靈、其他視窗不檢查；空字串 = 不檢查）')
+    ap.add_argument('--no-plan', action='store_true', help='points get：不開 SET 視窗讀方案（只讀勾選）')
     ap.add_argument('--no-wait', action='store_true', help='戰鬥中不等戰鬥結束，直接退出碼 %d（預設等最多 %d 秒）' % (EXIT_IN_BATTLE, BATTLE_WAIT))
     a = ap.parse_args(argv)
     if a.cmd == 'battle':
         return _main_battle(a)
+    if a.cmd == 'points':
+        return _main_points(a)
     if a.cmd == 'pet' and (a.role.lower() == 'all' or ',' in a.role):
         return _main_pet_many(a)
     role = norm_role(a.role)

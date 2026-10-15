@@ -821,6 +821,124 @@ check('戰鬥中 no_wait → rc 8、不開面板', rc == ass.EXIT_IN_BATTLE and 
 check('CLI battle 只收 all', ass.main(['battle', 'DKBO']) == 1)
 check('_dedup：OCR 多倍率重複只留一份', [ass._dedup(t) for t in ('攻擊攻擊攻擊', '防禦防禦', '風的精靈Lv.5', '')] == ['攻擊', '防禦', '風的精靈Lv.5', ''])
 
+print('(27) points：便捷功能 → 特色設定 自動加點（2026-10-15，newchar 用；座標 ui/ass.md 實測、OCR 框未實機）')
+GOOD_ROWS = [('速度', 540, 291), ('0', 669, 291), ('80', 770, 291), ('體力', 540, 344), ('0', 669, 344), ('50', 770, 344),
+             ('腕力', 540, 396), ('0', 669, 396), ('999', 770, 396), ('耐力', 540, 449), ('0', 669, 449), ('0', 770, 449)]
+check('parse_points：4 列 → [(屬性, 目標)]', ass.parse_points(GOOD_ROWS) == ass.POINTS_PLAN)
+check('parse_points：合成一行「1 速度 3 80」也取最後一個數字', ass.parse_points([('速度 3 80', 600, 291), ('體力 1 50', 600, 344), ('腕力 1 999', 600, 396), ('耐力 1 0', 600, 449)]) == ass.POINTS_PLAN)
+check('parse_points：某列只讀到 1 個數字（分不出當前 / 目標）→ None', ass.parse_points([r for r in GOOD_ROWS if r != ('80', 770, 291)]) is None)
+check('parse_points：只有 3 列 / 空 → None', ass.parse_points(GOOD_ROWS[:9]) is None and ass.parse_points([]) is None)
+
+
+class PGame(Game):
+    """右半「戰鬥設置 / 便捷功能」切換、特色設定分頁、自定義 / 同步加點勾選、SET 視窗（方案 rows）"""
+
+    def __init__(self, rows=None, custom=False, sync=False, feat_unread=False, title_unread=False, cstuck=False, **k):
+        super().__init__(**k)
+        self.right, self.feat, self.dlg = 'battle', False, False
+        self.rows = list(GOOD_ROWS if rows is None else rows)
+        self.pt = {r: {'custom': custom, 'sync': sync} for r in ass.ROLES}
+        self.feat_unread, self.title_unread, self.cstuck = feat_unread, title_unread, cstuck
+        self.box_clicks = []
+
+    def color(self, x, y):
+        for key, xy in (('custom', ass.PT_CUSTOM), ('sync', ass.PT_SYNC)):
+            if (x, y) == xy and self.panel and self.feat:
+                return (30, 30, 30) if self.pt[self.role][key] else (255, 255, 255)
+        return super().color(x, y)
+
+    def gui(self, *args, note=''):
+        if args[0] == 'key' and args[1] == '{ESC}':
+            if self.dlg and not self.title_unread:
+                self.dlg = False
+            else:
+                self.dlg, self.panel = False, False
+            return ''
+        return super().gui(*args, note=note)
+
+    def click(self, x, y):
+        xy = (x, y)
+        if self.panel and xy in (ass.RIGHT_CONV, ass.RIGHT_BATTLE, ass.FEAT_TAB, ass.BATTLE_TAB, ass.PT_SET, ass.PT_CANCEL, ass.PT_CUSTOM, ass.PT_SYNC):
+            self.clicks.append(xy)
+            if xy == ass.RIGHT_CONV:
+                self.right, self.feat = 'conv', False
+            elif xy == ass.RIGHT_BATTLE:
+                self.right, self.feat = 'battle', False
+            elif xy == ass.FEAT_TAB and self.right == 'conv':
+                self.feat = True
+            elif xy == ass.PT_SET and self.feat:
+                self.dlg = True
+            elif xy == ass.PT_CANCEL and self.dlg:
+                self.dlg = False
+            elif xy in (ass.PT_CUSTOM, ass.PT_SYNC) and self.feat and not self.dlg:
+                self.box_clicks.append((self.role, xy))
+                if not self.cstuck:
+                    key = 'custom' if xy == ass.PT_CUSTOM else 'sync'
+                    self.pt[self.role][key] = not self.pt[self.role][key]
+                    if key == 'sync':               # 同步加點：其他角色也套用（ui/ass.md 實測）
+                        for r in ass.ROLES:
+                            self.pt[r]['sync'] = self.pt[self.role]['sync']
+            return
+        super().click(x, y)
+
+    def ocr(self, box, *opts):
+        if box == ass.PT_FEAT_BOX:
+            return '自定義加點 使用推薦加點 同步加點' if self.panel and self.feat and not self.dlg and not self.feat_unread else ''
+        if box == ass.PT_DLG_TITLE_BOX:
+            return '自定義加點設定' if self.dlg and not self.title_unread else ''
+        if box == ass.PET_TITLE_BOX:
+            return '戰寵動作一' if self.panel and self.right == 'battle' else ''
+        return _ocr_impl(self, box, *opts)
+
+    def ocr_lines(self, box, *opts):
+        return list(self.rows) if box == ass.PT_ROWS_BOX and self.dlg else []
+
+
+def psetup(g):
+    setup(g)
+    ass._ocr_lines = g.ocr_lines
+
+
+g = PGame()
+psetup(g)
+rc, sts, msg, info = ass.points_get(list(ass.ROLES))
+check('points_get：5 人讀勾選 + 方案、沒點任何勾選、視窗關、右半切回戰鬥設置、面板關',
+      rc == 0 and all(s['plan'] == ass.POINTS_PLAN and s['自定義加點'] is False for s in sts.values()) and not g.box_clicks
+      and not g.dlg and g.right == 'battle' and not g.panel and g.clicks.count(ass.PT_CANCEL) == 5, f'{rc} {msg}')
+g = PGame()
+psetup(g)
+rc, sts, msg, info = ass.points_set('DKBO', ['DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'])
+check('points_set：方案相符 → 隊長勾自定義 + 同步各 1 次、讀回確認；其他人只看（同步已勾）',
+      rc == 0 and g.box_clicks == [('DKBO', ass.PT_CUSTOM), ('DKBO', ass.PT_SYNC)] and sts['DKBO']['自定義加點'] and sts['DKBO']['同步加點']
+      and all(sts[r]['同步加點'] and 'plan' not in sts[r] for r in ('DKBO2', 'DKBO5')) and g.right == 'battle', f'{rc} {msg} {g.box_clicks}')
+check('points_set：只有隊長開 SET 視窗', g.clicks.count(ass.PT_SET) == 1)
+g = PGame(rows=[(t if t != '80' else '20', x, y) for t, x, y in GOOD_ROWS])
+psetup(g)
+rc, sts, msg, info = ass.points_set('DKBO', [])
+check('方案不同（速度 20）→ 15、不勾任何框、視窗已取消、右半切回', rc == ass.EXIT_POINTS_PLAN and not g.box_clicks and not g.dlg and g.right == 'battle'
+      and '座標待量測' in msg, f'{rc} {msg}')
+g = PGame(feat_unread=True)
+psetup(g)
+rc, sts, msg, info = ass.points_set('DKBO', [])
+check('特色設定讀不到「加點」→ 16、沒點 SET / 勾選、右半切回', rc == ass.EXIT_POINTS_READ and ass.PT_SET not in g.clicks and not g.box_clicks and g.right == 'battle', f'{rc} {msg}')
+g = PGame(title_unread=True)
+psetup(g)
+rc, sts, msg, info = ass.points_set('DKBO', [])
+check('SET 後讀不到視窗標題 → ESC、16、沒點勾選 / 確認', rc == ass.EXIT_POINTS_READ and not g.box_clicks and ass.PT_OK not in g.clicks and ass.PT_CANCEL not in g.clicks, f'{rc} {msg}')
+g = PGame(rows=GOOD_ROWS[:6])
+psetup(g)
+rc, sts, msg, info = ass.points_set('DKBO', [])
+check('方案讀不準（2 列）→ 16、不勾', rc == ass.EXIT_POINTS_READ and not g.box_clicks and not g.dlg, f'{rc} {msg}')
+g = PGame(custom=True, sync=True)
+psetup(g)
+rc, sts, msg, info = ass.points_set('DKBO', [])
+check('已勾 + 方案相符 → 0、一次勾選都不點', rc == 0 and not g.box_clicks, f'{rc} {msg}')
+g = PGame(cstuck=True)
+psetup(g)
+rc, sts, msg, info = ass.points_set('DKBO', [])
+check('勾選點了沒變 → 4、不補點、右半切回', rc == ass.EXIT_CONFIRM and g.box_clicks == [('DKBO', ass.PT_CUSTOM)] and g.right == 'battle', f'{rc} {msg}')
+check('CLI：points set 多人 → 1、用法錯 → 1', ass.main(['points', 'all', 'set']) == 1 and ass.main(['points', 'DKBO', 'xx']) == 1)
+
 # 快戰中開面板不暫停遇敵：預設 --pause 關、戰鬥打斷自動重試
 _seq = [(6, {}, 'x', {}), (12, {}, 'x', {}), (0, {'a': 1}, '', {})]
 _sl = ass.sleep
