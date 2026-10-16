@@ -843,6 +843,10 @@ class Run:
             steps.insert(0, ('pet_catch.py', ['--autoswap', 'on'], '自動轉換戰寵 on'))
         for script, args, why in steps:
             rc, _ = self.sub(script, args, 1800)
+            if rc == 74 and script == 'pet.py' and self.autoswap_is_on():
+                # 自動轉換戰寵已開 / 戰寵鎖定（續跑時使用者或主 session 已手動設好出戰寵）：出戰鈕點了不會變，不算失敗，繼續練寵輪詢（2026-10-16 p3 實跑）
+                event(f'{stage}：{why} rc=74（外掛已鎖定戰寵 / 自動轉換開著，出戰寵由外掛管）→ 略過繼續')
+                continue
             if rc:
                 return self.pass_or(rc, EXIT_TRAIN, f'練寵準備：{why} 失敗 rc={rc}', f'uv run --no-project python tools/gui/{script} {" ".join(map(str, args))}')
             if script == 'pet_catch.py':
