@@ -3,16 +3,16 @@
 
 實測（2026-10-10）：點確定後遊戲**直接回到登入畫面**（帳號 / 密碼欄由遊戲自動帶入、登錄 / 註冊鈕），不會自動重連。
 使用者授權（2026-10-10，AGENTS.md 鐵則 2 的例外，只限這樣）：登入畫面**只點「登錄」**（用遊戲自動帶入的帳密），
-之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。密碼欄絕不碰（帳號欄只在下面「帳號核對」時重打）、不點鑰匙 / 註冊、
+之後處理「選擇角色 → 一鍵全登」→ 載入 → 進遊戲 → 清當前角色 → 檢查隊伍（失散時 team.form）→ 自動跑 grind.py ensure 一次（P8：重設 5 人快速 / 自動戰鬥、開遇敵；失敗只記 errlog 不重試）。密碼欄絕不碰（帳號欄只在下面「帳號重打」時重打）、不點鑰匙 / 註冊、
 不讀 savepwd.txt 或登錄檔、不把帳號寫進任何 log。帳密欄空的 / 登錄後出現提示視窗 / 連續 3 次登錄失敗 / 看不懂的畫面 → halt 停手通知使用者。
 多視窗（2026-10-15 使用者決定，auto_login_check）：非主視窗（PSA_CLIENT ≠ PrimalSA）一律不按登錄；主視窗偵測到還有別的 PrimalSA* 程序在跑也不按
 （遊戲記住的帳號是所有視窗共用的，自動登錄可能登錯帳號、互踢）→ 照樣偵測斷線、點「網路異常」的確定，回到登入畫面就 halt 通知使用者。
 只有單一視窗時維持自動登錄。查不到程序清單 = 讀取失敗：本輪不點，連續 5 輪才 halt。
-帳號核對（2026-10-15 使用者新規則，accounts.py；未實機）：本機設定檔 tools/gui/accounts.local.json（不進 git）有「本視窗 → 帳號」時，
-不管單 / 多視窗都改走帳號核對、不看程序清單：OCR 讀帳號欄（多倍數一致才算讀得出）→ = 本視窗帳號 → 按登錄；
-≠（帳號記憶共用，常態）→ 拿全視窗共用的登入輸入鎖 login-input.lock → 點帳號欄 → 清空 → 確認空 → 只打帳號（gui typeq，PostMessage 到本視窗 hwnd、
-log 只記字數）→ 再讀一次 = 本視窗帳號才按登錄、放鎖；重打後仍不符 / 讀不出 / 清不掉 / 密碼欄變空 / 畫面不是登入畫面 → halt。密碼欄絕對不碰。
-沒設定檔 / 本視窗不在對照表 / 設定檔格式錯 → 上面的舊行為逐字不變。log / errlog 只寫「帳號欄核對：符合 / 不符 / 讀不出」，不寫帳號名。
+帳號重打（2026-10-16 使用者改規則，accounts.py；未實機）：本機設定檔 tools/gui/accounts.local.json（不進 git）有「本視窗 → 帳號」時，
+不管單 / 多視窗都走帳號重打、不看程序清單：**不 OCR 核對帳號欄**，一律拿全視窗共用的登入輸入鎖 login-input.lock → 確認仍是登入畫面、密碼欄有字 →
+點帳號欄 → 清空 → 像素確認已空 → 再確認登入畫面 / 密碼欄 → 只打本視窗帳號（gui typeq，PostMessage 到本視窗 hwnd、log 只記字數）→
+**打完不核對**，確認仍是登入畫面就直接按登錄、按完放鎖；清不掉 / 密碼欄變空 / 畫面不是登入畫面 → halt。密碼欄絕對不碰。
+沒設定檔 / 本視窗不在對照表 / 設定檔格式錯 → 上面的舊行為逐字不變。log / errlog 只寫「帳號欄已重打（不核對）」，不寫帳號名。
 本視窗驗證停手旗標（verifyhalt.py，每視窗一份）存在 → check_and_reconnect 回 status 'verify'、guard sys.exit(9)，什麼都不點。
 網路異常窗辨識（2026-10-16）：框（screen_sigs.NET_DIALOG）+ 訊息白字字形（screen_sigs.net_lost，比像素不用 OCR）符合 = 網路異常；
 字形不符才退回舊的 OCR 過濾。watch.py 也用同一份特徵：正面認出網路異常窗持續 3 秒就另開 `netwatch.py --once`（watch 自己不點；
@@ -29,7 +29,7 @@ status：ok（沒事）/ reconnected（重連 / 重新登錄成功，已恢復�
   python tools/gui/netwatch.py --status                印目前 halt / 失敗計數
 版本錯誤（2026-10-16 伺服器改版 1.0.1 → 1.0.2）：按登錄後頂端閃黑條「登錄失敗！版本錯誤！」→ 腳本迴圈（guard）halt 退 10、理由提示跑 clientupdate.py；
 命令列 --once / --watch 直接接 clientupdate.run（關本視窗 → 重開 → 熱更新 → 登入 → grind ensure；--no-update 不接）。
-「提示：伺服器已關閉！」提示窗（同款單鈕）也按確定回登入畫面（未實機）。帳號欄核對容許字尾文字游標（重打後一定有，accounts.classify caret）。
+「提示：伺服器已關閉！」提示窗（同款單鈕）也按確定回登入畫面（未實機）。
 退出碼：0 正常、9 本視窗驗證停手旗標、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援；版本錯誤接 clientupdate 時回它的退出碼（210～219）。
 狀態檔（tools/.cache/，非主視窗在 tools/.cache/clients/<程序名>/；不進 git）：netwatch.halt（存在 = 已停手，等人類登入；HUD 回來後自動刪除）、
 netwatch.json（連續失敗計數）、netwatch.act.lock（動作鎖：同時只有一支腳本在處理重連，不會互相亂點）、netwatch.lock（--watch 單例）。
@@ -501,8 +501,8 @@ def _take_wait(lock: Path, stale: int, wait: float) -> bool:
 
 
 def retype_account(mine: str) -> str:
-    """登入畫面帳號欄是別的帳號：點帳號欄 → 清空 → 確認空 → 只打本視窗帳號 → 再讀核對。回 '' = 成功（帳號欄 = 本視窗帳號），
-    否則回 halt 理由（不含帳號名）。呼叫端必須已拿 LOGIN_INPUT_LOCK。密碼欄不點、不清、不打；每步前確認還是登入畫面、密碼欄還有字"""
+    """登入畫面帳號欄一律重打（2026-10-16 使用者：不核對）：點帳號欄 → 清空 → 確認空 → 只打本視窗帳號 → 確認仍是登入畫面。
+    回 '' = 成功（呼叫端直接按登錄，打完不 OCR 核對），否則回 halt 理由（不含帳號名）。呼叫端必須已拿 LOGIN_INPUT_LOCK。密碼欄不點、不清、不打；每步前確認還是登入畫面、密碼欄還有字"""
     def still_login() -> str:
         if _match(SIG_LOGIN) is not True:
             return '畫面不是 / 讀不到登入畫面'
@@ -532,13 +532,10 @@ def retype_account(mine: str) -> str:
         time.sleep(0.6)
     except Exception as e:          # noqa: BLE001  例外訊息可能帶指令參數（帳號）→ 只留型別
         return f'重打帳號時出錯（{type(e).__name__}），停手'
-    v = read_account(mine)
-    _log_verdict(v, '（重打後）')
-    if v != 'self':
-        return f'重打帳號後核對{VERDICT_TXT.get(v, v)}，不按登錄'
     why = still_login()
     if why:
         return f'重打帳號後{why}，不按登錄'
+    log('netwatch：帳號欄已重打（不核對）')
     return ''
 
 
@@ -584,7 +581,7 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
     失敗規則：欄位空 / 出現提示視窗（密碼錯誤、封停、維護、驗證）/ 看不懂的畫面逾時 / 連續 3 次 → halt（不重試）。
     版本錯誤（按登錄後頂端黑條，watch_version）：on_version='halt'（預設，腳本迴圈的 guard）→ halt，理由 VERSION_HALT + 提示跑 clientupdate.py；
     on_version='return'（clientupdate.py 用）→ 不 halt、不算登錄失敗，回 {'status': 'version'}；這時「按登錄後停在登入畫面 STUCK_LOGIN_S 秒」也算。
-    clear_halt=True（clientupdate.py 用）：帳號核對通過、要按登錄前刪本視窗 netwatch.halt（只在本次剛核對通過時）"""
+    clear_halt=True（clientupdate.py 用）：帳號欄重打完、要按登錄前刪本視窗 netwatch.halt（只在本次剛核對通過時）"""
     if not _take(ACT_LOCK, 300):
         return {'status': 'ok', 'busy': True}
     try:
@@ -619,23 +616,19 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
         held = False                     # 帳號重打時拿的全視窗登入輸入鎖（按完登錄就放）
         try:
             if how == 'account':
-                v = read_account(acct)
-                _log_verdict(v)
-                if v == 'unreadable':
-                    return halt('帳號欄讀不出（OCR 各倍數不一致 / 讀不到），不自動登錄', src)
-                if v == 'other':
-                    if not _take_wait(LOGIN_INPUT_LOCK, LOGIN_INPUT_STALE, LOGIN_INPUT_WAIT):
-                        return halt(f'別的視窗佔著登入輸入鎖超過 {LOGIN_INPUT_WAIT} 秒，不重打帳號', src)
-                    held = True
-                    why = retype_account(acct)
-                    if why:
-                        return halt(why, src)
+                # 2026-10-16：不再 OCR 核對，一律重打帳號欄（拿全視窗輸入鎖 → 保護檢查 → 清空 → 打字）後直接按登錄
+                if not _take_wait(LOGIN_INPUT_LOCK, LOGIN_INPUT_STALE, LOGIN_INPUT_WAIT):
+                    return halt(f'別的視窗佔著登入輸入鎖超過 {LOGIN_INPUT_WAIT} 秒，不重打帳號', src)
+                held = True
+                why = retype_account(acct)
+                if why:
+                    return halt(why, src)
             if clear_halt and HALT.exists():
                 _release(HALT)
-                log('netwatch：帳號核對通過，刪本視窗 netwatch.halt（clientupdate）')
+                log('netwatch：帳號欄已重打，刪本視窗 netwatch.halt（clientupdate）')
             i = errlog.add('斷線回到登入畫面，自動按「登錄」重新登入（使用者授權'
-                           + ('；帳號欄核對符合' if how == 'account' else '') + '）', source=src)
-            log('netwatch：登入畫面，' + ('帳號欄核對符合' if how == 'account' else '帳密欄已有內容') + ' → 按登錄')
+                           + ('；帳號欄已重打（不核對）' if how == 'account' else '') + '）', source=src)
+            log('netwatch：登入畫面，' + ('帳號欄已重打（不核對）' if how == 'account' else '帳密欄已有內容') + ' → 按登錄')
             base = _pixels(VERSION_PTS)
             gui('click', str(LOGIN_BTN[0]), str(LOGIN_BTN[1]), note='按登錄')
             flash = watch_version(base)

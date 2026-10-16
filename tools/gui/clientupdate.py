@@ -8,7 +8,7 @@
 用法（專案根目錄；WSL / Windows 原生指令相同；多視窗加 PSA_CLIENT=<程序名>，只動那個視窗的程序）：
   uv run --no-project python tools/gui/clientupdate.py run [--no-grind] [--restart] [--dry-run]
   run         每輪看畫面決定下一步（可重跑、從任一階段接上）：程序沒開 → 開；小視窗（1366×768）→ 更新提示 / 重啟 / 公告 / 最大化；
-              2880×1659 → 提示窗（伺服器已關閉 / 網路異常）按確定、登入畫面 → netwatch.relogin（帳號核對 → 登錄 → 一鍵全登 → 隊伍檢查 → grind ensure）、
+              2880×1659 → 提示窗（伺服器已關閉 / 網路異常）按確定、登入畫面 → netwatch.relogin（重打帳號欄 → 登錄 → 一鍵全登 → 隊伍檢查 → grind ensure）、
               選角面板 → 一鍵全登、已在遊戲 → grind ensure
   --restart   一開始先關本視窗程序再開（已知要更新時用；不加 = 只有登錄版本錯誤才關）
   --no-grind  進遊戲後不跑 grind.py ensure（交給呼叫端）
@@ -23,7 +23,7 @@
       「更新完畢需要重啟用戶端」→ 重啟（340,257）→ 程序自己結束、不會自動重開 → 回第 2 步再開
       「最新公告」（標題在畫面上方）→ 右上 X（573,48）→ gui max（2880×1659）→ gui end 還前景
       都沒有、也不像下載中 → SMALL_IDLE_S 秒後直接 max / end
-  4 2880×1659：登入畫面 → netwatch.relogin(on_version='return', clear_halt=True)：帳號欄核對（字尾文字游標容錯）→ 通過才刪本視窗 netwatch.halt →
+  4 2880×1659：登入畫面 → netwatch.relogin(on_version='return', clear_halt=True)：重打帳號欄（不核對）→ 刪本視窗 netwatch.halt →
     登錄（590,585）→ 版本錯誤（黑條 / 停在登入畫面 15 秒）→ 回第 1 步（最多 MAX_RESTARTS 次）；選角「一鍵全登」→ 主畫面 → 隊伍檢查 → grind ensure
 鐵則 2：密碼欄不碰、帳號名不進 log（登入畫面的點擊全在 netwatch.relogin）；登錄出錯（密碼錯、封號、維護、驗證碼）= netwatch halt → 退 10。
 鐵則 5：本視窗驗證停手旗標存在 → 退 9 什麼都不做；2880×1659 畫面答題介面正面命中 → 設旗標退 9。小視窗沒有面板特徵：只點 OCR 剛讀到的那個提示的按鈕。
@@ -419,7 +419,7 @@ class Runner:
         kind = full_kind()
         if self.dry:
             return self._plan(f'{FULL}，畫面「{kind}」→ ' + {
-                'dialog': '提示窗：伺服器已關閉 / 網路異常才按確定', 'login': 'netwatch.relogin（帳號核對 → 登錄；版本錯誤就重開）',
+                'dialog': '提示窗：伺服器已關閉 / 網路異常才按確定', 'login': 'netwatch.relogin（重打帳號欄 → 登錄；版本錯誤就重開）',
                 'charsel': '一鍵全登', 'game': '已在遊戲 → ' + ('grind ensure' if self.grind else '結束（--no-grind）'),
                 'other': '等（載入 / 不明）'}[kind])
         if kind != 'other':
@@ -445,7 +445,7 @@ class Runner:
         return None
 
     def login(self) -> int | None:
-        log('登入畫面 → netwatch.relogin（帳號核對 → 登錄 → 一鍵全登 → 隊伍檢查' + (' → grind ensure）' if self.grind else '）'))
+        log('登入畫面 → netwatch.relogin（重打帳號欄 → 登錄 → 一鍵全登 → 隊伍檢查' + (' → grind ensure）' if self.grind else '）'))
         r = netwatch.relogin(SRC, grind_ensure=self.grind, on_version='return', clear_halt=True)
         st = r.get('status')
         if st == 'version':

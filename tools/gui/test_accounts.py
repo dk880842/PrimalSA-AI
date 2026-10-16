@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""帳號對照 + 登入畫面帳號核對的離線測試（不碰遊戲；只用標準函式庫）。
-accounts.py（設定檔、容錯正規化、一致性判定）、netwatch.relogin 的帳號核對流程（符合 → 登錄；不符 → 重打 → 核對 → 登錄；
-重打後仍不符 / 讀不出 / 清不掉 / 密碼欄變空 / 鎖被佔 → halt）、沒設定檔時舊行為不變、relogin.py 有設定檔時多視窗不再 109、log 不含帳號名。
+"""帳號對照 + 登入畫面帳號重打的離線測試（不碰遊戲；只用標準函式庫）。
+accounts.py（設定檔、容錯正規化、一致性判定）、netwatch.relogin 的帳號重打流程（2026-10-16 起不核對：一律重打 → 直接登錄；
+清不掉 / 密碼欄變空 / 鎖被佔 → halt）、沒設定檔時舊行為不變、relogin.py 有設定檔時多視窗不再 109、log 不含帳號名。
 測試用假帳號（acct_a / acct_b / test01 / test02），真帳號只在本機 accounts.local.json。
 選配：本機有 accounts.local.json 和登入畫面截圖 tools/.cache/net5.png 時，加跑一段「真 OCR 讀 fixture 檔」（ocr.ps1 -Image，只讀檔、不碰遊戲）；
   路徑可用 PSA_FIXTURE_ACCOUNTS / PSA_FIXTURE_SHOT 指定，PSA_SKIP_OCR_FIXTURE=1 跳過。
@@ -88,7 +88,7 @@ check('caret：只有 1 個倍數讀到 → unreadable', accounts.classify(['tes
 check('caret：倍數之間不一致 → unreadable', accounts.classify(['test01', 'test02', 'test01'], 'test01', caret=True) == 'unreadable')
 no_cfg()
 
-# ================================================================ 2) netwatch.relogin 帳號核對（假畫面）
+# ================================================================ 2) netwatch.relogin 帳號重打（假畫面）
 netwatch.CACHE = TMP
 netwatch.HALT = TMP / 'netwatch.halt'
 netwatch.STATE = TMP / 'netwatch.json'
@@ -172,41 +172,26 @@ LOGIN = ('click', str(netwatch.LOGIN_BTN[0]), str(netwatch.LOGIN_BTN[1]))
 FIELD = ('click', str(netwatch.ACCT_FIELD[0]), str(netwatch.ACCT_FIELD[1]))
 use_cfg({'PrimalSA': 'acct_a', 'PrimalSA2': 'acct_b'})
 
-# 符合 → 直接登錄
-s = Screen('acct_a')
-r = run(s)
-check('符合 → reconnected、只點登錄（不點帳號欄、不打字）', r['status'] == 'reconnected' and s.calls == [LOGIN], s.calls)
-check('  log 有「帳號欄核對：符合」', any('帳號欄核對：符合' in x for x in LOGS))
-
-# 不符 → 重打 → 核對 → 登錄
-s = Screen('acct_b')
-r = run(s)
-kinds = [c[0] for c in s.calls]
-check('不符 → 點帳號欄 → 清空 → typeq 本視窗帳號 → 登錄', r['status'] == 'reconnected' and s.calls[0] == FIELD and kinds == ['click', 'key', 'typeq', 'click']
-      and s.calls[2] == ('typeq', 'acct_a') and s.calls[3] == LOGIN, s.calls)
+# 一律重打（2026-10-16：不核對）：不管欄位原本是不是本視窗帳號
+for field in ('acct_a', 'acct_b'):
+    s = Screen(field)
+    r = run(s)
+    kinds = [c[0] for c in s.calls]
+    check(f'欄位={field}：不核對 → 點帳號欄 → 清空 → typeq 本視窗帳號 → 登錄', r['status'] == 'reconnected' and s.calls[0] == FIELD and kinds == ['click', 'key', 'typeq', 'click']
+          and s.calls[2] == ('typeq', 'acct_a') and s.calls[3] == LOGIN, s.calls)
+    check('  沒有 OCR 讀帳號欄（ocr_n == 0）', s.ocr_n == 0, s.ocr_n)
 check('  清空鍵序列含 {END}{BS}…{HOME}{DEL}…、不含 {TAB} / {ENTER}', '{END}' in s.calls[1][1] and '{DEL}' in s.calls[1][1]
       and '{TAB}' not in s.calls[1][1] and '{ENTER}' not in s.calls[1][1])
 check('  打字當下拿著全視窗登入輸入鎖、結束後放掉', s.lock_seen == [True] and not netwatch.LOGIN_INPUT_LOCK.exists())
-check('  log 有「不符」與「（重打後）：符合」', any('帳號欄核對：不符' in x for x in LOGS) and any('帳號欄核對（重打後）：符合' in x for x in LOGS))
+check('  log 有「帳號欄已重打（不核對）」、沒有「帳號欄核對」', any('帳號欄已重打（不核對）' in x for x in LOGS) and not any('帳號欄核對' in x for x in LOGS))
 check('  沒有點密碼欄附近 / 鑰匙（只點帳號欄 + 登錄）', all(c in (FIELD, LOGIN) for c in s.calls if c[0] == 'click'))
 
-# 重打後仍不符 → halt、不登錄
+# 打完不核對：就算打字沒進去 / 打錯也照按登錄（遊戲端自己會擋）
 s = Screen('acct_b', typing='wrong')
 r = run(s)
-check('重打後仍不符 → halt、沒按登錄', r['status'] == 'halt' and LOGIN not in s.calls and '核對不符' in r['reason'], r)
-check('  halt 也放掉輸入鎖', not netwatch.LOGIN_INPUT_LOCK.exists())
-s = Screen('acct_b', typing='lost')          # 打字沒進去（欄位還是空）→ 讀不出
-r = run(s)
-check('重打後讀不出（打字沒進去）→ halt、沒按登錄', r['status'] == 'halt' and LOGIN not in s.calls and '讀不出' in r['reason'], r)
-
-# 讀不出 → halt、什麼都不點
-s = Screen('acct_a', ocr_mode='flaky')
-r = run(s)
-check('OCR 倍數不一致（讀不出）→ halt、沒點任何東西', r['status'] == 'halt' and not s.calls and '讀不出' in r['reason'], r)
-check('  讀不出會重讀（游標會閃，最多 3 次 OCR）', s.ocr_n == 3, s.ocr_n)
-s = Screen('acct_a', ocr_mode='blind')
-r = run(s)
-check('OCR 完全讀不到 → halt、沒點', r['status'] == 'halt' and not s.calls)
+check('打完不核對：欄位內容怎樣都照按登錄', r['status'] == 'reconnected' and s.calls[-1] == LOGIN and s.ocr_n == 0, s.calls)
+netwatch.LOGIN_INPUT_LOCK.unlink(missing_ok=True)
+check('  結束後放掉輸入鎖', not netwatch.LOGIN_INPUT_LOCK.exists())
 
 # 清不掉 / 密碼欄變空
 s = Screen('acct_b', clear_ok=False)
@@ -214,12 +199,12 @@ r = run(s)
 check('帳號欄清不掉 → halt、沒打字、沒登錄', r['status'] == 'halt' and 'typeq' not in [c[0] for c in s.calls] and LOGIN not in s.calls, s.calls)
 s = Screen('acct_b', typing='pwd_gone')
 r = run(s)
-check('重打後密碼欄變空 → halt、沒登錄', r['status'] == 'halt' and LOGIN not in s.calls and '密碼欄' in r['reason'], r)
+check('重打後密碼欄變空 → halt、沒登錄、放掉輸入鎖', r['status'] == 'halt' and LOGIN not in s.calls and '密碼欄' in r['reason'] and not netwatch.LOGIN_INPUT_LOCK.exists(), r)
 
 # 密碼欄空（遊戲沒帶入）→ 舊規則 halt，不核對帳號
 s = Screen('acct_a', pwd=False)
 r = run(s)
-check('密碼欄空 → halt「空的」、沒讀帳號、沒點', r['status'] == 'halt' and '空的' in r['reason'] and s.ocr_n == 0 and not s.calls)
+check('密碼欄空 → halt「空的」、沒點', r['status'] == 'halt' and '空的' in r['reason'] and s.ocr_n == 0 and not s.calls)
 
 # 輸入鎖被別的視窗佔著 → halt，不打字
 netwatch.LOGIN_INPUT_LOCK.write_text('999 0')
@@ -232,7 +217,7 @@ check('  別人的鎖不會被刪', netwatch.LOGIN_INPUT_LOCK.exists())
 netwatch.LOGIN_INPUT_WAIT = _w
 netwatch.LOGIN_INPUT_LOCK.unlink()
 
-# 多視窗 + 有設定檔：PrimalSA2 照帳號核對跑（不再 halt）
+# 多視窗 + 有設定檔：PrimalSA2 照帳號重打跑（不再 halt）
 os.environ['PSA_TEST_PROCS'] = 'PrimalSA,PrimalSA2'
 os.environ['PSA_CLIENT'] = 'PrimalSA2'
 s = Screen('acct_a')
@@ -241,7 +226,7 @@ check('多視窗 PrimalSA2 + 設定檔：帳號欄是主視窗帳號 → 重打�
 os.environ.pop('PSA_CLIENT')
 s = Screen('acct_a')
 r = run(s)
-check('多視窗主視窗 + 設定檔：符合 → 直接登錄', r['status'] == 'reconnected' and s.calls == [LOGIN], s.calls)
+check('多視窗主視窗 + 設定檔：一樣重打 → 登錄', r['status'] == 'reconnected' and ('typeq', 'acct_a') in s.calls and s.calls[-1] == LOGIN, s.calls)
 
 # 視窗不在對照表 / 沒設定檔 / 設定檔壞 → 舊行為
 os.environ['PSA_CLIENT'] = 'PrimalSA3'
