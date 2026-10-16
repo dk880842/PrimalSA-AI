@@ -40,12 +40,16 @@ def pets_ok_json():
 class Fake:
     """rcs：{(腳本, 第一個參數): rc 或 [rc…]}；bag_lists：bag.py list 依序回傳的 bags dict"""
 
-    def __init__(self, rcs=None, bag_lists=None, not_done=None, pets=None, not_done_ids=None):
+    def __init__(self, rcs=None, bag_lists=None, not_done=None, pets=None, not_done_ids=None, trans=1, exp_trans=None):
+        self.trans, self.exp_trans = trans, exp_trans      # trans = trans.json 快取（預設 1 轉）；exp_trans = 盤點 exp.py read 回報的 5 人轉數
         self.calls, self.rcs = [], dict(rcs or {})
         self.not_done_ids = list(not_done_ids or [])
         self.bag_lists = list(bag_lists or [])
         self.not_done = not_done or {}
         self.pets = pets or pets_ok_json()
+
+    def cached_trans(self):
+        return self.trans
 
     def sub(self, script, args, timeout=0):
         args = [str(a) for a in args]
@@ -58,6 +62,8 @@ class Fake:
             return rc, [json.dumps({'bags': b, 'rc': rc}, ensure_ascii=False)]
         if script == 'questrun.py' and args[0] == 'status':
             return rc, [json.dumps({'rc': rc, 'not_done': self.not_done, 'not_done_ids': self.not_done_ids}, ensure_ascii=False)]
+        if script == 'exp.py' and self.exp_trans is not None:
+            return rc, [json.dumps({'rc': rc, 'roles': {r: ({'trans': t} if t is not None else None) for r, t in zip(pr.ALL_ROLES, self.exp_trans)}})]
         if script == 'pet.py' and args[0] == 'list':
             return rc, [json.dumps(dict(self.pets, rc=rc), ensure_ascii=False)]
         return rc, []
@@ -197,8 +203,41 @@ check('沒 --confirm-drop + --wear-hero-items：什麼都不丟、仍戴首飾',
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     pr.run(confirm_drop=True, wear_hero_items=True, dry_run=True)
-check('plan 顯示 --wear-hero-items 效果、hero 指令不含 --drop-items', '--wear-hero-items' in buf.getvalue() and 'bag.py wear' in buf.getvalue()
-      and '--drop-items' not in buf.getvalue().split('[hero]')[1].split('[q182a]')[0].split('（--wear')[0])
+check('plan 顯示 --wear-hero-items 強制效果、hero 指令不含 --drop-items', '--wear-hero-items' in buf.getvalue() and 'bag.py wear' in buf.getvalue()
+      and '--drop-items' not in buf.getvalue().split('[hero]')[1].split('[q182a]')[0].split('（首飾')[0])
+# ---------------- 依轉數自動判斷（使用者 2026-10-16）
+check('hero_mode：0 轉 wear / 1～5 轉 drop / None keep / 強制 wear', pr.hero_mode({}, 0) == 'wear' and all(pr.hero_mode({}, n) == 'drop' for n in range(1, 6))
+      and pr.hero_mode({}, None) == 'keep' and pr.hero_mode({'wear_hero_items': True}, 3) == 'wear')
+check('team_trans：全同才算；混合 / 缺 / 空 → None', pr.team_trans({'a': 2, 'b': 2}) == 2 and pr.team_trans({'a': 0, 'b': 0}) == 0
+      and pr.team_trans({'a': 0, 'b': 1}) is None and pr.team_trans({'a': 1, 'b': None}) is None and pr.team_trans({}) is None)
+rich = bags(14, {'DKBO': [pr.HERO_RING], 'DKBO3': [pr.HERO_RING]})
+f = Fake(trans=0, bag_lists=[rich])
+rc = go(f, confirm_drop=True, from_seg='hero', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
+ws = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'wear']
+check('0 轉（trans.json）：不帶 --drop-items、丟巴朵蘭恩、背包有首飾的人戴', rc == 0 and '--drop-items' not in hr[0] and '--drop-reward' in hr[0]
+      and ws == [('wear', 'DKBO', pr.HERO_RING), ('wear', 'DKBO3', pr.HERO_RING)], str(ws))
+f = Fake(trans=1, bag_lists=[rich])
+rc = go(f, confirm_drop=True, from_seg='hero', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
+check('1 轉：照舊 --drop-items 刪、不戴', rc == 0 and '--drop-items' in hr[0] and not [1 for s, a in f.calls if s == 'bag.py' and a[0] == 'wear'])
+f = Fake(trans=None, bag_lists=[rich])
+rc = go(f, confirm_drop=True, from_seg='hero', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
+check('讀不出轉數：不刪也不戴、仍丟巴朵蘭恩、記 warning', rc == 0 and '--drop-items' not in hr[0] and '--drop-reward' in hr[0]
+      and not [1 for s, a in f.calls if s == 'bag.py'] and any('讀不出' in w for w in pr.LAST['warnings']), str(pr.LAST['warnings']))
+f = Fake(trans=1, exp_trans=[0] * 5, bag_lists=[rich])
+rc = go(f, confirm_drop=True, from_seg='inventory', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run' and a[1] == '2031']
+check('盤點 exp.py 回報 5 人 0 轉優先於 trans.json（1 轉）→ 戴', rc == 0 and '--drop-items' not in hr[0] and any(a[0] == 'wear' for s, a in f.calls if s == 'bag.py'))
+f = Fake(trans=0, exp_trans=[2, 2, 2, 2, 2], bag_lists=[rich])
+rc = go(f, confirm_drop=True, from_seg='inventory', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run' and a[1] == '2031']
+check('盤點 5 人 2 轉 → 刪', rc == 0 and '--drop-items' in hr[0])
+f = Fake(trans=1, exp_trans=[0, 0, 1, 0, 0], bag_lists=[rich])
+rc = go(f, confirm_drop=True, from_seg='inventory', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run' and a[1] == '2031']
+check('盤點轉數混合 → 退回 trans.json 快取（1 轉）→ 刪', rc == 0 and '--drop-items' in hr[0])
 check('清背包名單不含首飾', pr.HERO_RING not in pr.PURGE2)
 check('段名不認得 → 170', go(Fake(), from_seg='xx') == pr.EXIT_ARGS)
 buf = io.StringIO()

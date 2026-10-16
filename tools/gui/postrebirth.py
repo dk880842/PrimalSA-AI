@@ -8,9 +8,10 @@
   uv run --no-project python tools/gui/postrebirth.py run [--from 段] [--to 段] [--confirm-drop] [--confirm-buy-bait] [--wear-hero-items] [--spot 點名] [--fresh] [--dry-run]
     --confirm-drop      准做不可逆的丟 / 刪：紅暴的巴朵蘭恩（petdrop 1 級）+ 薩姆吉爾的首飾（bag.purge）、清背包（bag.purge 白名單）、
                         寵物任務的獎勵寵（布克布克 / 修寶 / 左迪洛斯）。沒給 → 紅暴不丟、清背包只 --dry-run 列出要刪的（空格不夠就 174 停）、寵物任務到丟寵段 168 停
-    --wear-hero-items   紅暴的薩姆吉爾的首飾（飾品，0 轉能戴）不刪、改戴上：hero 段（含 156 改單人逃跑）只帶 --drop-reward / --confirm-drop 巴朵蘭恩、不帶 --drop-items；
-                        紅暴成功後 bag.py list all → 背包有首飾的人 bag.py wear <角色> 薩姆吉爾的首飾（既有 bag.wear_item，實機未驗證）；戴失敗只警告（LAST['warnings']），首飾留背包。
-                        清背包白名單 PURGE1 / PURGE2 不含首飾，不會被刪（2026-10-16 使用者要求）
+    （紅暴的薩姆吉爾的首飾依轉數自動判斷，使用者 2026-10-16：**0 轉 → 不刪、拿到的人 bag.py wear 戴上**；**1～5 轉 → 照舊刪**（--drop-items，要 --confirm-drop）；
+                        讀不出轉數 → 不刪也不戴、首飾留背包並記 warning。轉數來源：盤點段 exp.py read 的 5 人轉數（全同才算）> 本視窗 tools/.cache[/clients/<程序>]/trans.json（grind.load_trans）；
+                        hero 段開跑前判斷、plan 也會顯示。巴朵蘭恩一律照丟。戴的動作實機未驗證）
+    --wear-hero-items   強制覆寫判斷：不管轉數一律不刪、改戴（舊旗標保留）
     --confirm-buy-bait  無作用（照傳給 petquest 也無害）：2026-10-15 起 petquest 誘餌不夠一律自動用外掛「+」買缺額，不需旗標（按前讀不到鑽石 / 鑽石有變就停）
     --spot 點名         收尾固定練功點（預設不給 = 去練功 grind.py start：依等級選點 + 未滿地雷區起 follow；2026-10-15 起不寫死地雷區）
     --from / --to       只跑某幾段（段名見 plan）；進度檔 tools/.cache/postrebirth.json 記完成的段（24 小時內），重跑 = 續跑；--fresh 從頭
@@ -95,11 +96,26 @@ HERO_DROP = HERO_DROP_PET + HERO_DROP_ITEMS
 HERO_RING = '薩姆吉爾的首飾'       # 飾品（Item type 10、level / transLimit 0 = 0 轉也能戴；運 / 魅 / 閃避 +5、附複活光精靈）；PURGE1 / PURGE2 / bag.AUTO_PURGE 都不含
 
 
+def team_trans(trans_by_role: dict | None):
+    """5 人轉數（{角色: 轉數 | None}）→ 全部讀到且相同才回該轉數，否則 None（不猜）"""
+    vals = [v for v in (trans_by_role or {}).values()]
+    if not vals or any(not isinstance(v, int) for v in vals) or len(set(vals)) != 1:
+        return None
+    return vals[0]
+
+
+def hero_mode(o: dict, trans) -> str:
+    """紅暴首飾處理：'wear' 戴（0 轉或 --wear-hero-items 強制）/ 'drop' 刪（1～5 轉）/ 'keep' 不刪不戴（讀不出轉數）"""
+    if o.get('wear_hero_items') or trans == 0:
+        return 'wear'
+    return 'drop' if isinstance(trans, int) and 1 <= trans <= 5 else 'keep'
+
+
 def hero_drop(o: dict) -> list:
-    """紅暴的丟棄旗標：--confirm-drop 才丟；--wear-hero-items → 只丟巴朵蘭恩，首飾不刪（紅暴成功後改戴）"""
+    """紅暴的丟棄旗標：--confirm-drop 才丟；o['hero_mode'] 不是 'drop'（0 轉戴 / 讀不出轉數留著）→ 只丟巴朵蘭恩，首飾不刪。沒判斷過（None）= 'keep'"""
     if not o.get('confirm_drop'):
         return []
-    return list(HERO_DROP_PET if o.get('wear_hero_items') else HERO_DROP)
+    return list(HERO_DROP if o.get('hero_mode') == 'drop' else HERO_DROP_PET)
 
 PURGE_CHUNK = 3
 SEGMENTS = ['inventory', 'adult', 'yayoi', 'hero', 'q182a', 'bag1', 'q182b', 'bag2', 'caves', 'dino', 'katan', 'quiz', 'finish']
@@ -227,6 +243,11 @@ def save_progress(d: dict) -> None:
 
 
 class Tools:
+    def cached_trans(self):
+        """本視窗 trans.json 的隊長轉數（grind.load_trans，背包讀字 / 轉生確認時寫）；沒有 None"""
+        import grind
+        return grind.load_trans()
+
     def quiet(self) -> int:
         """開面板前先靜下來（共用 questrun 交接的同一套）：follow 還在跑先停 → 關原地遇敵並等這場打完（Tools.encounter_off_wait）
         → 畫面還是戰鬥就等到結束（wait_battle_end，最多 BATTLE_WAIT_S）。→ 0 = 靜了；非 0 = 失敗（調用端決定警告或停）。
@@ -314,12 +335,32 @@ class Run:
             if rc:
                 self.warnings.append(f'盤點 {script} rc={rc}')
                 event(f'盤點：{script} rc={rc}（只警告，照跑）')
+            elif script == 'exp.py':
+                t = team_trans({r: (d or {}).get('trans') for r, d in (last_json(lines).get('roles') or {}).items()})
+                if t is not None:
+                    self.p['trans'] = t
+                    self.save()
             elif script == 'bag.py':
                 self.p['bags_start'] = {r: (d or {}).get('free') for r, d in (last_json(lines).get('bags') or {}).items()}
         return 0
 
+    def resolve_hero_mode(self) -> str:
+        """hero 段開跑前判斷首飾怎麼處理（盤點 exp.py 的轉數 > trans.json 快取）→ 寫進 self.o['hero_mode']"""
+        t, src = self.p.get('trans'), '盤點 exp.py'
+        if not isinstance(t, int):
+            try:
+                t, src = getattr(self.T, 'cached_trans', lambda: None)(), 'trans.json'
+            except Exception:                                          # noqa: BLE001
+                t = None
+        m = hero_mode(self.o, t)
+        self.o['hero_mode'] = m
+        event(f'紅暴首飾：轉數 {t if isinstance(t, int) else "讀不出"}（{src if isinstance(t, int) else "-"}）→ ' + {'wear': f'戴上（不刪）', 'drop': '刪除', 'keep': '不刪也不戴（留背包）'}[m])
+        if m == 'keep':
+            self.warnings.append(f'紅暴首飾：讀不出隊伍轉數，「{HERO_RING}」不刪也不戴（留背包；0 轉手動 bag.py wear、1 轉以上手動 bag.py purge）')
+        return m
+
     def wear_hero_items(self) -> None:
-        """--wear-hero-items：紅暴成功後，背包有首飾的人 bag.py wear 戴上（既有 bag.wear_item）。失敗只記 warning，不讓紅暴段失敗"""
+        """hero_mode == 'wear'：紅暴成功後，背包有首飾的人 bag.py wear 戴上（既有 bag.wear_item）。失敗只記 warning，不讓紅暴段失敗"""
         def warn(m):
             self.warnings.append(m)
             event('警告：' + m)
@@ -337,10 +378,12 @@ class Run:
                 warn(f'紅暴首飾：{r} 戴「{HERO_RING}」失敗 rc={rc}（首飾留背包，之後手動 bag.py wear {r} {HERO_RING}）')
 
     def s_quest(self, seg) -> int:
+        if seg == 'hero':
+            self.resolve_hero_mode()
         (script, args), = seg_cmds(seg, self.o)
         rc, _ = self.sub(script, args)
         if not rc:
-            if seg == 'hero' and self.o.get('wear_hero_items'):
+            if seg == 'hero' and self.o.get('hero_mode') == 'wear':
                 self.wear_hero_items()
             if seg == 'dino' and self.o.get('keep_autoswap'):
                 self.p['autoswap_pending'] = True                      # 自動轉換戰寵留著開，等卡坦解完才關
@@ -354,7 +397,7 @@ class Run:
             event('紅暴：questrun 156 = 背包 / 公共倉庫都沒有龍王的守護 → 自動改走單人逃跑（questrun --solo，psa-quest-solo）')
             rc, _ = self.sub(script, sargs)
             if not rc:
-                if self.o.get('wear_hero_items'):
+                if self.o.get('hero_mode') == 'wear':
                     self.wear_hero_items()
                 return 0
             return rc if rc in PASS else self.fail(EXIT_HERO, f'紅暴單人逃跑：questrun --solo 退出碼 {rc}（意義見 questrun.py 檔頭）；做完後 `run --from q182a` 續跑',
@@ -449,8 +492,21 @@ class Run:
         return self.s_quest(seg)
 
 
+def plan_hero_mode(o: dict) -> tuple:
+    """plan 用：不碰遊戲，只看進度檔 / trans.json 快取判斷首飾處理 → (模式, 轉數或 None)"""
+    t = load_progress().get('trans')
+    if not isinstance(t, int):
+        try:
+            t = Tools().cached_trans()
+        except Exception:                                              # noqa: BLE001
+            t = None
+    return hero_mode(o, t), t
+
+
 def print_plan(o: dict) -> None:
-    print(f'postrebirth 計畫：{len(SEGMENTS)} 段（--confirm-drop {bool(o.get("confirm_drop"))}；--wear-hero-items {bool(o.get("wear_hero_items"))}；誘餌不夠 petquest 自動買缺額，不需旗標）')
+    o = dict(o)
+    o['hero_mode'], ptrans = plan_hero_mode(o)
+    print(f'postrebirth 計畫：{len(SEGMENTS)} 段（--confirm-drop {bool(o.get("confirm_drop"))}；--wear-hero-items（強制戴）{bool(o.get("wear_hero_items"))}；誘餌不夠 petquest 自動買缺額，不需旗標）')
     for seg in SEGMENTS:
         print(f'[{seg}] {TITLES[seg]}')
         for script, args in seg_cmds(seg, o):
@@ -458,8 +514,10 @@ def print_plan(o: dict) -> None:
         if seg in ('bag1', 'bag2'):
             print(f'  （空格 < {NEED1 if seg == "bag1" else NEED2} 的人才刪；龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時；四大洞窟產物 / 龍王 / 誘餌等 bag.PURGE_FORBID 永不刪）')
         if seg == 'hero':
-            if o.get('wear_hero_items'):
-                print(f'  （--wear-hero-items：只丟巴朵蘭恩、不帶 --drop-items；紅暴成功後 bag.py list all → 背包有「{HERO_RING}」的人 bag.py wear <角色> {HERO_RING}；戴失敗只警告）' + ('' if o.get('confirm_drop') else '（沒 --confirm-drop：巴朵蘭恩也不丟）'))
+            m = o['hero_mode']
+            how = {'wear': f'0 轉 / 強制 → 只丟巴朵蘭恩、不帶 --drop-items；紅暴成功後 bag.py list all → 背包有「{HERO_RING}」的人 bag.py wear <角色> {HERO_RING}；戴失敗只警告',
+                   'drop': f'1～5 轉 → 帶 --drop-items 刪「{HERO_RING}」', 'keep': f'讀不出轉數 → 不刪也不戴、首飾留背包（開跑時盤點 exp.py 會再讀一次轉數）'}[m]
+            print(f'  （首飾：轉數 {ptrans if isinstance(ptrans, int) else "讀不出"}；{how}）' + ('' if o.get('confirm_drop') else '（沒 --confirm-drop：巴朵蘭恩也不丟）'))
             print('  （156 沒龍王 → 自動改跑 ' + fmt('questrun.py', seg_cmds('hero', o)[0][1] + HERO_SOLO) + '；仍失敗 173）' + ('' if o.get('confirm_drop') else '；沒 --confirm-drop：巴朵蘭恩 / 首飾不丟（之後寵物欄少 1 格，petquest 分批會變小）'))
     print('退出碼：170 參數（171 保留：盤點只警告）172 任務段 173 紅暴單人逃跑失敗 174 清背包 175 寵物任務段 176 收尾；9 驗證視窗 10 斷線')
 
@@ -517,7 +575,7 @@ def main(argv=None) -> int:
     ap.add_argument('--to', dest='to_seg', default=None)
     ap.add_argument('--confirm-drop', action='store_true', help='准丟 / 刪（紅暴巴朵蘭恩 + 首飾、清背包白名單、寵物任務獎勵寵）')
     ap.add_argument('--confirm-buy-bait', action='store_true', help='無作用（no-op，相容舊指令）：petquest 誘餌不夠一律自動買缺額')
-    ap.add_argument('--wear-hero-items', action='store_true', help='紅暴的薩姆吉爾的首飾不刪、成功後拿到的人 bag.py wear 戴上（巴朵蘭恩照丟；要配 --confirm-drop 才丟寵）')
+    ap.add_argument('--wear-hero-items', action='store_true', help='強制覆寫：紅暴首飾不管轉數一律不刪、改戴（預設依轉數：0 轉戴、1～5 轉刪、讀不出留著）')
     ap.add_argument('--spot', default=None, help='收尾固定練功點（預設不給 = 去練功：依等級選點 + follow）')
     ap.add_argument('--fresh', action='store_true')
     ap.add_argument('--dry-run', action='store_true')
