@@ -875,7 +875,7 @@ class Run:
             if self.T.clock() - t0 > TRAIN_MAX_S:
                 return self.fail(EXIT_TRAIN, f'練寵 {TRAIN_MAX_S // 60} 分鐘仍未達標：{lag}', '看 pet.py list；沒出戰寵就 set-state 出戰，達標後 --from turnin 續跑')
         # 第二次讀到最後一格達標就馬上改等待，只改最後那一格（前面的任務寵已被自動轉換戰寵換下、本來就是等待；使用者 2026-10-16）→ 再關遇敵
-        rc, _ = self.sub('pet.py', ['set-state-slot', '--role', 'all', '--slots', str(last_slot), '等待'], 1800)
+        rc, _ = self.sub('pet.py', ['set-state-slot', '--role', 'all', '--slots', str(last_slot), '等待', '--pause-encounter'], 1800)   # 自動轉換戰寵開著、練寵中戰鬥多 → rc=74 / 78（p3 實機兩次）
         if rc:
             return self.pass_or(rc, EXIT_TRAIN, f'練完：最後一格（第 {last_slot} 格）改等待失敗 rc={rc}', f'uv run --no-project python tools/gui/pet.py set-state-slot --role all --slots {last_slot} 等待')
         rc = self.encounter_off()
