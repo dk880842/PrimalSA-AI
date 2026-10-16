@@ -150,6 +150,11 @@ p2 DKBO6 事件：遇敵開著、掛機戰鬥中 `bag.py use 2倍智慧果` 兩�
 - 未改：rebirth.py / rebirth_pets.py / newchar.py 直接呼叫 `bag.use_item`（龍王 / 箱子等），沒套這套。
 
 ## 公共倉庫取一顆用（2026-10-11 實測：`tools/gui/depot_use.py`）
+**使用者說「吃 N 顆 2倍智慧果」→ `depot_use.py <隊長> 2倍智慧果 --force`（一顆一條，N 顆連跑 N 次；不要 agent 手動拆 take / use / store，2026-10-16）**：
+`--force` = buff 圖示在也照吃（智慧果疊加 +6h），吃前先 `eatbuff.remaining` 讀剩餘時間當基準（讀不出 = 95 不吃），取出 → 吃 → `eatbuff.verify`（剩餘時間要增加）→ 存回原倉庫 → 開回遇敵。
+`--store-only` = 只把背包殘留的同名道具存回倉庫（吃失敗 / 中斷後善後；背包沒有 = 92）。
+**倉庫存取失敗（2026-10-16，根因推測、未證實）**：p1 13:20 `bag.py store` rc 95（雙擊存入與彈窗「存入」都按了，背包 9 顆仍在）、13:17 take rc 90（public 子分頁點 3 次沒切過去）、p2 09:52 同；三次都在原地遇敵開著 + 快速戰鬥中 → 推測戰鬥演出 / 浮字吃掉點擊。
+`bag.py take|store ... --quiet`（先 `heal.encounter_off_wait`、做完開回，`--no-reopen` 不開回）；depot_use 整段本來就靜下來。store 驗證失敗（95）會存 `bag-store-verify-<角色>` 截圖供下次查根因。
 `uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果`：關遇敵 + 等戰鬥 → 倉庫取出（整疊）→ 背包使用一個 → 剩餘存回公共 → 開回遇敵。
 - **成敗看 buff 列圖示（2026-10-12 修）**：`bag.BUFF_KIND`（龍王的守護 = `dragon` 人形、2倍智慧果 = `exp` EXP 圖示）的道具，關背包後 4 秒內 `bag.has_buff(kind)` 沒看到 → **退出碼 95**（剩的已存回倉庫，存圖 `depot-use-nobuff`）；吃之前圖示已在 → 跳過不吃（rc 0、step skip）。`bag.use_item` 回 0 只代表「按了使用、彈窗關了」，**不代表伺服器真的扣了道具**：2026-10-12 15:03 舊版吃 2倍智慧果 rc 0，但聊天只有存回時的「扣除道具 X6」、buff 列沒 EXP（根因沒重現，同一條路徑 15:40 實機正常扣 X1；推測是按鈕在彈窗剛出現時落空，同 0846024 的取出症狀）。吃到時畫面上方 / 聊天會跳「扣除道具:2倍智慧果（綁定）X1」，堆疊數 −1；「使用」一次只吃 1 顆、沒有數量輸入（「更多」才有其他選項，未點過）。
 - 2026-10-12 實機（暫存腳本逐步呼叫 bag 函式，每步截圖）：公共倉庫原有 6 顆 → 取出 → 使用 1 顆（扣 X1）→ 存回 5 顆 → 關背包 `buff_row()` = `['exp', None, None]`。`bag.py use` 的 verify_buff 也改成關背包後才看（舊版在背包開著時看，buff 列被面板蓋住永遠看不到）。

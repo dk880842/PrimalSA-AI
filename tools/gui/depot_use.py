@@ -2,7 +2,10 @@
 """從公共倉庫取出道具、使用一個、剩下的存回公共倉庫（例：2倍智慧果）。只用標準函式庫；背包 / 倉庫動作全用 bag.py。
 
 用法（專案根目錄；WSL / Windows 原生相同）：
-  uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果 [--depot public] [--no-restore] [--have]
+  uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果 [--depot public] [--no-restore] [--have] [--force] [--store-only]
+使用者說「吃 N 顆 2倍智慧果」→ 一條指令一顆：depot_use.py <隊長> 2倍智慧果 --force（N 顆就連跑 N 次，不要 agent 手動拆 take / use / store）。
+--force（2026-10-16）：buff 圖示在也照吃：先 eatbuff.remaining 讀吃前剩餘時間當基準（讀不出 = 95 不吃）→ 取出 → 吃 → eatbuff.verify（剩餘時間要增加 ≥ 持續時間 − 容許）→ 存回原倉庫 → 開回遇敵。
+--store-only：只把背包殘留的同名道具存回倉庫（遇敵先關、存完開回），給吃失敗 / 中斷後的善後；背包沒有 = 92。
 流程：暫停遇敵 + 等戰鬥結束（heal.set_encounter(False)）→ buff 列已有該道具的圖示（bag.BUFF_KIND：龍王的守護 = 人形 dragon、2倍智慧果 = EXP exp）就跳過
 → bag.depot_take（整疊取出）→ bag.use_item → bag.depot_store（剩餘存回）→ 關背包後等 buff 列出現圖示（4 秒）→ 開回遇敵（不管成敗都會開回）。
 成敗判準（2026-10-16 起共用 eatbuff.verify）：BUFF_KIND 的道具吃後要看到圖示、且 buff 剩餘時間增加（吃前沒圖示 = 0；讀不出時間以圖示為準），沒吃到 = 95（剩的已存回倉庫；不比道具數量）；use 後背包還開著 → eatbuff.close_bag_leftover 再關；
@@ -68,13 +71,14 @@ def tidy() -> str:
         return f'error:{e}'
 
 
-def run(role: str, item: str, depot: str = 'public', restore: bool = True, have: bool = False, reopen: bool = True) -> tuple:
+def run(role: str, item: str, depot: str = 'public', restore: bool = True, have: bool = False, reopen: bool = True,
+        force: bool = False, store_only: bool = False) -> tuple:
     """→ (rc, info)。buff 圖示已在就跳過；encounter 先關、結束後一定開回（原本就關著也開回：本工具只在掛機時用）。
     非 0 結束（9 / 10 除外，畫面要留給人看）一律先 tidy() 關殘留面板，再開回遇敵"""
     info = {'role': role, 'item': item, 'depot': depot}
     rc = 1
     try:
-        rc, info = _run(role, item, depot, restore, have, info)
+        rc, info = _run(role, item, depot, restore, have, info, force, store_only)
         return rc, info
     finally:
         if rc and rc not in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
@@ -88,13 +92,33 @@ def run(role: str, item: str, depot: str = 'public', restore: bool = True, have:
                 info['enc_warn'] = str(e)
 
 
-def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict) -> tuple:
+def _store_only(role: str, item: str, depot: str, info: dict) -> tuple:
+    """善後：把背包裡殘留的同名道具存回倉庫（不吃）。背包沒有 = 92（沒東西要存，info.note 說明）"""
+    rc = bag.depot_store(role, item, depot)
+    info['step'] = 'store'
+    if rc == bag.EXIT_ITEM:
+        info['note'] = f'{role} 背包沒有「{item}」，沒東西要存'
+    return rc, info
+
+
+def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict, force: bool = False, store_only: bool = False) -> tuple:
     kind = bag.buff_kind(item)
     heal.encounter_off_wait()                                    # 關遇敵 + 等 VS 牌消失（戰鬥中點「使用」無效，2026-10-16）
-    if kind and bag.has_buff(kind):                              # 圖示已在 = 還有效，整個跳過（不開背包）；吃了也驗不出有沒有吃到
+    if store_only:
+        return _store_only(role, item, depot, info)
+    before = 0                                                   # 吃前 buff 剩餘秒數（沒圖示 = 0）
+    if kind and force:                                           # --force：圖示在也照吃（智慧果會疊加 +6h）；要讀到吃前剩餘時間才有基準驗證
+        before, brc = eatbuff.remaining(kind)
+        info['force'] = True
+        if before is None:
+            info.update(step='before', buff_before=True, warn_buff=f'--force：吃前讀不出 {kind} 剩餘時間（rc {brc}），不吃（沒基準驗不出）')
+            return bag.EXIT_VERIFY, info
+        info['buff_before'] = bool(before)
+    elif kind and bag.has_buff(kind):                              # 圖示已在 = 還有效，整個跳過（不開背包）；吃了也驗不出有沒有吃到
         info.update(buff_before=True, buff=True, step='skip', note=f'buff 列已有 {kind} 圖示，不吃')
         return 0, info
-    info['buff_before'] = False
+    if not (kind and force):
+        info['buff_before'] = False
     with bag.Session() as sess:                                      # 一次開背包做完 取出 → 使用 → 存回，最後才關（內部各步看到已開著不會關）
         if sess.rc:
             info['step'] = 'open'
@@ -124,7 +148,7 @@ def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict
                 return (use_rc or st), info
     eatbuff.close_bag_leftover(info)                                 # use 後背包沒關（戰鬥蓋住等）→ 再關一次
     if kind and not use_rc:                                          # 成功判定看 buff 剩餘時間增加（吃前沒圖示 = 0）；背包已關才讀得到
-        if eatbuff.verify(kind, 0, eat_ts, info):
+        if eatbuff.verify(kind, before, eat_ts, info):
             use_rc = bag.EXIT_VERIFY
             info['step'] = 'verify'
             info['warn_buff'] = info.get('warn_buff', '') + '（剩的已存回倉庫）'
@@ -145,13 +169,15 @@ def main() -> int:
     ap.add_argument('--depot', choices=['public', 'personal'], default='public')
     ap.add_argument('--have', action='store_true', help='道具已經在背包（上次取出後失敗）：跳過取出')
     ap.add_argument('--no-reopen', action='store_true', help='吃完不開回原地遇敵（跑任務用）')
+    ap.add_argument('--force', action='store_true', help='buff 圖示在也照吃（使用者明確要多吃；智慧果疊加 +6 小時）：先讀吃前剩餘時間當基準，吃後要增加才算吃到')
+    ap.add_argument('--store-only', action='store_true', help='只把 DKBO 背包殘留的同名道具存回倉庫（善後用），不吃；背包沒有 = 92')
     ap.add_argument('--no-restore', action='store_true', help='用完不把剩下的存回倉庫')
     a = ap.parse_args()
     roles = bag._roles(a.role)
     if not roles:
         print('角色名不在白名單', file=sys.stderr)
         return uikit.EXIT_USAGE
-    rc, info = run(roles[0], a.item, a.depot, not a.no_restore, a.have, not a.no_reopen)
+    rc, info = run(roles[0], a.item, a.depot, not a.no_restore, a.have, not a.no_reopen, a.force, a.store_only)
     info.update(ok=rc == 0, rc=rc)
     print(json.dumps(info, ensure_ascii=False))
     return rc

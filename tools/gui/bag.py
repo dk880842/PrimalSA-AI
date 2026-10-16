@@ -2187,6 +2187,10 @@ def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = Fal
                 return (not occ[i]) if occ else find_item(want) is None
             if not _wait(gone, 4.0):                         # 同上：背包頁更新有延遲，輪詢到那格變空
                 LAST['stored'] = stored
+                try:
+                    uikit.snap(f'bag-store-verify-{role}')        # 2026-10-16 p1 存不進去根因不明：留一張現場截圖
+                except Exception:                                 # noqa: BLE001
+                    pass
                 return _fail(EXIT_VERIFY, f'存入後背包「{want}」格數沒減少（倉庫滿？已存 {stored} 個）', 'bag-store-verify')
             stored += 1
             LAST['stored'] = stored
@@ -2293,6 +2297,8 @@ def main() -> int:
         p.add_argument('--kind', default='consumable', choices=['consumable', 'equip'])
         p.add_argument('--skip-missing', action='store_true', help='多人（all / 逗號）時沒有該道具的人略過')
         p.add_argument('--all-copies', action='store_true', help='store：同名多格（不疊加）全部存')
+        p.add_argument('--quiet', action='store_true', help='先關原地遇敵並等戰鬥結束（掛機快戰中浮字 / 戰鬥演出會吃掉點擊，2026-10-16 p1 / p2 倉庫存取失敗），做完開回（--no-reopen 不開回）')
+        p.add_argument('--no-reopen', action='store_true', help='--quiet 時做完不開回原地遇敵')
     p = sub.add_parser('drop'); p.add_argument('role'); p.add_argument('name'); p.add_argument('--confirm-name', required=True); p.add_argument('--allow-protected', action='store_true', help='允許丟保護名單道具（例 背包多拿的精靈王之弓；武器格穿著的不在背包格，不受影響）')
     a = ap.parse_args()
     roles = _roles(a.role)
@@ -2340,6 +2346,21 @@ def main() -> int:
         return _out(drop_spare_bow(r, a.bow), {})
     if a.cmd == 'swap-weapon':
         return _out(swap_weapon(r, a.bow, a.keep_old), {})
+    if a.cmd in ('take', 'store') and getattr(a, 'quiet', False):
+        import heal
+        try:
+            heal.encounter_off_wait()
+            return _depot_cli(a, roles, r)
+        finally:
+            if not getattr(a, 'no_reopen', False):
+                try:
+                    heal.set_encounter(True)
+                except RuntimeError as e:
+                    log(f'開回遇敵失敗：{e}')
+    return _depot_cli(a, roles, r)
+
+
+def _depot_cli(a, roles, r) -> int:
     if a.cmd in ('take', 'store') and len(roles) > 1:
         rc, d = depot_many(a.cmd, roles, a.name, a.depot, a.kind, a.skip_missing, a.all_copies)
         return _out(rc, {'roles': d})

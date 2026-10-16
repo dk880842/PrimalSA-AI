@@ -319,6 +319,40 @@ calls.clear()
 rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False)
 check('智慧果 buff 列讀不到 → 95', rc == bag.EXIT_VERIFY and calls == ['take', 'use', 'store'])
 
+# --force / --store-only（2026-10-16）
+import eatbuff  # noqa: E402
+_rem, _ver = eatbuff.remaining, eatbuff.verify
+_vseen = []
+eatbuff.verify = lambda kind, before, ts, info: (_vseen.append(before), 0)[1]
+bag.buff_row = lambda: ['dragon', 'exp', None]                                    # EXP 圖示已在
+eatbuff.remaining = lambda kind: (7200, 0)                                        # 吃前剩 2 小時
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False, force=True)
+check('--force：EXP 圖示在也照吃，verify 以吃前剩餘 7200 秒為基準 → take/use/store、rc 0',
+      rc == 0 and calls == ['take', 'use', 'store'] and _vseen == [7200] and info['force'] and info['buff_before'] and info['step'] == 'done')
+eatbuff.remaining = lambda kind: (None, 131)                                      # 吃前讀不出剩餘時間 → 不取不吃
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False, force=True)
+check('--force：吃前剩餘時間讀不出 → 95、不取不吃', rc == bag.EXIT_VERIFY and not calls and info['step'] == 'before')
+eatbuff.remaining = lambda kind: (0, 0)                                           # 沒圖示（remaining = 0）：基準 0，一樣吃
+_vseen.clear(); calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False, force=True)
+check('--force：沒 buff（基準 0）照吃', rc == 0 and _vseen == [0] and calls == ['take', 'use', 'store'])
+eatbuff.verify = lambda kind, before, ts, info: bag.EXIT_VERIFY                   # 吃後剩餘時間沒增加 → 95、剩的已存回
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False, force=True)
+check('--force：吃後時間沒增加 → 95、剩的已存回', rc == bag.EXIT_VERIFY and calls == ['take', 'use', 'store'])
+eatbuff.remaining, eatbuff.verify = _rem, _ver
+# --store-only：只存回、不取不吃
+_st = []
+bag.depot_store = lambda r, w, d='public', **k: (_st.append((r, w, d)), 0)[1]
+calls.clear()
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False, store_only=True)
+check('--store-only：只呼叫 depot_store(公共)，不取不吃 → rc 0', rc == 0 and _st == [('DKBO', '2倍智慧果', 'public')] and not calls and info['step'] == 'store')
+bag.depot_store = lambda r, w, d='public', **k: bag.EXIT_ITEM
+rc, info = depot_use.run('DKBO', '2倍智慧果', reopen=False, store_only=True)
+check('--store-only：背包沒有 → 92 + note', rc == bag.EXIT_ITEM and '沒東西要存' in info['note'])
+
 # ---- bag 新增：settle 等待 / 圖示嚴格→放寬 / 取出存入輪詢 ----
 sleeps = []
 uikit.sleep = lambda s: sleeps.append(s)
