@@ -370,7 +370,7 @@ class Run:
         if rc:
             return warn(f'紅暴首飾：bag.py list rc={rc}，沒戴（手動 bag.py wear all {HERO_RING}）')
         bags = last_json(lines).get('bags') or {}
-        who = [r for r in ALL_ROLES if HERO_RING in ((bags.get(r) or {}).get('slots') or {}).values()]
+        who = [r for r in ALL_ROLES if any(str(v).replace('(同圖)', '') == HERO_RING for v in ((bags.get(r) or {}).get('slots') or {}).values())]  # 圖示辨識的格名字會帶「(同圖)」
         event(f'紅暴首飾：背包有「{HERO_RING}」的人 {who}')
         for r in who:
             rc, _ = self.sub('bag.py', ['wear', r, HERO_RING])
