@@ -143,10 +143,22 @@ class _AcceptTools:
         return questdetail.LAST.get('state')
 
 
+def is_gatekeeper_dialog(buttons) -> bool:
+    """純函式：對話框是不是吉魯島守門人（左鈕「漆黑洞窟(漆黑任務)」、右鈕「再見」；2026-10-17 p3 截圖 ui-log/020313-bag-open-fail.png）。
+    村長選單左鈕只有「漆黑洞窟」四字；守門人多了「(漆黑任務)」→ 看「任務」兩字或括號（OCR 括號可能讀成全形 / 掉字，所以兩者擇一）"""
+    b = [re.sub(r'\s+', '', str(x or '')) for x in (buttons or [])]
+    if len(b) < 2 or '漆黑' not in b[0] or not any('再見' in x for x in b[1:]):
+        return False
+    return '任務' in b[0] or bool(re.search(r'[（(]', b[0]))
+
+
 def is_menu_dialog(buttons, title: str) -> bool:
-    """純函式：對話框按鈕是不是瑪麗娜絲村長的選單頁（左鈕 = 任務名去括號「漆黑洞窟」、後面有「再見」；2026-10-12 / 10-15 實機）"""
+    """純函式：對話框按鈕是不是瑪麗娜絲村長的選單頁（左鈕 = 任務名去括號「漆黑洞窟」、後面有「再見」；2026-10-12 / 10-15 實機）。
+    吉魯島守門人「漆黑洞窟(漆黑任務) / 再見」不算（2026-10-16 p2 / 10-17 p3：舊版當成村長選單去「接任務」→ 點了守門人左鈕 → 84）"""
     import questdetail
     b = [str(x or '') for x in (buttons or [])]
+    if is_gatekeeper_dialog(b):
+        return False
     return len(b) >= 2 and questdetail.menu_button_matches(b[0], title) and any('再見' in x for x in b[1:])
 
 
@@ -195,7 +207,9 @@ def level_gate(n: int, T=None, wait_s: float = GATE_WAIT_S) -> dict:
     blocked  跳「未達條件」視窗（提示視窗 → 已點 ✕ 關掉，closed=True；別種視窗讀到關鍵字 → closed=False 沒點）或聊天區有同樣訊息；who = 誰不夠
     nocard   追蹤欄掃完沒有這張卡（標題對不上絕不點；任務多半沒接）
     unknown  跳出視窗但讀不出「未達到 / 禁止傳送 / 條件不足 / 等級不足」→ 可能是驗證視窗，什麼都沒點（呼叫端回 9）
-    dialog   點卡後出現 NPC 對話框（沒傳送）且不是瑪麗娜絲村長的選單頁「漆黑洞窟 / 再見」→ 沒按
+    teleport 也包括：點卡後跳吉魯島守門人對話框「漆黑洞窟(漆黑任務) / 再見」（via='gatekeeper'，不按；對話框開著時 HUD 被藏、地圖讀不到，
+             2026-10-16 p2 / 10-17 p3 一轉實跑舊版誤當村長選單 → 84；未實機）
+    dialog   點卡後出現 NPC 對話框（沒傳送）且不是瑪麗娜絲村長的選單頁「漆黑洞窟 / 再見」、也不是守門人 → 沒按
              （2026-10-15 四轉實跑：任務其實還沒接，點卡被傳到村長選單 → 舊版直接 84。現在認得選單頁就 accept_dialog
                〔questdetail._after_transfer：左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗進行中〕→ 再點卡做門檻，結果帶 accepted=True；
                接取失敗 → accept_fail（rc = questdetail 退出碼）；接完再點卡又是對話框 → dialog）
@@ -234,8 +248,14 @@ def level_gate(n: int, T=None, wait_s: float = GATE_WAIT_S) -> dict:
                 return {'kind': 'moved', 'pos': p}
         st = T.state()
         if st == 'dialog':
-            if accepted or not is_menu_dialog(T.dialog_buttons(), title):
-                return {'kind': 'dialog', 'pos': pos, 'accepted': accepted}
+            btns = T.dialog_buttons()
+            if is_gatekeeper_dialog(btns):
+                # 傳送很快（約 3 秒）就到吉魯島、自動巡路到守門人跳對話框；對話框開著時整個 HUD（含右上地圖座標）被藏起來，
+                # 地圖一直讀不到（舊版 pos 停在練功點 → 84）。守門人對話框 = 已在吉魯島 = 門檻已過；不按任何鈕，交給 enter 的 quest.py
+                print(f'{SRC}：點卡後是吉魯島守門人對話框（{btns}）→ 已傳送、門檻已過（不按，enter 接手）', flush=True)
+                return {'kind': 'teleport', 'pos': pos, 'accepted': accepted, 'via': 'gatekeeper'}
+            if accepted or not is_menu_dialog(btns, title):
+                return {'kind': 'dialog', 'pos': pos, 'accepted': accepted, 'buttons': list(btns or [])}
             print(f'{SRC}：點卡後是瑪麗娜絲村長選單「漆黑洞窟 / 再見」（任務還沒接）→ 接任務後再點卡做門檻', flush=True)
             arc = T.accept_dialog(title)
             if arc:

@@ -45,6 +45,8 @@
   名字框讀不出（2026-10-14 40/9/6/5：Windows OCR 把「40」讀成「姍」）：先加讀 -Zooms 5,6；仍讀不出 → list 給 unreadable=True、guess=候選字串（只有一種完整字串、
     其餘行不矛盾），候選字串已登錄成 X 且縮圖也認成 X（且 X 不是騎寵）→ 當作沒名字的 X（species_src='img+reg-guess'，store / take 身分可用）；
     learn-species 對讀不出的格也可用（只收第 2～5 格、等待中、非騎寵，--confirm-growth 要跟現場 OCR 行不矛盾、縮圖不矛盾）
+  單格讀不出自動重讀（2026-10-17，未實機）：list 讀每一格後，讀不到像素 / 名字框有字卻讀不出 / 身分衝突（store-many 另含：沒名字且成長字串沒登錄）→
+    等 0.8 秒原地重讀最多 2 次（needs_reread / UNREAD_RETRIES；p2 卡坦 store-many 72 每次不同格、重跑就過），仍讀不出才照舊判失敗
   共用旗標：--pause-encounter（先關原地遇敵、等戰鬥結束，做完再開回；預設不動遇敵，戰鬥中直接退 78）、--no-learn（不學樣板）、--no-img（不用縮圖認物種）、
     --no-glyph（不用字形樣板 petglyph：名字框成長字串 / 倉庫卡字與等級改回全部 OCR + 逐張選卡；2026-10-14）、--timing、
     --no-icache（不用身分跨程序快取：成長字串以名字框點陣完全相同為鍵、縮圖結果以整格像素 + 候選為鍵；只在 list / levels / set-state-many / rest-all / depot-list 用，
@@ -979,6 +981,14 @@ def _list_slots(role: str, f: dict, ctx: dict, on_slot=None, only=None) -> tuple
             uikit.mark('stale-retry')
             d = read_slot(i, ctx)
             d['stale_retry'] = True
+        for k in range(UNREAD_RETRIES):                  # 單格名字隨機讀不出（2026-10-17 p2 卡坦 store-many 72：每次不同格，重跑就過）→ 原地重讀
+            if not needs_reread(d, ctx.get('reread_unnamed')):
+                break
+            uikit.sleep(UNREAD_WAIT_S)
+            uikit.mark(f'unread-retry {i + 1}')
+            d2 = read_slot(i, ctx)
+            d2['unread_retry'] = k + 1
+            d = d2
         slots.append(d)
         if on_slot is not None:
             rc = on_slot(d)
@@ -987,6 +997,22 @@ def _list_slots(role: str, f: dict, ctx: dict, on_slot=None, only=None) -> tuple
         f = scan_frames() or f
     uikit.mark(f'list {role}')
     return 0, slots
+
+
+UNREAD_RETRIES = 2             # 2026-10-17 p2 卡坦 store-many 72：單格名字隨機讀不出（每次不同格），重跑就過 → 讀完當場再讀最多 2 次（未實機）
+UNREAD_WAIT_S = 0.8
+
+
+def needs_reread(d: dict, unnamed_too: bool = False) -> bool:
+    """純函式：這格讀到的結果是不是「讀不出 / 不確定」該原地重讀：讀不到像素、名字框有字卻讀不出（unreadable 且沒推出物種）、
+    身分衝突（ident_conflict）。unnamed_too（store-many 用）：沒名字、成長字串也沒登錄物種的也重讀（存倉前已 reset-name，正常應讀得到名字）"""
+    if not d or d.get('empty') or d.get('skipped') or d.get('name'):
+        return False
+    if d.get('err') or d.get('ident_conflict'):
+        return True
+    if d.get('species'):
+        return False
+    return bool(d.get('unreadable') or (unnamed_too and d.get('unnamed')))
 
 
 STALE_RETRIES = 2              # 2026-10-14 卡坦：DKBO2 第 4 格新寵物 49/10/6/3 register 漏登（推定讀到第 3 格殘影、兩格同字串被合併）
@@ -2693,6 +2719,7 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
             rc = uikit_fail(EXIT_FORBID, f'拒絕存倉：{nm} 是 / 像騎寵，--allow-mount-store 沒列它；零點擊')
             return _out(rc, info, t0, '騎寵不能存倉')
     ctx = load_ctx(learn)
+    ctx['reread_unnamed'] = True                         # 存倉前讀寵物欄：讀不出 / 沒名字的格當場重讀（needs_reread）
     with Session(pause, need_calm=True) as s:
         if s.rc:
             return _out(s.rc, info, t0)

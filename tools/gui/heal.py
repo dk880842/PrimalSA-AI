@@ -112,12 +112,68 @@ def encounter_done(out: str) -> bool:
     return bool(res) and res[-1] == 'ok'
 
 
+ENC_BATTLE_WAIT_S = 240.0            # 完整戰鬥畫面等回主畫面的上限（原地遇敵開著時一場接一場，每場之間主畫面只露約 1～2 秒）
+ENC_POLL_S = 0.4
+ENC_TRIES = 3
+
+
+def enc_screen() -> tuple[str, bool]:
+    """現場讀一次畫面 → (state, full)。full = 完整戰鬥畫面（遇敵鈕被戰鬥 UI 蓋住，點了會被吃掉）。讀不到 → ('error', False)"""
+    pts = screen_sigs.points()
+    try:
+        cols = pixels(pts)
+    except Exception:                                    # noqa: BLE001
+        return 'error', False
+    c = screen_sigs.classify(dict(zip(pts, cols)))
+    return c.get('state') or 'error', bool(c.get('full'))
+
+
+def wait_not_full_battle(limit_s: float = ENC_BATTLE_WAIT_S) -> bool:
+    """完整戰鬥畫面中 → 每 ENC_POLL_S 秒讀一次，回主畫面就回 True；超過 limit_s 仍在完整戰鬥 → False。
+    快速戰鬥（主畫面 VS 牌，HUD 還在）不用等：遇敵鈕點得到（encounter_off_wait 本來就是先關再等這場打完）"""
+    t_end = time.time() + limit_s
+    waited = False
+    while True:
+        st, full = enc_screen()
+        if not full:
+            if waited:
+                log(f'原地遇敵：完整戰鬥結束，回到主畫面（{st}）再點')
+            return True
+        if time.time() >= t_end:
+            return False
+        if not waited:
+            log('原地遇敵：畫面是完整戰鬥（遇敵鈕被蓋住，點了會被吃掉）→ 等回主畫面再點')
+            waited = True
+        time.sleep(ENC_POLL_S)
+
+
+def enc_is(on: bool) -> bool:
+    """現場讀一次遇敵鈕：是不是目標狀態（與 encounter_steps 開頭同一個特徵 / 容差，避免兩套判斷不一致而誤點切回去）"""
+    sig = SIG_ENC_ON if on else SIG_ENC_OFF
+    out = gui('seq', f'waitpix 0 {sig} {screen_sigs.ENC_TOL}')
+    res = [l.split()[0] for l in (out or '').splitlines() if l.startswith(('ok', 'timeout'))]
+    return bool(res) and res[0] == 'ok'
+
+
 def set_encounter(on: bool) -> None:
-    """點「遇敵」並輪詢圖示顏色，變色就結束（實測 < 0.1 秒）"""
-    for _ in range(3):
-        if encounter_done(gui('seq', encounter_steps(on))):
-            log(f'原地遇敵：{"開" if on else "關"}')
+    """點「遇敵」並輪詢圖示顏色，變色就結束（實測 < 0.1 秒）。
+    2026-10-17（p2 1.82 後段 questdetail 120 / 121）：舊版在完整戰鬥畫面上看「遇敵鈕不是紅龍頭」就當已關（戰鬥 UI 蓋住按鈕，SIG_ENC_OFF 是反向特徵必過）
+    或點擊被戰鬥畫面吃掉 → 原地遇敵其實還開著、戰鬥一場接一場。現在：完整戰鬥中先等回主畫面才看 / 才點；點完再驗一次
+    （剛好進戰鬥 → 等打完回主畫面再看圖示），圖示不是目標狀態就再點，最多 ENC_TRIES 次；一直完整戰鬥 ENC_BATTLE_WAIT_S 秒 → RuntimeError。
+    驗證只看遇敵鈕圖示（紅龍頭「取消遇敵」= 開；灰「遇敵」= 關），沒讀聊天「你已關閉原地遇敵」。未實機"""
+    want = '開' if on else '關'
+    for k in range(ENC_TRIES):
+        if not wait_not_full_battle():
+            raise RuntimeError(f'切換原地遇敵（{want}）失敗：{int(ENC_BATTLE_WAIT_S)} 秒都在完整戰鬥畫面')
+        if not encounter_done(gui('seq', encounter_steps(on))):
+            continue
+        time.sleep(ENC_POLL_S)
+        if not wait_not_full_battle():                   # 點完剛好進完整戰鬥：點擊可能被吃掉，打完再看
+            raise RuntimeError(f'切換原地遇敵（{want}）後 {int(ENC_BATTLE_WAIT_S)} 秒都在完整戰鬥畫面，無法確認')
+        if enc_is(on):
+            log(f'原地遇敵：{want}' + (f'（第 {k + 1} 次才成功）' if k else ''))
             return
+        log(f'原地遇敵：點完驗證圖示仍不是「{want}」（點擊被戰鬥吃掉？）→ 再點（{k + 1}/{ENC_TRIES}）')
     raise RuntimeError('切換原地遇敵失敗')
 
 

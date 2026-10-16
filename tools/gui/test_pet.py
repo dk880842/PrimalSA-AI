@@ -1478,6 +1478,45 @@ check('list_role：第 3 格第一次讀到第 2 格殘影 → 重讀拿到自�
 (rc, sl), cnt = _list_with([['m'], ['z'], ['z']])
 check('list_role：真的同字串（重讀仍相同）→ 照收、最多重讀 STALE_RETRIES 次', rc == 0 and sl[2]['nh'] == 'z' and cnt[2] == 1 + pet.STALE_RETRIES)
 
+# ---- 2026-10-17 p2 卡坦 store-many 72：單格名字隨機讀不出 → 原地重讀（needs_reread / UNREAD_RETRIES）----
+N = pet.needs_reread
+check('needs_reread：讀不出 / 讀不到像素 / 衝突 → 重讀；有名字 / 有物種 / 空格 → 不重讀',
+      N({'unreadable': True}) and N({'err': 'x'}) and N({'ident_conflict': 'x'}) and not N({'name': '火雞'}) and not N({'empty': True})
+      and not N({'unreadable': True, 'species': '火雞'}) and not N({'unnamed': '33/8/4/8'}) and N({'unnamed': '33/8/4/8'}, True)
+      and not N({'unnamed': '33/8/4/8', 'species': '奇寶'}, True))
+
+
+def _list_dicts(reads, ctx=None):
+    """reads[格] = 依序讀到的 dict（第一次可能讀不出）"""
+    sv = (pet.select_role, pet.scan_frames, pet.select_slot, pet.read_slot, uikit.sleep, uikit.mark)
+    cnt = {}
+
+    def rs(i, ctx):
+        k = cnt.get(i, 0)
+        cnt[i] = k + 1
+        seq = reads[i]
+        return dict({'slot': i + 1, 'empty': False, 'nh': f'{i}-{k}'}, **seq[min(k, len(seq) - 1)])
+    pet.select_role = lambda role, ctx: 0
+    pet.scan_frames = lambda: {'empty': [False] * len(reads) + [True] * (5 - len(reads)), 'sel': [False] * 5}
+    pet.select_slot = lambda i, f: 0
+    pet.read_slot = rs
+    uikit.sleep = lambda s: None
+    uikit.mark = lambda *a, **k: None
+    try:
+        return pet.list_role('DKBO9', ctx if ctx is not None else {}), cnt
+    finally:
+        pet.select_role, pet.scan_frames, pet.select_slot, pet.read_slot, uikit.sleep, uikit.mark = sv
+
+
+(rc, sl), cnt = _list_dicts([[{'name': '騎'}], [{'name': '霍爾克'}], [{'unreadable': True}, {'name': '霍爾克'}], [{'name': '霍爾克'}]])
+check('list_role：第 3 格讀不出 → 重讀一次拿到名字', rc == 0 and sl[2]['name'] == '霍爾克' and cnt[2] == 2 and sl[2].get('unread_retry') == 1, str(sl[2]))
+(rc, sl), cnt = _list_dicts([[{'name': '騎'}], [{'unreadable': True}]])
+check('list_role：一直讀不出 → 最多重讀 UNREAD_RETRIES 次後照收（呼叫端照舊判失敗）', rc == 0 and sl[1].get('unreadable') and cnt[1] == 1 + pet.UNREAD_RETRIES)
+(rc, sl), cnt = _list_dicts([[{'name': '騎'}], [{'unnamed': '33/8/4/8'}, {'name': '奇寶'}]])
+check('list_role：沒名字（成長字串沒登錄）一般 list 不重讀', cnt[1] == 1)
+(rc, sl), cnt = _list_dicts([[{'name': '騎'}], [{'unnamed': '33/8/4/8'}, {'name': '奇寶'}]], {'reread_unnamed': True})
+check('list_role：store-many（reread_unnamed）沒名字 → 重讀拿到名字', cnt[1] == 2 and sl[1]['name'] == '奇寶')
+
 # ---- store-all（2026-10-16，全部存入；不驗名字 / 騎寵 / 第 1 格）----
 class _SA:
     """store_all 本體的模擬：bars[角色] = 5 格是否有寵物；depot_free[角色] = 個人倉庫剩餘格；click 存入鈕 = 選中那格存進去"""

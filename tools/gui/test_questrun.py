@@ -1825,6 +1825,20 @@ rc = go(f, [2031], after='none', solo=True)
 check('--solo：同一步做 4 次沒前進 → 112', rc == questrun.EXIT_STEP and '沒前進' in questrun.LAST['info'].get('msg', ''), questrun.LAST['info'].get('msg'))
 f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(2, [])], steps=[1], bag={r: 8 for r in questrun.ALL_ROLES})
 check('--solo：quest.py --solo 回 2（不認得畫面）→ 9', go(f, [2031], after='none', solo=True) == uikit.EXIT_UNKNOWN_SCREEN)
+# 2026-10-17 p2：任務已進行中續跑、步 1～5 同文字讀不到步號 → 舊版 112；現在依目前地圖推 solo_hint
+_d31 = next(x for x in questdefs.QOTHER if x['id'] == 2031)
+check('infer_solo_step：步 3 NPC 地圖 5505 → 3；半路 / 村子 → 1；龍穴 5510 → None；沒 same_text → None',
+      questrun.infer_solo_step(_d31, (5505, 15, 27)) == 3 and questrun.infer_solo_step(_d31, (5502, 1, 1)) == 1
+      and questrun.infer_solo_step(_d31, None) == 1 and questrun.infer_solo_step(_d31, (5510, 50, 17)) is None
+      and questrun.infer_solo_step({'solo': {'group_from': 7}}, (5505, 1, 1)) is None)
+f = SoloHero(status={D31: [questrun.DOING]}, quest=[(20, []), (0, STOP)] * 2 + [(0, [])] + [(0, STOP)] * 2,
+             steps=[None, None, 6, 7, 8, 'GONE'], bag={r: 8 for r in questrun.ALL_ROLES})
+f.no_dragon = True
+f.pos = (5506, 54, 5)
+rc = go(f, [2031], after='none', solo=True)
+qs = [c[1] for c in f.calls if c[0] == 'quest']
+check('--solo 續跑（進行中）步號讀不到 → 依地圖 5506 推步 4 → 步 4、5 單人 → 步 6 fight → 完成（不再 112）', rc == 0 and sum('--solo' in q for q in qs) == 2
+      and sum('--fight' in q for q in qs) == 1, f'rc={rc} {questrun.LAST["info"].get("msg")} {qs}')
 f = SoloHero(status={D17: [questrun.DOING]}, quest=[(0, [])])
 check('--solo 用在沒有 solo 設定的任務 → 110', go(f, [2017], after='none', solo=True) == questrun.EXIT_PREFLIGHT)
 # 9) --buy-missing 相容保留 = no-op：缺藥也不買（不呼叫 shopbuy）、照跑

@@ -152,7 +152,7 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 547 200; wait 600
 
 ## 吃 buff 道具要先靜下來 + 用剩餘時間判斷（2026-10-16，`tools/gui/eatbuff.py`，離線測試 test_eatbuff.py，**未實機**）
 p2 DKBO6 事件：遇敵開著、掛機戰鬥中 `bag.py use 2倍智慧果` 兩次都回 ok / buff=true（其實 buff 本來就在）或 buff=false，數量沒少 = 沒吃到；先關遇敵等戰鬥結束再吃就吃到（推測：戰鬥中點「使用」無效）。
-- 吃前 `heal.encounter_off_wait()`（關原地遇敵 + 等 VS 牌消失；questrun 交接 / depot_use / eatbuff 共用）。吃完預設**開回**遇敵（`--no-reopen` / `reopen=False` 不開；跑任務時用）。
+- 吃前 `heal.encounter_off_wait()`（關原地遇敵 + 等 VS 牌消失；questrun 交接 / depot_use / eatbuff 共用）。**2026-10-17 起 `heal.set_encounter` 本身**：完整戰鬥畫面（遇敵鈕被戰鬥 UI 蓋住）先等回主畫面才看 / 才點（最多 240 秒）；點完再驗遇敵鈕圖示（剛好進戰鬥 → 打完再驗），不是目標狀態就再點，最多 3 次（未實機；p2 1.82 後段舊版在戰鬥畫面誤判「已關」→ 戰鬥連續、questdetail 120 / 121）。吃完預設**開回**遇敵（`--no-reopen` / `reopen=False` 不開；跑任務時用）。
 - 判斷改看 **buff 剩餘時間**（`bufftime.read`），不比數量：吃前讀（沒圖示 = 0）→ 吃後讀 → 增加量 ≥ 持續時間 − 容許（智慧果 6 小時 − 5 分；龍王 10 分 − 3 分 20 秒）才算吃到，否則 95。吃前有圖示卻讀不出時間 → 不吃。吃前沒圖示：吃後圖示出現且時間讀不出 → 視為吃到並 `record_eaten`。
 - `bag.py use <角色> <buff 道具>` 走 `eatbuff.eat_have`（背包已有；使用者要多吃的路徑）；`depot_use.run` 吃前仍「看到圖示就跳過」，吃後同用 `eatbuff.verify`。其他道具照舊 `use_item`。
 - use 後背包面板沒關：推測同因（使用時戰鬥開打、畫面被蓋住，close_leftover 看不到背包外框）；`eatbuff.close_bag_leftover` 在 use 之後再確認一次，外框 / 彈窗還在就 `bag.close_leftover`。

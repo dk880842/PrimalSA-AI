@@ -170,6 +170,11 @@ class FakeTools:
     def encounter_set(self, on): self.c('enc_set', on)
     def screen_state(self): return self.scr
 
+    def esc_dialog(self):
+        self.c('esc_dialog')
+        if not getattr(self, 'esc_stuck', False):
+            self.scr = 'idle'
+
     def level_gate(self, n):
         self.c('level_gate', n)
         if self.gate.get('kind') in ('teleport', 'already') and self.gate.get('pos'):
@@ -385,6 +390,33 @@ fresh()
 T = FakeTools(quest=[(0, (32001, 5, 5))], use_rcs=[95])
 rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
 check('龍王使用失敗只警告、流程繼續', rc == 0 and any('龍王' in w for w in rebirth.LAST['warnings']))
+# 2026-10-16 p2 / 10-17 p3：NPC 對話框蓋住 HUD → 背包打不開 rc 90（ui-log *-bag-open-fail.png）
+fresh()
+T = FakeTools(quest=[(0, (32001, 5, 5))], scr='dialog')
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
+check('龍王：吃之前畫面是對話框 → ESC 一次 → 吃到、不警告', rc == 0 and T.names().count('esc_dialog') == 1 and T.names().count('bag_use') == 1
+      and not any('龍王' in w for w in rebirth.LAST['warnings']), str(T.names()))
+fresh()
+T = FakeTools(quest=[(0, (32001, 5, 5))], scr='dialog')
+T.esc_stuck = True
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
+check('龍王：對話框 ESC 兩次仍在 → 不開背包、警告、流程繼續', rc == 0 and T.names().count('esc_dialog') == 2 and 'bag_use' not in T.names()
+      and any('龍王' in w for w in rebirth.LAST['warnings']), str(T.names()))
+fresh()
+class _DlgT(FakeTools):
+    def bag_use(self, role, name):
+        r = super().bag_use(role, name)
+        if r[0] == 90:
+            self.scr = 'dialog'                                  # 使用途中巡路抵達 NPC 跳對話框
+        return r
+T = _DlgT(quest=[(0, (32001, 5, 5))], use_rcs=[90, 0])
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
+check('龍王：使用回 90 且有對話框 → ESC 後重試一次成功', rc == 0 and T.names().count('bag_use') == 2 and 'esc_dialog' in T.names()
+      and not any('龍王' in w for w in rebirth.LAST['warnings']), str(T.names()))
+fresh()
+T = FakeTools(quest=[(0, (32001, 5, 5))], use_rcs=[90])
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
+check('龍王：回 90 但沒有對話框 → 不重試、只警告', rc == 0 and T.names().count('bag_use') == 1 and any('rc 90' in w for w in rebirth.LAST['warnings']), str(T.names()))
 fresh()
 T = FakeTools(quest=[(0, (32010, 1, 1)), (37, (32011, 56, 36))])
 rc = quiet(rebirth.run, trans=1, from_stage='boss10', to_stage='boss10', tools=T)
@@ -1023,6 +1055,7 @@ T = FakeTools(quest=list(FULL_QUEST), scr='dialog')
 rc = quiet(rebirth.run, tools=T)
 check('門檻：傳送後已到守門人對話框 → preflight 不補血（第一次 heal 在 swap 之後）、警告、照跑',
       rc == 0 and T.names().index('heal') > T.names().index('swap_weapon') and any('不補血' in w for w in rebirth.LAST['warnings']), str(T.names()[:16]))
+check('門檻：守門人對話框 → enter 吃龍王前先 ESC（不回答）再開背包', T.names().index('esc_dialog') < T.names().index('bag_use'), str(T.names()[:20]))
 fresh()
 T = FakeTools(quest=list(FULL_QUEST))
 check('--read-levels：不點卡、讀 5 人等級、accept 照跑', quiet(rebirth.run, read_levels=True, tools=T) == 0 and 'level_gate' not in T.names() and 'accept' in T.names()

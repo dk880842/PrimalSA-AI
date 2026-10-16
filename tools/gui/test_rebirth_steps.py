@@ -457,6 +457,27 @@ T.after2 = [(4, (300, 96, 228))]
 T.card_seq = None
 g = quiet(rs.level_gate, 4, T)
 check('level_gate：接完人在村子（2000）不算 moved，等到吉魯島才 teleport', g['kind'] == 'teleport', str(g))
+# 2026-10-16 p2 / 10-17 p3 一轉：點卡約 3 秒就到吉魯島守門人對話框（HUD 被藏、地圖一直讀成練功點 60049）→ 舊版當村長選單去接任務 → 84
+check('is_gatekeeper_dialog：守門人「漆黑洞窟(漆黑任務) / 再見」', rs.is_gatekeeper_dialog(['漆黑洞窟(漆黑任務)', '再見'])
+      and rs.is_gatekeeper_dialog(['漆黑洞窟（漆黑任務', '再 見']) and rs.is_gatekeeper_dialog(['漆黑洞窟漆黑任務', '再見']))
+check('is_gatekeeper_dialog：村長選單 / 其他不算', not rs.is_gatekeeper_dialog(['漆黑洞窟', '再見']) and not rs.is_gatekeeper_dialog(['挑戰守護獸', '再見'])
+      and not rs.is_gatekeeper_dialog(['漆黑洞窟(漆黑任務)']) and not rs.is_gatekeeper_dialog(None))
+check('is_menu_dialog：守門人不算村長選單（不去接任務）', not rs.is_menu_dialog(['漆黑洞窟(漆黑任務)', '再見'], '漆黑洞窟(一轉)')
+      and rs.is_menu_dialog(['漆黑洞窟', '再見'], '漆黑洞窟(一轉)'))
+T = GateT(state='dialog', pos=(60049, 30, 25))
+T.btns = ['漆黑洞窟(漆黑任務)', '再見']
+g = quiet(rs.level_gate, 1, T)
+check('level_gate：點卡後是守門人對話框（地圖讀不到）→ teleport via gatekeeper、不接任務、只點一次卡', g['kind'] == 'teleport' and g.get('via') == 'gatekeeper'
+      and not any(isinstance(c, tuple) and c[0] == 'accept' for c in T.calls) and T.calls.count(('card', '漆黑洞窟(一轉)')) == 1, str((g, T.calls)))
+class _GK(GateT):
+    def accept_dialog(self, title):
+        rc = super().accept_dialog(title)
+        self.btns = ['漆黑洞窟(漆黑任務)', '再見']              # 接完再點卡 → 傳到守門人
+        return rc
+T2 = _GK(state='dialog', pos=(60050, 25, 24))
+T2.btns, T2.st_after = ['漆黑洞窟', '再見'], 'dialog'
+g = quiet(rs.level_gate, 1, T2)
+check('level_gate：村長選單接完再點卡 → 守門人對話框 → teleport、accepted', g['kind'] == 'teleport' and g['accepted'] is True and g.get('via') == 'gatekeeper', str(g))
 T = GateT(after=[(2, (2006, 21, 8))])
 check('level_gate：換到別張地圖 → moved', quiet(rs.level_gate, 4, T)['kind'] == 'moved')
 T = GateT(state='idle', chat='系統：DKBO3未達到3轉131級禁止傳送')

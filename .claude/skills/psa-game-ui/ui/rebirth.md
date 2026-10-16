@@ -20,7 +20,7 @@
 |---|---|---|
 | preflight | 先關原地遇敵（`heal.set_encounter(False)`，已關不點；練功中 EXP 橫幅擋讀字）→ 當前角色 = DKBO（面板左欄頭像紅字「當前登錄」，不看頭頂名牌）、`team.form` 滿 5 人（`Run.form`：非 0 / 非 9 → 等 3 秒 `team.check`，滿 5 就算，不滿再 form 一次）、背包空位 ≥2（2026-10-16 起不查寵物欄空位：boss20 後 storepets 會全存）→ **點追蹤卡 = 等級檢查**（2026-10-14 使用者說法，`rebirth_steps.level_gate`，未實機）：傳送到吉魯島 300 / 漆黑 = 5 人達標（accept 跳過）→ `heal --no-return`（補血排在門檻後；補血前已到守門人對話框 → 警告、不補直接 enter）；跳「未達到 / 禁止傳送 / 條件不足 / 等級不足」提示窗 → 點 ✕ 關、原地遇敵開回、留在練功點 → 80（`info.gate.who` 誰不夠）；讀不懂的視窗 → 9；追蹤欄沒卡 → `bag.levels`。`--read-levels` = 舊行為（`bag.levels` 讀 5 人轉數 / 等級，不點卡）。單獨跑：`rebirth_steps.py gate --trans N`（先自己關遇敵 / 組隊） | 83 / 82 / 80 / 9 / 84 / 87 |
 | accept | preflight 點卡已傳送（任務進行中）→ 跳過；否則 `rebirth_steps.accept_task`（先看任務追蹤欄：有標題精確相符的「漆黑洞窟(N轉)」卡片（titlematch 樣板，不用 OCR）→ `quest.track_task` 點卡巡路到村長 → 選單翻頁 → 接受 → 驗進行中；沒卡 / 不確定 / 點卡 20 秒沒對話框才退回 `questdetail.accept(「漆黑洞窟(N轉)」, skip_ok=True)`）：任務詳情列表 / 中間標題樣板精確比對（(三轉) / (五轉) 分得開，對不上不傳送）→ 傳送村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗進行中；已進行中略過、已完成不接 | 97 |
-| enter | **龍王的守護只在這裡吃一次**（2026-10-16 使用者：進洞前、`quest.py` 巡路到吉魯島守門人之前；沒有就照樣進；已在漆黑 1F 續跑不吃）→ `quest.py --stop-after-dialog` 最多 3 輪：吉魯島守門人 → 守門人２ → 漆黑 1F（32001） | 84 |
+| enter | （吃之前畫面是 NPC 對話框 → 先 ESC，見下「p2 / p3 一轉」②）**龍王的守護只在這裡吃一次**（2026-10-16 使用者：進洞前、`quest.py` 巡路到吉魯島守門人之前；沒有就照樣進；已在漆黑 1F 續跑不吃）→ `quest.py --stop-after-dialog` 最多 3 輪：吉魯島守門人 → 守門人２ → 漆黑 1F（32001） | 84 |
 | boss10 | `quest.py` 預設模式到 10F BOSS，退出碼 37（滿員）/ 38（不滿）→ 確認在 11F 以上（32011～32021，`past_boss10`，地圖為準；37 的「戰鬥 N」計數不可靠） | 85 / 84 |
 | bow16 | `--stop-after-rewards 1`：16F 守門人收 4 件證明、每人得精靈王之弓（32016）。進度看地圖（`bow16_progress`）：17～20F = 弓已拿到 → 0；21F = 20F 帖拉所伊朵也打完 → `after_boss` 確認滿 5 人 → 記 `boss20_done`（進度檔）→ heal / boss20 跳過 | 84 / 85 |
 | swap | 5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器；武器格本來就是弓（上一轉的）→ 背包裡 16F 新給的那把是多的，`bag.drop_spare_bow` 丟掉 | 86 |
@@ -67,6 +67,14 @@
   `accept_task` 先看畫面上有沒有對話框，是村長選單就直接接，別的對話框不點、97。
   ② heal 階段 5 人戰寵一般動作「忠犬」：剛轉生 Lv1 戰寵下拉只有「攻擊 / 防禦」（舊版 `ass.set_pet` 盲點第 3 列 → 讀回攻擊 → 87）→ 改 `ass.set_pet_many(skip_missing=True)`：
   下拉依 OCR 文字找選項，找不到就點回下拉鈕收起、記警告、跳過該人（不失敗）。
+- **p2 / p3 一轉實跑（2026-10-16 19:01、2026-10-17 01:33）寫回的兩個修正（離線測試，未實機）**：
+  ① preflight 點追蹤卡約 3 秒就傳到吉魯島、巡路到**守門人**跳對話框「漆黑洞窟(漆黑任務) / 再見」（`ui-log/020313-bag-open-fail.png`）。
+  對話框開著時**整個 HUD（含右上地圖座標）被藏起來**，地圖一直讀成練功點（60049）；舊版 `is_menu_dialog` 把守門人左鈕當成村長選單「漆黑洞窟」→ 去「接任務」
+  （點了守門人左鈕、重開詳情驗進行中）→ 再點卡又是對話框 → 84。現在 `rebirth_steps.is_gatekeeper_dialog`（左鈕含「任務」或括號 + 右鈕再見）→
+  `level_gate` 回 `teleport`（`via='gatekeeper'`，不按任何鈕）→ 補血跳過、enter 的 quest.py 接手；`is_menu_dialog` 不再把守門人當村長選單。
+  ② enter 吃龍王的守護 bag rc 90 的根因：同一個守門人對話框（p3 02:03）/ boss10 重跑時巡路到守護獸對話框（p2 19:10、19:17，`ui-log/191041-bag-open-fail.png`）
+  把 HUD 藏起來 → `bag.Session` 開不了背包（「背包面板打不開」、沒點面板內座標）。現在 `Run._clear_dialog`：吃之前畫面是對話框 → ESC（不回答，最多 2 次；
+  quest.py 啟動時本來也會 ESC 這個對話框）；使用途中回 90 且有對話框 → ESC 後重試一次。ESC 兩次仍在 → 警告、這段不用龍王（不失敗）。
 
 ## 2026-10-13 二轉後續：模組化與自動化（離線測試 test_rebirth.py / test_rebirth_steps.py / test_rebirth_pets.py；**實機未驗證**）
 可獨立呼叫的小模組（rebirth.py 只串階段）：

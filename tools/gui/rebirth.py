@@ -29,12 +29,16 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
                 傳送後遊戲會自動巡路往守門人，若補血前已到守門人對話框 → 警告、這次不補血，enter 的 quest.py 接手對話）；
               未達條件 → 提示視窗點 ✕ 關掉、原地遇敵開回、人留在練功點（不先去補血）→ 80（info.gate.who = 誰不夠，讀得到才有）；
               讀不懂的視窗 → 9（疑似驗證，什麼都不點）；追蹤欄沒卡 → 警告 + 改用 bag.levels（任務沒接，accept 會接）；其他（沒傳送也沒訊息 / 對話框 / 換到別圖）→ 84。
+              點卡後跳吉魯島守門人對話框「漆黑洞窟(漆黑任務) / 再見」= 已傳送（對話框開著 HUD 被藏、地圖讀不到；2026-10-16 p2 / 10-17 p3 舊版誤當村長選單 → 84）
+                → gate=teleport、不按鈕，補血跳過、enter 接手（未實機）；
               點卡被傳到瑪麗娜絲村長選單「漆黑洞窟 / 再見」（任務其實還沒接，2026-10-15 四轉實跑 84）→ 在對話框接任務（翻頁 → 接受 → 驗進行中）
               → 再點卡做門檻（accept 跳過）；接取失敗 → 97；接完被擋 → 80 但不開遇敵（人在村子，回去練功 = grind.py start）。
             --read-levels：舊行為，bag.levels 逐人讀 5 人轉數 / 等級當門檻（不點卡），之後 heal。
             （不再查四大洞窟證明：2026-10-13 find_items 讀字不穩兩次誤判 81；16F 守門人自己收，缺證明卡住由 quest.py 退出碼處理）。門檻實機未驗證（視窗內文 OCR 框是估計值）
   accept    preflight 點卡已傳送（任務進行中）→ 跳過。否則接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（畫面開著村長選單對話框 = 直接在對話框接、別的對話框 = 97 不點；再看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
-  enter     **龍王的守護只在這裡吃一次**（2026-10-16 使用者：進洞前、quest.py 巡路到吉魯島守門人之前；背包沒有就從公共倉庫取、都沒有照樣進；已在漆黑 1F 續跑就不吃）→
+  enter     （2026-10-17：吃龍王前畫面是 NPC 對話框〔點卡傳送後巡路已到守門人〕→ 先 ESC 關掉〔不回答〕再開背包；舊版背包打不開 bag rc 90 → 不吃龍王。
+            使用途中回 90 且有對話框 → ESC 後重試一次；未實機）
+            **龍王的守護只在這裡吃一次**（2026-10-16 使用者：進洞前、quest.py 巡路到吉魯島守門人之前；背包沒有就從公共倉庫取、都沒有照樣進；已在漆黑 1F 續跑就不吃）→
             quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
   boss10    quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認在 11F 以上（32011～32021，地圖為準）
   bow16     quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）。
@@ -358,6 +362,10 @@ class Tools:
     def screen_state(self):
         return uikit.screen().get('state')
 
+    def esc_dialog(self):
+        """NPC 對話框 ESC 關掉（不回答任何選項；quest.py 啟動時、bag.close_leftover 同一做法）"""
+        uikit.gui('seq', 'key {ESC}; wait 800', note='rebirth：吃龍王前 NPC 對話框蓋住 HUD（巡路已到守門人 / 守護獸）→ ESC（不回答）')
+
     def snap(self, tag):
         return uikit.snap(tag)
 
@@ -491,7 +499,14 @@ class Run:
         now = time.time()
         if not force and now - self.st.get('last_eat', 0) < DRAGON_REEAT_S:
             return
+        if not self._clear_dialog():
+            self.info['bag_rc'] = 90
+            self.warn('NPC 對話框 ESC 兩次仍在，龍王的守護這段不用（不按對話框選項）')
+            return
         rc, d = self.T.bag_use(LEADER, DRAGON)
+        if rc == 90 and self._clear_dialog(need=True):         # 使用途中巡路剛好抵達 NPC 跳對話框 → ESC 後只重試一次
+            event('龍王的守護：背包打不開時有 NPC 對話框 → ESC 後重試一次')
+            rc, d = self.T.bag_use(LEADER, DRAGON)
         if rc == 92:                                           # 背包沒有 → 公共倉庫
             event('背包沒有龍王的守護，從公共倉庫取出')
             r2 = self.T.bag_take(LEADER, DRAGON)
@@ -511,6 +526,19 @@ class Run:
             self.warn('吃了龍王的守護但沒看到 buff 圖示（偵測特徵只有單張樣本，不一定是失敗）')
         event(f'已吃龍王的守護（第 {self.st["dragon_used"]} 顆）')
         self.save()
+
+    def _clear_dialog(self, need: bool = False) -> bool:
+        """吃龍王前：畫面是 NPC 對話框就 ESC（最多 2 次，不回答）。
+        根因（2026-10-16 p2 19:10 / 19:17 守護獸、2026-10-17 p3 02:03 吉魯島守門人，ui-log *-bag-open-fail.png）：點追蹤卡 / 重登後遊戲自動巡路到 NPC，
+        對話框把整個 HUD 藏起來 → bag.Session 開不了背包 → use_item 回 90（沒點任何面板內座標）。之後 quest.py 啟動時也是先 ESC 這個對話框，不影響流程。
+        回 True = 現在不是對話框（need=True 時：本來有對話框且已關掉才 True）"""
+        had = False
+        for _ in range(2):
+            if self.T.screen_state() != 'dialog':
+                return had or not need
+            had = True
+            self.T.esc_dialog()
+        return self.T.screen_state() != 'dialog' and (had or not need)
 
     def read_pos(self):
         return self.T.read_pos()

@@ -13,6 +13,8 @@ description: Use when the PrimalSA (精靈王石器) quest chain must be solved 
 `uv run --no-project python tools/gui/questrun.py run 2031 --solo --after none --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾`
 （不吃龍王；DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 1～5「解散 → `quest.py --solo` 到 NPC → team.form → `--stop-after-dialog --disband-after`」→ 步 6 組隊 + 便捷傳送 + `--fight` → 步 7 / 8 組隊 `--stop-after-rewards 1`
 → DKBO 戰寵改回 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾；耐久力回複藥 NPC 會給，不檢查不買）。`postrebirth.py` hero 段收到 156 會**自動**改跑這一行。
+續跑（任務已「進行中」）時步 1～5 說明行同文字讀不出步號：2026-10-17 起 questrun 依目前地圖推（步 k 的薩姆吉爾地圖 5501 / 5503 / 5505 / 5506 / 5508 = 步 k，其他 = 步 1；步 1～5 做法相同，推錯只影響計數），不用再設 `QUESTRUN_SOLO_STEP`（仍可手動指定，優先；未實機）。
+
 腳本非 0 才照下面第 2～4 節手動做（退出碼見 questrun.py 檔頭；細節 `../psa-game-ui/ui/quest.md`「--solo」）。
 
 **REQUIRED BACKGROUND:** 先載入 psa-game-ui（紅區、驗證視窗立刻停手）。會用到 `/psa-disband-team`、`/psa-quick-team`、`/psa-grind-start`。

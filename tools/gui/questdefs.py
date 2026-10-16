@@ -143,7 +143,10 @@ QOTHER = [
          steps={6: dict(kind='fight', map=5510, xy=(50, 17), warp=(1160, 646), warp_name='龍王守衛', npc='龍王的守衛 5510:53,17', hp_min=80)},
          bag_slots=6, boss=True, est_min=20, live=False, dragon_required=True, stop_after_rewards=1, min_level=80,
          reward_pets=['巴朵蘭恩'], post=dict(store_personal=['英雄的祝福'], store_public=['龍王的守護']), drop_items=['薩姆吉爾的首飾'],
-         solo=dict(group_from=7),   # --solo（沒龍王 156 的退路）：步 1～5 單人逃跑到 NPC 再組隊對話、步 6 fight、步 7 / 8 組隊跑（2026-10-14 02:41～02:55 手動）
+         solo=dict(group_from=7,    # --solo（沒龍王 156 的退路）：步 1～5 單人逃跑到 NPC 再組隊對話、步 6 fight、步 7 / 8 組隊跑（2026-10-14 02:41～02:55 手動）
+                   # 步 1～5 說明行同文字「尋找薩姆吉爾」讀不出步號；續跑（任務已進行中）時用目前地圖推步號（questrun.infer_solo_step，2026-10-17）：
+                   # 在步 k 的 NPC 地圖 = 步 k；其他地圖 = 步 1（步 1～5 做法完全相同 = 跟追蹤卡巡路，步號只用來計數；步 6～8 說明行不同、讀得到就以讀到的為準）
+                   same_text=(1, 5), step_maps={5501: 1, 5503: 2, 5505: 3, 5506: 4, 5508: 5}, late_maps=(5510, 5511)),
          note='紅暴（每轉必解）。使用者 2026-10-13：有龍王效果就組隊打到底（dragon_required，不看 --dragon；完全沒龍王可吃 → 156 改走單人逃跑 psa-quest-solo）。'
               '前置：成人儀式、5 人 ≥80 級；耐久力回複藥 NPC 會給，不檢查不買。接取標題「英雄島前傳（必做）」。'
               '每步 --stop-after-rewards 1（步 1～5 對話 + 勾玉；步 1 點到同 NPC 閒聊只有再見 → quest.py ESC 回原流程）；'

@@ -11,6 +11,8 @@
   --solo（2026-10-14，紅暴沒龍王 156 的退路；只限 questdefs 有 solo 的任務，其他 110；**未實機**）：不吃龍王，接取後 DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 →
         每輪讀步號：步 < solo.group_from = 解散 → quest.py --solo 單人逃跑到 NPC（20；21 補血重跑 ≤2）→ team.form → quest.py --stop-after-dialog --disband-after；
         kind=fight = 先組隊再 do_fight；步 ≥ group_from = 組隊 quest.py --stop-after-rewards 1；GONE / 5 = 完成 → DKBO 戰寵改回 → post → --drop-*；同一步 4 次沒前進 112
+        步 1～5 說明行同文字讀不出步號：剛接取 = 步 1 起算；續跑（任務已進行中）→ infer_solo_step 依目前地圖推（步 k 的 NPC 地圖 = 步 k，其他 = 步 1；
+        2026-10-17 p2 實跑 112 後補，未實機）；QUESTRUN_SOLO_STEP=N 環境變數仍可手動指定（優先）
   --buy-missing：相容保留的 no-op（任務道具如耐久力回複藥由 NPC 給，開跑前不檢查不買；2026-10-15 使用者定）
   龍王的守護（2026-10-12 起）預設**不吃**，要吃加 --dragon；--no-dragon 保留相容（= 預設，no-op）。
   --dragon（2026-10-13 使用者定）對 questdefs 標 dragon（NO_DRAGON = 彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 以外）的任務吃，--dragon-all 全吃；
@@ -161,6 +163,22 @@ SOLO_RUN_S = 900                # --solo：quest.py --solo 單人巡路到 NPC �
 SOLO_TALK_S = 120               # --solo：到 NPC 後組隊對話 quest.py --stop-after-dialog --disband-after 的上限秒數
 SOLO_GROUP_S = 900              # --solo：group_from 以後的步（紅暴步 7 / 8）組隊 quest.py --stop-after-rewards 1 的上限秒數（步 8 跨圖巡路）
 SOLO_SAME_MAX = 3               # --solo：同一步號連做幾次都沒前進 → 112
+
+
+def infer_solo_step(d: dict, pos) -> int | None:
+    """純函式：--solo 續跑時追蹤欄步號讀不到（同文字多步，如紅暴步 1～5「尋找薩姆吉爾」）→ 依目前地圖推步號。
+    questdefs solo.same_text=(lo, hi)、step_maps={NPC 地圖: 步}、late_maps=後段地圖（在那裡不推，交給讀步號）。
+    在某步 NPC 的地圖 → 該步；在後段地圖 / 沒有 same_text → None；其他（村子、半路、讀不到位置）→ lo。
+    同文字的步做法相同（都是跟追蹤卡巡路到 NPC），推錯只影響計數，不會走錯；讀到的步號一律優先（2026-10-17，未實機）"""
+    so = (d or {}).get('solo') or {}
+    rng = so.get('same_text')
+    if not rng:
+        return None
+    m = pos[0] if pos else None
+    if m is not None and m in (so.get('late_maps') or ()):
+        return None
+    k = (so.get('step_maps') or {}).get(m)
+    return k if k else rng[0]
 SOLO_KNOCK_MAX = 2              # --solo：單人巡路被打飛（quest.py 21）最多補血重跑幾次
 SOLO_PET = {'first': '防禦', 'first_on': True, 'normal': '攻擊'}         # 跑路角色 DKBO 戰寵動作（psa-quest-solo §1，使用者 2026-10-10）
 SOLO_PET_BACK = {'first': '攻擊', 'first_on': False, 'normal': '攻擊'}   # 結束後改回
@@ -1375,7 +1393,7 @@ class Run:
         if solo:
             self.solo_hint = 1 if state == 'accepted' else None        # 步 1～5 說明行都是「尋找薩姆吉爾」讀不出步號 → 剛接取 = 步 1，之後每完成一個對話步 +1
             if self.solo_hint is None and os.environ.get('QUESTRUN_SOLO_STEP', '').isdigit():
-                self.solo_hint = int(os.environ['QUESTRUN_SOLO_STEP'])  # 續跑（任務已在進行中）時人工指定目前步號
+                self.solo_hint = int(os.environ['QUESTRUN_SOLO_STEP'])  # 續跑時人工指定目前步號（備援；2026-10-17 起讀不到步號會自動依地圖推，見 infer_solo_step）
             return self.run_solo(d, ts, t0)
         if self.o.get('pet_turnin') and self.o.get('rested') and self.rested != tid:
             self.rested = tid                                          # --rested：呼叫端（petquest 練完）剛 rest-all 過且驗過 → 接取後 / 交寵物前都不重做（review 1013b §2.2）
@@ -1659,6 +1677,12 @@ class Run:
             step = T.read_step(track)
             if step == T.gone():
                 return self.solo_done(d, ts, t0, k)
+            if (not isinstance(step, int) or step <= 0) and not getattr(self, 'solo_hint', None):
+                pos = self.read_pos_safe()
+                h = infer_solo_step(d, pos)                            # 續跑（任務已進行中）：步 1～5 同文字 → 用目前地圖推（2026-10-17 p2 紅暴 112）
+                if h:
+                    self.solo_hint = h
+                    event(f'任務 {tid}（單人逃跑）續跑：步號讀不到（步 1～5 同文字）→ 依目前地圖 {pos[0] if pos else "?"} 推為步 {h}')
             if (not isinstance(step, int) or step <= 0) and getattr(self, 'solo_hint', None):
                 event(f'任務 {tid}（單人逃跑）追蹤步號讀不到（同文字多步）→ 用內部計數步 {self.solo_hint}')
                 step = self.solo_hint
