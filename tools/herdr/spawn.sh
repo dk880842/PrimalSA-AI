@@ -13,7 +13,7 @@
 # 子 session 結束時把完整報告寫到 notes/handoff/<名稱>.md，畫面只回一行；
 # 主 session 只讀那個檔（或 herdr agent get / read --lines 20 看狀態），不要整頁 read。
 #   查狀態：herdr agent get <名稱>        追加指示：herdr agent prompt <名稱> "..."
-#   收尾：主 session 讀完報告檔就 herdr tab close <tab_id>（使用者 2026-10-16）
+#   收尾：派工後立刻背景跑 bash tools/herdr/collect.sh <名稱>：做完自動印報告 + 關 tab（使用者 2026-10-16）
 #
 # 退出碼：0 成功（印 tab_id / pane_id / 名稱）、2 參數錯、3 不在 herdr 內、4 角色定義不存在、
 #         5 開 tab 失敗、6 claude 啟動失敗、7 送 prompt 失敗
