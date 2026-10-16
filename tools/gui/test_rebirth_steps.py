@@ -340,8 +340,8 @@ class PetT:
         self.reads += 1
         return 0, {r: [dict(s) for s in self.after.get(r, AFT)] for r in roles}
 
-    def drop(self, role, name, slot=None, dry_run=False, lone=False):
-        self.drops.append((role, name, slot) + ((True,) if lone else ()))
+    def drop(self, role, name, slot=None, dry_run=False):
+        self.drops.append((role, name, slot))
         return self.drop_rc
 
 
@@ -465,25 +465,45 @@ check('level_gate：逾時、聊天區有未達到 → blocked via chat', g['kin
 T = GateT(state='idle')
 check('level_gate：逾時、什麼都沒有 → timeout', quiet(rs.level_gate, 4, T)['kind'] == 'timeout')
 
-# ---- 2026-10-16 drop_lone_rewards：寵物欄已全存、只剩獎勵寵（第 1 格也丟）----
-def _lone(**k):
-    d = {'slot': 1, 'empty': False, 'name': '火的守護獸', 'level': 1, 'state': '等待', 'mountlike': False}
-    d.update(k)
-    return [d] + [{'slot': i, 'empty': True} for i in range(2, 6)]
-cand, why = rs.find_lone_lv1(_lone())
-check('find_lone_lv1：只有 1 隻 Lv1 有名字（在第 1 格）→ 候選', len(cand) == 1 and why == '')
-check('find_lone_lv1：出戰狀態不擋（全存後唯一一隻）', len(rs.find_lone_lv1(_lone(state='出戰'))[0]) == 1)
-check('find_lone_lv1：騎乘中 / 像騎寵 / 等級 ≠ 1 / 等級讀不出 / 名字讀不出 → 不丟',
-      all(rs.find_lone_lv1(_lone(**kw))[0] == [] for kw in ({'state': '騎乘'}, {'mountlike': True}, {'level': 5}, {'level': None}, {'name': None})))
-check('find_lone_lv1：寵物欄空 / 2 隻 → 不確定', rs.find_lone_lv1([{'slot': 1, 'empty': True}])[0] == [] and len(rs.find_lone_lv1(_lone()[:1] + [dict(_lone()[0], slot=2)])[0]) == 2)
-T = PetT({r: _lone() for r in rs.ALL_ROLES})
-check('drop_lone_rewards 第 3 轉：5 人各 1 隻 → 逐人丟（slot 1、lone=True）', quiet(rs.drop_lone_rewards, 3, T) == 0 and len(T.drops) == 5 and all(d[2] == 1 and d[3] is True for d in T.drops))
-T = PetT({**{r: _lone() for r in rs.ALL_ROLES}, rs.ALL_ROLES[2]: _lone(level=9)})
-check('drop_lone_rewards：有一人等級不是 1 → 98、全員都不丟', quiet(rs.drop_lone_rewards, 3, T) == 98 and T.drops == [])
-T = PetT({})
-check('drop_lone_rewards 第 1 轉：對照表 → petdrop all 烏力斯坦 lone（不讀寵物欄）', quiet(rs.drop_lone_rewards, 1, T) == 0 and T.drops == [('all', '烏力斯坦', None, True)] and T.reads == 0)
-T = PetT({r: _lone() for r in rs.ALL_ROLES}, drop_rc=9)
-check('drop_lone_rewards：petdrop 9 透傳', quiet(rs.drop_lone_rewards, 4, T) == 9)
+# ---- 2026-10-16 petdrop.drop_first_slot：固定動作逐人丟第 1 格（假 pet / uikit，不碰畫面）----
+import petdrop, pet as _pet, uikit as _uk
+class _FakePetUI:
+    def __init__(self, empty_roles=(), stuck=False):
+        self.empty_roles, self.stuck, self.cur, self.log = set(empty_roles), stuck, None, []
+        self.after_ok = False
+    def select_role(self, r, ctx): self.cur = r; self.log.append(('role', r)); return 0
+    def scan_frames(self):
+        e = r_ = self.cur in self.empty_roles
+        return {'empty': [e, True, True, True, True], 'sel': [False] * 5}
+    def select_slot(self, i, f): self.log.append(('slot', self.cur, i)); return 0
+    def click(self, x, y, panel, note='', allow=(), wait_ms=0):
+        self.log.append(('click', (x, y), self.cur))
+        if (x, y) == petdrop.CONFIRM_OK and not self.stuck: self.empty_roles.add(self.cur)
+        return True
+def _run_first(ui, **kw):
+    saved = (_pet.select_role, _pet.scan_frames, _pet.select_slot, _pet.load_ctx, _pet.save_ctx, _pet.Session, _uk.safe_click, _uk.is_open, _uk.sleep)
+    class _S:
+        rc = 0
+        def __init__(s, *a): pass
+        def __enter__(s): return s
+        def __exit__(s, *a): return False
+    _pet.select_role, _pet.scan_frames, _pet.select_slot = ui.select_role, ui.scan_frames, ui.select_slot
+    _pet.load_ctx, _pet.save_ctx, _pet.Session = (lambda *a, **k: {}), (lambda *a, **k: None), _S
+    _uk.safe_click, _uk.is_open, _uk.sleep = ui.click, (lambda p: True), (lambda s: None)
+    try:
+        return quiet(petdrop.drop_first_slot, 'all', **kw)
+    finally:
+        (_pet.select_role, _pet.scan_frames, _pet.select_slot, _pet.load_ctx, _pet.save_ctx, _pet.Session, _uk.safe_click, _uk.is_open, _uk.sleep) = saved
+ui = _FakePetUI()
+check('drop_first_slot：5 人逐人 選第 1 格 → 垃圾桶 → 確定，全 dropped', _run_first(ui) == 0 and petdrop.LAST.get('dropped') == list(_pet.role_list('all'))
+      and [l for l in ui.log if l[0] == 'slot'] == [('slot', r, 0) for r in _pet.role_list('all')]
+      and [l[1] for l in ui.log if l[0] == 'click'].count(petdrop.TRASH_XY) == 5, str(petdrop.LAST))
+ui = _FakePetUI(empty_roles=[_pet.role_list('all')[1]])
+check('drop_first_slot：某人第 1 格本來就空 → 跳過（already），其他照丟', _run_first(ui) == 0 and petdrop.LAST.get('already') == [_pet.role_list('all')[1]] and len(petdrop.LAST['dropped']) == 4)
+ui = _FakePetUI(stuck=True)
+check('drop_first_slot：確定後第 1 格沒變空 → 76、不續做下一人', _run_first(ui) == 76 and len([l for l in ui.log if l[0] == 'role']) == 1)
+ui = _FakePetUI()
+check('drop_first_slot dry-run：不點任何東西', _run_first(ui, dry_run=True) == 0 and not [l for l in ui.log if l[0] == 'click'] and len(petdrop.LAST['would_drop']) == 5)
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

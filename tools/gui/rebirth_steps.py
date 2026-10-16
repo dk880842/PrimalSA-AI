@@ -6,8 +6,8 @@
   uv run --no-project python tools/gui/rebirth_steps.py gate --trans 4                # 點追蹤卡當等級檢查（有傳送 = 5 人達標；跳未達條件視窗 → 關掉，印 JSON 結果）
   uv run --no-project python tools/gui/rebirth_steps.py snapshot                    # 唯讀：讀 5 人寵物欄存成轉生前快照（tools/.cache/rebirth_pets_before.json）
   uv run --no-project python tools/gui/rebirth_steps.py drop-reward --trans 3 [--dry-run]   # 轉生後丟 5 人的獎勵寵（見下）
-  可 import：accept_task(n, T=None)、level_gate(n, T=None)、judge_gate_text(text)、reward_name(n)、find_new_lv1(before, after)、drop_rewards(n, before, T=None, dry_run=False)、
-    drop_lone_rewards(n, T=None, dry_run=False)（2026-10-16 起 rebirth.py cleanup 用：寵物欄已全存，只剩獎勵寵 → 名稱 / 恰好 1 隻 Lv1 驗過就丟，放行第 1 格；**未實機**）
+  可 import：accept_task(n, T=None)、level_gate(n, T=None)、judge_gate_text(text)、reward_name(n)、find_new_lv1(before, after)、drop_rewards(n, before, T=None, dry_run=False)
+  （2026-10-16 起 rebirth.py cleanup 不再用本檔丟獎勵寵：改 petdrop.drop_first_slot 固定動作，見 rebirth.py；本檔 drop_rewards 仍給 questrun 等舊路徑）
 
 接任務（accept_task）：畫面已開著對話框（--from accept 時 preflight 留下的村長選單）→ 是「漆黑洞窟 / 再見」選單就直接接（翻頁 → 接受 → 驗進行中），
   別的對話框 → 不點、97。否則先看任務追蹤欄——有標題精確等於「漆黑洞窟(N轉)」的卡片（titlematch 圖樣板；沒樣板 / 不確定不用 OCR）→ quest.track_task 點卡片巡路到村長 →
@@ -396,9 +396,9 @@ class _PetTools:
             pet.save_ctx(ctx)
         return 0, out
 
-    def drop(self, role, name, slot=None, dry_run=False, lone=False):
+    def drop(self, role, name, slot=None, dry_run=False):
         import petdrop
-        return petdrop.drop(role, name, name, slot_no=slot, dry_run=dry_run, max_level=1, lone=lone)
+        return petdrop.drop(role, name, name, slot_no=slot, dry_run=dry_run, max_level=1)
 
 
 def take_snapshot(T=None, roles=None) -> int:
@@ -439,56 +439,6 @@ def drop_rewards(n: int, before: dict | None = None, T=None, dry_run: bool = Fal
     LAST['plan'] = {r: [s['slot'], s['name'], s['level']] for r, s in plan.items()}
     for r, s in plan.items():
         rc = T.drop(r, s['name'], s['slot'], dry_run)
-        if rc:
-            return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else uikit.fail(SRC, EXIT_REWARD, f'{r} 丟第 {s["slot"]} 格「{s["name"]}」失敗（petdrop rc={rc}）')
-        LAST.setdefault('dropped', {})[r] = s['name']
-    return 0
-
-
-def find_lone_lv1(slots: list) -> tuple:
-    """單人：寵物欄（snapshot 格式）→ (候選 [slot dict], 理由)。轉生 20F 後寵物欄已全存，此時有的寵物就只有剛拿到的獎勵寵：
-    要「恰好 1 隻」、Lv1、名字讀得出、不是騎乘狀態、不像騎寵；第 1 格 / 出戰不擋（petdrop --lone）。純函式"""
-    have = [s for s in slots or [] if not s.get('empty')]
-    if len(have) != 1:
-        return have, f'寵物欄有 {len(have)} 隻（要剛好 1 隻轉生獎勵寵）'
-    s = have[0]
-    if s.get('state') == '騎乘' or s.get('mountlike'):
-        return [], f'第 {s["slot"]} 格狀態 / 名字像騎寵 → 不丟'
-    if s.get('level') != 1:
-        return [], f'第 {s["slot"]} 格寵物等級 {s.get("level")} 不是 1（讀不出也算）→ 不丟'
-    if not s.get('name'):
-        return [], f'第 {s["slot"]} 格寵物名字讀不出 → 不丟'
-    return have, ''
-
-
-def drop_lone_rewards(n: int, T=None, dry_run: bool = False, roles=None) -> int:
-    """轉生後丟獎勵寵（2026-10-16 起 rebirth.py 用；寵物欄已在 boss20 後全存，**未實機**）。
-    有對照表（一轉烏力斯坦 / 二轉奇娜）→ 名稱 + Lv1 + lone（petdrop，放行第 1 格 / 出戰）；沒有（三、四轉）→ 逐人讀寵物欄，要恰好 1 隻 Lv1 有名字的才丟，
-    全員先驗再動手，任何不確定 → 98 全不丟。五轉不呼叫這個（機暴要存倉，見 rebirth.py cleanup）。LAST['dropped'] = {角色: 名字}"""
-    LAST.clear()
-    T = T or _PetTools()
-    roles = list(roles or ALL_ROLES)
-    name = reward_name(n)
-    if name:
-        rc = T.drop('all', name, None, dry_run, True)
-        if rc:
-            return rc
-        LAST['dropped'] = {r: name for r in roles}
-        return 0
-    rc, after = T.pets(roles)
-    if rc:
-        return rc
-    after = snapshot_pets(after)
-    plan = {}
-    for r in roles:
-        cand, why = find_lone_lv1(after.get(r))
-        if len(cand) != 1 or why:
-            LAST['why'] = f'{r}：{why}'
-            return uikit.fail(SRC, EXIT_REWARD, f'{r} 轉生獎勵寵無法確認：{why} → 全部都不丟')
-        plan[r] = cand[0]
-    LAST['plan'] = {r: [s['slot'], s['name'], s['level']] for r, s in plan.items()}
-    for r, s in plan.items():
-        rc = T.drop(r, s['name'], s['slot'], dry_run, True)
         if rc:
             return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else uikit.fail(SRC, EXIT_REWARD, f'{r} 丟第 {s["slot"]} 格「{s["name"]}」失敗（petdrop rc={rc}）')
         LAST.setdefault('dropped', {})[r] = s['name']

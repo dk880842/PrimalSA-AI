@@ -53,8 +53,9 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
             只驗存完寵物欄全空）。寵物欄已空 = 跳過；個人倉庫剩餘格不夠 → 77（pet.py 同碼，已存的不動，清出倉庫後 --from storepets 續跑）；其他失敗 → 86（info.pet_rc）。寫進度檔 pets_stored、quest-events
   rebirth   team.form → quest.py 預設模式（守門人 → 精靈王）→ 39 時 OCR 對話判斷：「角色轉生」才放行（點完成 + quest.py --allow-irreversible 收尾），
             「寵物轉生」/ 讀不到 / 位置不在精靈王旁 → 88；--confirm-rebirth → 89；放行後確認 5 人轉數 = N
-  cleanup   （2026-10-16）此時寵物欄只剩剛拿到的轉生獎勵寵：一～四轉 → 丟 5 人獎勵寵（一轉烏力斯坦 / 二轉奇娜：petdrop --lone 名稱 + Lv1；三、四轉：逐人讀寵物欄、要恰好 1 隻 Lv1 有名字，
-            rebirth_steps.drop_lone_rewards，全員先驗再丟，任何不確定 → 98；--lone 放行第 1 格 / 出戰，仍擋騎乘）；**五轉（--trans 5）獎勵寵帖拉所伊朵（機暴）存個人倉庫（pet.py store-all），絕不丟**；
+  cleanup   （2026-10-16，**機械式固定動作、不檢查、未實機**）storepets 後寵物欄全空 → 轉生獎勵寵一定在 5 人第 1 格：一～四轉 → 面板開一次、左欄頭像逐人切，
+            每人選第 1 格 → 垃圾桶 → 確定（petdrop.drop_first_slot；不讀名字 / 等級、不驗 Lv1、不分轉數；只確認第 1 格變空，失敗 76 → 86）；
+            **五轉（--trans 5）獎勵寵帖拉所伊朵（機暴）存個人倉庫（pet.py store-all，同樣不檢查），絕不丟**；
             → 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
   之後      不自己練功；下一步 `rebirth_pets.py --trans N`（寵物重整，完成後自動去練功 = grind.go，不寫死練功點）。轉生確認後記 tools/.cache/trans.json
 
@@ -71,7 +72,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
   88 精靈王對話不是「角色轉生」（寵物轉生 / 讀不到 / 位置不對），或轉生後驗證轉數沒變
   89 --confirm-rebirth 停下等人
   97 接任務失敗（info.accept_rc = questdetail 退出碼；已完成 / 條件不達標 / 標題對不上都不亂點）
-  98 轉生獎勵寵無法確認（三轉起：沒快照 / 0 或多隻候選 / 名字或 Lv 讀不出）→ 一律不丟，人看寵物欄
+  98 轉生獎勵寵無法確認（舊 diff 路徑 rebirth_steps.drop_rewards 才會回；cleanup 固定動作丟第 1 格不再回 98）
 載入畫面卡住：quest.py 回 43（載入 / 轉場畫面 60 秒）→ 不重登、重跑同一指令（每階段最多 2 次）。
 卡住自動重登：任何階段的 quest.py 回 19（自動巡路卡住）/ 42（VS 牌卡死）→ stuckrecover.relogin_team（relogin.py --stuck --confirm，只按已帶入帳密的「登錄」；105 → team.form）→
 team.check / form → 重吃龍王 → 重跑同一個 quest.py 指令；每階段最多 2 次（info.relogin_rc 記重登碼），仍卡 / 重登失敗 → 84；重登遇 9 / 10 → 原碼停手。--fight（單人重打）不重登。
@@ -334,9 +335,10 @@ class Tools:
         return rc, dict(pet.LAST)
 
     def drop_lone(self, n):
-        """寵物欄已全存、只剩剛拿到的獎勵寵（一～四轉）：名稱 / 恰好 1 隻 Lv1 驗過才丟（rebirth_steps.drop_lone_rewards）"""
-        rc = rebirth_steps.drop_lone_rewards(n)
-        return rc, dict(rebirth_steps.LAST)
+        """寵物欄已全存 → 獎勵寵一定在第 1 格（一～四轉）：5 人逐人直接丟第 1 格，不讀名字 / 等級（petdrop.drop_first_slot，未實機）"""
+        import petdrop
+        rc = petdrop.drop_first_slot('all')
+        return rc, dict(petdrop.LAST)
 
     def encounter_on(self):
         import heal
@@ -961,7 +963,7 @@ class Run:
             if rc:
                 return self.fail(EXIT_BAG, f'五轉獎勵寵（機暴）存個人倉庫失敗 pet rc={rc}（{d.get("msg", "")}）；不丟', pet_rc=rc)
             event('cleanup：五轉獎勵寵（機暴）已存個人倉庫（不丟）')
-        else:                                                   # 一～四轉：寵物欄只剩獎勵寵 → 丟（仍驗名字 / Lv1）
+        else:                                                   # 一～四轉：獎勵寵一定在第 1 格 → 機械式直接丟第 1 格（不驗名字 / Lv1）
             rc, d = T.drop_lone(self.n)
             self.info['reward_drop'] = d
             if rc in stuckrecover.HALT_RC:
@@ -1009,7 +1011,7 @@ DRY_PLAN = {
     'storepets': ['pet.py store-all：5 人寵物欄所有寵物存個人倉庫（不驗名字、不擋騎寵 / 騎乘 / 第 1 格；寵物欄已空跳過；倉庫滿 77；其他失敗 86；未實機）'],
     'rebirth': ['team.form', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
                 '點完成 + quest.py --no-track --allow-irreversible 收尾 → bag.levels 確認 5 人轉數 = N'],
-    'cleanup': ['一～四轉：丟轉生獎勵寵（寵物欄只剩它；一轉烏力斯坦 / 二轉奇娜 petdrop --lone 名稱 + Lv1；三、四轉 = 逐人恰好 1 隻 Lv1 有名字才丟，不確定 98）；五轉：獎勵寵機暴 pet.py store-all 存個人倉庫，絕不丟（77 / 86）', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
+    'cleanup': ['一～四轉：丟轉生獎勵寵（固定動作：逐人選第 1 格 → 垃圾桶 → 確定，不讀名字 / 等級；petdrop.drop_first_slot）；五轉：獎勵寵機暴 pet.py store-all 存個人倉庫，絕不丟（77 / 86）', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
 }
 
 

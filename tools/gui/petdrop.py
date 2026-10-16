@@ -7,8 +7,9 @@
 用法：
   uv run --no-project python tools/gui/petdrop.py DKBO|all 烏力斯坦 --confirm-name 烏力斯坦 [--max-level 1] [--dry-run]
   --max-level N：只丟等級 ≤ N 的（等級讀不出也不丟 → 73）；questrun --drop-reward 固定帶 1（剛拿到的獎勵寵是 1 級，練過的同名寵不會被丟）
-  --lone：寵物欄已全存、這是剛拿到的唯一一隻（rebirth 轉生後 cleanup 用，2026-10-16 **未實機**）：放行第 1 格與「出戰」狀態；仍擋騎乘 / 像騎寵 / 名字不符 / 等級（--max-level）
-  可 import：petdrop.drop(role, name, confirm_name, slot_no=None, dry_run=False, max_level=None, lone=False) → 退出碼；結果在 petdrop.LAST
+  --first-slot：機械式固定動作（rebirth 轉生後 cleanup 用，2026-10-16 **未實機**）：寵物欄已全存、獎勵寵一定在第 1 格 → 面板開一次、逐人
+    選第 1 格 → 垃圾桶 → 確定，**不讀名字 / 等級、不驗 Lv1、不擋第 1 格 / 騎乘 / 出戰、不驗提示窗名稱**；只確認「第 1 格變空」。此模式不需名稱參數
+  可 import：petdrop.drop(role, name, confirm_name, slot_no=None, dry_run=False, max_level=None) → 退出碼；petdrop.drop_first_slot(role_arg='all', dry_run=False)；結果在 petdrop.LAST
 退出碼（pet.py 的 70～78 + 本檔 79）：
   0  丟掉了（或該角色沒有這隻 = 視為已完成，info.already）
   70/71/72 同 pet.py（面板 / 選取 / 名字）
@@ -45,14 +46,14 @@ def _fail(rc: int, msg: str, tag: str = '') -> int:
     return uikit.fail(SRC, rc, msg)
 
 
-def guard_target(sl: dict, want: str, max_level: int | None = None, lone: bool = False) -> str | None:
+def guard_target(sl: dict, want: str, max_level: int | None = None) -> str | None:
     """純函式：這格能不能丟？回拒絕理由或 None。max_level：等級要讀得到且 ≤ 它才丟。
-    lone（2026-10-16，轉生 20F 後寵物欄已全存、只剩剛拿到的獎勵寵）：放行第 1 格與「出戰」狀態（全存後唯一一隻會落在第 1 格）；騎乘 / 名字像騎寵 / 名字 / 等級照舊擋"""
+"""
     if sl.get('empty'):
         return '空格'
-    if sl['slot'] == 1 and not lone:
+    if sl['slot'] == 1:
         return '第 1 格（通常是騎寵）'
-    if sl.get('state') in (('騎乘',) if lone else ('騎乘', '出戰')):
+    if sl.get('state') in ('騎乘', '出戰'):
         return f'狀態是 {sl["state"]}'
     nm = sl.get('name') or ''
     if any(uikit.is_mount_like(t) for t in [nm] + list(sl.get('ocr') or [])) or sl.get('mountlike'):
@@ -85,7 +86,7 @@ def confirm_names_ok(ct: str, want: str) -> bool:
     return bool(got) and (got == w or difflib.SequenceMatcher(None, got, w).ratio() >= 0.85)
 
 
-def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_run: bool = False, max_level: int | None = None, lone: bool = False) -> int:
+def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_run: bool = False, max_level: int | None = None) -> int:
     """面板已開。選角色 → 找名字 = want 的格 → 選取 → 垃圾桶 → 提示窗驗名 → 確定 → 驗空格"""
     rc, slots = pet.list_role(role, ctx)
     if rc:
@@ -103,7 +104,7 @@ def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_r
     if len(hits) > 1:
         return _fail(EXIT_MULTI, f'{role} 有 {len(hits)} 隻「{want}」（格 {[h["slot"] for h in hits]}），要用 --slot 指定', 'petdrop-multi')
     sl = hits[0]
-    why = guard_target(sl, want, max_level, lone)
+    why = guard_target(sl, want, max_level)
     if why:
         return _fail(EXIT_GUARD, f'{role} 第 {sl["slot"]} 格不丟：{why}')
     if dry_run:
@@ -117,8 +118,8 @@ def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_r
     if rc:
         return rc
     again = pet.read_slot(i, ctx)                                  # 選取後再讀一次名字（防補位 / 選錯格）
-    if guard_target(again, want, max_level, lone):
-        return _fail(EXIT_GUARD, f'{role} 選取第 {sl["slot"]} 格後重讀：{guard_target(again, want, max_level, lone)}', 'petdrop-reread')
+    if guard_target(again, want, max_level):
+        return _fail(EXIT_GUARD, f'{role} 選取第 {sl["slot"]} 格後重讀：{guard_target(again, want, max_level)}', 'petdrop-reread')
     if not uikit.safe_click(TRASH_XY[0], TRASH_XY[1], uikit.PET, note=f'petdrop 垃圾桶（{role} 第 {sl["slot"]} 格 {want}）', allow=('trash',), wait_ms=500):
         return _fail(pet.EXIT_PANEL, '寵物面板特徵不在，沒點垃圾桶')
     end = uikit.clock() + 2.5
@@ -147,7 +148,7 @@ def drop_role(role: str, want: str, ctx: dict, slot_no: int | None = None, dry_r
 
 
 def drop(role_arg: str, want: str, confirm_name: str, slot_no: int | None = None, dry_run: bool = False, learn: bool = True,
-         max_level: int | None = None, lone: bool = False) -> int:
+         max_level: int | None = None) -> int:
     LAST.clear()
     if bag.norm_name(want) != bag.norm_name(confirm_name):
         return _fail(uikit.EXIT_USAGE, f'--confirm-name {confirm_name!r} 與名稱 {want!r} 不同，不丟')
@@ -159,11 +160,64 @@ def drop(role_arg: str, want: str, confirm_name: str, slot_no: int | None = None
         if s.rc:
             return s.rc
         for r in roles:
-            rc = drop_role(r, want, ctx, slot_no, dry_run, max_level, lone)
+            rc = drop_role(r, want, ctx, slot_no, dry_run, max_level)
             if rc:
                 pet.save_ctx(ctx)
                 return rc
         pet.save_ctx(ctx)
+    return 0
+
+
+def drop_first_slot(role_arg: str = 'all', dry_run: bool = False) -> int:
+    """機械式固定動作（2026-10-16，**未實機**）：轉生後寵物欄已全存、獎勵寵一定在第 1 格 → 面板開一次、左欄頭像逐人切，
+    每人 選第 1 格 → 垃圾桶 → 提示窗出現就按確定（固定座標，不 OCR 名字）→ 等第 1 格變空。
+    **不讀名字 / 等級、不擋第 1 格 / 騎乘 / 出戰。** 該人第 1 格本來就空 = 已完成跳過。只驗：垃圾桶後提示窗有出現、確定後第 1 格變空
+    （否則 76，不重點）。LAST['dropped'] = [角色]、LAST['already'] = [角色]"""
+    LAST.clear()
+    roles = pet.role_list(role_arg)
+    if not roles:
+        return _fail(uikit.EXIT_USAGE, f'角色 {role_arg!r} 不認得')
+    ctx = pet.load_ctx(False)
+    with pet.Session(False, True) as s:
+        if s.rc:
+            return s.rc
+        try:
+            for r in roles:
+                rc = pet.select_role(r, ctx)
+                if rc:
+                    return rc
+                f = pet.scan_frames()
+                if f is None:
+                    return _fail(pet.EXIT_PANEL, '讀不到面板像素')
+                if f['empty'][0]:
+                    LAST.setdefault('already', []).append(r)
+                    continue
+                if dry_run:
+                    LAST.setdefault('would_drop', []).append(r)
+                    continue
+                rc = pet.select_slot(0, f)
+                if rc:
+                    return rc
+                if not uikit.safe_click(TRASH_XY[0], TRASH_XY[1], uikit.PET, note=f'petdrop 垃圾桶（{r} 第 1 格，固定動作）', allow=('trash',), wait_ms=500):
+                    return _fail(pet.EXIT_PANEL, '寵物面板特徵不在，沒點垃圾桶')
+                end = uikit.clock() + 2.5
+                while not uikit.is_open(pet.CONFIRM):
+                    if uikit.clock() >= end:
+                        return _fail(EXIT_VERIFY, f'{r} 按了垃圾桶但提示窗沒出現（不重點）', 'petdrop-noconfirm')
+                    uikit.sleep(0.15)
+                if not uikit.safe_click(CONFIRM_OK[0], CONFIRM_OK[1], pet.CONFIRM, note=f'petdrop 確定丟棄（{r} 第 1 格，固定動作）', wait_ms=700):
+                    return _fail(EXIT_VERIFY, '提示窗特徵消失，沒點確定')
+                end = uikit.clock() + 3.0
+                while True:
+                    g = pet.scan_frames()
+                    if g is not None and g['empty'][0]:
+                        LAST.setdefault('dropped', []).append(r)
+                        break
+                    if uikit.clock() >= end:
+                        return _fail(EXIT_VERIFY, f'{r} 丟完第 1 格不是空格（不重點）', 'petdrop-verify')
+                    uikit.sleep(0.2)
+        finally:
+            pet.save_ctx(ctx)
     return 0
 
 
@@ -174,14 +228,19 @@ def main() -> int:
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
     ap.add_argument('role')
-    ap.add_argument('name')
-    ap.add_argument('--confirm-name', required=True)
+    ap.add_argument('name', nargs='?', default='')
+    ap.add_argument('--confirm-name', default='')
+    ap.add_argument('--first-slot', action='store_true', help='固定動作：逐人直接丟第 1 格（不讀名字 / 等級；rebirth cleanup 用，未實機）')
     ap.add_argument('--slot', type=int, default=None)
     ap.add_argument('--max-level', type=int, default=None, help='只丟等級 ≤ N 的（等級讀不出不丟）')
     ap.add_argument('--dry-run', action='store_true')
-    ap.add_argument('--lone', action='store_true', help='寵物欄已全存、只剩這一隻：放行第 1 格 / 出戰（仍擋騎乘 / 像騎寵 / 名字 / 等級）')
     a = ap.parse_args()
-    rc = drop(a.role, a.name, a.confirm_name, a.slot, a.dry_run, max_level=a.max_level, lone=a.lone)
+    if a.first_slot:
+        rc = drop_first_slot(a.role, a.dry_run)
+    elif not a.name or not a.confirm_name:
+        ap.error('沒給 --first-slot 時要 name 與 --confirm-name')
+    else:
+        rc = drop(a.role, a.name, a.confirm_name, a.slot, a.dry_run, max_level=a.max_level)
     print(json.dumps(dict(LAST, ok=rc == 0, rc=rc), ensure_ascii=False))
     return rc
 
