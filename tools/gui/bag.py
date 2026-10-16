@@ -2046,6 +2046,7 @@ def swap_weapon(role: str, bow: str = '精靈王之弓', keep_old: bool = False)
             return 0                                    # 原本沒武器，沒東西可丟
         if name_match(cur, bow, 0.8):
             return _fail(EXIT_GUARD, '舊武器名稱吻合弓，不丟')
+        cur = cur.split()[0] if cur.split() else cur      # 彈窗 OCR 可能連內文一起讀進來（p2 實測「新手棍棒 新手棍棒 新手棍棒 25」）→ 只取第一段名稱
         j = find_item(cur)
         if j is None:
             return _fail(EXIT_ITEM, f'穿弓後背包找不到舊武器「{cur}」（不丟別的東西）', 'bag-noold')
