@@ -1,20 +1,20 @@
 # 精靈王石器（PrimalSA）遊戲知識庫
 
 本資料夾由 `tools/extract/extract.py` 從 `GameClient/` 自動產生（**請勿手動修改**，重新匯出會覆蓋）。
-產生時間：2026-10-09 12:08；遊戲資料版本（Config.MD5Version）：20260518；客戶端版本（app.ver）：1.0.0。
+產生時間：2026-10-16 17:27；遊戲資料版本（Config.MD5Version）：20260518；客戶端版本（app.ver）：1.0.0。
 
 ## 分類目錄
 | 資料夾 | 內容 | 主要來源表 |
 |---|---|---|
 | [overview/](overview/) | 遊戲常數、程式列舉、客戶端檔案分類 / 格式、UI 畫面清單 | Config、HotUpdate.dll |
-| [items/](items/README.md) | 道具 10390 件（武器、防具、飾品、藥品、材料、寵物裝備、任務、其他）、套裝 | Item、Suit |
+| [items/](items/README.md) | 道具 10393 件（武器、防具、飾品、藥品、材料、寵物裝備、任務、其他）、套裝 | Item、Suit |
 | [pets/](pets/README.md) | 寵物 / 怪物 3980 種（依系別分檔）、取得方式、騎乘、經驗表 | Monster、PetData、PetBaby、Ride、Exp |
 | [skills/](skills/README.md) | 戰鬥技能 1206、狀態 609、角色 Buff、技能學習 NPC | SkillBattle、Skill、SkillStatus、RoleBuff |
 | [world/](world/README.md) | 地圖 1467 張、出口 5003 個、NPC 3973 個（依地圖分組）、交通 / 傳送 | MapName、MapWarp、Npc、Transfer |
 | [quests/](quests/README.md) | 任務 373 步、攻略說明、NPC 腳本 / 對話 1268 個、答題題庫 | Task、TaskExplan、NpcScript、Answer |
-| [crafting/](crafting/README.md) | 合成配方 1894、材料圖鑑、製作、強化、回爐 | ExchangeItem、ItemBook、ItemUp |
+| [crafting/](crafting/README.md) | 合成配方 1877、材料圖鑑、製作、強化、回爐 | ExchangeItem、ItemBook、ItemUp |
 | [economy/](economy/README.md) | NPC 商店、商城、抽獎、活動 / 副本、公告、儲值 | Npc.npcArgs、ShopMall、Lottery、Activity |
-| [text/](text/README.md) | 遊戲文字 6777 條（繁中 / 韓文對照） | NewLanguage、NewLanguagePublic |
+| [text/](text/README.md) | 遊戲文字 6780 條（繁中 / 韓文對照） | NewLanguage、NewLanguagePublic |
 | [data/](data/) | 機器可讀原始資料（見下） | — |
 
 ## 原始資料（data/）
@@ -37,7 +37,7 @@
 
 - [crafting/README.md](crafting/README.md) — 合成 / 製作總覽
 - [crafting/enhance.md](crafting/enhance.md) — 道具強化 / 升級
-- [crafting/exchange.md](crafting/exchange.md) — 合成 / 兌換配方（ExchangeItem）：合成介面（UIHeCheng）用的配方。isSeletItemIndex 的材料是「多選一」。共 1894 筆。
+- [crafting/exchange.md](crafting/exchange.md) — 合成 / 兌換配方（ExchangeItem）：合成介面（UIHeCheng）用的配方。isSeletItemIndex 的材料是「多選一」。共 1877 筆。
 - [crafting/huilu.md](crafting/huilu.md) — 回爐（Huilu）：寵物 / 道具回爐的花費表。
 - [crafting/item-book.md](crafting/item-book.md) — 材料圖鑑製作（ItemBook）：材料圖鑑（UICaiLiaoTuJian）。
 - [crafting/item-make.md](crafting/item-make.md) — 道具製作
@@ -48,11 +48,11 @@
 - [economy/notices.md](economy/notices.md) — 遊戲公告（Notice）：開服公告：基礎設定（經驗倍率、離線時間、月卡 / 季卡效果等）。
 - [economy/npc-shops.md](economy/npc-shops.md) — NPC 商店：每個販售 NPC 的商品與價格（Npc.npcArgs）。貨幣：1=鑽石、2=金幣、3=石幣、8=綁定鑽石、10=活躍度、11=積分。
 - [economy/recharge.md](economy/recharge.md) — 儲值（僅供參考，AI 不得進行任何付費操作）
-- [items/README.md](items/README.md) — 道具總覽：Item 表共 10390 件道具，依類型分檔。
+- [items/README.md](items/README.md) — 道具總覽：Item 表共 10393 件道具，依類型分檔。
 - [items/accessories.md](items/accessories.md) — 道具：飾品（手環 / 樂器 / 項鍊 / 戒指 / 耳環 / 護身符）：共 1192 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
 - [items/armor.md](items/armor.md) — 道具：防具（頭盔 / 鎧甲 / 盾 / 鞋 / 手套 / 腰帶）：共 1712 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
 - [items/consumables.md](items/consumables.md) — 道具：藥品 / 料理：共 388 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
-- [items/materials.md](items/materials.md) — 道具：材料 / 寶石 / 行李：共 955 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
+- [items/materials.md](items/materials.md) — 道具：材料 / 寶石 / 行李：共 958 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
 - [items/misc.md](items/misc.md) — 道具：其他道具（卷軸、蛋、禮包、經驗果、活動道具…）：共 3046 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
 - [items/pet-equipment.md](items/pet-equipment.md) — 道具：寵物裝備 / 陣法：共 103 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
 - [items/quest-items.md](items/quest-items.md) — 道具：任務道具：共 424 件。能力欄：攻/防/敏/HP/MP/運/魅/閃避/爆擊/抗性；「取得」= NPC 販售或合成/圖鑑配方（細節見 crafting/、economy/npc-shops.md）。
@@ -119,13 +119,13 @@
 - [text/strings-2.md](text/strings-2.md) — 遊戲文字（34604 ~ 80036）：語言表 NewLanguage / NewLanguagePublic：介面文字、系統訊息、提示。用來對照畫面上的韓文 / 中文訊息。
 - [text/strings-3.md](text/strings-3.md) — 遊戲文字（80037 ~ 200000082）：語言表 NewLanguage / NewLanguagePublic：介面文字、系統訊息、提示。用來對照畫面上的韓文 / 中文訊息。
 - [text/strings-4.md](text/strings-4.md) — 遊戲文字（200000083 ~ 70000000082）：語言表 NewLanguage / NewLanguagePublic：介面文字、系統訊息、提示。用來對照畫面上的韓文 / 中文訊息。
-- [text/strings-5.md](text/strings-5.md) — 遊戲文字（70000000083 ~ 91000020014）：語言表 NewLanguage / NewLanguagePublic：介面文字、系統訊息、提示。用來對照畫面上的韓文 / 中文訊息。
+- [text/strings-5.md](text/strings-5.md) — 遊戲文字（70000000083 ~ 91000020017）：語言表 NewLanguage / NewLanguagePublic：介面文字、系統訊息、提示。用來對照畫面上的韓文 / 中文訊息。
 - [world/README.md](world/README.md) — 世界：地圖 / NPC / 傳送總覽：地圖 1467 張、NPC 3973 個、出口 5003 個。
 - [world/maps.md](world/maps.md) — 地圖一覽：MapName + mapdata 合併。名稱後有 * 表示設定表沒有名稱、用地圖檔頭的範本名（可能不準）。通行格在 data/maps.bin（用 tools/query/psa.py grid/route 查）。
 - [world/npcs-01.md](world/npcs-01.md) — NPC（地圖 40 ~ 1000）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
-- [world/npcs-02.md](world/npcs-02.md) — NPC（地圖 1001 ~ 2006）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
-- [world/npcs-03.md](world/npcs-03.md) — NPC（地圖 2009 ~ 3403）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
-- [world/npcs-04.md](world/npcs-04.md) — NPC（地圖 3404 ~ 7001）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
+- [world/npcs-02.md](world/npcs-02.md) — NPC（地圖 1001 ~ 2009）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
+- [world/npcs-03.md](world/npcs-03.md) — NPC（地圖 2011 ~ 3409）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
+- [world/npcs-04.md](world/npcs-04.md) — NPC（地圖 3412 ~ 7001）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
 - [world/npcs-05.md](world/npcs-05.md) — NPC（地圖 7002 ~ 7300）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
 - [world/npcs-06.md](world/npcs-06.md) — NPC（地圖 7301 ~ 9031）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。
 - [world/npcs-07.md](world/npcs-07.md) — NPC（地圖 9032 ~ 31701）：依地圖分組列出 NPC：位置、販售、教技能、功能腳本、交通路線、預設對話。

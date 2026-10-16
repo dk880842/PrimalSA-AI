@@ -19,6 +19,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, '..', '..'))
 sys.path.insert(0, HERE)
 import tabtoy
+sys.path.insert(0, os.path.join(ROOT, 'tools', 'gui'))
+import winenv   # Windows 執行檔（SchemaDump.exe / csc）要 Windows 路徑；WSL 下 /mnt/c/... 會讓 SchemaDump 回 82
 
 CSC = r'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 
@@ -55,9 +57,9 @@ def build_schema(ab, cache, data_dir):
     exe = os.path.join(cache, 'SchemaDump.exe')
     src = os.path.join(ROOT, 'tools', 'schemadump', 'SchemaDump.cs')
     if not os.path.exists(exe) or os.path.getmtime(exe) < os.path.getmtime(src):
-        subprocess.check_call([CSC, '/nologo', '/out:' + exe, src])
+        subprocess.check_call([CSC, '/nologo', '/out:' + winenv.to_windows(exe), winenv.to_windows(src)])
     for mode, fn in (('schema', 'schema.tsv'), ('enums', 'enums.tsv')):
-        out = subprocess.check_output([exe, mode, dll, cache])
+        out = subprocess.check_output([exe, mode, winenv.to_windows(dll), winenv.to_windows(cache)])
         open(os.path.join(data_dir, fn), 'wb').write(out)
     return os.path.join(data_dir, 'schema.tsv')
 

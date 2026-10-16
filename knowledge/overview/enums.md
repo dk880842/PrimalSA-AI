@@ -29,7 +29,6 @@
 | BattleStatuDeal | ADD=1, DELETE=2, MISS=3 |
 | BattleTarget | RANDOM=99999, ANY_ENEMY=101, ANY_ENEMY_LIVE=102, ANY_SELF=201, ONLY_SELF=202, WITHOUT_SELF=203, ANY_SELF_LIVE=204, ANY_SELF_DIE=208, WITHOUT_SELF_LIVE=210, ANY_LIVE=301, ANY_ENEMY_LIVE_PET=503, EMEMY_ONE_ROW=602, ENEMY_BEHIND_BACK=603, ENEMY_LEFT_RIGHT=604, ONLY_SELF_LIVE_PET=606, ONLY_SELF_FOR_PET=607, ANY_ENEMY_DIE_PET=608, ANY_LIVE_NOT_SELF=609, ANY_SELF_DIE_PET=610, ANY_SELF_PET=611, ANY_ENEMY_PET=612, SELF_ONE_ROW=613 |
 | BattleTeamType | None=0, Atc=1, Die=2, Select=3 |
-| BgType | Bg1=0, Bg2=1, Bg3=2, Bg4=3, Count=4 |
 | ButtonEnum | NONE=1, OK=2, CANCEL=4, PREV=8, NEXT=16 |
 | CameraMode | Login=0, Main=1, Battle=2, MiniMap=3, CG=4 |
 | ChannelType | MAP=1, TEAM=2, GUILD=3, WORLD=4, JOB=5, SYSTEM=6, PRIVATE=7, ALL_WORLD=8, WORLD_TEAM=9, Local=10, All=11, TOP_ROLL=100, BOTTOM_TIP=101 |
@@ -159,7 +158,6 @@
 | SaveWindow | ROLE_TILE=1, ROLE_TRANS=2, ROLE_WINDOW=3, ITEM_WINDOW=4, PET_WINDOW=5, TEAM_WINDOW=6, GUILD_WINDOW=7, TASK_WINDOW=8, AH_WINDOW=9, SHOP_WINDOW=10, RECHARGE_WINDOW=11, SETUP_WINDOW=12, FAST_WINDOW=13, ROLE_ARUA=14, ROLE_FRIEND=15, ROLE_EMAIL=16, ROLE_MAP=17 |
 | SceneEnum | SCENE_SPLASH=0, SCENE_NEW_LOGIN=1, SCENE_NEW_MAIN=2, SCENE_EMPTY=3 |
 | ScriptButtonType | BATTLE=1, TASK=2, FUNC=3, WARP=4 |
-| SelectMode | None=0, SelectRole=1, SelectRide=2, SelectMask=3 |
 | SelectPetItemType | Pet=0, Item=1 |
 | ShieldRoleMask | MainRole=1, TeamRole=2, Npc=4, Family=8, Friend=16, Other=32 |
 | ShopBoothFouceType | FOUCE=1, UNFOUCE=2 |
@@ -176,7 +174,6 @@
 | SnapStatus | NoTargetSet=0, TargetHasSet=1, SnapMoving=2, SnapMoveFinish=3 |
 | SocketDriver+E_ConnectState | ConnectNone=0, ConnectFail=1, PacketGame=2, DisconnectGame=3, ReConnectGameFail=4, ReConnectAutoFail=5 |
 | SoundEnum | BUTTON_CLICK=204, BUTTON_CLICK_1=217, WINDOWS_CLOSE=203, WINDOWS_OPEN=202, BATTLE_BEGIN=215, ERROR=213, ADD_BASEPOINT=100, FLY_ONE=11, FLY_TWO=66, ATTACK=250, HEAL=102 |
-| SpriteFXType | None=0, Lightning=1, LightningBolt=2, Ice=3, IcedFx=4, GoldFx=5, Fire=6, FireAdd=7, NewTeleportation=8, Compression=9, Destroyed=10, GoldenFX=11, Pixel=12, Waterfall=13, PlasmaRainbowColor=14, PlasmaRainbow=15, PlasmaShield=16, ShinyReflect=17 |
 | SpriteStoneAddType | STAMINA=1, VITALITY=2, STRENGTH=3, SPEED=4, MAGIC=5 |
 | Sproto.SprotoRpc+RpcType | REQUEST=1, RESPONSE=2 |
 | StatusType | operability=0, noOperability=1 |
@@ -191,7 +188,6 @@
 | UIPriority | LowLevel=0, Normal=100, Resident=200, MidLevel=500, HeightLevel=600, Warning=1000, HighestLevel=1500 |
 | UISelectItemType | Item=0, Equip=1, All=2, Other=3 |
 | UIStonePayShowMode | Pay=0, Power=1, Fund=2, Frist=3, War=4, Day=5, TopUp=6 |
-| UIType | Open=0, New=1, Edit=2, Preview=3 |
 | WuQiType | GJian=0, HXBiao=1, STou=2, FTou=3 |
 | XiaLaType | ChangDu1=0, ChangDu2=1, ChangDu3=2, Yanse=3, Yanse2=4, DuoKuang1=5 |
 | lotteyType | start=0, lottery=1, Double=2, bigSmall=3, shaizi=4 |

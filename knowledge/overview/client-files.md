@@ -13,11 +13,11 @@
 | 前綴 | 類別 | 數量 | 大小 | 內容 | 範例 |
 |---|---|---|---|---|---|
 | mapdata | 地圖 | 1464 | 7.4 MB | 地圖資料（LS2MAP：寬高、地面層、物件層） | mapdata_1.assetbundle、mapdata_100.assetbundle、mapdata_1000.assetbundle… |
-| ui* | 介面 | 448 | 366.5 MB | UI 介面預製物（*_yhkrn = 韓版 UI），見 ui-screens.md | activelog_yhkrn.assetbundle、activepopup_yhkrn.assetbundle、chatdetailspanel_yhkrn.assetbundle… |
+| ui* | 介面 | 449 | 372.2 MB | UI 介面預製物（*_yhkrn = 韓版 UI），見 ui-screens.md | activelog_yhkrn.assetbundle、activepopup_yhkrn.assetbundle、chatdetailspanel_yhkrn.assetbundle… |
+| char | 角色 | 358 | 100.8 MB | 角色 / 寵物 / 怪物 / NPC 影格圖（char{圖號}） | char100000.assetbundle、char1000021000.assetbundle、char1000021100.assetbundle… |
 | gsound | 音效 | 206 | 2.6 MB | 音效 | gsound_1.assetbundle、gsound_10.assetbundle、gsound_100.assetbundle… |
 | mapbg | 地圖 | 87 | 100.3 MB | 地圖背景大圖 | mapbg100.assetbundle、mapbg10001.assetbundle、mapbg10002.assetbundle… |
 | mapbuild | 地圖 | 76 | 30.9 MB | 地圖建築 / 物件圖素 | mapbuild_0.assetbundle、mapbuild_10000.assetbundle、mapbuild_10100.assetbundle… |
-| char | 角色 | 64 | 12.4 MB | 角色 / 寵物 / 怪物 / NPC 影格圖（char{圖號}） | char100000.assetbundle、char1000027010.assetbundle、char100005.assetbundle… |
 | newarua | 角色 | 54 | 10.1 MB | 光環特效 | newarua_201210.assetbundle、newarua_201211.assetbundle、newarua_201212.assetbundle… |
 | chardata | 角色 | 48 | 0.3 MB | 48 種基本人物的動畫表 / 位移表 | chardata100000.assetbundle、chardata100005.assetbundle、chardata100010.assetbundle… |
 | chname | 角色 | 42 | 46.6 MB | 稱號 / 名稱特效 | chname_aoshi.assetbundle、chname_aoshi2.assetbundle、chname_aoshi_krn.assetbundle… |
@@ -86,7 +86,7 @@
 | soulexplosiongreen |  | 1 | 0.3 MB |  | soulexplosiongreen.assetbundle |
 | spritemask |  | 1 | 0.0 MB |  | spritemask.assetbundle |
 | synsound | 音效 | 1 | 0.0 MB | 合成音效 | synsound.assetbundle |
-| updateui |  | 1 | 0.9 MB |  | updateui.assetbundle |
+| updateui |  | 1 | 1.1 MB |  | updateui.assetbundle |
 | warp | 地圖 | 1 | 0.1 MB | 傳送點特效 | warp.assetbundle |
 | warppoint | 地圖 | 1 | 0.0 MB | 傳送點 | warppoint.assetbundle |
 | warppointpub | 地圖 | 1 | 0.1 MB | 傳送點(公用) | warppointpub.assetbundle |

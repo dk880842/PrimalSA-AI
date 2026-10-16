@@ -179,7 +179,7 @@
 - 目的地 / 地點：英雄戰場(8201) 93,143
 - 參數：{"isVideos": 1, "group": 200041, "trans": 5}
 - 需求：[{"needCurrencyType": 3, "needCurrencyValue": 50000}]
-- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3160}]
+- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3160}]
   > 想和我過招還怕沒有機會嗎，只怕你不堪一擊！！！！
 
 ### 腳本 3168：英雄戰場（戰鬥）
@@ -320,7 +320,7 @@
 - 目的地 / 地點：英雄戰場(8203) 133,84
 - 參數：{"isVideos": 1, "group": 200042, "trans": 5}
 - 需求：[{"needCurrencyType": 3, "needCurrencyValue": 50000}]
-- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3180}]
+- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3180}]
   > 想和我過招還怕沒有機會嗎，只怕你不堪一擊！！！！
 
 ### 腳本 3188：英雄戰場（戰鬥）
@@ -461,7 +461,7 @@
 - 目的地 / 地點：英雄戰場(8205) 204,21
 - 參數：{"isVideos": 1, "group": 200043, "trans": 5}
 - 需求：[{"needCurrencyType": 3, "needCurrencyValue": 50000}]
-- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3200}]
+- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3200}]
   > 想和我過招還怕沒有機會嗎，只怕你不堪一擊！！！！
 
 ### 腳本 3208：英雄戰場（戰鬥）
@@ -602,7 +602,7 @@
 - 目的地 / 地點：英雄戰場(8206) 82,145
 - 參數：{"isVideos": 1, "group": 200044, "trans": 5}
 - 需求：[{"needCurrencyType": 3, "needCurrencyValue": 50000}]
-- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3220}]
+- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3220}]
   > 想和我過招還怕沒有機會嗎，只怕你不堪一擊！！！！
 
 ### 腳本 3228：英雄戰場（戰鬥）
@@ -743,7 +743,7 @@
 - 目的地 / 地點：英雄戰場(8208) 132,73
 - 參數：{"isVideos": 1, "group": 200045, "trans": 5}
 - 需求：[{"needCurrencyType": 3, "needCurrencyValue": 50000}]
-- 選項參數：[{"itemString": "92130*10", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3240}]
+- 選項參數：[{"itemString": "92130*20", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3240}]
   > 想和我過招還怕沒有機會嗎，只怕你不堪一擊！！！！
 
 ### 腳本 3248：英雄戰場（戰鬥）
@@ -884,7 +884,7 @@
 - 目的地 / 地點：英雄戰場(8210) 204,29
 - 參數：{"isVideos": 1, "group": 200046, "trans": 5}
 - 需求：[{"needCurrencyType": 3, "needCurrencyValue": 50000}]
-- 選項參數：[{"itemString": "92130*20", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3260}]
+- 選項參數：[{"itemString": "92130*30", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3260}]
   > 想和我過招還怕沒有機會嗎，只怕你不堪一擊！！！！
 
 ### 腳本 3268：英雄戰場（戰鬥）
@@ -969,7 +969,7 @@
 - 目的地 / 地點：薩姆吉爾村(1000) 92,99
 - 參數：{"isVideos": 1, "group": 200047, "trans": 1}
 - 需求：[{"needCurrencyType": 3, "needCurrencyValue": 50000}]
-- 選項參數：[{"itemString": "92130*30", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3272}]
+- 選項參數：[{"itemString": "92130*50", "ran": 1000}, {"banPartner": 1, "maxRoleNum": 1}, {"day": "1-1", "announceId": 40000000141, "realNpcId": 3272}]
   > 想和我過招還怕沒有機會嗎，只怕你不堪一擊！！！！
 
 ### 腳本 3280：碧青洞窟(碧青任務)（任務戰鬥）

@@ -110,6 +110,7 @@
 | lotterybag | UIlotterybagScreen | 抽獎背包 |
 | lotterybagget | UIlotterybaggetScreen |  |
 | lotterybuy | UIlotterybuyScreen | 抽獎購買 |
+| lotterydoublereward | UIlotterydoublerewardScreen |  |
 | lotterylog | UIlotterylogScreen |  |
 | lotteryloglook | UIlotteryloglookScreen |  |
 | lotterypoint | UIlotterypointScreen |  |
