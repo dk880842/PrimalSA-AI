@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """每視窗驗證停手旗標 verify-halt.json（只用標準函式庫；多視窗第 3a 步，2026-10-15 使用者改成「各自視窗停手」）。
 
-鐵則 5：出現答題 / 驗證視窗要立刻停手。多視窗時某個視窗出事（uikit 回 9、watch 標 verify_suspect / unknown_long、
-quest.py 的驗證警報）→ 只寫**那個視窗自己的**旗標，只有那個視窗的常駐程式 / 腳本停，其他視窗照常：
+鐵則 5：出現答題 / 驗證視窗要立刻停手。**什麼時候設（使用者 2026-10-16 定案：正面辨識 + 3 分鐘兜底）**：
+  - 答題 / 驗證介面正面命中（screen_sigs.quiz_screen）：watch 第一輪、uikit.preflight 第一次 unknown、quest.py 立刻 trip
+  - watch 看到不認得的畫面連續 3 分鐘沒有進度（畫面 / 座標 / 腳本動作 log 都沒變；定義見 watch.py 檔頭）→ 兜底 trip
+  - 其他不認得的畫面一律**不設**：腳本照樣自己停（uikit.trip_verify / uikit.fail(9) 會現場再確認答題介面，沒認出就不 trip）；
+    網路異常窗（screen_sigs.net_lost）交給 netwatch，不設
+多視窗時某個視窗出事 → 只寫**那個視窗自己的**旗標，只有那個視窗的常駐程式 / 腳本停，其他視窗照常：
   - 路徑 = clients.cache_dir() / verify-halt.json：主視窗 tools/.cache/verify-halt.json（原路徑），
     其他 tools/.cache/clients/<程序名>/verify-halt.json；trip / active / clear 都只看本視窗（PSA_CLIENT）
   - uikit.preflight（每支腳本開跑）→ 9；uikit.watch_preflight_ok → False
@@ -14,12 +18,12 @@ quest.py 的驗證警報）→ 只寫**那個視窗自己的**旗標，只有那
 **自動清（使用者 2026-10-16：偵測保留、旗標自動清；當天 7 次以上誤設〔刪除確認窗、道具說明彈窗、手動開的面板、新視窗剛開〕）**：
   旗標存在時，本視窗畫面連續 AUTO_CLEAR_S（5）秒、至少 AUTO_CLEAR_N（6）次讀圖都是「已知正常畫面」
   （screen_sigs.normal_screen：主畫面 idle / 自動跑路 walking / 戰鬥 battle / 認得的面板 panel〔沒有提示視窗等附註〕，
-  或面板上疊已知彈窗 popup_*）→ 自動清掉，寫 actions.log、quest-events.log「verifyhalt 自動清除（畫面已恢復：<狀態>）」、
+  或面板上疊已知彈窗 popup_*，或登入 / 選角 / 載入 / 網路異常窗〔2026-10-16 加：netwatch 那一層，否則斷線會死結〕）→ 自動清掉，寫 actions.log、quest-events.log「verifyhalt 自動清除（畫面已恢復：<狀態>）」、
   把設旗標時那筆 errlog 補 fix（psa-hud 錯誤表看得到）。判斷邏輯 = AutoClear（一份，兩個呼叫端共用）：
   - watch.py（常駐、零輸入、每 0.5 s 讀一次）每輪餵一次 → 主要的清除者
   - watch 沒在跑的視窗：uikit.preflight 遇到旗標時自己現場連讀 6 次（間隔 1 s）判斷，通過就清掉繼續、否則照舊 9
-  **絕不清**：任何一次讀到 unknown / 對話框（驗證視窗是 NpcScript，可能長得像對話框）/ 獲得物品 / 選擇對象 / 登入 / 選角 /
-  載入 / 全黑 / 主畫面帶提示視窗 / 最小化 / 讀不到 → 計時歸零；讀圖時間早於旗標時間的不算；`set` 手動設的（src=manual）不自動清。
+  **絕不清**：任何一次讀到 unknown / 答題介面 / 對話框（驗證視窗是 NpcScript，可能長得像對話框）/ 獲得物品 / 選擇對象 /
+  全黑 / 主畫面帶提示視窗 / 最小化 / 讀不到 → 計時歸零；讀圖時間早於旗標時間的不算；`set` 手動設的（src=manual）不自動清。
   手動清照舊：`uv run --no-project python tools/gui/verifyhalt.py clear <程序名>`。
 
 只在「多視窗情境」才寫（clients.multi_window：非主視窗，或主視窗時還有別的 PrimalSA* 在跑；查不到程序清單當作多視窗）。
@@ -29,7 +33,7 @@ quest.py 的驗證警報）→ 只寫**那個視窗自己的**旗標，只有那
   內容 client 不是主視窗 → 歸屬那個視窗（主視窗不受影響；那個視窗照樣停），`clear <程序名>` / 之後寫旗標時搬到該視窗資料夾。
 
   import verifyhalt
-  verifyhalt.trip('畫面連 3 次不認得', src='grind')   # 多視窗才寫（本視窗）；回 True = 有寫 / 已經有
+  verifyhalt.trip('答題介面正面命中', src='grind')     # 多視窗才寫（本視窗）；回 True = 有寫 / 已經有（只在上面兩種情況呼叫）
   verifyhalt.active()                                  # → dict（本視窗旗標內容）或 None
   ac = verifyhalt.AutoClear(); ac.feed(flag, normal, now, read_wall)   # True = 該清了 → verifyhalt.auto_clear(flag, 狀態文字, src)
 命令列：

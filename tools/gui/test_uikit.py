@@ -231,11 +231,49 @@ g = install(Game(hud=True))
 uikit.watch_state = lambda max_age=1.0: None            # 預設 watch 不可用 → 走完整檢查
 uikit.watch_screen = lambda max_age=1.0: None
 check('preflight 主畫面 = 0', uikit.preflight('t') == 0)
+import verifyhalt  # noqa: E402
+_TRIPS = []
+_real_vh_trip = verifyhalt.trip
+verifyhalt.trip = lambda reason, src='', **kw: _TRIPS.append((reason, src)) or True
 g = install(Game(unknown=True))
 g.painted[screen_sigs.BLACK_PTS[0]] = (90, 90, 90)          # 假畫面其餘點是黑色 = 會被當全黑轉場；點亮一點 = 真的不認得
 rc = uikit.preflight('t')
-check('preflight unknown 連 3 次 → 9（每次多讀轉場特徵 + 已知彈窗各一次）', rc == 9 and g.reads == 9 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
+check('preflight unknown 連 3 次 → 9（每次多讀轉場特徵 + 已知彈窗各一次，最後 trip_verify 再現場確認一次答題介面）',
+      rc == 9 and g.reads == 10 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
 check('preflight unknown 時 0 點擊', g.clicks == [])
+check('preflight unknown 連 3 次但沒認出答題介面 → 不設驗證停手旗標（2026-10-16：交給 watch 3 分鐘兜底）', _TRIPS == [], str(_TRIPS))
+# 答題介面（合成模擬圖，fixtures/verify_px.json）：preflight 第一次 unknown 就 9 + 設旗標，不等 3 次
+_vfx = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'verify_px.json').read_text(encoding='utf-8'))
+_vpts = [tuple(p) for p in _vfx['points']]
+
+
+def _paint(g, rel):
+    _h = next(s_ for s_ in _vfx['samples'] if s_['f'] == rel)['px']
+    g.painted.update({pt: (int(_h[i * 6:i * 6 + 2], 16), int(_h[i * 6 + 2:i * 6 + 4], 16), int(_h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(_vpts)})
+
+
+g = install(Game(unknown=True))
+_paint(g, 'npcanswer-extract/mock_battle_k10546_+0+0.png')
+_TRIPS.clear()
+rc = uikit.preflight('t')
+check('preflight 答題介面 → 立刻 9（不等 3 次、不睡）+ 設旗標、0 點擊', rc == 9 and g.reads <= 3 and g.t < 5.0 and g.clicks == [] and len(_TRIPS) == 1
+      and '答題' in _TRIPS[0][0], f'rc={rc} reads={g.reads} t={g.t} {_TRIPS}')
+_TRIPS.clear()
+check('trip_verify：現場認出答題介面 → 設旗標', uikit.trip_verify('測試', 't') is True and len(_TRIPS) == 1 and '正面命中' in _TRIPS[0][0])
+g = install(Game(unknown=True))
+_paint(g, 'kr322.png')
+_TRIPS.clear()
+check('trip_verify：別的提示窗（任務條件不達標）→ 不設旗標、回 False', uikit.trip_verify('測試', 't') is False and _TRIPS == [])
+_keep_qn = uikit.quiz_now
+uikit.quiz_now = lambda: (_ for _ in ()).throw(RuntimeError('讀不到'))
+check('trip_verify：讀畫面例外 → 當沒認出、不設旗標', uikit.trip_verify('測試', 't') is False and _TRIPS == [])
+uikit.quiz_now = _keep_qn
+_TRIPS.clear()
+g = install(Game(unknown=True))
+_paint(g, 'net1.png')
+rc = uikit.preflight('t')
+check('preflight 網路異常窗（netwatch.guard 沒處理掉時）→ 照舊 9、不設旗標、0 點擊', rc == 9 and _TRIPS == [] and g.clicks == [], f'rc={rc} {_TRIPS}')
+verifyhalt.trip = _real_vh_trip
 # 背包上疊道具說明彈窗（2026-10-16 p2 02:40:05 誤停那張，真實取點）：已知彈窗 → 0、不計次、不點
 _ifx = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'bag_itempop_px.json').read_text(encoding='utf-8'))
 _ipts = [tuple(p) for p in _ifx['points']]

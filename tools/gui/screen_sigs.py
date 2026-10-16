@@ -5,6 +5,8 @@
 特徵 = 清單，每點 tuple (x, y, r, g, b, tol)：座標是 2880×1659 版面的截圖座標（1440×830 縮圖座標），
 tol 是該特徵原本使用的容差（搬移時逐一保留，不要統一）。
 classify(px) 與搬出前的 quest.read_screen 判定逐點相同（fixtures/screen_px.json 驗證）。
+驗證停手相關（使用者 2026-10-16 定案）：quiz_screen = 答題 / 驗證介面正面辨識（npcanswer prefab 推出，未實機；命中立刻設旗標）；
+net_lost = 網路異常窗（框 + 白字字形，交給 netwatch）；normal_screen = 旗標自動清認的已知正常畫面。annotate 依序先判 quiz、net_lost。
 """
 import battleguard
 
@@ -370,7 +372,7 @@ ANNOT_SIGS = {'notice_dialog': NET_DIALOG, 'login': NET_LOGIN, 'charsel': NET_CH
 #   keypad  = 拆分 / 數量的數字鍵盤（0～9、✕、↵ 大鍵，watch-alerts/unknown-1791750847 / 1791750914）
 #   qty     = 「數量輸入」視窗（− 數量 ＋、確定 / 取消，unknown-1791756186 / 1791756276）
 #   confirm = 「提示」確定（藍）/ 取消（橘）兩顆鈕的確認窗（丟寵 / 存入戰鬥寵；前 6 點與 pet.CONFIRM_SIG 相同，unknown-1791754960）
-# 兩個條件缺一不可：驗證 / 答題視窗（選項是圖片）、網路異常提示（只有一顆確定鈕）、其他沒見過的彈窗即使疊在面板上也仍是 unknown → 10 s 後照報。
+# 兩個條件缺一不可：驗證 / 答題視窗（選項是圖片）、網路異常提示（只有一顆確定鈕）、其他沒見過的彈窗即使疊在面板上也仍是 unknown（10 s 截圖報「不認得的畫面」）。
 DIM_K = (0.40, 0.56)
 DIM_TOL = 10
 POPUP_TOL = 16
@@ -397,7 +399,7 @@ BAG_DELMODE_SIG = [(1280, 113, 197, 70, 43, 30), (700, 410, 246, 70, 83, 26), (1
                    (1050, 508, 244, 68, 82, 26), (1150, 688, 191, 127, 63, 26), (1150, 625, 177, 70, 38, 30)]
 BAG_DELMODE_NEED = 6
 # 刪除確認窗本體：「提示」單鈕窗的框（✕、標題板、藍「確定」兩側、米色底；避開清單 / 問句字的範圍，5 行清單 + 問句也不碰）。
-# 這個框和網路異常 / 「接取任務條件不達標」等所有單鈕「提示」窗**完全相同**（kr322 / qd-after / net1 樣本），所以只當 bag.py 腳本內的「窗開了沒」；
+# 這個框和網路異常 / 「接取任務條件不達標」等所有單鈕「提示」窗**完全相同**（kr322 / qd-after / net1 樣本；網路異常 2026-10-16 起另有字形 net_lost），所以只當 bag.py 腳本內的「窗開了沒」；
 # watch 要認成已知畫面還得加下面三個條件。
 BAG_DELOK_FRAME = [(946, 208, 197, 73, 49, 24), (715, 190, 139, 85, 57, 24), (645, 557, 56, 99, 156, 24), (785, 557, 56, 104, 161, 24),
                    (560, 545, 244, 215, 177, 24), (880, 545, 245, 217, 179, 24), (520, 520, 237, 209, 171, 24), (900, 500, 243, 213, 175, 24)]
@@ -529,23 +531,108 @@ def popup_over_panel(px: dict):
     return (pn, kinds[0]) if pn in POPUP_PANELS else None
 
 
-ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗；popup_item = 背包道具說明彈窗）
+ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'net_lost', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角 / 網路異常窗是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗；popup_item = 背包道具說明彈窗）。答題介面 quiz 刻意不在這裡（它是「認得的危險畫面」）
+
+
+# ---- 網路異常提示窗（「提示：網路異常，是否重連?」，2026-10-16 使用者定案：交給 netwatch、不設驗證停手旗標）----
+# 根因（10-16 08:00 三個視窗同時斷線）：網路異常窗的框和「接取任務條件不達標」、刪除確認等單鈕「提示」窗完全相同（NET_DIALOG / BAG_DELOK_FRAME），
+# watch 只能當 unknown → 10 秒設旗標 → netwatch 看到旗標 exit 9 不點 → 窗不會自己消失 → 旗標永遠清不掉（死結）。
+# 解法：框（NET_DIALOG）+ 訊息白字字形都符合 → 'net_lost'（已知畫面），watch 叫 netwatch 處理；字形不用 OCR，比像素（同 LOADING_TEXT_MASK 的做法）。
+# 字形點：net1.png（10-10）與 10-16 08:00 三個視窗的 watch-alerts（unknown-1792108847 / 1792108852 / 1792108855）白字（min(rgb) > 220）
+# 逐點完全相同（字在 586～842 × 374～399）；ON = 筆畫內部（自己與上下左右都白）、OFF = 3×3 內都不白，各平均取 48 點。
+# 負例：同框的「接取任務條件不達標 / 請到任務詳情進行查閱」（kr322、qd-after，白字在 y 395～418）ON 命中率遠低於門檻。
+NET_MSG_ON = [(646, 376), (652, 376), (660, 376), (728, 376), (790, 376), (820, 376), (628, 378), (634, 378), (680, 378), (688, 378), (790, 378), (840, 378),
+              (646, 380), (652, 380), (660, 380), (790, 380), (588, 382), (622, 382), (762, 382), (768, 382), (648, 384), (686, 384), (790, 384), (808, 384),
+              (826, 384), (840, 384), (790, 386), (588, 388), (626, 388), (648, 388), (656, 388), (658, 388), (798, 388), (838, 388), (756, 390), (790, 390),
+              (648, 392), (658, 392), (728, 392), (770, 392), (620, 394), (770, 394), (810, 394), (838, 394), (634, 396), (726, 396), (736, 396), (770, 396)]
+NET_MSG_OFF = [(586, 374), (614, 374), (642, 374), (700, 374), (724, 374), (768, 374), (804, 374), (836, 374), (666, 376), (706, 376), (750, 376), (642, 378),
+               (710, 378), (804, 378), (696, 380), (720, 380), (776, 380), (642, 382), (710, 382), (774, 382), (626, 384), (704, 384), (748, 384), (600, 386),
+               (692, 386), (716, 386), (780, 386), (670, 388), (712, 388), (780, 388), (638, 390), (670, 390), (720, 390), (804, 390), (668, 392), (720, 392),
+               (774, 392), (638, 394), (698, 394), (742, 394), (776, 394), (834, 394), (676, 396), (716, 396), (594, 398), (652, 398), (698, 398), (748, 398)]
+NET_MSG_WHITE = 220
+NET_MSG_ON_MIN, NET_MSG_OFF_MAX = 0.90, 0.10              # 筆畫點至少 90% 白、非筆畫點最多 10% 白
+
+
+def net_msg(px: dict) -> bool:
+    """「網路異常，是否重連?」白字字形比對（缺點 → False）"""
+    on = [px.get(pt) for pt in NET_MSG_ON]
+    off = [px.get(pt) for pt in NET_MSG_OFF]
+    if any(c is None for c in on + off):
+        return False
+    white = lambda c: min(c) > NET_MSG_WHITE
+    return sum(map(white, on)) >= NET_MSG_ON_MIN * len(on) and sum(map(white, off)) <= NET_MSG_OFF_MAX * len(off)
+
+
+def net_lost(px: dict) -> bool:
+    """網路異常提示窗：NET_DIALOG 框 6 點全中 + 訊息字形符合（netwatch.detect / watch annotate 共用）"""
+    return _match_safe(px, NET_DIALOG) and net_msg(px)
+
+
+def net_points() -> list:
+    """net_lost 要讀的全部點（框 + 字形），不重複"""
+    return list(dict.fromkeys([(x, y) for x, y, *_ in NET_DIALOG] + NET_MSG_ON + NET_MSG_OFF))
+
+
+# ---- 答題 / 防腳本驗證介面（npcanswer = UInpcanswerScreen；鐵則 5：正面命中 → 立刻設驗證停手旗標，使用者 2026-10-16 定案）----
+# **沒有實機截圖**（猜謎三兄弟不會再跑到答題）：特徵來自 GameClient 的 prefab（uiuinpcanswer_yhkrn.assetbundle，唯讀抽取）合成的模擬圖，
+# 產生器 tools/extract/uimock.py（輸出 tools/.cache/npcanswer-extract/mock_*.png、layout.json）。版面（1440×830 截圖座標，畫布比例 k≈1.0546
+# 由 10-09 爬塔實測的點擊座標反推：選項 463 / 643 / 822 / 1002, 430、確認 735, 610 三者一致）：
+#   大彈窗 bg_2（米色、木框）約 x 312～1157 × y 185～703；標題板「知識答題」約 x 577～893 × y 149～219；
+#   題目白字 y 257～304；4 張棕色選項卡（bg_qh_stone，171×244）x 377 起每 179 px、y 304～548，卡內是寵物全身圖；
+#   卡下方 img_beijing 淺棕底條 y 548～564；藍色「確認」鈕 x 628～843 × y 560～657；背景整片壓暗 ×0.4（maskCol 黑 α0.6）。
+# 判定（quiz_screen）：7 組點（左右米色邊條、題目上方米色、卡下淺棕條、確認鈕藍、標題板木色、彈窗下緣木框）共 QUIZ_N（34）點，
+# 至少 QUIZ_NEED 點在 QUIZ_TOL 內，且至少 QUIZ_GROUPS_NEED 組有一半以上吻合（容許實機版面和推算有出入時整組不中）；
+# 點都避開文字與卡內寵物圖（題目 / 選項每次不同）。
+# 點是在 20 張模擬圖（4 種實機背景 × k 1.0466 / 1.0546 / 1.062 × 位移 ±6 px）全部穩定（各色差 ≤ 10）的位置平均挑的；
+# 2026-10-16 掃 tools/.cache 全部 3108 張 1440×830 實機截圖：0 張命中，最高 15 / 34 點、4 / 7 組（設置面板 ui/j_*、組隊面板）；模擬圖 20 / 20 張 34 / 34。
+# 可信度：未實機（版面照 prefab 推，實際有出入就只能靠 watch 3 分鐘兜底）。
+QUIZ_TOL = 24
+QUIZ_GROUPS = {
+    'side_l': [(356, 320, 239, 213, 178), (364, 368, 244, 217, 181), (352, 420, 241, 216, 180), (360, 468, 244, 217, 181), (368, 516, 244, 215, 181)],
+    'side_r': [(1132, 320, 222, 187, 148), (1100, 372, 241, 216, 181), (1112, 420, 239, 215, 181), (1100, 472, 242, 216, 180), (1116, 516, 241, 215, 181)],
+    'top': [(412, 224, 234, 210, 176), (472, 248, 239, 209, 173), (536, 240, 241, 212, 175), (928, 232, 239, 208, 167), (992, 224, 238, 209, 173), (1056, 236, 239, 211, 174)],
+    'tan': [(456, 552, 225, 189, 148), (572, 552, 225, 189, 148), (684, 552, 225, 189, 148), (800, 552, 225, 189, 148), (916, 552, 225, 189, 148), (1028, 552, 225, 189, 148)],
+    'btn': [(668, 624, 50, 99, 159), (684, 620, 61, 107, 168), (796, 596, 61, 109, 168), (808, 608, 52, 96, 160)],
+    'title': [(640, 172, 145, 89, 60), (652, 188, 148, 92, 64), (812, 196, 146, 94, 63), (832, 172, 146, 88, 57)],
+    'bottom': [(624, 688, 105, 69, 43), (724, 688, 104, 71, 46), (860, 688, 105, 69, 45), (992, 688, 101, 69, 43)],
+}
+QUIZ_N = sum(len(v) for v in QUIZ_GROUPS.values())
+QUIZ_NEED = 26
+QUIZ_GROUPS_NEED = 6
+
+
+def quiz_screen(px: dict) -> bool:
+    """答題 / 驗證介面（npcanswer）正面命中。缺點一律不符"""
+    total = groups = 0
+    for pts in QUIZ_GROUPS.values():
+        n = _count_ok(px, pts, QUIZ_TOL)
+        total += n
+        groups += n * 2 >= len(pts)
+    return total >= QUIZ_NEED and groups >= QUIZ_GROUPS_NEED
+
+
+def quiz_points() -> list:
+    return list(dict.fromkeys((x, y) for pts in QUIZ_GROUPS.values() for x, y, *_ in pts))
 
 
 NORMAL_STATES = ('idle', 'walking', 'battle', 'panel')   # 驗證停手旗標自動清認的「已知正常畫面」（verifyhalt.AutoClear，使用者 2026-10-16）
+NORMAL_ANNOT = ('login', 'charsel', 'loading', 'net_lost')   # 這些附註也算已知正常（登入 / 選角 / 載入 / 網路異常窗，使用者 2026-10-16：netwatch 那一層的畫面要能自動清旗標，否則斷線會死結）
 
 
 def normal_screen(state, annot=()) -> bool:
     """驗證停手旗標可以自動清的畫面（watch 每輪 / uikit.preflight 現場讀共用）：
     主畫面 idle / 自動跑路 walking / 戰鬥 battle / 認得的面板 panel，而且沒有任何附註（提示視窗 notice_dialog 等）；
-    或 unknown 但附註是面板上疊已知彈窗（popup_*，ANNOT_KNOWN）。
+    或 unknown 但附註是面板上疊已知彈窗（popup_*，ANNOT_KNOWN）或登入 / 選角 / 載入 / 網路異常窗（NORMAL_ANNOT）。
+    答題介面（annot quiz）任何情況都不算。
     刻意不算：對話框 dialog（驗證視窗是 NpcScript，可能長得像對話框）、獲得物品 reward、選擇對象 select、
-    登入 / 選角 / 載入 / 全黑、其他 unknown、讀不到 / 最小化 / 沒開遊戲"""
+    全黑、其他 unknown、讀不到 / 最小化 / 沒開遊戲"""
     annot = list(annot or [])
+    if 'quiz' in annot:
+        return False
     if state in NORMAL_STATES:
         return not annot
     if state == 'unknown':
-        return any(a.startswith('popup_') and a in ANNOT_KNOWN for a in annot)
+        return any((a.startswith('popup_') and a in ANNOT_KNOWN) or a in NORMAL_ANNOT for a in annot)
     return False
 
 
@@ -565,10 +652,11 @@ def annot_points() -> list:
 
 
 def loading_points() -> list:
-    """watch 另外加讀的點：「加載中」字形遮罩 + 英文版進度條 + 背包刪除確認窗（delok_points，2026-10-15）+ 背包道具說明彈窗（itempop_points，2026-10-16）。
+    """watch 另外加讀的點：「加載中」字形遮罩 + 英文版進度條 + 背包刪除確認窗（delok_points，2026-10-15）+ 背包道具說明彈窗（itempop_points，2026-10-16）
+    + 網路異常窗字形（net_points）+ 答題介面（quiz_points，2026-10-16）。
     不在 points() / annot_points()（那兩組被凍結 fixture 綁住）"""
     seen, out = set(points()) | set(annot_points()), []
-    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points() + delok_points() + itempop_points():
+    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points() + delok_points() + itempop_points() + net_points() + quiz_points():
         if pt not in seen:
             seen.add(pt)
             out.append(pt)
@@ -581,8 +669,13 @@ def _match_safe(px: dict, sig) -> bool:
 
 
 def annotate(px: dict, base: dict) -> list:
-    """watch 專用附註 → ['notice_dialog' | 'login' | 'charsel'] / ['loading'] / ['black'] / ['popup_*', 'over_面板']。不影響 classify。
-    遇敵鈕（enc_on）不在這裡：用 enc_on() 另外取"""
+    """watch 專用附註 → ['quiz'] / ['net_lost'] / ['notice_dialog' | 'login' | 'charsel'] / ['loading'] / ['black'] / ['popup_*', 'over_面板']。不影響 classify。
+    quiz（答題 / 驗證介面）不看 classify 結果、最先判（它可能被 classify 判成 dialog / panel 等）；
+    net_lost（網路異常窗：框 + 字形）取代原本的 notice_dialog。遇敵鈕（enc_on）不在這裡：用 enc_on() 另外取"""
+    if quiz_screen(px):
+        return ['quiz']
+    if net_lost(px):
+        return ['net_lost']
     if base.get('state') == 'unknown' and bag_delok(px):      # 刪除確認窗的框和「提示」單鈕窗相同（notice_dialog 也會中），所以先判
         return ['popup_delok', 'over_bag']
     if base.get('state') == 'unknown' and bag_itempop(px):    # 道具說明彈窗：窗外背包壓暗 ×0.45～0.60（dim_panel 不認）
@@ -615,6 +708,7 @@ _LABELS = {'idle': '主畫面', 'walking': '自動跑路中', 'dialog': '對話�
            'no_game': '遊戲未執行', 'minimized': '遊戲視窗最小化', 'error': '讀取畫面失敗', 'unsupported': '版面不支援（非 2880×1659）'}
 
 _ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面', 'loading': '載入畫面', 'black': '黑畫面（轉場）',
+               'net_lost': '網路異常窗（交給 netwatch）', 'quiz': '答題 / 驗證視窗',
                'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗', 'popup_delok': '刪除確認窗', 'popup_item': '道具說明彈窗'}
 
 
@@ -623,6 +717,8 @@ def label(d: dict, annot=None) -> str:
     idle 標「主畫面」（只代表沒認出已知視窗，不等於沒有驗證視窗）：特徵只認得有限幾種視窗，所以任何標籤都不准出現「安全」「無驗證」之類的保證（單元測試檢查）"""
     st = d.get('state')
     annot = list(annot or [])
+    if 'quiz' in annot:                     # 答題介面正面命中：不管 classify 判成什麼都標這個（鐵則 5 停手）
+        return '答題 / 驗證視窗（停手，請人工處理）'
     if st == 'unknown':                     # 登入 / 選角畫面沒有 HUD → classify 是 unknown，但那是認得的畫面
         for k in ANNOT_KNOWN:
             if k in annot:

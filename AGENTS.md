@@ -26,7 +26,7 @@ PrimalSA-AI/
     text/              遊戲文字（繁中 / 韓文對照，用來看懂畫面訊息）
     data/              機器可讀原始資料：tables/*.jsonl（全部設定表）、maps.bin（通行格）、schema.tsv、enums.tsv
   tools/
-    extract/           匯出器：GameClient → knowledge（extract.py、tabtoy.py、docs.py）
+    extract/           匯出器：GameClient → knowledge（extract.py、tabtoy.py、docs.py）；uimock.py = 答題介面（npcanswer）prefab 合成模擬圖 → tools/.cache/npcanswer-extract/（screen_sigs.quiz_screen 選點 / 測試用，2026-10-16）
     schemadump/        SchemaDump.cs：從 HotUpdate.dll 抽 Tabtoy 欄位對照與列舉（ReflectionOnly，不執行遊戲程式）
     query/psa.py       知識庫查詢工具（搜尋、交叉查詢、跨地圖路線、通行格）
     gui/gui.sh         遊戲畫面操作（截圖、點擊、拖曳、按鍵）；用法與按鈕地圖見 .claude/skills/psa-game-ui/
@@ -61,9 +61,11 @@ PrimalSA-AI/
    AI 只能透過正常的畫面操作（看畫面、點擊、鍵盤）遊玩。
 5. **防腳本驗證要交給人類**：遊戲有伺服器觸發的答題驗證（NpcScript「防腳本驗證」、`quests/answers.md` 題庫，選項是圖片），
    公告寫明違規「最高永久封停所有帳戶」。**一旦出現答題 / 驗證視窗，立刻停止自動操作並通知使用者**，不要自己亂猜答案。
+   偵測方式（使用者 2026-10-16 定案：**正面辨識 + 3 分鐘兜底**）：答題介面（npcanswer，`screen_sigs.quiz_screen`，特徵由 GameClient prefab 推出、未實機）一出現就立刻設驗證停手旗標；
+   其他不認得的畫面腳本照樣自己停下不點，但只截圖存證、不設旗標，連續 3 分鐘沒有進度（畫面 / 座標 / 腳本動作 log 都沒變）才由 watch 兜底設旗標。網路異常窗交給 netwatch（不設旗標）。
 6. **不用違規方式多開**：遊戲允許同一台電腦同時開多個視窗（使用者 2026-10-15 確認至少 3 個；做法：`GameClient` 內放改名的執行檔 `PrimalSA2.exe` 加目錄連結 `PrimalSA2_Data` → `PrimalSA_Data`，由使用者自行建立）。
    不要用虛擬機、沙盒、改硬體識別碼、改執行檔內容或注入等方式繞過遊戲或伺服器的限制。每個視窗最多 5 個角色（UISwitchRole）。
-   工具用環境變數 `PSA_CLIENT=<程序名稱>`（PrimalSA2 …；不設 = PrimalSA）選視窗，點擊有全域鎖；每個視窗的狀態檔各自一份（主視窗沿用 `tools/.cache/`、`notes/`，其他在 `clients/<程序名>/` 底下）；多視窗時 netwatch 只在本機帳號對照核對通過才自動按登錄（鐵則 2），某個視窗疑似驗證視窗就寫**那個視窗自己的**停手旗標（主視窗 `tools/.cache/verify-halt.json`、其他 `tools/.cache/clients/<程序名>/verify-halt.json`），只有該視窗停手、其他視窗照常（使用者 2026-10-15 改）；偵測照舊，旗標**自動清**（使用者 2026-10-16）：畫面回到已知正常狀態（主畫面 / 跑路 / 戰鬥 / 認得的面板 / 面板上疊已知彈窗）穩定 5 秒（≥6 次讀圖）會自動清（watch 每輪判斷；watch 沒在跑時腳本 preflight 現場連讀判斷），畫面仍不認得 / 對話框等一律不清、照舊停手（鐵則 5 不變）；清時寫 actions.log / quest-events.log「verifyhalt 自動清除（畫面已恢復：…）」並把那筆 errlog 補 fix；手動 `verifyhalt.py clear <程序名>` 保留（`set` 手動設的不自動清），`status` 列各視窗；哪些工具已支援見 psa-game-ui SKILL.md「多視窗」。
+   工具用環境變數 `PSA_CLIENT=<程序名稱>`（PrimalSA2 …；不設 = PrimalSA）選視窗，點擊有全域鎖；每個視窗的狀態檔各自一份（主視窗沿用 `tools/.cache/`、`notes/`，其他在 `clients/<程序名>/` 底下）；多視窗時 netwatch 只在本機帳號對照核對通過才自動按登錄（鐵則 2），某個視窗出現驗證視窗就寫**那個視窗自己的**停手旗標（主視窗 `tools/.cache/verify-halt.json`、其他 `tools/.cache/clients/<程序名>/verify-halt.json`），只有該視窗停手、其他視窗照常（使用者 2026-10-15 改）；**設旗標只有兩種情況**（使用者 2026-10-16 定案）：答題介面正面命中（watch / preflight / quest.py 立刻設）、或 watch 看到不認得的畫面連續 3 分鐘沒有進度（兜底）；不認得的畫面 10 秒只截圖存證（`tools/.cache/watch-alerts/`）、HUD 顯示「不認得的畫面」；網路異常窗（框 + 白字字形）watch 判 `net_lost` 不設旗標，持續 3 秒就另開 `netwatch.py --once` 處理（watch 自己仍零輸入）；旗標**自動清**（使用者 2026-10-16）：畫面回到已知正常狀態（主畫面 / 跑路 / 戰鬥 / 認得的面板 / 面板上疊已知彈窗 / 登入 / 選角 / 載入 / 網路異常窗）穩定 5 秒（≥6 次讀圖）會自動清（watch 每輪判斷；watch 沒在跑時腳本 preflight 現場連讀判斷），畫面仍不認得 / 對話框 / 答題介面等一律不清、照舊停手（鐵則 5 不變）；清時寫 actions.log / quest-events.log「verifyhalt 自動清除（畫面已恢復：…）」並把那筆 errlog 補 fix；手動 `verifyhalt.py clear <程序名>` 保留（`set` 手動設的不自動清），`status` 列各視窗；哪些工具已支援見 psa-game-ui SKILL.md「多視窗」。
 7. **`knowledge/` 不要手動改**：它由工具產生，重新匯出會覆蓋。要補充攻略心得、遊玩紀錄，請另外放在 `notes/`（自行建立）。
 8. 對使用者回報時說實話：查不到的資料就說查不到，推測的內容要標明是推測。
 

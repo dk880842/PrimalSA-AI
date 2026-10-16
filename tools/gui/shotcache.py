@@ -215,7 +215,7 @@ def auto_label(shot: Shot) -> str:
     px = shot.pixels(label_points())
     c = screen_sigs.classify(px)
     ann = screen_sigs.annotate(px, c)
-    for a, lab in (('login', 'login'), ('charsel', 'charsel'), ('notice_dialog', 'notice'), ('loading', 'loading'), ('black', 'black')):
+    for a, lab in (('login', 'login'), ('charsel', 'charsel'), ('notice_dialog', 'notice'), ('net_lost', 'notice'), ('loading', 'loading'), ('black', 'black')):
         if a in ann:
             return lab
     return c['panel'] if c['state'] == 'panel' and c['panel'] else c['state']
