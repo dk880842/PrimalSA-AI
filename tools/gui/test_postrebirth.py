@@ -170,6 +170,36 @@ check('收尾：寵物狀態不對 → 176', rc == pr.EXIT_FINISH and '寵物狀
 f = Fake()
 rc = go(f, confirm_drop=False, from_seg='hero', to_seg='hero')
 check('沒 --confirm-drop：紅暴不帶丟寵 / 丟首飾旗標', rc == 0 and '--drop-items' not in f.calls[0][1])
+# ---------------- --wear-hero-items
+f = Fake()
+rc = go(f, confirm_drop=True, wear_hero_items=True, from_seg='hero', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
+ws = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'wear']
+check('--wear-hero-items：紅暴帶丟巴朵蘭恩、不帶 --drop-items；背包沒首飾 → 不戴', rc == 0 and '--drop-reward' in hr[0] and '--drop-items' not in hr[0] and not ws, str(hr))
+rich = bags(14, {'DKBO': [pr.HERO_RING], 'DKBO3': ['儀之兜', pr.HERO_RING]})
+f = Fake(rcs={('questrun.py', 'run'): [156, 0]}, bag_lists=[rich])
+rc = go(f, confirm_drop=True, wear_hero_items=True, from_seg='hero', to_seg='hero')
+hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
+ws = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'wear']
+check('156 改單人逃跑也不帶 --drop-items，成功後只對背包有首飾的人 bag.py wear', rc == 0 and len(hr) == 2 and '--solo' in hr[1] and all('--drop-items' not in a for a in hr)
+      and ws == [('wear', 'DKBO', pr.HERO_RING), ('wear', 'DKBO3', pr.HERO_RING)], str(ws))
+f = Fake(rcs={('bag.py', 'wear'): [92, 0]}, bag_lists=[rich])
+rc = go(f, confirm_drop=True, wear_hero_items=True, from_seg='hero', to_seg='hero')
+check('戴失敗只警告、紅暴段仍成功、另一人照戴', rc == 0 and len(pr.LAST['warnings']) == 1 and '戴' in pr.LAST['warnings'][0]
+      and len([1 for s, a in f.calls if s == 'bag.py' and a[0] == 'wear']) == 2)
+f = Fake(rcs={('questrun.py', 'run'): [112]}, bag_lists=[rich])
+rc = go(f, confirm_drop=True, wear_hero_items=True, from_seg='hero', to_seg='hero')
+check('紅暴失敗 → 不戴', rc != 0 and not [1 for s, a in f.calls if s == 'bag.py' and a[0] == 'wear'])
+f = Fake(bag_lists=[rich])
+rc = go(f, confirm_drop=False, wear_hero_items=True, from_seg='hero', to_seg='hero')
+check('沒 --confirm-drop + --wear-hero-items：什麼都不丟、仍戴首飾', rc == 0 and '--drop-reward' not in f.calls[0][1] and '--drop-items' not in f.calls[0][1]
+      and any(a[0] == 'wear' for s, a in f.calls if s == 'bag.py'))
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    pr.run(confirm_drop=True, wear_hero_items=True, dry_run=True)
+check('plan 顯示 --wear-hero-items 效果、hero 指令不含 --drop-items', '--wear-hero-items' in buf.getvalue() and 'bag.py wear' in buf.getvalue()
+      and '--drop-items' not in buf.getvalue().split('[hero]')[1].split('[q182a]')[0].split('（--wear')[0])
+check('清背包名單不含首飾', pr.HERO_RING not in pr.PURGE2)
 check('段名不認得 → 170', go(Fake(), from_seg='xx') == pr.EXIT_ARGS)
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
