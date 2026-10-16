@@ -55,7 +55,7 @@
 - **boss20「挑戰機暴(轉生任務)」**：對話框被 quest.py 不可逆防護擋（rc 39；已由 1fcf5e0 放行）。手動點左鈕沒開戰、對話框會關，改用 `quest.py --fight --task 漆黑洞窟(二轉) --step 4`（`--npc auto` 因追蹤文字 OCR 失敗回 31）打贏，落 32021:29,57，再 `team.check` 滿 5 人。
 - **16F 多拿的精靈王之弓（DROP2）**：每人背包第 1 格多一把，用 `bag.py drop --allow-protected` 丟 1 把（武器格穿著的不動）。bag 丟棄提示窗版型與 pet.CONFIRM 不同：丟棄 613,543 / 取消 820,543，腳本回 95 時手動點 613,543。
 - **轉生**：`--from rebirth`（不加 `--confirm-rebirth`）守門人 → 精靈王（rc 39）→ OCR 判角色轉生 → 完成；落 1006:12,20，5 人 2轉1級。轉生後每人得奇娜 Lv1（寵物欄第 3 格）用 `petdrop.py` 丟（名稱 + Lv1）。
-- **新手禮盒**：2轉新手禮盒在個人倉庫（先 `bag.py take --depot personal`）；內容寵物誘餌 / 離線水晶 / 2倍智慧果 / 安撫之素存公共，3轉新手禮盒存個人。離線水晶的道具名稱是「離線水晶」，不是「離線水晶8H」（已改 `rebirth_pets` 常數）。
+- **新手禮盒**：2轉新手禮盒在個人倉庫（`rebirth_pets` boxes 段背包沒有會自動 `depot_take` 從個人倉庫取，兩邊都沒有才記 skipped；2026-10-16 修，未實機；手動則 `bag.py take --depot personal`）；內容寵物誘餌 / 離線水晶 / 2倍智慧果 / 安撫之素存公共，3轉新手禮盒存個人。離線水晶的道具名稱是「離線水晶」，不是「離線水晶8H」（已改 `rebirth_pets` 常數）。
 - **舊寵物存倉（2026-10-16 起由 rebirth.py storepets 在轉生前全存，rebirth_pets 不再有 store 段；以下是舊流程紀錄）**：不必先解外掛鎖定，遊戲沒擋。舊騎寵（轉生後變「等待」、名字讀不出）：先 `pet.py learn-species`，或 `rebirth_pets` 以縮圖比對認物種（`stores_for`：沒名字 + mountlike + 縮圖分數 ≥0.9 + 物種 = `--store-mount`，才放行；測試見 test_rebirth_pets.py）。
 - **誘餌「+」要錢**：外掛捉寵設置裡可抓捕數「+」每按一次 +1，扣 **50,000 石幣**（鑽石不動），5 次 = 250,000 石幣。用 `rebirth_pets.py --direct-catch` 直接抓 5 隻（雷龍系 / 布拉奇多斯 約 1 分 10 秒），DKBO2 留 1、存 4 公共、其他 4 人取；每次按「+」前要確定石幣夠。戰寵 Lv1 朵拉比斯從個人倉庫取（`--expect-level 1`；同名多隻時卡片等級讀不出，指定 `--index` 取後驗 Lv1）。
 - **收尾練功**：吃 2倍智慧果 → `team.form` → `grind.py start 柯奧龜洞` → `grind.py follow --trans 2 --no-heal`。

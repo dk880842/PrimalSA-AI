@@ -37,7 +37,7 @@
 
 階段：
   preflight   當前角色 = DKBO（不是就 char.ensure）→ team.disband（沒隊伍 = 不點）→ 外掛鎖定騎寵 / 戰寵 5 人先取消 → 讀 5 人寵物欄（舊寵物清單）
-  boxes       （bag 95 = 動作後驗證失敗：使用 / 每項存倉各自動重試 1 次，二轉 DKBO4 重跑才過的處理）5 人各：背包找「N轉新手禮盒」→ 使用 → 內容（寵物誘餌 / 離線水晶8H / 2倍智慧果 / 安撫之素）存公共；「N+1轉新手禮盒」禁止存公共 → 存個人（--no-boxes 跳過）
+  boxes       （bag 95 = 動作後驗證失敗：使用 / 每項存倉各自動重試 1 次，二轉 DKBO4 重跑才過的處理）5 人各：背包找「N轉新手禮盒」（背包沒有先從個人倉庫取，兩邊都沒有才跳過）→ 使用 → 內容（寵物誘餌 / 離線水晶8H / 2倍智慧果 / 安撫之素）存公共；「N+1轉新手禮盒」禁止存公共 → 存個人（--no-boxes 跳過）
   catch       catcher 從公共取誘餌（拆分只留 1）→ 外掛捉寵設置（系別 → 物種 → 可抓捕數 = 1）→ 勾自動存倉庫 / 自動抓寵 → 等抓完 →
               → pet.reset_soft(catcher) 還原名字（成長字串 → 物種名）→ 確認多 1 隻新寵物、名字 = 物種 → 再留 N-1 個誘餌重複 → 還原名字 → 確認共 N 隻
               名字為主（2026-10-14 晚，離線測試；reset-name 本身實機驗過 8 隻布拉奇多斯）：learn-species（登錄縮圖 / 成長字串）只在還原失敗、
@@ -502,16 +502,21 @@ class Tools:
 
     # ---- 背包（bag.py + 拆分）----
     def box_open(self, role, trans):
-        """開禮盒並存倉。→ (rc, info)。背包沒有禮盒 = 'skipped'（已開過，不算失敗）"""
+        """開禮盒並存倉。→ (rc, info)。背包沒有 → 先從個人倉庫取；兩邊都沒有 = 'skipped'（已開過，不算失敗）"""
         import bag
         box, nxt = box_names(trans)
         info = {'stored': [], 'personal': []}
         rc, found = bag.find_items(role, [box])
         if rc:
             return rc, info
-        if found.get(box) is None:
-            info['skipped'] = f'背包沒有 {box}'
-            return 0, info
+        if found.get(box) is None:                          # 背包沒有 → 禮盒平常在個人倉庫（上一轉開完就存個人），先取出
+            rc = bag.depot_take(role, box, 'personal')
+            if rc == bag.EXIT_ITEM:                         # 92：個人倉庫也沒有 = 已開過
+                info['skipped'] = f'背包 / 個人倉庫都沒有 {box}'
+                return 0, info
+            if rc:
+                return rc, info
+            info['taken'] = box
         rc = bag.use_item(role, box)
         if rc == bag.EXIT_VERIFY:                           # 95：用完驗證失敗 → 禮盒還在才重用一次（不在 = 已用掉）
             info['retry'] = ['use']

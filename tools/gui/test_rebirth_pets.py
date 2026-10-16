@@ -823,8 +823,12 @@ for opens, want, n_close, label in (([False], True, 0, '已關 → 不點'), ([T
 import bag as _bag  # noqa: E402
 class _FakeBag:
     EXIT_VERIFY, EXIT_ITEM = 95, 92
-    def __init__(self, store_script, use_script=(0,), box_left=(1,)):
+    def __init__(self, store_script, use_script=(0,), box_left=(1,), take_rc=0):
         self.store_script, self.use_script, self.box_left, self.calls = list(store_script), list(use_script), list(box_left), []
+        self.take_rc = take_rc
+    def depot_take(self, role, name, depot='public', **k):
+        self.calls.append(('take', name, depot))
+        return self.take_rc
     def find_items(self, role, names):
         self.calls.append('find')
         return 0, {names[0]: (None if not self.box_left or self.box_left.pop(0) == 0 else 3)}
@@ -835,7 +839,7 @@ class _FakeBag:
         self.calls.append(('store', name))
         return self.store_script.pop(0) if self.store_script else 92
 def _box(fb):
-    saved = {k: getattr(_bag, k) for k in ('find_items', 'use_item', 'depot_store')}
+    saved = {k: getattr(_bag, k) for k in ('find_items', 'use_item', 'depot_store', 'depot_take')}
     for k in saved:
         setattr(_bag, k, getattr(fb, k))
     try:
@@ -860,6 +864,16 @@ check('box_open：使用 95 且禮盒還在 → 重用 1 次', rc == 0 and fb.ca
 fb = _FakeBag([], use_script=[95], box_left=[1, 0])        # 用禮盒 95、禮盒已不在 = 已用掉 → 不重用
 rc, info = _box(fb)
 check('box_open：使用 95 但禮盒已不在 → 不重用、繼續存倉', rc == 0 and fb.calls.count('use') == 1, str(fb.calls))
+
+fb = _FakeBag([0, 0, 0, 0, 0], box_left=[0])             # 背包沒有 → 從個人倉庫取 → 開
+rc, info = _box(fb)
+check('box_open：背包沒有 → 個人倉庫取出後使用、存倉', rc == 0 and ('take', '1轉新手禮盒', 'personal') in fb.calls and fb.calls.count('use') == 1 and info.get('taken') == '1轉新手禮盒' and 'skipped' not in info, str(fb.calls))
+fb = _FakeBag([], box_left=[0], take_rc=92)              # 兩邊都沒有 → skipped
+rc, info = _box(fb)
+check('box_open：背包 / 個人倉庫都沒有 → skipped、不使用', rc == 0 and '個人倉庫' in info.get('skipped', '') and 'use' not in fb.calls, str(info))
+fb = _FakeBag([], box_left=[0], take_rc=95)              # 取出其他錯誤 → 照回
+rc, info = _box(fb)
+check('box_open：取出回 95 → 回 95', rc == 95 and 'use' not in fb.calls)
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)
