@@ -1597,7 +1597,10 @@ def _leave_delmode() -> bool:
     return _wait(lambda: uikit.is_open(BAG), 2.0)
 
 
-def purge_role(role: str, names, dry_run: bool = False) -> tuple:
+PURGE_BATCH = 5      # 提示窗一次勾太多件 OCR 讀不全（p3 2026-10-16 勾 8～9 件核對不過）→ 每批最多 5 件
+
+
+def purge_role(role: str, names, dry_run: bool = False, _only=None) -> tuple:
     """單人（背包已開、在背包頁）：只勾名單內道具 → 讀提示窗清單核對 → 確定。→ (rc, {'targets': {格號: 名稱}, 'deleted': [名稱], 'skipped_unread': [格號]})"""
     info = {'targets': {}, 'deleted': []}
     rc = select_role(role)
@@ -1606,6 +1609,16 @@ def purge_role(role: str, names, dry_run: bool = False) -> tuple:
     occ, texts = read_bag_names()
     tg = {i: purge_target(t, names) for i, t in texts.items()}
     tg = {i: n for i, n in sorted(tg.items()) if n}
+    if _only is not None:
+        tg = {i: n for i, n in tg.items() if i in _only}
+    elif len(tg) > PURGE_BATCH and not dry_run:          # 分批：先刪前 PURGE_BATCH 件，再遞迴處理剩下的
+        rc, info = purge_role(role, names, dry_run, _only=set(list(tg)[:PURGE_BATCH]))
+        if rc:
+            return rc, info
+        rc2, info2 = purge_role(role, names, dry_run)
+        info['deleted'] = info.get('deleted', []) + info2.get('deleted', [])
+        info['targets'] = {**info.get('targets', {}), **info2.get('targets', {})}
+        return rc2, info
     info['targets'] = tg
     info['skipped_unread'] = [i for i, t in texts.items() if not t.strip()]
     guarded = {i: purge_guard(dedup_text(t)) for i, t in texts.items() if t.strip() and purge_guard(dedup_text(t))}
