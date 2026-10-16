@@ -56,6 +56,10 @@
 - **16F 多拿的精靈王之弓（DROP2）**：每人背包第 1 格多一把，用 `bag.py drop --allow-protected` 丟 1 把（武器格穿著的不動）。bag 丟棄提示窗版型與 pet.CONFIRM 不同：丟棄 613,543 / 取消 820,543，腳本回 95 時手動點 613,543。
 - **轉生**：`--from rebirth`（不加 `--confirm-rebirth`）守門人 → 精靈王（rc 39）→ OCR 判角色轉生 → 完成；落 1006:12,20，5 人 2轉1級。轉生後每人得奇娜 Lv1（寵物欄第 3 格）用 `petdrop.py` 丟（名稱 + Lv1）。
 - **新手禮盒**：2轉新手禮盒在個人倉庫（`rebirth_pets` boxes 段背包沒有會自動 `depot_take` 從個人倉庫取，兩邊都沒有才記 skipped；2026-10-16 修，未實機；手動則 `bag.py take --depot personal`）；內容寵物誘餌 / 離線水晶 / 2倍智慧果 / 安撫之素存公共，3轉新手禮盒存個人。離線水晶的道具名稱是「離線水晶」，不是「離線水晶8H」（已改 `rebirth_pets` 常數）。
+  **2026-10-17 boxes 段重寫（使用者「檢查的動作真的太白吃了」；離線測試，未實機）**：舊版每個 bag.* 呼叫各自開關背包 + 選角 + 全背包辨識（p1 07:10～07:12 DKBO2 一人開關 5 次、還 15 格逐格彈窗找根本沒開出的離線水晶）。
+  新版先 quiet（停 follow / 關遇敵驗證 / 等戰鬥結束）→ 背包面板整段只開 1 次、左欄頭像切人；每人：個人倉庫第 1 格取禮盒（彈窗核對一次、含數字）→ 使用 → **一次截圖**認內容物 → 公共存 → 開出的禮盒存個人。
+  內容清單讀 `Item.jsonl` 禮盒 arg（`rebirth_pets.box_spec`；三轉起沒有離線水晶、四 / 五轉沒有安撫之素，不在清單的不找）；五轉開出同名「5轉新手禮盒」（90333，140 級才能開）靠開箱前後新出現的格判斷，存個人。
+  新格沒認出才開那一格彈窗；清單裡沒認出的只記 missing，不逐格掃。低階函式 `bag.take_slot / use_slot / store_slot / popup_read / new_slots`（面板已開、已選角時用）。
 - **舊寵物存倉（2026-10-16 起由 rebirth.py storepets 在轉生前全存，rebirth_pets 不再有 store 段；以下是舊流程紀錄）**：不必先解外掛鎖定，遊戲沒擋。舊騎寵（轉生後變「等待」、名字讀不出）：先 `pet.py learn-species`，或 `rebirth_pets` 以縮圖比對認物種（`stores_for`：沒名字 + mountlike + 縮圖分數 ≥0.9 + 物種 = `--store-mount`，才放行；測試見 test_rebirth_pets.py）。
 - **誘餌「+」要錢**：外掛捉寵設置裡可抓捕數「+」每按一次 +1，扣 **50,000 石幣**（鑽石不動），5 次 = 250,000 石幣。用 `rebirth_pets.py --direct-catch` 直接抓 5 隻（雷龍系 / 布拉奇多斯 約 1 分 10 秒），DKBO2 留 1、存 4 公共、其他 4 人取；每次按「+」前要確定石幣夠。戰寵 Lv1 朵拉比斯從個人倉庫取（`--expect-level 1`；同名多隻時卡片等級讀不出，指定 `--index` 取後驗 Lv1）。
 - **收尾練功**：吃 2倍智慧果 → `team.form` → `grind.py start 柯奧龜洞` → `grind.py follow --trans 2 --no-heal`。
@@ -84,7 +88,7 @@
 - **`bag.py drop-spare-bow <角色>`**：武器格是精靈王之弓時丟背包多的那把（`--allow-protected`；武器格不是弓 → 93 不丟）。
 - boss20 備援 / 單人重打的 `quest.py --fight` 一律帶 `--step 4`（10F 為 `--step 2`），不靠追蹤文字 OCR（二轉 22:15 回 31）。
 - **team.form 回 9**（二轉 22:20，BOSS 戰後；16 秒後原指令就過）：9 = `uikit.preflight` 畫面連 3 次不認得；無法重現當時畫面（事後無 snap），判斷是過場 / 結算畫面暫時認不得。rebirth 的 `Run.form` 改成回 9 時等 20 秒只讀重試一次，第 2 次仍 9 = 驗證視窗，照鐵則 5 停手。
-- rebirth_pets：`--confirm-buy-catch`（買到 count → `--direct-catch`）；戰寵取「名字@1」，同名多隻卡片等級讀不出（72）→ `pet_take_lv1_scan` 逐隻 `--index` 取出驗 Lv1、不對（讀得到等級但不是 1）存回個人倉庫換下一隻；boxes 的使用 / 存倉遇 bag 95（動作後驗證失敗）各自動重試 1 次（原因在二轉沒留下 snap，無法確認根因；92 視為已存好）。
+- rebirth_pets：`--confirm-buy-catch`（買到 count → `--direct-catch`）；戰寵取「名字@1」，同名多隻卡片等級讀不出（72）→ `pet_take_lv1_scan` 逐隻 `--index` 取出驗 Lv1、不對（讀得到等級但不是 1）存回個人倉庫換下一隻；boxes 的使用 / 存倉遇 bag 95 各自動重試 1 次（2026-10-17 boxes 重寫後拿掉：每步記進度檔，失敗續跑從那一步接）。
 - 退出碼新增：rebirth 97 / 98（80～89 已用完，借 bag 90～96 後面空的）。
 
 ## 2026-10-13 三轉實跑寫回（`rebirth.py --trans 3` 21:26～21:47 → `rebirth_pets.py` 21:47～22:19；**以下修正只有離線測試，實機未驗證**）

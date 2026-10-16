@@ -329,15 +329,25 @@ class Fake:
         return 0
 
     # --- 背包 / 禮盒 / 誘餌 ---
-    def box_open(self, r, trans):
-        self.c('box_open', r, trans)
-        if self.f('box_open'):
-            return self.f('box_open'), {}
-        if self.boxes[r]:
-            self.boxes[r] = 0
-            self.pub_baits += 10
-            return 0, {'stored': ['寵物誘餌'], 'personal': ['2轉新手禮盒']}
-        return 0, {'skipped': 'x'}
+    def quiet(self):
+        self.c('quiet')
+        return self.f('quiet')
+
+    def boxes_many(self, roles, trans, states, save):
+        for r in roles:
+            if states.get(r, {}).get('step') == 'done':
+                continue
+            self.c('box_open', r, trans)
+            if self.f('box_open'):
+                return self.f('box_open'), r
+            if self.boxes[r]:
+                self.boxes[r] = 0
+                self.pub_baits += 10
+                states[r] = {'step': 'done', 'stored': [[0, '寵物誘餌']]}
+            else:
+                states[r] = {'step': 'done', 'skipped': 'x'}
+            save()
+        return 0, None
 
     def bait_take(self, r, keep):
         self.c('bait_take', r, keep)
@@ -819,61 +829,211 @@ for opens, want, n_close, label in (([False], True, 0, '已關 → 不點'), ([T
         _ass.panel_open, _ass.close_panel, rp.uikit.sleep, rp.uikit.snap = saved
     check(f'ass_close_hard：{label}', got_ is want and fa.closes == n_close, f'{got_} {fa.closes}')
 
-# 禮盒 95 重試（bag 假函式）
+# ---------------- boxes 精簡（2026-10-17）：假遊戲計數 ----------------
+# 模擬背包 15 格 / 個人 / 公共倉庫，計：背包面板開幾次、彈窗開幾次、一次截圖幾次、分頁切幾次。
 import bag as _bag  # noqa: E402
-class _FakeBag:
-    EXIT_VERIFY, EXIT_ITEM = 95, 92
-    def __init__(self, store_script, use_script=(0,), box_left=(1,), take_rc=0):
-        self.store_script, self.use_script, self.box_left, self.calls = list(store_script), list(use_script), list(box_left), []
-        self.take_rc = take_rc
-    def depot_take(self, role, name, depot='public', **k):
-        self.calls.append(('take', name, depot))
-        return self.take_rc
-    def find_items(self, role, names):
-        self.calls.append('find')
-        return 0, {names[0]: (None if not self.box_left or self.box_left.pop(0) == 0 else 3)}
-    def use_item(self, role, name, verify_buff=False):
-        self.calls.append('use')
-        return self.use_script.pop(0) if self.use_script else 0
-    def depot_store(self, role, name, depot, **k):
-        self.calls.append(('store', name))
-        return self.store_script.pop(0) if self.store_script else 92
-def _box(fb):
-    saved = {k: getattr(_bag, k) for k in ('find_items', 'use_item', 'depot_store', 'depot_take')}
-    for k in saved:
-        setattr(_bag, k, getattr(fb, k))
+
+
+class GameBag:
+    EXIT_PANEL, EXIT_SELECT, EXIT_ITEM, EXIT_VERIFY, EXIT_NAME = 90, 91, 92, 95, 96
+
+    def __init__(self, trans=1, hidden=(), personal0=None, box_slot=0, bag_init=None, no_box=(), store_fail=None):
+        self.trans = trans
+        self.spec = rp.box_spec(trans)
+        self.box = self.spec['box']
+        self.cur = None
+        self.bags = {r: list(bag_init or [None] * 15) for r in ROLES}
+        self.personal = {}
+        for r in ROLES:
+            d = [None] * 20
+            if r not in no_box:
+                d[box_slot] = ('box', self.box, 'v1')          # ('box', 名稱, 版本)：v1 = 這轉要開的；v140 = 五轉開出的同名 140 版
+            if personal0 and box_slot != 0:
+                d[0] = personal0
+            self.personal[r] = d
+        self.public = []
+        self.hidden = set(hidden)                              # 名字樣板認不出的道具（要靠新格彈窗）
+        self.sessions = self.popups = self.shots = self.tabs = 0
+        self.page = 'bag'
+        self.store_fail = store_fail                           # (角色, 名稱) → 存倉回 95 一次
+        self.ops = []
+
+    # 道具在格裡：(種類, 名稱, 版本)；名稱以 Item 表為準
+    def nm(self, x):
+        return x[1] if x else None
+
+    def Session(self):
+        g = self
+
+        class S:
+            rc = 0
+
+            def __enter__(s):
+                g.sessions += 1
+                return s
+
+            def __exit__(s, *a):
+                return False
+        return S()
+
+    def select_role(self, r):
+        self.cur = r
+        return 0
+
+    def goto_page(self, page):
+        if page != self.page:
+            self.tabs += 1
+            self.page = page
+        return 0
+
+    def open_depot(self, sub):
+        return self.goto_page('depot-' + sub)
+
+    def _wait(self, pred, secs=0):
+        return pred()
+
+    def slot_occupancy(self):
+        return [x is not None for x in self.bags[self.cur]]
+
+    def _first_empty(self):
+        return self.bags[self.cur].index(None)
+
+    def take_slot(self, i, want, sub='personal', kind='consumable'):
+        self.open_depot(sub)
+        self.popups += 1
+        d = self.personal[self.cur]
+        if d[i] is None:
+            return 92, []
+        if self.nm(d[i]) != want:
+            return 96, []
+        j = self._first_empty()
+        self.bags[self.cur][j], d[i] = d[i], None
+        self.ops.append(('take', self.cur, i, j))
+        return 0, [j]
+
+    def use_slot(self, i, want, stay_ok=False, strict_digits=False):
+        assert self.page == 'bag'
+        self.popups += 1
+        b = self.bags[self.cur]
+        if self.nm(b[i]) != want or b[i][2] != 'v1':
+            return 96
+        b[i] = None
+        self.ops.append(('use', self.cur, i))
+        for it in self.spec['items']:
+            same = [k for k, x in enumerate(b) if x and x[1] == it['name'] and not it['box']]
+            if same:                                       # 疊加（禮盒不疊）
+                continue
+            b[self._first_empty()] = ('box' if it['box'] else 'item', it['name'], 'v140' if it['box'] and it['name'] == want else 'v1')
+        return 0
+
+    def icon_read(self, kind='bag', want=(), pool=None, expand=True):
+        self.shots += 1
+        cells = self.bags[self.cur] if kind == 'bag' else self.personal[self.cur]
+        named = {i: x[1] for i, x in enumerate(cells) if x and x[1] not in self.hidden}
+        hits = {n: [i for i, v in named.items() if _bag.norm_name(v) == _bag.norm_name(n)] for n in want}
+        return {'occ': [x is not None for x in cells], 'named': named, 'hits': hits, 'cells': {i: {'by': 'name', 'ok': True} for i in named}}
+
+    def popup_read(self, i, depot=False):
+        self.popups += 1
+        return self.nm(self.bags[self.cur][i])
+
+    def _popup_verify(self, i, depot, want, tried):
+        self.popups += 1
+        cells = self.personal[self.cur] if depot else self.bags[self.cur]
+        return self.nm(cells[i]) == want
+
+    def store_slot(self, i, want, sub='public'):
+        self.open_depot(sub)
+        b = self.bags[self.cur]
+        if self.nm(b[i]) != want:
+            return 96
+        if self.store_fail == (self.cur, want):
+            self.store_fail = None
+            return 95
+        (self.public if sub == 'public' else self.personal[self.cur]).append(b[i]) if sub == 'public' else self.personal[self.cur].__setitem__(self.personal[self.cur].index(None), b[i])
+        b[i] = None
+        self.ops.append(('store', self.cur, want, sub))
+        return 0
+
+
+_BAG_FNS = ('Session', 'select_role', 'goto_page', 'open_depot', '_wait', 'slot_occupancy', 'take_slot', 'use_slot', 'icon_read', 'popup_read', '_popup_verify', 'store_slot')
+
+
+def run_boxes(g, states=None, roles=None):
+    saved = {k: getattr(_bag, k) for k in _BAG_FNS}
+    for k in _BAG_FNS:
+        setattr(_bag, k, getattr(g, k))
+    saves = []
+    states = {} if states is None else states
     try:
         t = rp.Tools()
-        t.sleep = lambda s: None
-        return t.box_open('DKBO4', 1)
+        out = quiet(t.boxes_many, roles or ROLES, g.trans, states, lambda: saves.append(1))
+        return out[0][0], states, saves
     finally:
         for k, v in saved.items():
             setattr(_bag, k, v)
-fb = _FakeBag([95, 0, 0, 0, 0, 0])                 # 第 1 項存倉 95 → 重試成功
-rc, info = _box(fb)
-check('box_open：存倉 95 → 重試 1 次成功，整體 0', rc == 0 and info.get('retry') == ['寵物誘餌'] and info['stored'][0] == '寵物誘餌', str(info))
-fb = _FakeBag([95, 95])
-rc, info = _box(fb)
-check('box_open：重試仍 95 → 回 95（info.failed）', rc == 95 and info.get('failed') == '寵物誘餌')
-fb = _FakeBag([95, 92, 92, 92, 92, 92])             # 重試時回 92 = 其實已存成功（驗證誤判）
-rc, info = _box(fb)
-check('box_open：95 後重試回 92（已存好）→ 視為成功繼續', rc == 0, str(info))
-fb = _FakeBag([], use_script=[95, 0], box_left=[1, 1])    # 用禮盒 95、禮盒還在 → 重用一次
-rc, info = _box(fb)
-check('box_open：使用 95 且禮盒還在 → 重用 1 次', rc == 0 and fb.calls.count('use') == 2 and info.get('retry', [None])[0] == 'use', str(fb.calls))
-fb = _FakeBag([], use_script=[95], box_left=[1, 0])        # 用禮盒 95、禮盒已不在 = 已用掉 → 不重用
-rc, info = _box(fb)
-check('box_open：使用 95 但禮盒已不在 → 不重用、繼續存倉', rc == 0 and fb.calls.count('use') == 1, str(fb.calls))
 
-fb = _FakeBag([0, 0, 0, 0, 0], box_left=[0])             # 背包沒有 → 從個人倉庫取 → 開
-rc, info = _box(fb)
-check('box_open：背包沒有 → 個人倉庫取出後使用、存倉', rc == 0 and ('take', '1轉新手禮盒', 'personal') in fb.calls and fb.calls.count('use') == 1 and info.get('taken') == '1轉新手禮盒' and 'skipped' not in info, str(fb.calls))
-fb = _FakeBag([], box_left=[0], take_rc=92)              # 兩邊都沒有 → skipped
-rc, info = _box(fb)
-check('box_open：背包 / 個人倉庫都沒有 → skipped、不使用', rc == 0 and '個人倉庫' in info.get('skipped', '') and 'use' not in fb.calls, str(info))
-fb = _FakeBag([], box_left=[0], take_rc=95)              # 取出其他錯誤 → 照回
-rc, info = _box(fb)
-check('box_open：取出回 95 → 回 95', rc == 95 and 'use' not in fb.calls)
+
+check('new_slots：之前空 / 被釋放的格現在有 → 新格；讀不到 → []', _bag.new_slots([1, 0, 0], [1, 1, 0]) == [1] and _bag.new_slots([1, 0], [1, 1], freed=[0]) == [0, 1]
+      and _bag.new_slots(None, [1]) == [])
+sp1, sp5 = rp.box_spec(1), rp.box_spec(5)
+check('box_spec：1轉從 Item 表讀到誘餌 / 離線水晶 / 智慧果 / 安撫之素存公共、2轉禮盒存個人',
+      sp1['src'] == 'table' and [(i['name'], i['depot']) for i in sp1['items']] == [('寵物誘餌', 'public'), ('離線水晶（8H）', 'public'), ('2倍智慧果（綁定）', 'public'), ('安撫之素', 'public'), ('2轉新手禮盒', 'personal')], str(sp1))
+check('box_spec：5轉 = 90332（等級 1 那筆）→ 誘餌 / 智慧果 / 同名 5轉新手禮盒（個人）', [(i['name'], i['depot'], i['box']) for i in sp5['items']] == [('寵物誘餌', 'public', False), ('2倍智慧果（綁定）', 'public', False), ('5轉新手禮盒', 'personal', True)], str(sp5))
+check('box_spec：表讀不到 → 舊寫死清單', rp.box_spec(2, table=[])['src'] == 'fallback' and rp.box_spec(2, table=[])['items'][-1]['name'] == '3轉新手禮盒')
+pl, pend = rp.plan_box_stores(sp5, {0: '寵物誘餌', 1: '5轉新手禮盒', 3: '5轉新手禮盒', 4: '某道具'}, {'寵物誘餌': [0], '5轉新手禮盒': [1, 3]}, {0: {'by': 'name'}}, new=[0, 3, 5])
+check('plan_box_stores：禮盒只認新格（舊格 1 不碰）、新格沒認出的回給彈窗', pl == {0: ('寵物誘餌', 'public'), 3: ('5轉新手禮盒', 'personal')} and pend == [5], f'{pl} {pend}')
+check('match_box_item：禮盒忽略數字、清單外 → None', rp.match_box_item(sp1, '2轉新手禮盒')['depot'] == 'personal' and rp.match_box_item(sp1, '安撫之素')['name'] == '安撫之素'
+      and rp.match_box_item(sp1, '千年龜的殼') is None)
+
+g = GameBag(1)
+rc, st, saves = run_boxes(g)
+check('1轉 5 人：rc 0、背包面板整段只開 1 次', rc == 0 and g.sessions == 1, f'rc={rc} sessions={g.sessions}')
+check('1轉：每人彈窗 2 次（取出核對 + 使用核對）、一次截圖 1 次，沒有逐格彈窗掃', g.popups == 2 * len(ROLES) and g.shots == len(ROLES), f'popups={g.popups} shots={g.shots}')
+check('1轉：公共 = 4 種內容物 × 5 人、個人倉庫 = 2轉新手禮盒', sorted(x[1] for x in g.public) == sorted(['寵物誘餌', '離線水晶（8H）', '2倍智慧果（綁定）', '安撫之素'] * len(ROLES))
+      and all(any(x and x[1] == '2轉新手禮盒' for x in g.personal[r]) for r in ROLES) and all(not any(g.bags[r]) for r in ROLES), str(g.public[:4]))
+check('1轉：分頁切換每人 ≤ 4 次（個人取 → 背包使用 → 公共存 → 個人存）', g.tabs <= 4 * len(ROLES), f'tabs={g.tabs}')
+check('1轉：每人進度 done、每步都記（take / use / store 至少 3 次 save）', all(st[r]['step'] == 'done' for r in ROLES) and len(saves) >= 3 * len(ROLES))
+
+g = GameBag(5)
+rc, st, _ = run_boxes(g)
+check('5轉：開出的同名 140 版禮盒（新格）存個人、背包清空，不開額外彈窗', rc == 0 and all(any(x and x[2] == 'v140' for x in g.personal[r]) for r in ROLES)
+      and all(not any(g.bags[r]) for r in ROLES) and g.popups == 2 * len(ROLES), f'popups={g.popups}')
+
+g = GameBag(1, hidden={'安撫之素'})
+rc, st, _ = run_boxes(g)
+check('名字樣板認不出安撫之素 → 只對那 1 個新格開彈窗（每人 +1），照樣存公共', rc == 0 and g.popups == 3 * len(ROLES) and sum(1 for x in g.public if x[1] == '安撫之素') == len(ROLES), f'popups={g.popups}')
+
+g = GameBag(1, bag_init=[('item', '千年龜的殼', 'v1')] + [None] * 14)
+rc, st, _ = run_boxes(g)
+check('清單外的舊道具（千年龜的殼）不碰、不開彈窗', rc == 0 and all(g.bags[r][0][1] == '千年龜的殼' for r in ROLES) and g.popups == 2 * len(ROLES))
+
+g = GameBag(1, personal0=('item', '朵拉比斯蛋', 'v1'), box_slot=3)
+rc, st, _ = run_boxes(g, roles=['DKBO'])
+check('個人倉庫第 1 格不是禮盒 → 只核對一次截圖命中的格（背包 0 命中、倉庫 1 格）→ 取出照開', rc == 0 and st['DKBO']['step'] == 'done' and g.popups == 1 + 1 + 1 + 1 and g.shots == 3,
+      f'popups={g.popups} shots={g.shots} ops={g.ops}')
+
+g = GameBag(1, no_box=('DKBO2',))
+rc, st, _ = run_boxes(g)
+check('背包 / 個人倉庫都沒有 → skipped、不使用，其他人照開', rc == 0 and 'skipped' in st['DKBO2'] and not [o for o in g.ops if o[0] == 'use' and o[1] == 'DKBO2']
+      and len([o for o in g.ops if o[0] == 'use']) == len(ROLES) - 1)
+
+g = GameBag(1, store_fail=('DKBO3', '離線水晶（8H）'))
+rc, st, _ = run_boxes(g)
+check('DKBO3 存倉失敗 → 回 95、停在 DKBO3（step used）', rc == 95 and st['DKBO3']['step'] == 'used' and 'DKBO4' not in st, str(st.get('DKBO3')))
+n_use = len([o for o in g.ops if o[0] == 'use'])
+rc, st, _ = run_boxes(g, states=st)
+check('續跑：done 的人跳過、DKBO3 從存倉接（不再取 / 開）、DKBO4～5 照開', rc == 0 and len([o for o in g.ops if o[0] == 'use']) == n_use + 2
+      and not [o for o in g.ops if o[0] == 'take' and o[1] in ('DKBO', 'DKBO2', 'DKBO3')][3:] and all(st[r]['step'] == 'done' for r in ROLES) and g.sessions == 2,
+      f'{g.ops[-6:]}')
+
+f = Fake()
+rc, _ = go(f, to_stage='boxes')
+check('boxes 段開頭先 quiet（停 follow / 關遇敵 / 等戰鬥）再開箱', rc == 0 and ci('quiet') and ci('quiet')[0] < ci('box_open')[0])
+f = Fake()
+f.fail['quiet'] = 3
+rc, _ = go(f, to_stage='boxes')
+check('quiet 失敗 → 101、沒開背包', rc == 101 and not ci('box_open') and rp.LAST.get('quiet_rc') == 3)
 
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

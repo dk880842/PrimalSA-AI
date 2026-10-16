@@ -37,7 +37,11 @@
 
 階段：
   preflight   當前角色 = DKBO（不是就 char.ensure）→ team.disband（沒隊伍 = 不點）→ 外掛鎖定騎寵 / 戰寵 5 人先取消 → 讀 5 人寵物欄（舊寵物清單）
-  boxes       （bag 95 = 動作後驗證失敗：使用 / 每項存倉各自動重試 1 次，二轉 DKBO4 重跑才過的處理）5 人各：背包找「N轉新手禮盒」（背包沒有先從個人倉庫取，兩邊都沒有才跳過）→ 使用 → 內容（寵物誘餌 / 離線水晶8H / 2倍智慧果 / 安撫之素）存公共；「N+1轉新手禮盒」禁止存公共 → 存個人（--no-boxes 跳過）
+  boxes       （2026-10-17 重寫：檢查只做一次，離線測試 test_rebirth_pets.py，**未實機**）先 quiet（postrebirth.Tools.quiet：停 follow → 關原地遇敵並驗證 → 等戰鬥結束）→
+              **背包面板整段只開 1 次**，左欄頭像切人；每人固定動作：個人倉庫第 1 格取「N轉新手禮盒」（bag.take_slot：彈窗核對名稱一次、含數字）→ 背包使用（bag.use_slot）→
+              一次截圖（bag.icon_read 名字樣板 / 縮圖）認內容物 → 公共存（bag.store_slot）→ 個人存開出的禮盒。內容清單從 Item.jsonl 禮盒 arg 讀（box_spec；5轉 90332 =
+              寵物誘餌 / 2倍智慧果（綁定）/ 同名 5轉新手禮盒 140 版 90333）；禮盒（含五轉同名 140 版）只認開箱前後新出現的格，不靠名字區分；新格沒認出的才開彈窗一次，
+              禁止逐格掃。第 1 格不是禮盒 → 只核對一次截圖命中的格（背包先、再個人倉庫），都沒有 = skipped。每人每步（taken / used / done）記進度檔 data.box_roles，續跑接著做（--no-boxes 跳過）
   catch       catcher 從公共取誘餌（拆分只留 1）→ 外掛捉寵設置（系別 → 物種 → 可抓捕數 = 1）→ 勾自動存倉庫 / 自動抓寵 → 等抓完 →
               → pet.reset_soft(catcher) 還原名字（成長字串 → 物種名）→ 確認多 1 隻新寵物、名字 = 物種 → 再留 N-1 個誘餌重複 → 還原名字 → 確認共 N 隻
               名字為主（2026-10-14 晚，離線測試；reset-name 本身實機驗過 8 隻布拉奇多斯）：learn-species（登錄縮圖 / 成長字串）只在還原失敗、
@@ -145,6 +149,75 @@ def level_n(trans) -> int:
 def box_names(trans: int) -> tuple:
     """(這次要開的禮盒, 開出來的下一個禮盒)"""
     return f'{trans}轉新手禮盒', f'{trans + 1}轉新手禮盒'
+
+
+ITEM_TABLE = ROOT / 'knowledge' / 'data' / 'tables' / 'Item.jsonl'
+
+
+def box_spec(trans: int, table=None) -> dict:
+    """「N轉新手禮盒」開出什麼（2026-10-17：從 Item 表的 arg 讀，不再寫死）→ {'box': 名稱, 'items': [{'name', 'count', 'depot', 'box'}], 'src': 'table' / 'fallback'}。
+    同名禮盒取 levelLimit 等級最低的那筆（5轉 90332 是 [5,1]、開出的同名 90333 是 [5,140]）；arg = 「道具ID-數量」。
+    depot：banPubDepot=1 → personal（禮盒），其他 → public；box = 開出的是新手禮盒（下一轉 / 五轉的 140 版）。
+    table = 測試用 [dict, …]；讀不到表 → 舊寫死清單（BOX_CONTENTS 存公共 + N+1 轉禮盒存個人）"""
+    box, nxt = box_names(trans)
+    rows = table
+    if rows is None:
+        try:
+            with open(ITEM_TABLE, encoding='utf-8') as f:
+                rows = [json.loads(ln) for ln in f if ln.strip()]
+        except (OSError, ValueError):
+            rows = []
+    by_id = {r.get('ID'): r for r in rows}
+    cand = sorted((r for r in rows if r.get('nameTn') == box), key=lambda r: list(r.get('levelLimit') or [0, 0])[::-1])
+    if cand:
+        items = []
+        for a in cand[0].get('arg') or []:
+            iid, _, n = str(a).partition('-')
+            r = by_id.get(int(iid)) if iid.isdigit() else None
+            if not r:
+                continue
+            items.append({'name': r['nameTn'], 'count': int(n or 1), 'depot': 'personal' if r.get('banPubDepot') else 'public',
+                          'box': r['nameTn'].endswith('新手禮盒')})
+        return {'box': box, 'items': items, 'src': 'table'}
+    return {'box': box, 'src': 'fallback', 'items': [{'name': n, 'count': 0, 'depot': 'public', 'box': False} for n in BOX_CONTENTS]
+            + [{'name': nxt, 'count': 1, 'depot': 'personal', 'box': True}]}
+
+
+def plan_box_stores(spec: dict, named: dict, hits: dict, cells: dict, new: list) -> tuple:
+    """純函式：開箱後一次截圖（bag.icon_read）的結果 → ({背包格: (名稱, 倉庫)}, 還要開彈窗認的新格 list)。
+    - 一般內容物：名字樣板認出（by name）或縮圖只屬於它（不 ambiguous）的格 → 直接存（含原本就在背包、疊上去的那疊）；
+    - 禮盒（下一轉 / 五轉同名 140 版）：**只看開箱前後新出現的格**（new），名字樣板讀到「*轉新手禮盒」就算（開的那個已用掉，新格裡的禮盒只可能是開出來的；
+      五轉兩個同名，靠前後差異區分，不靠名字）；
+    - new 裡沒認出的格 → 回給呼叫端開彈窗認一次（只有這些格，不逐格掃）"""
+    import bag
+    out = {}
+    for it in spec['items']:
+        if it['box']:
+            continue
+        for i in hits.get(it['name']) or []:
+            c = cells.get(i) or {}
+            if i not in out and (c.get('by') == 'name' or not c.get('ambiguous')):
+                out[i] = (it['name'], it['depot'])
+    boxes = [it for it in spec['items'] if it['box']]
+    for i in new:
+        nm = named.get(i)
+        if i in out or not nm or not boxes:
+            continue
+        if bag.strip_digits(bag.norm_name(nm)) == bag.strip_digits(bag.norm_name(boxes[0]['name'])):
+            out[i] = (boxes[0]['name'], boxes[0]['depot'])
+    return out, [i for i in new if i not in out]
+
+
+def match_box_item(spec: dict, text) -> dict | None:
+    """純函式：新格彈窗讀到的名稱 → spec 裡的哪一項（禮盒忽略數字：新格裡的禮盒只可能是開出來的）；都不是 → None（不在清單的不碰）"""
+    import bag
+    for it in spec['items']:
+        if it['box']:
+            if bag.strip_digits(bag.norm_name(text)) == bag.strip_digits(bag.norm_name(it['name'])) and bag.norm_name(text):
+                return it
+        elif bag.name_match(text, it['name']):
+            return it
+    return None
 
 
 def family_for(species: str, family: str | None) -> str | None:
@@ -306,10 +379,10 @@ def plan(o: dict) -> list:
     """--dry-run / 說明用：(階段, [動作文字])"""
     sp, bp, ct, n = o['mount_species'], o['battle_pet'], o['catcher'], o['count']
     fam = family_for(sp, o.get('family')) or '（--family 必填）'
-    box, nxt = box_names(o['trans'])
+    box = box_names(o['trans'])[0]
     return [
         ('preflight', [f'確認當前 = {LEADER}', '解散隊伍', '外掛：5 人鎖定騎寵 / 戰寵先取消', '讀 5 人寵物欄']),
-        ('boxes', [f'5 人開 {box}（內容存公共，{nxt} 存個人；bag 95 驗證失敗各步自動重試 1 次）'] if not o['no_boxes'] else ['（--no-boxes 跳過）']),
+        ('boxes', ['停 follow / 關原地遇敵 / 等戰鬥結束（quiet）', f'背包面板開 1 次，5 人各：個人倉庫第 1 格取 {box} → 使用 → 一次截圖認內容物（Item 表）→ 公共存、開出的禮盒存個人'] if not o['no_boxes'] else ['（--no-boxes 跳過）']),
         ('catch', ([f'{ct} 外掛捉寵設置「+」花石幣買可抓捕數到 {n}（--confirm-buy-catch，每個 50,000，前後驗石幣 / 鑽石）', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 {n}、自動存倉庫 + 自動抓寵（直接抓，不試抓）', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才縮圖 + 成長字串登錄）', f'確認 {ct} 共 {n} 隻 {sp}'] if o.get('confirm_buy_catch') else [f'{ct} 公共倉庫取誘餌、拆到只剩 1', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 1、自動存倉庫 + 自動抓寵', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才學物種）', f'再留 {n - 1} 個誘餌重複 → reset-name', f'確認 {ct} 共 {n} 隻 {sp}'])),
         ('distribute', [f'{ct} 存 {n - 1} 隻 {sp} 進公共（取最後格）', f'其他 {n - 1} 人各從公共取 1 隻']),
         ('ride', [f'5 人 {sp} 設騎乘']),
@@ -501,56 +574,139 @@ class Tools:
         return pet.reset_soft(','.join(roles))
 
     # ---- 背包（bag.py + 拆分）----
-    def box_open(self, role, trans):
-        """開禮盒並存倉。→ (rc, info)。背包沒有 → 先從個人倉庫取；兩邊都沒有 = 'skipped'（已開過，不算失敗）"""
+    def quiet(self):
+        """開面板前先靜下來：沿用 postrebirth.Tools.quiet（questrun 交接同一套：停 follow → 關原地遇敵並驗證 → 等戰鬥結束）→ 0 / 1～3"""
+        import postrebirth
+        return postrebirth.Tools().quiet()
+
+    def boxes_many(self, roles, trans, states, save):
+        """5 人開禮盒（2026-10-17 重寫，使用者「檢查的動作真的太白吃了」）：**背包面板整段只開一次**，左欄頭像切人連續做完才關。
+        states = {角色: 進度}（就地更新，每步後 save() 寫進度檔，續跑從那一步接）。→ (rc, 出錯的角色或 None)。
+        每人固定動作（Tools._box_role）：個人倉庫第 1 格取禮盒（彈窗核對名稱一次、含數字）→ 背包使用 → 一次截圖認內容物 → 公共存 → 個人存禮盒"""
         import bag
-        box, nxt = box_names(trans)
-        info = {'stored': [], 'personal': []}
-        rc, found = bag.find_items(role, [box])
+        spec = box_spec(trans)
+        with bag.Session() as s:
+            if s.rc:
+                return s.rc, roles[0] if roles else None
+            for r in roles:
+                st = states.setdefault(r, {})
+                if st.get('step') == 'done':
+                    continue
+                rc = self._box_role(r, spec, st, save)
+                if rc:
+                    st['rc'] = rc
+                    save()
+                    return rc, r
+        return 0, None
+
+    def _box_role(self, role, spec, st, save):
+        """一人：step 無 → taken（slot = 背包格）→ used（before = 開箱前占用）→ done。每步記進度"""
+        import bag
+        box = spec['box']
+        rc = bag.select_role(role)
         if rc:
-            return rc, info
-        if found.get(box) is None:                          # 背包沒有 → 禮盒平常在個人倉庫（上一轉開完就存個人），先取出
-            rc = bag.depot_take(role, box, 'personal')
-            if rc == bag.EXIT_ITEM:                         # 92：個人倉庫也沒有 = 已開過
-                info['skipped'] = f'背包 / 個人倉庫都沒有 {box}'
-                return 0, info
+            return rc
+        if st.get('step') in (None, 'taken') and st.get('slot') is None:
+            rc, new = bag.take_slot(0, box, 'personal')        # 禮盒平常在個人倉庫第 1 格（上一轉開完存個人）
+            if rc in (bag.EXIT_ITEM, bag.EXIT_NAME):          # 第 1 格空 / 不是禮盒 → 只看名字樣板 / 縮圖命中的格（背包先、再個人倉庫），不逐格掃
+                rc, where = self._box_find(box)
+                if rc:
+                    return rc
+                if where is None:
+                    st.update(step='done', skipped=f'背包 / 個人倉庫都沒有 {box}')
+                    save()
+                    print(f'rebirth_pets：{role} 背包 / 個人倉庫都沒有 {box} → 已開過，跳過', flush=True)
+                    return 0
+                kind, i = where
+                if kind == 'depot':
+                    rc, new = bag.take_slot(i, box, 'personal')
+                else:
+                    rc, new = 0, [i]
             if rc:
-                return rc, info
-            info['taken'] = box
-        rc = bag.use_item(role, box)
-        if rc == bag.EXIT_VERIFY:                           # 95：用完驗證失敗 → 禮盒還在才重用一次（不在 = 已用掉）
-            info['retry'] = ['use']
-            self.sleep(2)
-            rc, found = bag.find_items(role, [box])
-            if not rc and found.get(box) is not None:
-                rc = bag.use_item(role, box)
-            elif not rc:
-                rc = 0
+                return rc
+            if len(new) != 1:
+                return uikit.fail(SRC, bag.EXIT_VERIFY, f'{role} 取出 {box} 後新出現 {len(new)} 格（{new}），不猜是哪格')
+            st.update(step='taken', slot=new[0])
+            save()
+        if st.get('step') == 'taken':
+            rc = bag.goto_page('bag')
+            if rc:
+                return rc
+            slot = st['slot']
+            before = bag.slot_occupancy()
+            rc = bag.use_slot(slot, box, strict_digits=True)
+            if rc:
+                return rc
+            if before and not bag._wait(lambda: bag.slot_occupancy() not in (None, before), 3.0):
+                # 格子占用沒變：內容物全疊進原有那疊、禮盒格又被開出的東西補上時也會這樣 → 只讀那一格一次判斷
+                nm = bag.popup_read(slot) or ''
+                same_box_inside = any(it['box'] and it['name'] == box for it in spec['items'])     # 五轉：開出同名 140 版，名字分不出
+                if not same_box_inside and bag.name_match(nm, box) and not bag.digit_unsure(nm, box):
+                    return uikit.fail(SRC, bag.EXIT_VERIFY, f'{role} 按了使用 {box}，第 {slot + 1} 格還是禮盒（沒開成）')
+            st.update(step='used', before=before)
+            save()
+        if st.get('step') == 'used':
+            rc = self._box_store(role, spec, st)
+            if rc:
+                return rc
+            st['step'] = 'done'
+            save()
+        return 0
+
+    def _box_find(self, box):
+        """第 1 格不是禮盒時的備援（續跑 / 位置變了）：背包一次截圖命中的格 → 彈窗核對；再個人倉庫一次截圖命中的格 → 彈窗核對。
+        → (rc, ('bag' / 'depot', 格) 或 None)。只開命中格的彈窗，不逐格掃"""
+        import bag
+        for kind, depot in (('bag', False), ('depot', True)):
+            rc = bag.goto_page('bag') if not depot else bag.open_depot('personal')
+            if rc:
+                return rc, None
+            ir = bag.icon_read(kind, [box], pool=[])
+            tried = set()
+            for i in (ir or {}).get('hits', {}).get(box) or []:
+                if bag._popup_verify(i, depot, box, tried):
+                    return 0, (kind, i)
+        return 0, None
+
+    def _box_store(self, role, spec, st):
+        """開箱後：背包頁一次截圖（名字樣板 / 縮圖）→ 認出的格直接存；只有「新出現、沒認出」的格開彈窗認一次。
+        存的順序：公共一次切過去存完 → 個人存禮盒（同一人不重複切分頁）。清單外的道具不碰；清單裡沒找到的只記 missing"""
+        import bag
+        rc = bag.goto_page('bag')
         if rc:
-            return rc, info
-        for nm in BOX_CONTENTS:
-            rc = bag.depot_store(role, nm, 'public')
-            if rc == bag.EXIT_VERIFY:                        # 二轉 DKBO4 回 95、重跑才過：驗證失敗 → 等 2 秒再存一次（已存成功則回 92 = 找不到，視為已存）
-                info.setdefault('retry', []).append(nm)
-                self.sleep(2)
-                rc = bag.depot_store(role, nm, 'public')
-            if rc == bag.EXIT_ITEM:                          # 這次禮盒沒開出這項（或重試時已存好）
-                continue
-            if rc:
-                info['failed'] = nm
-                return rc, info
-            info['stored'].append(nm)
-        rc = bag.depot_store(role, nxt, 'personal')          # banPubDepot=1：禁止存公共，直接存個人
-        if rc == bag.EXIT_VERIFY:
-            info.setdefault('retry', []).append(nxt)
-            self.sleep(2)
-            rc = bag.depot_store(role, nxt, 'personal')
-        if rc and rc != bag.EXIT_ITEM:
-            info['failed'] = nxt
-            return rc, info
-        if not rc:
-            info['personal'].append(nxt)
-        return 0, info
+            return rc
+        names = [it['name'] for it in spec['items']]
+        ir = bag.icon_read('bag', names, pool=[]) or {}
+        after = ir.get('occ') or bag.slot_occupancy()
+        if st.get('before'):
+            new = bag.new_slots(st['before'], after, freed=[st['slot']] if st.get('slot') is not None else [])
+        else:                                               # 開箱前占用沒讀到：有道具的格都當新格（開的那個禮盒已用掉，新格裡的禮盒只可能是開出來的）
+            new = [i for i, o in enumerate(after or []) if o]
+        plan_, pending = plan_box_stores(spec, ir.get('named') or {}, ir.get('hits') or {}, ir.get('cells') or {}, new)
+        if not st.get('before'):                            # 沒有開箱前占用 = 分不出哪格是新的 → 只信名字樣板，不開彈窗（禁止逐格掃）
+            pending = []
+        for i in pending:                                   # 新出現但沒認出的格：開彈窗一次
+            nm = bag.popup_read(i)
+            it = match_box_item(spec, nm or '')
+            if it:
+                plan_[i] = (it['name'], it['depot'])
+            else:
+                print(f'rebirth_pets：{role} 背包第 {i + 1} 格新出現「{nm}」不在禮盒清單 → 不碰', flush=True)
+        st['plan'] = {str(i): v for i, v in sorted(plan_.items())}
+        st['missing'] = [n for n in names if n not in {v[0] for v in plan_.values()}]
+        stored = st.setdefault('stored', [])
+        for depot in ('public', 'personal'):
+            for i, (nm, d) in sorted(plan_.items()):
+                if d != depot or [i, nm] in stored:
+                    continue
+                rc = bag.store_slot(i, nm, depot)
+                if rc:
+                    st['failed'] = nm
+                    return rc
+                stored.append([i, nm])
+        if st['missing']:
+            print(f'rebirth_pets：{role} 一次截圖沒認出 {st["missing"]}（可能疊進原有那疊或沒開出）→ 不逐格找', flush=True)
+        return 0
 
     def bait_take(self, role, keep, keep_short=False):
         """每人最簡流程（2026-10-16 使用者「誘餌拆分怎那麼繁瑣」）：
@@ -1090,13 +1246,21 @@ class Run:
         if o['no_boxes']:
             self.done('boxes', skipped=True)
             return 0
-        res = {}
-        for r in ALL_ROLES:
-            rc, info = self.T.box_open(r, o['trans'])
-            res[r] = info
-            if rc:
-                return self.stop(EXIT_BOX, f'{r} 禮盒 / 存倉失敗（bag rc {rc}）', bag_rc=rc, boxes=res)
-        self.done('boxes', boxes=res)
+        q = getattr(self.T, 'quiet', None)
+        if q is not None:                                   # 開背包前先靜下來（停 follow、關遇敵並驗證、等戰鬥結束；上次 DKBO 失敗 = 開面板時進了戰鬥）
+            qrc = q()
+            event('boxes：開面板前停 follow / 關原地遇敵 / 等戰鬥結束 → ' + ('OK' if not qrc else f'失敗 rc={qrc}'))
+            if qrc:
+                return self.stop(EXIT_BOX, f'開背包前靜不下來（quiet rc {qrc}：1 follow 停不掉 / 2 關遇敵失敗 / 3 等不到戰鬥結束）', quiet_rc=qrc)
+        data = self.prog.setdefault('data', {})
+        states = data.setdefault('box_roles', {})
+        if states.get('_trans') not in (None, o['trans']):    # 別轉的舊紀錄不沿用
+            states.clear()
+        states['_trans'] = o['trans']
+        rc, bad = self.T.boxes_many(ALL_ROLES, o['trans'], states, lambda: save_progress(self.prog))
+        if rc:
+            return self.stop(EXIT_BOX, f'{bad} 禮盒 / 存倉失敗（bag rc {rc}）', bag_rc=rc, boxes={r: v for r, v in states.items() if r != '_trans'})
+        self.done('boxes', boxes={r: {k: v for k, v in st.items() if k in ('skipped', 'plan', 'missing', 'stored')} for r, st in states.items() if r != '_trans'})
         return 0
 
     def catch(self):

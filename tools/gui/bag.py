@@ -1843,6 +1843,28 @@ def click_popup_button(label: str, allow=()) -> tuple:
     return 0, b['kind']
 
 
+def use_slot(i: int, want: str, stay_ok: bool = False, strict_digits: bool = False) -> int:
+    """**低階（面板已開、已選角、在背包頁）**：第 i 格 → 彈窗名稱核對（含數字）→ 使用 → 等彈窗關。use_item 與 rebirth_pets boxes 共用。
+    stay_ok = 按了使用後彈窗沒關也算（疊加道具；ESC 關掉、LAST['popup_stayed']，成敗由呼叫端另判）；strict_digits = 名稱含數字要讀到同一個數字（N轉新手禮盒）"""
+    if not open_slot_popup(i):
+        return _fail(EXIT_PANEL, f'點第 {i + 1} 格沒開彈窗', 'bag-nopopup')
+    nm = popup_name(want)
+    if not name_match(nm, want) or (strict_digits and digit_unsure(nm, want)):
+        close_popup()
+        return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不使用）', 'bag-popup-name')
+    _learn_verified('bag', i, want)
+    rc, _ = click_popup_button('使用')
+    if rc:
+        close_popup()
+        return rc
+    if not _wait(lambda: not popup_open(), 2.0):
+        if not stay_ok:
+            return _fail(EXIT_VERIFY, '按了使用但彈窗沒關（不重點）', 'bag-use-verify')
+        close_popup()                                    # 疊加道具使用後彈窗可能還開著：ESC 關掉，不重點，成敗交給 buff 圖示判斷
+        LAST['popup_stayed'] = True
+    return 0
+
+
 def use_item(role: str, want: str, verify_buff: bool = False) -> int:
     """背包找 want → 彈窗名稱核對 → 使用。回 0 只代表「按了使用、彈窗關了」，不代表伺服器真的扣了道具（2026-10-12 2倍智慧果
     按了使用、彈窗關了卻沒吃到）。verify_buff = 關背包後用 buff 圖示確認（BUFF_KIND 有的道具才看；找不到只警告，不重點）；
@@ -1857,22 +1879,9 @@ def use_item(role: str, want: str, verify_buff: bool = False) -> int:
         i = find_item(want)
         if i is None:
             return _fail(EXIT_ITEM, f'{role} 背包找不到「{want}」', 'bag-noitem')
-        if not open_slot_popup(i):
-            return _fail(EXIT_PANEL, f'點第 {i + 1} 格沒開彈窗', 'bag-nopopup')
-        nm = popup_name(want)
-        if not name_match(nm, want):
-            close_popup()
-            return _fail(EXIT_NAME, f'彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不使用）', 'bag-popup-name')
-        _learn_verified('bag', i, want)
-        rc, _ = click_popup_button('使用')
+        rc = use_slot(i, want, stay_ok=verify_buff)
         if rc:
-            close_popup()
             return rc
-        if not _wait(lambda: not popup_open(), 2.0):
-            if not verify_buff:
-                return _fail(EXIT_VERIFY, '按了使用但彈窗沒關（不重點）', 'bag-use-verify')
-            close_popup()                                # 疊加道具使用後彈窗可能還開著：ESC 關掉，不重點，成敗交給 buff 圖示判斷
-            LAST['popup_stayed'] = True
     kind = buff_kind(want)
     if verify_buff and kind and not uikit.is_open(BAGANY):   # 背包關了才看得到 buff 列（舊版在 Session 裡看，永遠被面板蓋住）
         LAST['buff'] = _wait(lambda: has_buff(kind), 4.0)
@@ -2190,27 +2199,36 @@ def _bag_gained(before) -> bool:
     return bool(before and now and len(before) == len(now) and any(n and not b for b, n in zip(before, now)))
 
 
-def _take_via_popup(i: int, want: str, kind: str) -> int:
-    """倉庫第 i 格 → 彈窗核對名稱 / 按鈕 → 按「取出」→ 切回背包頁驗證（原流程，已實機）"""
+def _popup_take_click(i: int, want: str, kind: str, strict_digits: bool = False) -> tuple:
+    """倉庫頁：倉庫第 i 格 → 彈窗核對名稱 / 按鈕 → 按「取出」→ 等彈窗關（停在倉庫頁）→ (rc, 按之前的背包格占用)。
+    空格不開彈窗 → 92（不點取出，空格點取出會進刪除管理）；名稱不符 → 96。strict_digits = 名稱含數字要讀到同一個數字（N轉新手禮盒）"""
     if not open_slot_popup(i, depot=True):
-        return _fail(EXIT_PANEL, f'點倉庫第 {i + 1} 格沒開彈窗（空格不要點取出，會進刪除管理）', 'bag-depot-nopopup')
+        return _fail(EXIT_ITEM, f'點倉庫第 {i + 1} 格沒開彈窗（空格？不點取出，會進刪除管理）', 'bag-depot-nopopup'), None
     nm = popup_name(want)
-    if not name_match(nm, want):
+    if not name_match(nm, want) or (strict_digits and digit_unsure(nm, want)):
         close_popup()
-        return _fail(EXIT_NAME, f'倉庫彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不取）', 'bag-depot-name')
+        return _fail(EXIT_NAME, f'倉庫彈窗名稱 OCR 是 {nm!r}，不是「{want}」（不取）', 'bag-depot-name'), None
     _learn_verified('depot', i, want)
     txt = _ocr_join(POPUP_BTN_BOX, BTN_OPTS)
     if '取出' not in re.sub(r'\s+', '', txt):
         close_popup()
-        return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn')
+        return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn'), None
     uikit.sleep(POPUP_SETTLE_S)                      # 彈窗出現動畫期間點「取出」會落空（2026-10-11 實測：彈窗關了但道具沒動）
     x, y = (722, 662) if kind == 'equip' else (732, 648)
     before = slot_occupancy()                        # 彈窗疊在倉庫頁上，右半背包格仍看得到（彈窗在中間偏左，蓋不到右半的數量字帶時才有值）
     _SHOT.clear()                                    # 取出後倉庫 / 背包格內容會變
     if not _click(x, y, POPUP, f'bag 倉庫取出「{want}」', allow=(), wait_ms=700):
-        return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone')
+        return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone'), before
     if not _wait(lambda: not popup_open(), 2.5):
-        return _fail(EXIT_VERIFY, '按了取出但彈窗沒關（不重點）', 'bag-depot-verify')
+        return _fail(EXIT_VERIFY, '按了取出但彈窗沒關（不重點）', 'bag-depot-verify'), before
+    return 0, before
+
+
+def _take_via_popup(i: int, want: str, kind: str) -> int:
+    """倉庫第 i 格 → 彈窗核對名稱 / 按鈕 → 按「取出」→ 切回背包頁驗證（原流程，已實機）"""
+    rc, before = _popup_take_click(i, want, kind)
+    if rc:
+        return EXIT_PANEL if rc == EXIT_ITEM else rc     # 原流程：find_item 找到的格沒開彈窗 = 面板問題（90）
     rc = goto_page('bag')
     if rc:
         return rc
@@ -2248,8 +2266,8 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
     return 0
 
 
-def _store_via_popup(i: int, want: str) -> int:
-    """目前在倉庫頁：點右半（背包）第 i 格 → 彈窗核對名稱 / 按鈕 → 按「存入」→ 切回背包頁（原流程，已實機）"""
+def _store_via_popup(i: int, want: str, back_to_bag: bool = True) -> int:
+    """目前在倉庫頁：點右半（背包）第 i 格 → 彈窗核對名稱 / 按鈕 → 按「存入」→ 切回背包頁（原流程，已實機；back_to_bag=False 停在倉庫頁）"""
     # 倉庫頁右半是背包，座標同背包頁；面板特徵要用倉庫頁的（背包頁特徵在倉庫頁不吻合，safe_click 會擋）
     x, y = store_click_xy(i)
     if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
@@ -2269,10 +2287,7 @@ def _store_via_popup(i: int, want: str) -> int:
         return _fail(EXIT_PANEL, '彈窗特徵消失，沒點存入', 'bag-store-gone')
     if not _wait(lambda: not popup_open(), 2.5):
         return _fail(EXIT_VERIFY, '按了存入但彈窗沒關（不重點）', 'bag-store-verify')
-    rc = goto_page('bag')
-    if rc:
-        return rc
-    return 0
+    return goto_page('bag') if back_to_bag else 0
 
 
 def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = False, all_copies: bool = False, pick: str | None = None, want_count: int | None = None) -> int:
@@ -2343,6 +2358,75 @@ def depot_store(role: str, want: str, depot: str = 'public', keep_ok: bool = Fal
             LAST['stored'] = stored
             if not all_copies:
                 break
+    return 0
+
+
+# ---- 低階（2026-10-17 rebirth_pets boxes 精簡，使用者「檢查的動作真的太白吃了」）----
+# 前提：呼叫端已開好背包 Session、已 select_role；這些函式**不開關面板、不選角、不全背包掃描**，只碰指定的那一格。
+def new_slots(before, after, freed=()) -> list:
+    """純函式：背包格占用 before → after，新出現（之前空 / 在 freed 裡）、現在有道具的格號。任一邊讀不到 → []"""
+    if not before or not after or len(before) != len(after):
+        return []
+    fr = set(freed)
+    return [i for i, (b, a) in enumerate(zip(before, after)) if a and (not b or i in fr)]
+
+
+def popup_read(i: int, depot: bool = False) -> str | None:
+    """開第 i 格彈窗讀名稱（不核對）→ ESC 關。沒開成（空格）→ None。只給「新出現、名字樣板沒認出的格」用，不拿來逐格掃"""
+    if not open_slot_popup(i, depot):
+        return None
+    nm = popup_name()
+    close_popup()
+    return nm
+
+
+def take_slot(i: int, want: str, sub: str = 'personal', kind: str = 'consumable') -> tuple:
+    """**低階**：倉庫 sub 分頁第 i 格 → 彈窗名稱核對一次（含數字）→ 取出 → 停在倉庫頁 → (rc, 背包新出現的格 list)。
+    驗證 = 倉庫頁右半（背包格）像素出現新格（最多 3 秒），不切背包頁、不 find_item。空格 92 / 名稱不符 96（都沒點取出）"""
+    rc = open_depot(sub)
+    if rc:
+        return rc, []
+    rc, before = _popup_take_click(i, want, kind, strict_digits=True)
+    if rc:
+        return rc, []
+    got = []
+
+    def gained():
+        got[:] = new_slots(before, slot_occupancy())
+        return bool(got)
+    if not _wait(gained, 3.0):
+        return _fail(EXIT_VERIFY, f'取出「{want}」後背包沒有新出現的格（before {before}）', 'bag-take-slot'), []
+    return 0, list(got)
+
+
+def store_slot(i: int, want: str, sub: str = 'public') -> int:
+    """**低階**：背包第 i 格（呼叫端已認出 = want）存進倉庫 sub 分頁，停在倉庫頁。
+    雙擊為主（PSA_DEPOT_DCLICK=0 關）：雙擊後等該格像素變空；彈出彈窗 / 沒變空 → 走彈窗「存入」（名稱核對）再等變空。驗證失敗 95"""
+    rc = open_depot(sub)
+    if rc:
+        return rc
+
+    def empty():
+        occ = slot_occupancy()
+        return bool(occ) and not occ[i]
+    if DCLICK:
+        x, y = store_click_xy(i)
+        _SHOT.clear()
+        if uikit.safe_dclick(x, y, DEPOT, f'bag 雙擊存入「{want}」第 {i + 1} 格（{sub}）', wait_ms=900):
+            if popup_open():
+                close_popup()
+            elif _wait(empty, 3.0):
+                return 0
+        rc = open_depot(sub)
+        if rc:
+            return rc
+        if empty():                                   # 雙擊其實成功、只是驗證慢
+            return 0
+    rc = _store_via_popup(i, want, back_to_bag=False)
+    if rc:
+        return rc
+    if not _wait(empty, 4.0):
+        return _fail(EXIT_VERIFY, f'存入「{want}」後背包第 {i + 1} 格沒變空（倉庫滿？）', 'bag-store-slot')
     return 0
 
 
