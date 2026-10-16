@@ -26,7 +26,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py store-items all --public 寵物誘餌,離線水晶 --personal 1轉新手禮盒 [--strict]   # 多人存多樣（面板開一次、每人一次存完；沒有的略過；實機未驗證）
 最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / wear_item / wear_many / swap_weapon / depot_take / depot_store / depot_store_items / drop_item。
 背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
-AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的一項）。
+AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的一項；2026-10-17 加千年龜的殼：同名多格全勾、「未知的殼」同圖不誤刪）。
 道具辨識以名字為主（2026-10-14）：find / find_items / team_read / list / item_slots / find_item 一次截圖 →
 ① 名字樣板（itemname_match：「顯示道具名」白字整名圖，學出來的，tools/.cache/item-name-tpl/）認得的格 = 確定名稱 →
 ② 沒認出的格才比 GameClient 道具圖（itemimg_match，只認得到 imageId，同圖多名）→ ③ 還是沒認出 / 被浮字蓋住的格才名稱 OCR。
@@ -1455,7 +1455,8 @@ MAZU_FAMILY = ['馬祖的斧頭', '馬祖的矛', '馬祖的棍棒']
 AUTO_PURGE = ['儀之兜', '杉的手環', '龍之鎧', '龍之槍', '龍之衣', '月光的手鐲', '巴巴洛的許可證', '空想的衣服',
               '老爺爺的護身符', '薩頓家的秘藥', '山賊的羽飾',
               '馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '空想的帽子', '空想的豎琴',
-              '仙尼亞的花', '郵寄物', '切繩石', '龍的魅力之笛', '不可思議的貝殼']
+              '仙尼亞的花', '郵寄物', '切繩石', '龍的魅力之笛', '不可思議的貝殼',
+              '千年龜的殼']       # 2026-10-17 使用者加：不疊加、每個佔一格（同名多格 purge_role 全勾；「未知的殼」同圖但不在名單）
 
 
 def mark_red(c) -> bool:

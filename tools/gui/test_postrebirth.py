@@ -88,6 +88,7 @@ check('purge_plan：沒有龍之槍 / 鎧 / 衣 → 笛子不刪（ui/bag.md 條
 check('group_by_names：名單相同的人一起刪、空名單略過', pr.group_by_names({'DKBO': ['a'], 'DKBO2': ['a'], 'DKBO3': [], 'DKBO4': ['b']})
       == [(['DKBO', 'DKBO2'], ['a']), (['DKBO4'], ['b'])])
 check('PURGE1 含 2026-10-14 核准的 8 項', {'仙尼亞的花', '郵寄物', '切繩石', '馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '空想的帽子', '空想的豎琴'} <= set(pr.PURGE1) and not [n for n in pr.PURGE1 if __import__('bag').purge_guard(n)])
+check('PURGE1 / PURGE2 含千年龜的殼（使用者 2026-10-17）', '千年龜的殼' in pr.PURGE1 and '千年龜的殼' in pr.PURGE2)
 check('PURGE2 = PURGE1 + 杉的手環 / 月光的手鐲 / 巴巴洛的許可證；都不是保護名稱', set(pr.PURGE2) - set(pr.PURGE1) == {'杉的手環', '月光的手鐲', '巴巴洛的許可證'}
       and not [n for n in pr.PURGE2 if __import__('bag').purge_guard(n)])
 check('pets_ok：朵拉比斯出戰 1 隻 + 騎乘', pr.pets_ok(pets_ok_json()['roles']) == {} and 'DKBO' in pr.pets_ok({'DKBO': [{'name': '朵拉比斯', 'state': '等待'}]}))

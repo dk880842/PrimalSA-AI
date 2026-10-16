@@ -885,6 +885,25 @@ check('purge：進模式就有名單外的勾 → 93、取消、沒刪', rc == 9
 fb = FakeDelBag({'DKBO2': W}).install()
 rc, d = quiet(bag.purge, ['DKBO2'], B, True)
 check('purge --dry-run：列出目標、不按刪除管理', rc == 0 and d['DKBO2']['targets'] == {2: '巴巴洛的許可證'} and bag.DEL_BTN not in fb.clicks and fb.deleted == [])
+# 2026-10-17 千年龜的殼（不疊加、每格一個）加進白名單：同名多格全勾、同圖「未知的殼」不誤刪
+T = ['千年龜的殼']
+check('白名單：千年龜的殼在 AUTO_PURGE、不是保護名稱', '千年龜的殼' in bag.AUTO_PURGE and not bag.purge_guard('千年龜的殼') and '千年龜的殼' not in bag.PURGE_FORBID + bag.PROTECT)
+check('purge_target：千年龜的殼認得；未知的殼 / 千年龜（別名）/ 空 → None（不誤刪）', bag.purge_target('千年龜的殼', T) == '千年龜的殼'
+      and bag.purge_target('未知的殼', T) is None and bag.purge_target('龜的殼', T) == '千年龜的殼' and bag.purge_target('', T) is None)
+check('del_classify：未知的殼是別的道具（other）、千年龜的殼是 target', bag.del_classify('未知的殼', T)[0] == 'other' and bag.del_classify('千年龜的殼', T) == ('target', '千年龜的殼'))
+check('del_list_ok：5 條同名（千年龜的殼*1| × 5）= 勾選 5 格 → 過', bag.del_list_ok({'2': ['千年龜的殼*1|' * 5, '是否批量刪除道具?']}, T * 5, 5)[0])
+check('del_list_ok：清單混入未知的殼 → 不過；條數少 → 不過', not bag.del_list_ok({'2': ['千年龜的殼*1|' * 4 + '未知的殼*1|']}, T * 5, 5)[0]
+      and not bag.del_list_ok({'2': ['千年龜的殼*1|' * 4]}, T * 5, 5)[0])
+fb = FakeDelBag({'DKBO2': ['千年龜的殼'] * 5 + ['未知的殼', '巴巴洛的許可證', '千年龜的殼']}).install()
+rc, d = quiet(bag.purge, ['DKBO2'], T)
+check('purge 千年龜的殼：同名 6 格全勾（分兩批 5 + 1）、未知的殼 / 巴巴洛的許可證不動', rc == 0 and fb.deleted == T * 6 and fb.bags['DKBO2'][:8] == [None] * 5 + ['未知的殼', '巴巴洛的許可證', None]
+      and d['DKBO2']['deleted'] and sum(1 for c in fb.clicks if c == bag.DELOK_XY) == 2, str((rc, fb.deleted, fb.bags['DKBO2'][:8])))
+fb = FakeDelBag({'DKBO2': ['千年龜的殼'] * 5 + ['未知的殼']}).install()
+rc, d = quiet(bag.purge, ['DKBO2'], T)
+check('purge 千年龜的殼：同名 5 格一批全刪、未知的殼留下', rc == 0 and fb.deleted == T * 5 and fb.bags['DKBO2'][5] == '未知的殼', str((rc, fb.deleted)))
+fb = FakeDelBag({'DKBO2': ['千年龜的殼'] * 5}, list_override=['千年龜的殼*1|' * 4, '是否批量刪除道具?']).install()
+rc, d = quiet(bag.purge, ['DKBO2'], T)
+check('purge 千年龜的殼：提示窗只讀到 4 條（勾 5）→ 96、不按確定', rc == 96 and fb.deleted == [] and bag.DELOK_XY not in fb.clicks)
 # 2026-10-15 23:32 根因：快速戰鬥 EXP 橫幅一時蓋住刪除模式特徵 → 勾到一半判「刪除模式特徵消失」90、取消刪除也沒按 → 背包卡在刪除模式
 fb = FakeDelBag({'DKBO2': W + ['巴巴洛的許可證']}).install()
 _io, _n = fb.is_open, {'k': 0}
