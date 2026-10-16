@@ -72,16 +72,21 @@ EXIT_PANEL, EXIT_SELECT, EXIT_ITEM, EXIT_GUARD, EXIT_FULL, EXIT_VERIFY, EXIT_NAM
 BAG_BTN, CLOSE_XY = (1120, 760), (1280, 113)
 TAB_BAG, TAB_DEPOT = (1318, 265), (1318, 467)
 SUB_XY = {'personal': (307, 200), 'public': (547, 200)}
-SUB_PROBE = {'personal': (230, 200), 'public': (480, 200)}        # 選中 = 亮黃 (251,219,135)；沒選 = (171,127,84)
 SUB_ON = (251, 219, 135)
-# 子分頁列三點（個人 230 / 公共 480、640，都避開字）→ tab_state。沒選 = (171,127,84)；沒選但游標停在上面 = hover 淡色 (177,141,106)。
-# 浮動「獲得 EXP」橫幅（約 x 470～1000）會蓋住公共分頁、而且會吃掉點擊（2026-10-14 errlog 877/878：DKBO4 / DKBO5 open_depot 回 90，
-# ui-log 6 張 bag-depot-sub 失敗截圖 5 張是橫幅蓋住分頁或點完後只剩 hover 淡色）→ 讀不出狀態 = 被蓋住，等它飄走再點
+# 子分頁列五點 → tab_state：個人 230,200 / 400,210（個人分頁本體）、公共 436,205（左緣）/ 480,200 / 640,200（中段）。
+# 沒選 = (171,127,84)；沒選但游標停在上面 = hover 淡色 (177,141,106)。
+# 浮動「獲得 EXP」橫幅（掛機戰鬥的寵物 / 人物經驗、恢復魔力；3 行固定位置 y≈140～270、x≈440～1000，掛機中幾乎一直有）會蓋住公共分頁中段、
+# 而且會吃掉點擊（2026-10-14 errlog 877/878、2026-10-16 13:17 / 13:21 / 13:26 p1 depot_use rc 90 都是點 547,200 沒切過去）。
+# 2026-10-16 改：狀態只看「個人」兩點 + 公共左緣（tools/.cache 30 張倉庫頁截圖，含 6 張橫幅蓋住公共分頁的，這三點全部乾淨）——
+# 個人亮 = personal、個人沒選 = public（兩分頁互斥），公共中段被蓋住不影響判斷；公共中段讀得懂才拿來交叉檢查。
 SUB_OFF = ((171, 127, 84), (177, 141, 106))
-SUB_TABS = [(230, 200), (480, 200), (640, 200)]
+SUB_TABS = [(230, 200), (400, 210), (436, 205), (480, 200), (640, 200)]
+SUB_PERSONAL_N = 2                                  # SUB_TABS 前幾點屬於個人分頁
+SUB_EDGE_XY = (440, 210)                            # 公共分頁左緣：橫幅從沒蓋到（同上 30 張），中段被蓋住 / 點了沒切過去時改點這裡
 SUB_TOL = 24
-SUB_CLEAR_WAIT_S = 4.0     # 分頁被橫幅蓋住時最多等多久
-SUB_RETRIES = 2            # 點了沒切過去（點擊被橫幅吃掉）→ 等橫幅消失再點，最多再點幾次（切分頁可重複點，無副作用）
+SUB_MID_TOL = 8           # 公共中段交叉檢查 / 判斷沒被蓋住用嚴格容差：橫幅半透明壓暗的亮黃 (188,164,102) 離 hover 淡色只差 23，寬容差會誤認
+SUB_CLEAR_WAIT_S = 4.0     # 子分頁列讀不懂（面板被其他東西蓋住）時最多等多久
+SUB_RETRIES = 2            # 點了沒切過去（點擊被橫幅吃掉）→ 改點分頁左緣再點，最多再點幾次（切分頁可重複點，無副作用）
 SLOT_X, SLOT_Y = [752, 860, 966, 1072, 1180], [245, 352, 460]     # 背包格 5×3 可見（ui/bag.md 寫 5×4；第 4 列 / 捲動未量）
 DEPOT_X, DEPOT_Y = [237, 331, 425, 520, 614], [290, 385, 480, 575]
 WEAPON_SLOT = (233, 372)                                            # 裝備格左欄第 3 個（弓箭圖示）
@@ -197,6 +202,15 @@ def depot_xy(i: int) -> tuple:
     return DEPOT_X[i % 5], DEPOT_Y[i // 5]
 
 
+BANNER_SAFE_DY = 33        # 背包第 1 列格心 y=245 在浮字橫幅（y≈140～270）裡、會被吃掉點擊 → 倉庫存取改點格子下緣 y=278（格框到 y≈292，仍在格內）
+
+
+def store_click_xy(i: int) -> tuple:
+    """倉庫頁點 / 雙擊背包第 i 格的座標：第 1 列改點下緣（避開浮字橫幅，2026-10-16 未實機），其他列照格心"""
+    x, y = slot_xy(i)
+    return (x, y + BANNER_SAFE_DY) if i < 5 else (x, y)
+
+
 def popup_buttons(text) -> dict:
     """彈窗按鈕列文字 → {'kind', 按鈕: (x, y)}（依 ui/bag.md 的座標表；kind = equip / stack / consumable / single / depot）"""
     t = re.sub(r'\s+', '', str(text or ''))
@@ -228,31 +242,62 @@ def _avatar_sel(role: str) -> bool:
     return sel == [r == role for r in roles]
 
 
-def _sub_on(sub: str) -> bool:
-    cols = uikit.px([SUB_PROBE[sub]])
-    return bool(cols) and all(abs(a - b) <= SUB_TOL for a, b in zip(cols[0], SUB_ON))
+def _near(c, t, tol: int = SUB_TOL) -> bool:
+    return all(abs(a - b) <= tol for a, b in zip(c, t))
 
 
 def tab_state(cols) -> str | None:
-    """純函式：SUB_TABS 三點顏色 → 'personal' / 'public' / None（讀不懂 = 被浮字橫幅 / 其他東西蓋住）"""
+    """純函式：SUB_TABS 五點顏色 → 'personal' / 'public' / None（讀不懂 = 面板被蓋住 / 不在倉庫頁）。
+    只靠個人分頁兩點 + 公共左緣（浮字橫幅蓋不到）：個人兩點都亮且公共左緣沒選 → personal；個人兩點都沒選且公共左緣亮 → public。
+    公共中段兩點只做交叉檢查：讀得懂（亮 / 沒選）而且跟結論矛盾才回 None；被橫幅蓋住（讀不懂）不影響"""
     if not cols or len(cols) != len(SUB_TABS):
         return None
-    near = lambda c, t: all(abs(a - b) <= SUB_TOL for a, b in zip(c, t))
-    on = [near(c, SUB_ON) for c in cols]
-    off = [any(near(c, t) for t in SUB_OFF) for c in cols]
-    if on[0] and off[1] and off[2]:
-        return 'personal'
-    if off[0] and on[1] and on[2]:
-        return 'public'
-    return None
+    on = [_near(c, SUB_ON) for c in cols]
+    off = [any(_near(c, t) for t in SUB_OFF) for c in cols]
+    k = SUB_PERSONAL_N
+    if all(on[:k]) and off[k]:
+        st = 'personal'
+    elif all(off[:k]) and on[k]:
+        st = 'public'
+    else:
+        return None
+    mid = cols[k + 1:]
+    if st == 'personal' and any(_near(c, SUB_ON, SUB_MID_TOL) for c in mid):
+        return None
+    if st == 'public' and any(_near(c, t, SUB_MID_TOL) for c in mid for t in SUB_OFF):
+        return None
+    return st
+
+
+def public_mid_clear(cols) -> bool:
+    """純函式：公共分頁中段兩點讀得懂（沒被橫幅蓋住）→ 點中心 547,200 安全；否則改點左緣 SUB_EDGE_XY"""
+    if not cols or len(cols) != len(SUB_TABS):
+        return False
+    return all(_near(c, SUB_ON, SUB_MID_TOL) or any(_near(c, t, SUB_MID_TOL) for t in SUB_OFF) for c in cols[SUB_PERSONAL_N + 1:])
+
+
+def sub_click_xy(sub: str, attempt: int, cols) -> tuple:
+    """純函式：第 attempt 次（0 起）點子分頁的座標。個人分頁橫幅蓋不到 → 一律中心；
+    公共：第 1 次且中段沒被蓋住 → 中心 547,200，其餘（中段被蓋住 / 重點）→ 左緣 440,210"""
+    if sub != 'public' or (attempt == 0 and public_mid_clear(cols)):
+        return SUB_XY[sub]
+    return SUB_EDGE_XY
+
+
+def _tab_cols():
+    return uikit.px(SUB_TABS)
 
 
 def _tab_state() -> str | None:
-    return tab_state(uikit.px(SUB_TABS))
+    return tab_state(_tab_cols())
+
+
+def _sub_on(sub: str) -> bool:
+    return _tab_state() == sub
 
 
 def _wait_tab_clear(secs: float = SUB_CLEAR_WAIT_S) -> str | None:
-    """輪詢到子分頁列讀得懂（沒被橫幅蓋住）→ 目前分頁；secs 內一直被蓋住 → None"""
+    """輪詢到子分頁列讀得懂 → 目前分頁；secs 內一直讀不懂 → None"""
     end = uikit.clock() + secs
     while True:
         st = _tab_state()
@@ -643,21 +688,46 @@ SLOT_EMPTY_TOL = 14
 # 取出動畫時上一格飄下來的圖示（p4/after_take_depot.png 第 12 格，dy ≤ −26）
 SLOT_PROBE = [(dx, dy) for dx in range(-30, 31, 5) for dy in range(-24, 25, 4)]
 SLOT_OCC_MIN = 2
+# 數量字帶（2026-10-16）：每格右下都有疊數白字（數量 1 也顯示），在格子下緣、浮動「獲得 EXP」橫幅（y≈140～270）蓋不到的地方。
+# 背包第 1 列（y=245）的 SLOT_PROBE（y 221～269）整片在橫幅裡 → 空格被橫幅壓暗也算「有道具」→ 存入驗證「格子變空」永遠等不到（p1 13:27 shot.png：
+# 第 3 格已空，主探點 0 點吻合空格棕 → 誤判有；數量字帶 0 點偏離 → 空）。倉庫第 1 列（y=290）的名字 / 圖示也被橫幅的第 3 行蓋到。
+# 規則：主探點說有、而且數量字帶也有 ≥ SLOT_QTY_MIN 點偏離空格棕 才算有道具。背包格 / 倉庫格大小不同各一組
+SLOT_QTY_PROBE = [(dx, dy) for dx in range(-36, 41, 3) for dy in range(26, 41, 2)]
+DEPOT_QTY_PROBE = [(dx, dy) for dx in range(-30, 37, 3) for dy in range(16, 35, 2)]
+SLOT_QTY_MIN = 3
 
 
-def slot_occupied(cols) -> bool:
-    """純函式：某格 SLOT_PROBE 各點顏色 → 有沒有道具（≥ SLOT_OCC_MIN 點偏離空格棕）"""
-    return sum(1 for c in cols if any(abs(a - b) > SLOT_EMPTY_TOL for a, b in zip(c, SLOT_EMPTY))) >= SLOT_OCC_MIN
+def _dev_n(cols) -> int:
+    return sum(1 for c in cols if any(abs(a - b) > SLOT_EMPTY_TOL for a, b in zip(c, SLOT_EMPTY)))
 
 
-def slot_occupancy() -> list | None:
-    """背包頁 15 格各有沒有道具（一次 uikit.px）；讀不到 None"""
-    pts = [(x + dx, y + dy) for i in range(n_slots()) for x, y in [slot_xy(i)] for dx, dy in SLOT_PROBE]
+def slot_occupied(cols, qty_cols=None) -> bool:
+    """純函式：某格 SLOT_PROBE 各點顏色 → 有沒有道具（≥ SLOT_OCC_MIN 點偏離空格棕）。
+    qty_cols（數量字帶各點）有給 → 還要字帶 ≥ SLOT_QTY_MIN 點偏離才算有（擋浮字橫幅蓋住的空格）"""
+    if _dev_n(cols) < SLOT_OCC_MIN:
+        return False
+    return qty_cols is None or _dev_n(qty_cols) >= SLOT_QTY_MIN
+
+
+def _occupancy(depot: bool) -> list | None:
+    xy, qp = (depot_xy, DEPOT_QTY_PROBE) if depot else (slot_xy, SLOT_QTY_PROBE)
+    probes = SLOT_PROBE + qp
+    pts = [(x + dx, y + dy) for i in range(n_slots(depot)) for x, y in [xy(i)] for dx, dy in probes]
     cols = uikit.px(pts)
     if not cols or len(cols) != len(pts):
         return None
-    k = len(SLOT_PROBE)
-    return [slot_occupied(cols[i * k:(i + 1) * k]) for i in range(n_slots())]
+    k, m = len(SLOT_PROBE), len(probes)
+    return [slot_occupied(cols[i * m:i * m + k], cols[i * m + k:(i + 1) * m]) for i in range(n_slots(depot))]
+
+
+def slot_occupancy() -> list | None:
+    """背包頁（或倉庫頁右半，同座標）15 格各有沒有道具（一次 uikit.px；主探點 + 數量字帶，不受浮字橫幅影響）；讀不到 None"""
+    return _occupancy(False)
+
+
+def depot_occupancy() -> list | None:
+    """倉庫頁左半 20 格各有沒有道具（同 slot_occupancy）；讀不到 None"""
+    return _occupancy(True)
 
 
 def names_hidden(occ, texts) -> bool:
@@ -1996,14 +2066,16 @@ def open_depot(sub: str) -> int:
     if _sub_on(sub):
         return 0
     for attempt in range(SUB_RETRIES + 1):
-        if _wait_tab_clear() == sub:                    # 分頁被浮動 EXP 橫幅蓋住 → 等它飄走（橫幅會吃掉點擊）；等不到照點，點完再驗
+        if _wait_tab_clear() == sub:                    # 子分頁列讀不懂（面板被蓋住）→ 等一下；已經是 sub 就不點
             return 0
-        if not _click(SUB_XY[sub][0], SUB_XY[sub][1], DEPOT, f'bag 倉庫切到{sub}' + (f'（第 {attempt + 1} 次）' if attempt else '')):
+        x, y = sub_click_xy(sub, attempt, _tab_cols())  # 公共中段被浮字橫幅蓋住 / 重點 → 改點左緣（橫幅會吃掉點擊）
+        where = '' if (x, y) == SUB_XY[sub] else f'（左緣 {x},{y}）'
+        if not _click(x, y, DEPOT, f'bag 倉庫切到{sub}{where}' + (f'（第 {attempt + 1} 次）' if attempt else '')):
             return _fail(EXIT_PANEL, '倉庫特徵不在，沒點子分頁', 'bag-depot-sub')
-        if _wait(lambda: _sub_on(sub) or _tab_state() == sub, 2.0):
+        if _wait(lambda: _sub_on(sub), 2.0):
             return 0
-        log(f'點了 {sub} 子分頁沒切過去（可能被浮字橫幅吃掉點擊），等橫幅消失再點')
-    return _fail(EXIT_PANEL, f'點了 {sub} 子分頁 {SUB_RETRIES + 1} 次底色都沒變', 'bag-depot-sub')
+        log(f'點了 {sub} 子分頁沒切過去（目前 {_tab_state() or "讀不懂"}；可能被浮字橫幅吃掉點擊），改點分頁左緣再點')
+    return _fail(EXIT_PANEL, f'點了 {sub} 子分頁 {SUB_RETRIES + 1} 次都沒切過去（目前 {_tab_state() or "讀不懂"}）', 'bag-depot-sub')
 
 
 DCLICK = os.environ.get('PSA_DEPOT_DCLICK', '1') != '0'     # 雙擊存取（0 = 一律走彈窗 + 按鈕）
@@ -2022,7 +2094,8 @@ def _dclick_move(i: int, want: str, take: bool) -> bool:
     nm = read_slot_name(i, True) if take else read_slot_name(i, False)
     if not (nm and name_match(nm, want)):
         return False
-    x, y = depot_xy(i) if take else slot_xy(i)
+    x, y = depot_xy(i) if take else store_click_xy(i)  # 倉庫第 1 列 y=290 在橫幅下方；背包第 1 列改點下緣
+    before = slot_occupancy() if take else None        # 倉庫頁右半 = 背包格（同座標）：取出後背包「多一格有東西」也算取到（名字被浮字橫幅蓋住讀不到時）
     _SHOT.clear()
     if not uikit.safe_dclick(x, y, DEPOT, f'bag 雙擊{"取出" if take else "存入"}「{want}」第 {i + 1} 格', wait_ms=900):
         return False
@@ -2030,11 +2103,11 @@ def _dclick_move(i: int, want: str, take: bool) -> bool:
         close_popup()
         return False
     if take:
-        if not _wait(lambda: not name_match(read_slot_name(i, True) or '', want), 3.0):
+        if not _wait(lambda: _depot_slot_left(i, want), 3.0):
             return False
         if goto_page('bag'):
             return False
-        return _wait(lambda: find_item(want) is not None, 4.0)
+        return _wait(lambda: _bag_gained(before) or find_item(want) is not None, 4.0)
     if goto_page('bag'):
         return False
 
@@ -2042,6 +2115,20 @@ def _dclick_move(i: int, want: str, take: bool) -> bool:
         occ = slot_occupancy()
         return (not occ[i]) if occ else find_item(want) is None
     return _wait(gone, 4.0)
+
+
+def _depot_slot_left(i: int, want: str) -> bool:
+    """取出後倉庫第 i 格已不是 want：像素看該格變空（數量字帶，浮字橫幅蓋不到）或名字不再吻合"""
+    occ = depot_occupancy()
+    if occ and not occ[i]:
+        return True
+    return not name_match(read_slot_name(i, True) or '', want)
+
+
+def _bag_gained(before) -> bool:
+    """背包頁：跟 before（取出前的 slot_occupancy）比，多了一格有道具 → 取到了（不靠名字，浮字橫幅蓋住第 1 列名字時也判得出）"""
+    now = slot_occupancy()
+    return bool(before and now and len(before) == len(now) and any(n and not b for b, n in zip(before, now)))
 
 
 def _take_via_popup(i: int, want: str, kind: str) -> int:
@@ -2059,6 +2146,7 @@ def _take_via_popup(i: int, want: str, kind: str) -> int:
         return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn')
     uikit.sleep(POPUP_SETTLE_S)                      # 彈窗出現動畫期間點「取出」會落空（2026-10-11 實測：彈窗關了但道具沒動）
     x, y = (722, 662) if kind == 'equip' else (732, 648)
+    before = slot_occupancy()                        # 彈窗疊在倉庫頁上，右半背包格仍看得到（彈窗在中間偏左，蓋不到右半的數量字帶時才有值）
     _SHOT.clear()                                    # 取出後倉庫 / 背包格內容會變
     if not _click(x, y, POPUP, f'bag 倉庫取出「{want}」', allow=(), wait_ms=700):
         return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone')
@@ -2068,7 +2156,7 @@ def _take_via_popup(i: int, want: str, kind: str) -> int:
     if rc:
         return rc
     # 切回背包頁後格子要約 1～3 秒才更新（2026-10-11 實測：立刻找會找不到而誤判失敗並回滾存回），輪詢最多 4 秒
-    if not _wait(lambda: find_item(want) is not None, 4.0):
+    if not _wait(lambda: _bag_gained(before) or find_item(want) is not None, 4.0):
         return _fail(EXIT_VERIFY, f'取出後背包讀不到「{want}」', 'bag-depot-verify')
     return 0
 
@@ -2104,7 +2192,7 @@ def depot_take(role: str, want: str, depot: str = 'public', kind: str = 'consuma
 def _store_via_popup(i: int, want: str) -> int:
     """目前在倉庫頁：點右半（背包）第 i 格 → 彈窗核對名稱 / 按鈕 → 按「存入」→ 切回背包頁（原流程，已實機）"""
     # 倉庫頁右半是背包，座標同背包頁；面板特徵要用倉庫頁的（背包頁特徵在倉庫頁不吻合，safe_click 會擋）
-    x, y = slot_xy(i)
+    x, y = store_click_xy(i)
     if not _click(x, y, DEPOT, f'bag 倉庫頁點背包第 {i + 1} 格') or not _wait(popup_open, 1.5):
         return _fail(EXIT_PANEL, f'倉庫頁點背包第 {i + 1} 格沒開彈窗', 'bag-store-nopopup')
     nm = popup_name(want)

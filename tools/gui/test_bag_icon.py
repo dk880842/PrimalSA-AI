@@ -5,7 +5,8 @@
 畫面 = fixtures/itemimg_cells.png 的格子裁片拼回原座標（其他位置當空格棕），uikit.shot_getter 換成它；面板 / 選角色 / OCR / 彈窗全換假的。
 驗：find_items 縮圖命中不 OCR、沒命中只 OCR 沒認出的格、icon 模式不 OCR、ocr 模式不截圖；list（read_bag_items）縮圖名 + 同圖多名標 ambiguous；
 find_item 只開縮圖命中那格的彈窗；橫幅蓋住 → 重拍、仍蓋住 → 那格走 OCR；名稱帶 [地] 的道具（大地的羈絆）也查得到圖；
-倉庫格被橫幅蓋住（名字關著的實樣）→ 重拍、不認成 2倍智慧果；open_depot 子分頁被橫幅蓋住 → 等它消失再點、點擊被吃掉 → 重點（不需要抽圖）。"""
+倉庫格被橫幅蓋住（名字關著的實樣）→ 重拍、不認成 2倍智慧果；open_depot 子分頁：狀態只看個人分頁 + 公共左緣（橫幅蓋不到）、公共中段被橫幅蓋住 / 點了沒切過去 → 改點左緣；
+格子有無看數量字帶（橫幅蓋住的空格不算有）（這兩項不需要抽圖）。"""
 import sys
 from pathlib import Path
 
@@ -75,29 +76,44 @@ def install(get, texts=None, popups=None):
     return st
 
 
-# 子分頁列三點（SUB_TABS）實機像素（2026-10-14 itemident/*-noname.png 與 ui-log/*-bag-depot-sub.png）
+# 子分頁列五點（SUB_TABS：個人 230,200 / 400,210、公共左緣 436,205、公共中段 480,200 / 640,200）實機像素
+# （2026-10-14 itemident/*-noname.png 與 ui-log/*-bag-depot-sub.png；2026-10-16 p1 13:26 / 13:27 浮字橫幅蓋住公共中段）
 TAB_SAMPLES = [
-    ([(251, 219, 135), (171, 127, 84), (173, 126, 82)], 'personal'),       # depot-personal-DKBO
-    ([(171, 127, 84), (251, 219, 135), (251, 219, 135)], 'public'),        # depot-public-DKBO
-    ([(251, 219, 135), (177, 141, 106), (178, 141, 106)], 'personal'),     # 185001：公共只剩 hover 淡色（點擊被橫幅吃掉後）
-    ([(251, 219, 135), (131, 106, 79), (100, 79, 59)], None),             # 185027：公共被橫幅蓋住
-    ([(251, 219, 135), (139, 102, 67), (255, 255, 255)], None),           # 094414
-    ([(171, 127, 84), (187, 151, 87), (3, 46, 0)], None),                 # depot-public-DKBO2：已切公共但被橫幅蓋住
-    ([(251, 219, 135), (128, 95, 63), (97, 70, 45)], None),               # depot-personal-DKBO3
+    ([(251, 219, 135), (251, 219, 135), (171, 126, 83), (171, 127, 84), (173, 126, 82)], 'personal'),     # depot-personal-DKBO
+    ([(171, 127, 84), (171, 127, 84), (250, 219, 135), (251, 219, 135), (251, 219, 135)], 'public'),      # depot-public-DKBO
+    ([(251, 219, 135), (251, 219, 135), (177, 141, 106), (177, 141, 106), (178, 141, 106)], 'personal'),  # 131724 / 185001：公共只剩 hover 淡色（點擊沒切過去）
+    ([(251, 219, 135), (251, 219, 135), (177, 141, 106), (131, 106, 79), (100, 79, 59)], 'personal'),     # 132647 / 185027：公共中段被橫幅蓋住（舊版 None）
+    ([(251, 219, 135), (251, 219, 135), (171, 126, 83), (128, 95, 63), (97, 70, 45)], 'personal'),        # depot-personal-DKBO3
+    ([(171, 127, 84), (171, 127, 84), (250, 219, 135), (187, 151, 87), (3, 46, 0)], 'public'),            # depot-public-DKBO2：已切公共但中段被橫幅蓋住（舊版 None）
+    ([(171, 127, 84), (171, 127, 84), (250, 219, 135), (188, 164, 102), (139, 123, 76)], 'public'),       # shot.png 13:27：同上（壓暗的亮黃離 hover 只差 23，嚴格容差不誤判矛盾）
+    ([(0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (99, 79, 36)], None),                                     # 191737：面板被黑幕蓋住
+    ([(200, 183, 145), (211, 191, 148), (209, 192, 151), (206, 188, 147), (210, 193, 152)], None),         # 141744：整片淡色（不是倉庫頁）
+    ([(251, 219, 135), (251, 219, 135), (171, 126, 83), (251, 219, 135), (251, 219, 135)], None),          # 合成：兩邊都亮 → 矛盾
 ]
+# public_mid_clear：中段讀得懂才點中心 547,200，否則點左緣
+MID_SAMPLES = [(TAB_SAMPLES[0][0], True), (TAB_SAMPLES[2][0], True), (TAB_SAMPLES[3][0], False), (TAB_SAMPLES[6][0], False)]
 
 
 def test_open_depot():
     for cols, want in TAB_SAMPLES:
         check(f'tab_state 實機像素 → {want}', bag.tab_state(cols) == want, cols)
-    keep = (bag.goto_page, bag._sub_on, bag._tab_state, bag._click, uikit.clock, uikit.sleep, bag.log)
+    for cols, want in MID_SAMPLES:
+        check(f'public_mid_clear → {want}', bag.public_mid_clear(cols) == want, cols)
+    check('sub_click_xy：個人一律中心', bag.sub_click_xy('personal', 1, None) == bag.SUB_XY['personal'])
+    check('sub_click_xy：公共第 1 次中段乾淨 → 中心、中段被蓋 → 左緣、重點 → 左緣',
+          bag.sub_click_xy('public', 0, TAB_SAMPLES[0][0]) == bag.SUB_XY['public'] and bag.sub_click_xy('public', 0, TAB_SAMPLES[3][0]) == bag.SUB_EDGE_XY
+          and bag.sub_click_xy('public', 1, TAB_SAMPLES[0][0]) == bag.SUB_EDGE_XY)
+    keep = (bag.goto_page, bag._sub_on, bag._tab_state, bag._tab_cols, bag._click, uikit.clock, uikit.sleep, bag.log, uikit.snap)
+    uikit.snap = lambda tag: None                  # 失敗路徑（rc 90）不要真的截遊戲畫面
     t = {'now': 0.0}
     uikit.clock = lambda: t['now']
     uikit.sleep = lambda s: t.__setitem__('now', t['now'] + s)
     bag.goto_page = lambda page: 0
     bag.log = lambda msg: None
 
-    def run(covered, swallow, start='personal'):
+    def run(covered, swallow, start='personal', mid_banner=False, center_dead=False):
+        """covered = 前幾次讀子分頁列讀不懂；swallow = 前幾次點擊被吃掉；mid_banner = 公共中段被橫幅蓋住（_tab_cols 回中段壓暗的實樣）；
+        center_dead = 點中心 547,200 永遠沒反應（橫幅吃掉），點左緣才切得過去"""
         st = {'tab': start, 'covered': covered, 'swallow': swallow, 'clicks': [], 'clicked_covered': 0}
 
         def tab():
@@ -112,10 +128,13 @@ def test_open_depot():
                 st['clicked_covered'] += 1
             if st['swallow'] > 0:
                 st['swallow'] -= 1
+            elif center_dead and (x, y) == bag.SUB_XY['public']:
+                pass
             else:
-                st['tab'] = 'public' if (x, y) == bag.SUB_XY['public'] else 'personal'
+                st['tab'] = 'personal' if (x, y) == bag.SUB_XY['personal'] else 'public'
             return True
         bag._tab_state = tab
+        bag._tab_cols = lambda: TAB_SAMPLES[3][0] if mid_banner else TAB_SAMPLES[2][0]
         bag._sub_on = lambda sub: st['covered'] <= 0 and st['tab'] == sub
         bag._click = click
         return bag.open_depot('public'), st
@@ -124,12 +143,35 @@ def test_open_depot():
     rc, st = run(covered=5, swallow=0)
     check('open_depot：分頁被橫幅蓋住 → 等它消失才點（1 次）', rc == 0 and len(st['clicks']) == 1 and st['clicked_covered'] == 0, st)
     rc, st = run(covered=0, swallow=1)
-    check('open_depot：點擊被橫幅吃掉 → 重點一次成功', rc == 0 and len(st['clicks']) == 2, st['clicks'])
+    check('open_depot：點擊被橫幅吃掉 → 重點一次成功（第 2 次點左緣）', rc == 0 and st['clicks'] == [bag.SUB_XY['public'], bag.SUB_EDGE_XY], st['clicks'])
+    rc, st = run(covered=0, swallow=0, mid_banner=True, center_dead=True)
+    check('open_depot：公共中段被橫幅蓋住 → 第 1 次就點左緣、切成功（2026-10-16 p1 13:26 rc 90）', rc == 0 and st['clicks'] == [bag.SUB_EDGE_XY], st['clicks'])
+    rc, st = run(covered=0, swallow=0, center_dead=True)
+    check('open_depot：中段看起來乾淨但點中心沒反應 → 改點左緣成功', rc == 0 and st['clicks'] == [bag.SUB_XY['public'], bag.SUB_EDGE_XY], st['clicks'])
     rc, st = run(covered=0, swallow=99)
     check(f'open_depot：一直切不過去 → 點 {bag.SUB_RETRIES + 1} 次後回 90', rc == 90 and len(st['clicks']) == bag.SUB_RETRIES + 1, (rc, st['clicks']))
     rc, st = run(covered=10 ** 6, swallow=0)
     check('open_depot：一直被蓋住 → 等 SUB_CLEAR_WAIT_S 後照點（舊行為）、點完被蓋住讀不到 → 90', rc == 90 and st['clicks'], (rc, len(st['clicks'])))
-    (bag.goto_page, bag._sub_on, bag._tab_state, bag._click, uikit.clock, uikit.sleep, bag.log) = keep
+    (bag.goto_page, bag._sub_on, bag._tab_state, bag._tab_cols, bag._click, uikit.clock, uikit.sleep, bag.log, uikit.snap) = keep
+
+
+def test_slot_qty():
+    """slot_occupied 數量字帶：主探點偏離（浮字橫幅壓暗）但字帶是空格棕 → 空；字帶有疊數白字 → 有；不給字帶 = 舊行為"""
+    dark = [(60, 40, 25)] * len(bag.SLOT_PROBE)
+    plain = [EMPTY] * len(bag.SLOT_QTY_PROBE)
+    digit = [(255, 255, 255)] * 5 + [EMPTY] * (len(bag.SLOT_QTY_PROBE) - 5)
+    check('slot_occupied：橫幅蓋住的空格（字帶空）→ 空', bag.slot_occupied(dark, plain) is False)
+    check('slot_occupied：有道具（字帶有疊數字）→ 有', bag.slot_occupied(dark, digit) is True)
+    check('slot_occupied：主探點空 → 空（不看字帶）', bag.slot_occupied([EMPTY] * len(bag.SLOT_PROBE), digit) is False)
+    check('slot_occupied：不給字帶 = 舊行為', bag.slot_occupied(dark) is True)
+    shot = Path(__file__).resolve().parents[1] / '.cache' / 'ui-log' / '233459-bag-select-DKBO3.png'
+    if shot.exists():                                  # 本機才有的實樣：背包頁第 1 列 1～3 格空格被橫幅蓋住
+        import imgmatch
+        g = imgmatch.as_getter(shot)
+        occ = [bag.slot_occupied([g(x + dx, y + dy) for dx, dy in bag.SLOT_PROBE], [g(x + dx, y + dy) for dx, dy in bag.SLOT_QTY_PROBE])
+               for y in bag.SLOT_Y for x in bag.SLOT_X]
+        check('slot_occupied 實樣 233459（第 1 列被橫幅蓋住的空格 → 空、第 2 列 4 件 → 有）', ''.join('X' if o else '.' for o in occ) == '.....XXXX......',
+              ''.join('X' if o else '.' for o in occ))
 
 
 def test_depot_banner():
@@ -151,6 +193,7 @@ def test_depot_banner():
 
 def main() -> int:
     test_open_depot()
+    test_slot_qty()
     try:
         IM.index()
     except FileNotFoundError:
