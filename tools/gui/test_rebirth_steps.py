@@ -340,8 +340,8 @@ class PetT:
         self.reads += 1
         return 0, {r: [dict(s) for s in self.after.get(r, AFT)] for r in roles}
 
-    def drop(self, role, name, slot=None, dry_run=False):
-        self.drops.append((role, name, slot))
+    def drop(self, role, name, slot=None, dry_run=False, lone=False):
+        self.drops.append((role, name, slot) + ((True,) if lone else ()))
         return self.drop_rc
 
 
@@ -464,6 +464,26 @@ g = quiet(rs.level_gate, 4, T)
 check('level_gate：逾時、聊天區有未達到 → blocked via chat', g['kind'] == 'blocked' and g['via'] == 'chat' and g['who'] == 'DKBO3', str(g))
 T = GateT(state='idle')
 check('level_gate：逾時、什麼都沒有 → timeout', quiet(rs.level_gate, 4, T)['kind'] == 'timeout')
+
+# ---- 2026-10-16 drop_lone_rewards：寵物欄已全存、只剩獎勵寵（第 1 格也丟）----
+def _lone(**k):
+    d = {'slot': 1, 'empty': False, 'name': '火的守護獸', 'level': 1, 'state': '等待', 'mountlike': False}
+    d.update(k)
+    return [d] + [{'slot': i, 'empty': True} for i in range(2, 6)]
+cand, why = rs.find_lone_lv1(_lone())
+check('find_lone_lv1：只有 1 隻 Lv1 有名字（在第 1 格）→ 候選', len(cand) == 1 and why == '')
+check('find_lone_lv1：出戰狀態不擋（全存後唯一一隻）', len(rs.find_lone_lv1(_lone(state='出戰'))[0]) == 1)
+check('find_lone_lv1：騎乘中 / 像騎寵 / 等級 ≠ 1 / 等級讀不出 / 名字讀不出 → 不丟',
+      all(rs.find_lone_lv1(_lone(**kw))[0] == [] for kw in ({'state': '騎乘'}, {'mountlike': True}, {'level': 5}, {'level': None}, {'name': None})))
+check('find_lone_lv1：寵物欄空 / 2 隻 → 不確定', rs.find_lone_lv1([{'slot': 1, 'empty': True}])[0] == [] and len(rs.find_lone_lv1(_lone()[:1] + [dict(_lone()[0], slot=2)])[0]) == 2)
+T = PetT({r: _lone() for r in rs.ALL_ROLES})
+check('drop_lone_rewards 第 3 轉：5 人各 1 隻 → 逐人丟（slot 1、lone=True）', quiet(rs.drop_lone_rewards, 3, T) == 0 and len(T.drops) == 5 and all(d[2] == 1 and d[3] is True for d in T.drops))
+T = PetT({**{r: _lone() for r in rs.ALL_ROLES}, rs.ALL_ROLES[2]: _lone(level=9)})
+check('drop_lone_rewards：有一人等級不是 1 → 98、全員都不丟', quiet(rs.drop_lone_rewards, 3, T) == 98 and T.drops == [])
+T = PetT({})
+check('drop_lone_rewards 第 1 轉：對照表 → petdrop all 烏力斯坦 lone（不讀寵物欄）', quiet(rs.drop_lone_rewards, 1, T) == 0 and T.drops == [('all', '烏力斯坦', None, True)] and T.reads == 0)
+T = PetT({r: _lone() for r in rs.ALL_ROLES}, drop_rc=9)
+check('drop_lone_rewards：petdrop 9 透傳', quiet(rs.drop_lone_rewards, 4, T) == 9)
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

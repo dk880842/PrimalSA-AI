@@ -1478,5 +1478,80 @@ check('list_role：第 3 格第一次讀到第 2 格殘影 → 重讀拿到自�
 (rc, sl), cnt = _list_with([['m'], ['z'], ['z']])
 check('list_role：真的同字串（重讀仍相同）→ 照收、最多重讀 STALE_RETRIES 次', rc == 0 and sl[2]['nh'] == 'z' and cnt[2] == 1 + pet.STALE_RETRIES)
 
+# ---- store-all（2026-10-16，全部存入；不驗名字 / 騎寵 / 第 1 格）----
+class _SA:
+    """store_all 本體的模擬：bars[角色] = 5 格是否有寵物；depot_free[角色] = 個人倉庫剩餘格；click 存入鈕 = 選中那格存進去"""
+    def __init__(self, bars, free, btn='store', works=True):
+        self.bars, self.free, self.btn, self.works = bars, free, btn, works
+        self.cur, self.sel, self.tab, self.log = None, None, 'pet', []
+
+    def frames(self):
+        return {'empty': [not x for x in self.bars[self.cur]], 'sel': [i == self.sel for i in range(5)]}
+
+    def dep(self):
+        n = self.free[self.cur]
+        return {'empty': [True] * n + [False] * (20 - n), 'sig': True, 'tab': 'personal', 'btn': self.btn}
+
+    def install(self):
+        sv = {k: getattr(pet, k) for k in ('select_role', 'scan_frames', 'select_slot', 'open_depot', 'scan_depot', 'click', 'wait_counts', 'goto_pet_tab', 'uikit_fail')}
+        sv['snap'], sv['mark'] = uikit.snap, uikit.mark
+        def sel_role(r, ctx): self.cur, self.sel = r, None; self.log.append(('role', r)); return 0
+        def sel_slot(i, f): self.sel = i; self.log.append(('slot', self.cur, i + 1)); return 0
+        def open_depot(d): self.tab = 'depot'; self.log.append(('open_depot', self.cur)); return 0, self.dep()
+        def click(x, y, note):
+            if (x, y) == tuple(pet.DEPOT_BTN_XY):
+                self.log.append(('store', self.cur, self.sel + 1))
+                if self.works:
+                    self.bars[self.cur][self.sel] = False
+                    self.free[self.cur] -= 1
+            return True
+        def wait_counts(depot, want_empty, want_filled, info=None, allow_confirm=False):
+            f, d = self.frames(), self.dep()
+            return sum(f['empty']) == want_empty and 20 - sum(d['empty']) == want_filled, f, d
+        def goto(): self.tab = 'pet'; self.log.append(('goto_pet_tab',)); return True
+        pet.select_role, pet.select_slot, pet.open_depot, pet.click, pet.wait_counts, pet.goto_pet_tab = sel_role, sel_slot, open_depot, click, wait_counts, goto
+        pet.scan_frames, pet.scan_depot = self.frames, self.dep
+        pet.uikit_fail = lambda rc, msg: rc
+        uikit.snap, uikit.mark = lambda *a, **k: None, lambda *a, **k: None
+        return sv
+
+    def run(self, roles):
+        sv = self.install()
+        try:
+            info = {'ops': [], 'stored': {}}
+            return pet._store_all_slots(roles, 'personal', {}, info), info
+        finally:
+            for k, v in sv.items():
+                if k == 'snap': uikit.snap = v
+                elif k == 'mark': uikit.mark = v
+                else: setattr(pet, k, v)
+
+
+sa = _SA({'DKBO': [True, False, True, False, False], 'DKBO2': [False] * 5, 'DKBO3': [True] * 5}, {'DKBO': 20, 'DKBO2': 20, 'DKBO3': 20})
+rc, info = sa.run(['DKBO', 'DKBO2', 'DKBO3'])
+stores = [x for x in sa.log if x[0] == 'store']
+check('store-all：每格有寵物的都存（含第 1 格 / 不驗名字）、共 7 次、最後 5 人寵物欄全空', rc == 0 and len(stores) == 7 and (('store', 'DKBO', 1) in stores)
+      and not any(any(sa.bars[r]) for r in sa.bars), str(sa.log))
+check('store-all：每人由後往前存（前面的格不補位）', [x[2] for x in stores if x[1] == 'DKBO3'] == [5, 4, 3, 2, 1] and [x[2] for x in stores if x[1] == 'DKBO'] == [3, 1])
+check('store-all：寵物欄已空的人（DKBO2）完全不碰倉庫 / 不選格', not any(x[1:2] == ('DKBO2',) and x[0] in ('slot', 'store', 'open_depot') for x in sa.log))
+check('store-all：只回寵物分頁一次（全存完才驗）', sum(1 for x in sa.log if x[0] == 'goto_pet_tab') == 1 and info['stored'] == {'DKBO': 2, 'DKBO2': 0, 'DKBO3': 5})
+sa = _SA({'DKBO': [True, True, False, False, False], 'DKBO3': [True] * 5}, {'DKBO': 20, 'DKBO3': 3})
+rc, info = sa.run(['DKBO', 'DKBO3'])
+check('store-all：個人倉庫剩餘格不夠 → 77、該人沒點存入（前面的人已存的不動）', rc == pet.EXIT_FULL and not any(x[0] == 'store' and x[1] == 'DKBO3' for x in sa.log) and sa.bars['DKBO3'] == [True] * 5)
+sa = _SA({'DKBO': [True, False, False, False, False]}, {'DKBO': 20}, btn='none')
+rc, _ = sa.run(['DKBO'])
+check('store-all：存入鈕底色不是 store → 75、沒點', rc == pet.EXIT_DEPOT and not any(x[0] == 'store' for x in sa.log))
+sa = _SA({'DKBO': [True, False, False, False, False]}, {'DKBO': 20}, works=False)
+rc, _ = sa.run(['DKBO'])
+check('store-all：點了存入但張數沒變 → 76、不重點', rc == pet.EXIT_VERIFY and sum(1 for x in sa.log if x[0] == 'store') == 1)
+sa = _SA({'DKBO': [False] * 5, 'DKBO2': [False] * 5}, {'DKBO': 20, 'DKBO2': 20})
+rc, info = sa.run(['DKBO', 'DKBO2'])
+check('store-all：全部都空 → 0、不開倉庫分頁', rc == 0 and not any(x[0] in ('open_depot', 'store', 'goto_pet_tab') for x in sa.log))
+_buf = io.StringIO()
+with contextlib.redirect_stdout(_buf), contextlib.redirect_stderr(_buf):
+    rc_bad = pet.store_all('XYZ')
+    rc_bad2 = pet.store_all('all', 'bogus')
+check('store-all：角色 / 倉庫參數不對 → 用法碼、零操作', rc_bad == uikit.EXIT_USAGE and rc_bad2 == uikit.EXIT_USAGE)
+
 print(f'\n{fails} 項失敗' if fails else '\n全部通過')
 sys.exit(1 if fails else 0)

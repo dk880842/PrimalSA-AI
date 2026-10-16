@@ -10,6 +10,7 @@
   uv run --no-project python tools/gui/pet.py store DKBO 迪基格斯 [--depot personal|public] [--slot N] [--allow-slot1] [--allow-mount-store 名字]
   uv run --no-project python tools/gui/pet.py take DKBO --depot personal --index N --expect 迪基格斯|--expect-growth 35/7/3/8|--expect-level 126   # --index 一定要配 --expect-*（不准盲取）
   uv run --no-project python tools/gui/pet.py store-many --role all|DKBO,DKBO3 --pets 迪基格斯,瑪斯貝卡 [--depot personal|public] [--allow-slot1] [--allow-mount-store 瑪斯貝卡] [--skip-missing] [--pick first|last]
+  uv run --no-project python tools/gui/pet.py store-all [--role all|DKBO,DKBO3] [--depot personal|public]   # 全部存入（2026-10-16，**未實機**）：寵物欄每一格都存（轉生 20F 後 rebirth.py 用）；面板 / 倉庫分頁各開一次、換頭像逐人；不驗名字 / 不擋騎寵 / 騎乘 / 第 1 格 / 不還原名字，只驗存完寵物欄全空；倉庫剩餘格不夠 → 77
   uv run --no-project python tools/gui/pet.py take DKBO --depot public --pet 朵拉比斯        # 不給格號：現場逐張選卡讀名字找（沒名字的卡靠成長字串登錄檔）
   uv run --no-project python tools/gui/pet.py store-many --plan "DKBO2:克邦凱斯×4,DKBO3:加克拉×4" --depot public --pick last   # 每人存不同寵物：面板開一次、倉庫分頁只開一次、在倉庫分頁內直接換頭像連續存、全存完才回寵物分頁只數格數（2026-10-16，不逐隻確認；petquest catch 存公共用）
   uv run --no-project python tools/gui/pet.py take-many --role all --pets 朵拉比斯 [--depot personal|public] [--skip-missing]
@@ -2703,6 +2704,104 @@ def store_many(role_arg: str, pets_text: list, depot: str = 'personal', allow_sl
     return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
 
 
+def store_all(role_arg: str = 'all', depot: str = 'personal', pause: bool = False, learn: bool = False) -> int:
+    """全部存入（2026-10-16 轉生 20F 後存全寵；**未實機**）：面板開一次、倉庫分頁只開一次、左欄頭像逐人換，把寵物欄每一格都存進 depot。
+    **不做名字 / 縮圖 / 騎寵 / 騎乘狀態 / 第 1 格防護、不還原名字**：用爪印像素判斷哪幾格有寵物，由後往前（前面的格不補位）
+    每隻 選格 → 存入鈕底色 → 點存入 → 等寵物欄空格 / 倉庫張數 +1（戰鬥 / 騎乘狀態存入確認窗 wait_counts 會處理）。
+    只驗：存完寵物欄最後變空；倉庫剩餘格不夠 → 77 不點存入。寵物欄已空 = 該人跳過。其他退出碼同 store-many（70 面板 / 71 選取 / 75 倉庫 / 76 驗證 / 77 倉庫滿）"""
+    t0 = time.time()
+    roles = roles_multi(role_arg)
+    info = {'cmd': 'store-all', 'depot': depot, 'roles': roles, 'ops': [], 'stored': {}}
+    if not roles or depot not in ('personal', 'public'):
+        print(f'pet：store-all 參數不對（角色 {role_arg!r}、倉庫 {depot!r}）', file=sys.stderr)
+        return _out(uikit.EXIT_USAGE, info, t0, '參數不對')
+    ctx = load_ctx(learn)
+    with Session(pause, need_calm=True) as s:
+        if s.rc:
+            return _out(s.rc, info, t0)
+        try:
+            final = _store_all_slots(roles, depot, ctx, info)
+        finally:
+            save_ctx(ctx)
+            _back_to_pet_tab()
+    return _out(final, info, t0, next((o.get('msg', '') for o in info['ops'] if o.get('rc')), ''))
+
+
+def _store_all_slots(roles: list, depot: str, ctx: dict, info: dict) -> int:
+    """store_all 本體（面板已開）：A 寵物分頁逐人數有寵物的格 → B 倉庫分頁逐人由後往前存 → C 回寵物分頁逐人驗空"""
+    jobs = []                                                      # [(角色, [有寵物的格號 0 起算], 寵物欄空格數)]
+    for r in roles:
+        rc = select_role(r, ctx)
+        if rc:
+            return rc
+        f = scan_frames()
+        if f is None:
+            return uikit_fail(EXIT_PANEL, '讀不到面板像素')
+        full = [i for i, e in enumerate(f['empty']) if not e]
+        info['stored'][r] = len(full)
+        if full:
+            jobs.append((r, full, sum(f['empty'])))
+        else:
+            print(f'pet：{r} 寵物欄已空，略過')
+    if not jobs:
+        return 0
+    rc, d = open_depot(depot)                                      # 倉庫分頁只開這一次
+    if rc:
+        return rc
+    for r, full, pre_empty in jobs:
+        rc = select_role(r, ctx)
+        if rc:
+            return rc
+        rc, d = open_depot(depot)                                  # 換人後仍在倉庫分頁就不點；順便讀個人倉庫張數
+        if rc:
+            return rc
+        free = sum(d['empty'])
+        if free < len(full):
+            op = {'role': r, 'msg': f'{r} 的 {depot} 倉庫只剩 {free} 格，要存 {len(full)} 隻，沒點存入鈕', 'clicked': False}
+            op['rc'] = uikit_fail(EXIT_FULL, op['msg'])
+            info['ops'].append(op)
+            return EXIT_FULL
+        depot_n = 20 - free
+        for i in sorted(full, reverse=True):
+            op = {'role': r, 'slot': i + 1, 'depot': depot, 'clicked': False}
+            info['ops'].append(op)
+
+            def bad(rc, msg, op=op):
+                op['msg'], op['rc'] = msg, rc
+                return uikit_fail(rc, msg)
+            f = scan_frames()
+            if f is None:
+                return bad(EXIT_PANEL, '讀不到面板像素')
+            rc = select_slot(i, f)
+            if rc:
+                return bad(rc, f'倉庫分頁中選不到第 {i + 1} 格')
+            d = scan_depot()
+            if d is None or not d['sig'] or d['btn'] != 'store':
+                uikit.snap('pet-storeall-btn')
+                return bad(EXIT_DEPOT, f'存入鈕底色不是 store（{d and d["btn"]}）；不點')
+            if not click(DEPOT_BTN_XY[0], DEPOT_BTN_XY[1], f'pet store-all {r} 第 {i + 1} 格 → {depot}'):
+                return bad(EXIT_PANEL, '面板特徵不在，沒點存入鈕')
+            op['clicked'] = True
+            pre_empty, depot_n = pre_empty + 1, depot_n + 1
+            ok, f2, d2 = wait_counts(depot, pre_empty, depot_n, op, allow_confirm=True)
+            if not ok:
+                path = uikit.snap('pet-storeall-nochange')
+                return bad(EXIT_VERIFY, f'點了存入但寵物欄 / 倉庫張數沒照預期變（寵物空格 {f2 and sum(f2["empty"])}→要 {pre_empty}；倉庫 {d2 and 20 - sum(d2["empty"])}→要 {depot_n}）；不重點{"：" + path if path else ""}')
+            op['rc'] = 0
+            print(f'pet：{r} 第 {i + 1} 格存入{"個人" if depot == "personal" else "公共"}倉庫')
+    if not goto_pet_tab():
+        return uikit_fail(EXIT_DEPOT, '存完切不回寵物分頁')
+    for r, full, _ in jobs:                                        # 只驗最後寵物欄全空
+        rc = select_role(r, ctx)
+        if rc:
+            return rc
+        f = scan_frames()
+        if f is None or not all(f['empty']):
+            return uikit_fail(EXIT_VERIFY, f'{r} 全部存入後寵物欄仍有寵物（空格 {f and f["empty"]}）')
+    uikit.mark('store-all done')
+    return 0
+
+
 def _batch_targets(r: str, names: list, slots: list, allow_slot1: bool, ams: list, skip_missing: bool, pick, info: dict) -> tuple:
     """一次讀好的寵物欄 → (要存的 [(op, slot dict)], rc)。同一格不重複選；每隻過 guard_store；找不到且沒 --skip-missing → 72"""
     todo, used = [], set()
@@ -3636,6 +3735,9 @@ def main() -> int:
     p.add_argument('--allow-mount-store', default=None, metavar='名,名', help='放行存倉的騎寵名單（名字完全相同、須已是等待）；只有使用者當次明講才用')
     p.add_argument('--skip-missing', action='store_true', help='角色沒有這隻就略過（預設 72 停手）')
     p.add_argument('--pick', default=None, choices=['first', 'last'], help='同物種有多隻時取最前 / 最後一格（預設 72 停手）')
+    p = sub.add_parser('store-all', help='全部存入：寵物欄每一格都存（不驗名字 / 騎寵 / 第 1 格；只驗最後變空、倉庫滿 77）', parents=[cp])
+    p.add_argument('--role', default='all', help='all 或逗號分隔 DKBO,DKBO3')
+    p.add_argument('--depot', default='personal', choices=['personal', 'public'])
     p = sub.add_parser('take-many', help='批次取出：面板 / 倉庫分頁只開一次，左欄頭像換角色連續取（現場逐張找名字）', parents=[cp])
     p.add_argument('--role', default=None, help='all 或逗號分隔（配 --pets：每人取同樣的目標）')
     p.add_argument('--pets', default=None, help='目標（逗號分隔）：名字 / 名字@等級 / #成長字串 / 名字#成長字串@等級')
@@ -3708,6 +3810,8 @@ def main() -> int:
     if a.cmd == 'take':
         return take(a.role, a.depot, a.index, a.expect, a.pause_encounter, learn, a.pet, a.expect_growth, a.expect_level)
     csv = lambda t: [x.strip() for x in (t or '').split(',') if x.strip()]    # noqa: E731
+    if a.cmd == 'store-all':
+        return store_all(a.role, a.depot, a.pause_encounter, False)
     if a.cmd == 'store-many':
         if a.plan:
             pr = parse_store_plan(a.plan)

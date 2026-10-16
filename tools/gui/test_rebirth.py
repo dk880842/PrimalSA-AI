@@ -84,15 +84,13 @@ class FakeTools:
         self.fight_rc = kw.get('fight_rc', 0)
         self.items = kw.get('items')
         self.ass_rc = kw.get('ass_rc', (0, {'normal': '忠犬'}, ''))
-        self.pet_empty = kw.get('pet_empty', {r: 3 for r in rebirth.ALL_ROLES})
+        self.petstore_rc = kw.get('petstore_rc', 0)
         self.cur = kw.get('cur', 'DKBO')
         self.team_form_rc = kw.get('team_form_rc', 0)
         self.team_form_rcs = kw.get('team_form_rcs', [])
         self.wins = kw.get('wins', {})
         self.accept_rc = kw.get('accept_rc', 0)
         self.relogin_rcs = kw.get('relogin_rcs', [])
-        self.snap_rc = kw.get('snap_rc', 0)
-        self.diff_rc = kw.get('diff_rc', 0)
         self.gate = kw.get('gate', {'kind': 'teleport', 'pos': (300, 121, 170)})
         self.scr = kw.get('scr', 'idle')
 
@@ -125,7 +123,7 @@ class FakeTools:
         d['_free'] = 8
         return 0, d
 
-    def pet_empties(self): self.c('pet_empties'); return 0, self.pet_empty
+    def pet_store_all(self): self.c('pet_store_all'); return self.petstore_rc, {'stored': {r: 3 for r in rebirth.ALL_ROLES}, 'msg': 'x'}
     def heal(self): self.c('heal')
     def ass_pet(self, role, act):
         self.c('ass_pet', role, act)
@@ -164,11 +162,9 @@ class FakeTools:
         self.c('swap_weapon', role, keep_old)
         return self.swap_rc, {'old': '合成弓箭 9', 'dropped': None if keep_old else '合成弓箭 9'}
 
-    def drop_pet(self, name): self.c('drop_pet', name); return self.drop_rc
+    def drop_lone(self, n): self.c('drop_lone', n); return self.drop_rc, {'why': 'x'}
     def accept(self, n): self.c('accept', n); return self.accept_rc
     def relogin(self): self.c('relogin'); return self.relogin_rcs.pop(0) if self.relogin_rcs else 0
-    def pet_snapshot(self): self.c('pet_snapshot'); return self.snap_rc, {'DKBO': []}
-    def drop_new_lv1(self, n, before): self.c('drop_new_lv1', n, before); return self.diff_rc, {'why': 'x'}
     def encounter_on(self): return False
     def encounter_off(self): self.c('enc_off')
     def encounter_set(self, on): self.c('enc_set', on)
@@ -192,21 +188,24 @@ FULL_QUEST = [(0, (32001, 5, 5)), (37, (32011, 56, 36)), (0, (32016, 31, 40)), (
 fresh()
 T = FakeTools(quest=list(FULL_QUEST))
 rc = quiet(rebirth.run, tools=T)
-seq = [c for c in T.calls if c[0] in ('quest', 'swap_weapon', 'heal', 'teleport20', 'press_dialog', 'drop_pet', 'bag_store', 'ass_pet')]
+seq = [c for c in T.calls if c[0] in ('quest', 'swap_weapon', 'heal', 'teleport20', 'press_dialog', 'drop_lone', 'bag_store', 'ass_pet', 'pet_store_all')]
 qs = [c[1] for c in seq if c[0] == 'quest']
 check('完整流程 rc 0', rc == 0, str(rebirth.LAST.get('info')))
 check('trans 自動 = 目前轉數 + 1 = 1（任務 漆黑洞窟(一轉)）', rebirth.LAST['trans'] == 1 and '漆黑洞窟(一轉)' in qs[0])
 check('quest 呼叫順序：enter → boss10 → bow16 → boss20 → rebirth → allow 收尾',
       '--stop-after-dialog' in qs[0] and '--max-seconds' in qs[1] and '--stop-after-rewards' in qs[2] and qs[3][0] == '--task' and '--allow-irreversible' in qs[5], str(qs))
 order = [c[0] for c in seq]
-check('階段順序：quest < swap×5 < heal < ass×5 < teleport < quest < press < drop_pet < bag_store',
+check('階段順序：quest < swap×5 < heal < ass×5 < teleport < quest < store_all < quest < press < drop_lone < bag_store',
       order.index('swap_weapon') > order.index('quest') and max(i for i, x in enumerate(order) if x == 'heal') > max(i for i, x in enumerate(order) if x == 'swap_weapon')
       and order.index('teleport20') > order.index('ass_pet') and order.index('press_dialog') > order.index('teleport20')
-      and order.index('drop_pet') > order.index('press_dialog') and order.index('bag_store') > order.index('drop_pet'), str(order))
+      and order.index('drop_lone') > order.index('press_dialog') and order.index('bag_store') > order.index('drop_lone')
+      and order.index('pet_store_all') > order.index('teleport20') and order.index('pet_store_all') < order.index('press_dialog'), str(order))
+check('龍王的守護全程只吃 1 次（enter）', T.names().count('bag_use') == 1 and T.names().index('bag_use') < T.names().index('quest'), str(T.names()))
+check('storepets 在 boss20 的 quest 之後、rebirth 的 quest 之前', [c for c in T.calls if c[0] in ('quest', 'pet_store_all')].index(('pet_store_all',)) == 4, str([c[0] for c in T.calls if c[0] in ('quest', 'pet_store_all')]))
 check('swap 5 人、ass 5 人忠犬', order.count('swap_weapon') == 5 and [c for c in T.calls if c[0] == 'ass_pet'][0][2] == '忠犬' and order.count('ass_pet') == 5)
 check('龍王的守護存回公共（隊長）', ('bag_store', 'DKBO', '龍王的守護') in T.calls)
 check('轉生確認後記 trans 快取（grind 去練功備援）', ('save_trans', 1) in T.calls)
-check('進度檔記 10 階段 ok（含 accept）', all(v['status'] == 'ok' for v in rebirth.LAST['stages'].values()) and len(rebirth.LAST['stages']) == 10)
+check('進度檔記 11 階段 ok（含 accept / storepets）', all(v['status'] == 'ok' for v in rebirth.LAST['stages'].values()) and len(rebirth.LAST['stages']) == 11)
 check('event log / quest-log 有寫', '階段 cleanup 結束' in rebirth.EVENT_LOG.read_text(encoding='utf-8') and '漆黑洞窟(一轉)' in rebirth.QUEST_LOG.read_text(encoding='utf-8'))
 
 # ---- --trans / --from ----
@@ -237,7 +236,9 @@ fresh()
 T = FakeTools(items={'DKBO2': {'水的戒指': None}}, quest=[(37, (32011, 1, 1))])
 check('缺證明不再擋 preflight（不回 81、不查證明）', quiet(rebirth.run, tools=T) != 81 and 'missing' not in rebirth.LAST.get('info', {}))
 fresh()
-check('寵物欄空位不足 → 82', quiet(rebirth.run, tools=FakeTools(pet_empty={**{r: 3 for r in rebirth.ALL_ROLES}, 'DKBO5': 1})) == 82)
+T = FakeTools(quest=[(37, (32011, 1, 1))])
+quiet(rebirth.run, tools=T)
+check('preflight 不再讀寵物欄空位（boss20 後全存）', 'pet_empties' not in T.names())
 fresh()
 check('preflight 全過（heal 有跑）', quiet(rebirth.run, tools=(t := FakeTools(quest=[(37, (32011, 1, 1))]))) != 80 and 'heal' in t.names())
 
@@ -377,17 +378,26 @@ check('轉生後轉數沒變 → 88', quiet(rebirth.run, trans=1, from_stage='re
 
 # ---- 龍王 / 收尾 ----
 fresh()
-T = FakeTools(quest=[(37, (32011, 56, 36))], use_rcs=[92, 0])
-rc = quiet(rebirth.run, trans=1, from_stage='boss10', to_stage='boss10', tools=T)
-check('龍王：背包沒有(92)→ 公共倉庫取出 → 再使用', ('bag_take', 'DKBO', '龍王的守護') in T.calls and T.names().count('bag_use') == 2 and rc == 0)
+T = FakeTools(quest=[(0, (32001, 5, 5))], use_rcs=[92, 0])
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
+check('龍王（enter）：背包沒有(92)→ 公共倉庫取出 → 再使用', ('bag_take', 'DKBO', '龍王的守護') in T.calls and T.names().count('bag_use') == 2 and rc == 0)
 fresh()
-T = FakeTools(quest=[(37, (32011, 56, 36))], use_rcs=[95])
-rc = quiet(rebirth.run, trans=1, from_stage='boss10', to_stage='boss10', tools=T)
+T = FakeTools(quest=[(0, (32001, 5, 5))], use_rcs=[95])
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
 check('龍王使用失敗只警告、流程繼續', rc == 0 and any('龍王' in w for w in rebirth.LAST['warnings']))
 fresh()
 T = FakeTools(quest=[(0, (32010, 1, 1)), (37, (32011, 56, 36))])
 rc = quiet(rebirth.run, trans=1, from_stage='boss10', to_stage='boss10', tools=T)
-check('boss10：第一段逾時（回 0 沒進 11F）→ 強制再吃龍王再跑一段', rc == 0 and T.names().count('bag_use') >= 2)
+check('boss10：第一段逾時（回 0 沒進 11F）→ 再跑一段、不再吃龍王（只在 enter 吃一次）', rc == 0 and T.names().count('bag_use') == 0 and T.names().count('quest') == 2)
+fresh()
+T = FakeTools(quest=[(0, (32001, 5, 5))])
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T, use_dragon=False)
+check('--no-dragon：enter 也不吃', rc == 0 and 'bag_use' not in T.names())
+fresh()
+T = FakeTools(quest=[])
+T.pos = (32001, 5, 5)
+rc = quiet(rebirth.run, trans=1, from_stage='enter', to_stage='enter', tools=T)
+check('enter：已在漆黑 1F（續跑）→ 不吃龍王', rc == 0 and 'bag_use' not in T.names())
 fresh()
 T = FakeTools(store_rc=92)
 check('cleanup：龍王背包沒有(92)視為略過', quiet(rebirth.run, trans=1, from_stage='cleanup', to_stage='cleanup', tools=T) == 0)
@@ -969,7 +979,7 @@ T = FakeTools(quest=list(FULL_QUEST))
 rc = quiet(rebirth.run, tools=T)
 nm = T.names()
 check('門檻：有傳送 → 繼續跑完 rc 0', rc == 0, str(rebirth.LAST.get('info')))
-check('門檻：順序 關遇敵 → current → form → 空位 → 點卡 → 補血', nm.index('enc_off') < nm.index('current') < nm.index('team_form') < nm.index('pet_empties') < nm.index('level_gate') < nm.index('heal'), str(nm[:14]))
+check('門檻：順序 關遇敵 → current → form → 背包空位 → 點卡 → 補血', nm.index('enc_off') < nm.index('current') < nm.index('team_form') < nm.index('level_gate') < nm.index('heal'), str(nm[:14]))
 check('門檻：有傳送 → 不讀 5 人等級、accept 跳過', ('levels', tuple(rebirth.ALL_ROLES)) not in T.calls[:nm.index('quest')] and 'accept' not in nm, str(nm[:14]))
 fresh()
 T = FakeTools(quest=list(FULL_QUEST), gate={'kind': 'already', 'pos': (32001, 5, 5)})
@@ -1053,7 +1063,7 @@ check('重登後 team.check 非 0 → team.form', rc == 0 and T.names().count('t
 fresh()
 T = FakeTools(quest=[(19, None), (37, (32011, 56, 36))])
 rc = quiet(rebirth.run, trans=2, from_stage='boss10', to_stage='boss10', tools=T)
-check('重登後重吃龍王（force）', rc == 0 and T.names().count('bag_use') == 2, str(T.names()))
+check('重登後不再補吃龍王（只在 enter 吃一次）', rc == 0 and T.names().count('bag_use') == 0 and 'relogin' in T.names(), str(T.names()))
 fresh()
 T = FakeTools(quest=[(43, None), (37, (32011, 56, 36))])
 rc = quiet(rebirth.run, trans=2, from_stage='boss10', to_stage='boss10', tools=T, use_dragon=False)
@@ -1149,35 +1159,67 @@ T = FakeTools(team_form_rcs=[42, 42], team_checks=[42])
 r_ = rebirth.Run(2, T, {})
 check('form()：42 → check 不滿 → 再 form 仍 42 → 42（只重試一次）', quiet(r_.form) == 42 and T.names().count('team_form') == 2)
 
-# ---- 轉生獎勵寵 ----
-for n, nm_ in ((1, '烏力斯坦'), (2, '奇娜')):
+# ---- 轉生獎勵寵 / storepets（2026-10-16）----
+for n in (1, 2, 3, 4):
     fresh()
     T = FakeTools()
     rc = quiet(rebirth.run, trans=n, from_stage='cleanup', tools=T)
-    check(f'cleanup 第 {n} 轉：丟「{nm_}」（對照表）、不做 diff', rc == 0 and ('drop_pet', nm_) in T.calls and 'drop_new_lv1' not in T.names() and 'pet_snapshot' not in T.names())
+    check(f'cleanup 第 {n} 轉：drop_lone（寵物欄只剩獎勵寵，丟）、不存倉、沒有快照 / diff', rc == 0 and ('drop_lone', n) in T.calls and 'pet_store_all' not in T.names()
+          and 'pet_snapshot' not in T.names())
+fresh()
+T = FakeTools()
+rc = quiet(rebirth.run, trans=5, from_stage='cleanup', tools=T)
+check('cleanup 第 5 轉：獎勵寵機暴 pet_store_all 存個人倉庫、絕不丟（不呼叫 drop_lone）', rc == 0 and 'pet_store_all' in T.names() and 'drop_lone' not in T.names()
+      and T.names().index('pet_store_all') < T.names().index('bag_store'), str(T.names()))
+fresh()
+T = FakeTools(petstore_rc=77)
+check('第 5 轉 cleanup：倉庫滿 → 77、不丟、龍王不動', quiet(rebirth.run, trans=5, from_stage='cleanup', tools=T) == 77 and 'drop_lone' not in T.names() and 'bag_store' not in T.names())
+fresh()
+T = FakeTools(petstore_rc=9)
+check('第 5 轉 cleanup：存寵時驗證視窗 → 9', quiet(rebirth.run, trans=5, from_stage='cleanup', tools=T) == 9)
+fresh()
+T = FakeTools(petstore_rc=76)
+check('第 5 轉 cleanup：存寵其他失敗 → 86、不丟', quiet(rebirth.run, trans=5, from_stage='cleanup', tools=T) == 86 and 'drop_lone' not in T.names())
 fresh()
 T = FakeTools(quest=[(39, (32021, 31, 29))])
 T.after_levels = {r: (3, 1) for r in rebirth.ALL_ROLES}
 T.levels_map = {r: (2, 131) for r in rebirth.ALL_ROLES}
 rc = quiet(rebirth.run, trans=3, from_stage='rebirth', tools=T)
 nm = T.names()
-check('第 3 轉：rebirth 階段先拍寵物欄快照（在 quest 之前）→ cleanup 做 diff 丟、不用 drop_pet', rc == 0 and nm.index('pet_snapshot') < nm.index('quest') and 'drop_new_lv1' in nm and 'drop_pet' not in nm, str(nm))
-check('快照存進進度檔', rebirth.load_progress().get('pets_before') == {'DKBO': []})
+check('第 3 轉 rebirth 階段不再拍寵物欄快照、不存倉（storepets 已做）', rc == 0 and 'pet_snapshot' not in nm and 'pet_store_all' not in nm and 'drop_lone' in nm, str(nm))
 fresh()
-T = FakeTools(quest=[(39, (32021, 31, 29))], snap_rc=71)
-rc = quiet(rebirth.run, trans=3, from_stage='rebirth', tools=T)
-check('第 3 轉：快照讀失敗 → 98，不轉生（沒呼叫 quest）', rc == 98 and 'quest' not in T.names())
-fresh()
-T = FakeTools(diff_rc=98)
+T = FakeTools(drop_rc=98)
 rc = quiet(rebirth.run, trans=3, from_stage='cleanup', tools=T)
-check('第 3 轉 cleanup：diff 不確定 → 98，龍王不動', rc == 98 and 'bag_store' not in T.names())
+check('第 3 轉 cleanup：獎勵寵不確定 → 98，龍王不動', rc == 98 and 'bag_store' not in T.names())
 fresh()
-T = FakeTools(diff_rc=9)
-check('第 3 轉 cleanup：diff 時驗證視窗 → 9', quiet(rebirth.run, trans=3, from_stage='cleanup', tools=T) == 9)
+T = FakeTools(drop_rc=9)
+check('第 3 轉 cleanup：丟寵時驗證視窗 → 9', quiet(rebirth.run, trans=3, from_stage='cleanup', tools=T) == 9)
+fresh()
+T = FakeTools(drop_rc=73)
+check('第 1 轉 cleanup：petdrop 防護擋下 73 → 86', quiet(rebirth.run, trans=1, from_stage='cleanup', tools=T) == 86)
+# storepets 階段
+fresh()
+T = FakeTools()
+rc = quiet(rebirth.run, trans=3, from_stage='storepets', to_stage='storepets', tools=T)
+check('storepets：只呼叫 pet_store_all 一次（5 人由 pet.py 一次處理）、寫進度檔 pets_stored', rc == 0 and T.names().count('pet_store_all') == 1 and rebirth.load_progress().get('pets_stored') is True, str(T.names()))
+check('storepets：event log 有寫', 'storepets：5 人寵物欄已全存個人倉庫' in rebirth.EVENT_LOG.read_text(encoding='utf-8'))
+fresh()
+T = FakeTools(petstore_rc=77)
+check('storepets：個人倉庫滿 → 77、續跑提示', quiet(rebirth.run, trans=3, from_stage='storepets', to_stage='storepets', tools=T) == 77 and rebirth.LAST['info'].get('pet_rc') == 77)
+fresh()
+T = FakeTools(petstore_rc=10)
+check('storepets：斷線 → 10', quiet(rebirth.run, trans=3, from_stage='storepets', to_stage='storepets', tools=T) == 10)
+fresh()
+T = FakeTools(petstore_rc=76)
+check('storepets：其他失敗 → 86', quiet(rebirth.run, trans=3, from_stage='storepets', to_stage='storepets', tools=T) == 86)
+fresh()
+T = FakeTools(petstore_rc=77, quest=[(39, (32021, 31, 29))])
+rc = quiet(rebirth.run, trans=1, from_stage='storepets', tools=T)
+check('storepets 失敗 → 後面的 rebirth quest 不跑（不去拿守護獸）', rc == 77 and 'quest' not in T.names())
 _buf = io.StringIO()
 with contextlib.redirect_stdout(_buf):
     rebirth.run(dry_run=True, trans=3, tools=types.SimpleNamespace())
-check('dry-run 計畫含 accept / 獎勵寵 / 97 98 碼', '[accept]' in _buf.getvalue() and '97 接任務' in _buf.getvalue() and '98 獎勵寵' in _buf.getvalue())
+check('dry-run 計畫含 accept / storepets / 獎勵寵 / 77 97 98 碼', '[accept]' in _buf.getvalue() and '[storepets]' in _buf.getvalue() and '97 接任務' in _buf.getvalue() and '98 獎勵寵' in _buf.getvalue() and '77 倉庫滿' in _buf.getvalue())
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 sys.exit(1 if fails else 0)

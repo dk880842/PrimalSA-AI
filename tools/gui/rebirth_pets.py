@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""轉生後寵物重整：舊寵物全存個人倉庫 → DKBO2 抓 N 隻騎寵（預設布拉奇多斯）→ 經公共倉庫分給 5 人 → 設騎乘 → 取出戰寵（預設朵拉比斯）設出戰
+"""轉生後寵物重整（舊寵物已在轉生前由 rebirth.py 全存個人倉庫）→ DKBO2 抓 N 隻騎寵（預設布拉奇多斯）→ 經公共倉庫分給 5 人 → 設騎乘 → 取出戰寵（預設朵拉比斯）設出戰
 → 外掛重新鎖定騎寵 / 戰寵。2026-10-11 第一次手動做完（notes/quest-log.md「轉生後寵物重整」），本檔是把它腳本化。只用標準函式庫。
 
 **實機驗證狀態（2026-10-11 寫成時）**：只有離線測試（test_rebirth_pets.py，假 Tools）。寫的當下遊戲被別的 agent 接手掛機，沒能實機跑。
@@ -12,6 +12,9 @@
 鎖定騎寵成長字串漏段比對（growth_partial，同角色別隻吻合 = 歧義停）；系別清單雷龍系被上緣切半 → plain_row 寬鬆比對 + family_below_action
 （大象系 y - 42 位置備援、往回捲最多 2 次、不震盪）；選不到時收下拉 + ass_close_hard 保險關面板；catchbuy 可抓捕數 0 讀不到 → parse_count_zero。
 
+**2026-10-16 起沒有 store 段**：舊寵物（含騎寵）在 rebirth.py 的 storepets（boss20 後、轉生前）已全存個人倉庫，轉生獎勵寵也在 rebirth cleanup 丟掉（五轉存倉）；
+本腳本從空寵物欄開始（preflight → boxes → catch …）。`--store-mount` 保留為無作用參數（印一行提示）；舊的 `--from store` 改從 catch。battle 從個人倉庫取 Lv1 戰寵照舊。
+
 用法（專案根目錄；WSL / Windows 原生指令相同）：
   uv run --no-project python tools/gui/rebirth_pets.py [--trans N] [--mount-species 布拉奇多斯] [--battle-pet 朵拉比斯] [--catcher DKBO2] [--count 5]
         [--family 雷龍系] [--store-mount 瑪斯貝卡] [--from 階段] [--to 階段] [--dry-run] [--no-boxes] [--confirm-buy-catch] [--direct-catch] [--keep-lock] [--no-grind]
@@ -21,7 +24,7 @@
     --battle-pet       戰寵（預設 朵拉比斯，從個人倉庫取、設出戰、鎖定）
     --catcher          負責抓的角色（預設 DKBO2；不是當前角色，勾自動抓寵也照抓）
     --count N          共要幾隻（預設 5，每人 1 隻；DKBO 以外 4 人由公共倉庫分）
-    --store-mount 名   **使用者當次明講才用**：舊騎寵（例 瑪斯貝卡）也存個人倉庫（先設等待、再 pet.py store --allow-mount-store）；沒給 = 舊騎寵不碰
+    --store-mount 名   無作用參數（2026-10-16 起沒有 store 段；給了只印一行提示）
     --from 階段        從這個階段開始（中斷後接著做；進度記在 tools/.cache/rebirth_pets.json）；--to 階段 = 做到該階段（含）就停
     --confirm-buy-catch catch：外掛捉寵設置「+」花石幣買可抓捕數到 count（每個 50,000 石幣；使用者規定騎寵這樣抓，二轉 5 次 = 250,000）。沿用 petquest 的
                        catchbuy.buy_to：不讀石幣；按前讀不到鑽石不按、按後鑽石讀不到 / 有變就停、可抓捕數 +1 才繼續，買到 = count 後走 --direct-catch
@@ -35,7 +38,6 @@
 階段：
   preflight   當前角色 = DKBO（不是就 char.ensure）→ team.disband（沒隊伍 = 不點）→ 外掛鎖定騎寵 / 戰寵 5 人先取消 → 讀 5 人寵物欄（舊寵物清單）
   boxes       （bag 95 = 動作後驗證失敗：使用 / 每項存倉各自動重試 1 次，二轉 DKBO4 重跑才過的處理）5 人各：背包找「N轉新手禮盒」→ 使用 → 內容（寵物誘餌 / 離線水晶8H / 2倍智慧果 / 安撫之素）存公共；「N+1轉新手禮盒」禁止存公共 → 存個人（--no-boxes 跳過）
-  store       5 人寵物欄所有寵物存個人倉庫（pet.py store-many；騎寵只在 --store-mount 時、先設等待）
   catch       catcher 從公共取誘餌（拆分只留 1）→ 外掛捉寵設置（系別 → 物種 → 可抓捕數 = 1）→ 勾自動存倉庫 / 自動抓寵 → 等抓完 →
               → pet.reset_soft(catcher) 還原名字（成長字串 → 物種名）→ 確認多 1 隻新寵物、名字 = 物種 → 再留 N-1 個誘餌重複 → 還原名字 → 確認共 N 隻
               名字為主（2026-10-14 晚，離線測試；reset-name 本身實機驗過 8 隻布拉奇多斯）：learn-species（登錄縮圖 / 成長字串）只在還原失敗、
@@ -55,7 +57,7 @@
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79 / 80～89 rebirth / 90～96 bag；本檔 100～109）：
   100 preflight 失敗（當前角色切不回 DKBO、解散失敗、外掛解鎖失敗、讀寵物欄失敗）
   101 boxes 失敗（背包 / 倉庫操作，info.bag_rc）
-  102 store 失敗（pet.py 退出碼在 info.pet_rc；舊騎寵沒給 --store-mount 又佔位 → 也是 102）
+  102 保留不用（原 store 段，2026-10-16 拿掉）
   103 catch 失敗（取誘餌 / 外掛設定 / 抓寵逾時 / 新寵物數量不對 / 名字不是該物種 / 物種登錄失敗 / 欄位不夠 / 還原名字讀到費用字樣 pet 67）
   104 distribute 失敗
   105 ride 失敗
@@ -65,7 +67,7 @@
   109 參數 / 進度檔不一致（--from 的階段前置沒做、角色名不認得）
 驗證視窗（uikit 回 9）→ 一律回 9 並停手（鐵則 5）；斷線（netwatch halt）→ 10；其他腳本佔用畫面 → 8。
 
-安全：騎寵（uikit.MOUNTS）存倉只在 --store-mount 名字完全相同時放行；捉寵設置的「+」（買可抓捕數，花石幣）只有 --confirm-buy-catch 才按（catchbuy，前後驗石幣 / 鑽石）；不碰「丟棄不滿足條件的寵物」區塊；
+安全：捉寵設置的「+」（買可抓捕數，花石幣）只有 --confirm-buy-catch 才按（catchbuy，前後驗石幣 / 鑽石）；不碰「丟棄不滿足條件的寵物」區塊；
   只點讀字確認過的下拉選項；沒給 --confirm-buy-catch 不花石幣 / 鑽石（誘餌用禮盒送的）。
 """
 import argparse
@@ -89,7 +91,7 @@ PROGRESS = logpaths.p(uikit.CACHE / 'rebirth_pets.json')
 
 EXIT_PRE, EXIT_BOX, EXIT_STORE, EXIT_CATCH, EXIT_DIST, EXIT_RIDE, EXIT_BATTLE, EXIT_LOCK, EXIT_CLEAN, EXIT_ARGS = 100, 101, 102, 103, 104, 105, 106, 107, 108, 109
 
-STAGES = ['preflight', 'boxes', 'store', 'catch', 'distribute', 'ride', 'battle', 'lock', 'cleanup']
+STAGES = ['preflight', 'boxes', 'catch', 'distribute', 'ride', 'battle', 'lock', 'cleanup']
 ALL_ROLES = clients.roster()          # 這個視窗（PSA_CLIENT）的名單：主視窗 DKBO、DKBO2～5；PrimalSA2 = DKBO6～10；第 1 個 = 隊長
 LEADER = ALL_ROLES[0] if ALL_ROLES else ''
 FAMILY_NEIGHBORS = {'鯊魚系': (('犀牛', '牛系'), ('飛天蛙', '飛夭蛙', '蛙系'))}          # 外掛系別清單的上下鄰居（2026-10-12 實機）
@@ -276,34 +278,6 @@ def lock_items(pets: dict, roles: list, species: str, battle_pet: str, which=('�
     return items, ''
 
 
-def stores_for(slots: list, store_mount: str | None, keep: list | None = None) -> tuple:
-    """role 的寵物欄 → (要存的名單 [寵物名], 要先設等待的騎寵名 | None, 留在欄位的清單 [(slot, 原因)])。
-    空格略過；有名字的存（同名多隻就重複列）；沒名字但物種已確認的存物種名；沒名字又沒確認 → 留下並回報（不猜）；
-    騎寵名單（uikit.MOUNTS）只在 name == store_mount 時存（其餘留下）"""
-    names, left, mount = [], [], None
-    for s in slots:
-        if s.get('empty'):
-            continue
-        nm = s.get('name') or (s.get('species') if s.get('unnamed') else None)
-        if not nm and s.get('unnamed') and s.get('mountlike') and (s.get('img_score') or 0) >= 0.9 and store_mount and s.get('img_species') == store_mount:
-            nm = store_mount                                        # 使用者明講要存的騎寵：縮圖認得物種就放行（pet.py 還會再比對）
-        if not nm:
-            left.append((s['slot'], f'名字讀不出來 / 沒名字且物種未確認：{s.get("raw_name") or "?"}'))
-            continue
-        if keep and nm in keep:
-            left.append((s['slot'], f'{nm} 在 --keep'))
-            continue
-        if nm in uikit.MOUNTS or s.get('mountlike'):
-            if store_mount and nm == store_mount:
-                mount = nm
-                names.append(nm)
-            else:
-                left.append((s['slot'], f'{nm} 是騎寵，沒給 --store-mount {nm}（不碰）'))
-            continue
-        names.append(nm)
-    return names, mount, left
-
-
 def new_pets(before: list, after: list) -> list:
     """抓寵前後寵物欄 → 新增的寵物（前一次是空格、這次有；有沒有名字都算，名字為主 2026-10-14：還原名字後新寵物有物種名）"""
     was_empty = {s['slot'] for s in before if s.get('empty')}
@@ -336,7 +310,6 @@ def plan(o: dict) -> list:
     return [
         ('preflight', [f'確認當前 = {LEADER}', '解散隊伍', '外掛：5 人鎖定騎寵 / 戰寵先取消', '讀 5 人寵物欄']),
         ('boxes', [f'5 人開 {box}（內容存公共，{nxt} 存個人；bag 95 驗證失敗各步自動重試 1 次）'] if not o['no_boxes'] else ['（--no-boxes 跳過）']),
-        ('store', ['5 人寵物欄全存個人倉庫'] + ([f'舊騎寵 {o["store_mount"]} 先設等待再存（--store-mount）'] if o['store_mount'] else ['舊騎寵不碰（沒給 --store-mount）'])),
         ('catch', ([f'{ct} 外掛捉寵設置「+」花石幣買可抓捕數到 {n}（--confirm-buy-catch，每個 50,000，前後驗石幣 / 鑽石）', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 {n}、自動存倉庫 + 自動抓寵（直接抓，不試抓）', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才縮圖 + 成長字串登錄）', f'確認 {ct} 共 {n} 隻 {sp}'] if o.get('confirm_buy_catch') else [f'{ct} 公共倉庫取誘餌、拆到只剩 1', f'外掛捉寵設置 {fam} → {sp}、可抓捕數 1、自動存倉庫 + 自動抓寵', f'等抓完 → reset-name 還原名字、名字驗 {sp}（還原失敗才學物種）', f'再留 {n - 1} 個誘餌重複 → reset-name', f'確認 {ct} 共 {n} 隻 {sp}'])),
         ('distribute', [f'{ct} 存 {n - 1} 隻 {sp} 進公共（取最後格）', f'其他 {n - 1} 人各從公共取 1 隻']),
         ('ride', [f'5 人 {sp} 設騎乘']),
@@ -1121,33 +1094,6 @@ class Run:
         self.done('boxes', boxes=res)
         return 0
 
-    def store(self):
-        T, o = self.T, self.o
-        rc, pets = T.pets_list(ALL_ROLES)
-        if rc:
-            return self.stop(EXIT_STORE, f'讀寵物欄失敗（pet rc {rc}）', pet_rc=rc)
-        groups: dict = {}
-        notes = {}
-        for r in ALL_ROLES:
-            names, mount, left = stores_for(pets[r], o['store_mount'])
-            notes[r] = left
-            if mount:                                                      # 使用者當次明講：騎寵先設等待
-                rc = T.pet_set_state(r, mount, '等待', True)
-                if rc:
-                    return self.stop(EXIT_STORE, f'{r} 的 {mount} 設等待失敗（pet rc {rc}；外掛鎖定騎寵沒取消？）', pet_rc=rc)
-            if names:
-                groups.setdefault((tuple(names), bool(mount)), []).append(r)
-        for (names, has_mount), roles in groups.items():
-            rc, info = T.pet_store_many(roles, list(names), 'personal', allow_slot1=True, allow_mount_store=[o['store_mount']] if has_mount and o['store_mount'] else [])
-            if rc:
-                return self.stop(EXIT_STORE, f'{roles} 存 {list(names)} 失敗（pet rc {rc}：{info.get("msg", "")}）', pet_rc=rc)
-        stuck = {r: l for r, l in notes.items() if l}
-        for r, l in stuck.items():
-            event(f'{r} 留在寵物欄：{l}')
-        self.info['left_in_bar'] = stuck
-        self.done('store', left_in_bar=stuck)
-        return 0
-
     def catch(self):
         T, o = self.T, self.o
         sp, ct, n = o['mount_species'], o['catcher'], o['count']
@@ -1164,7 +1110,7 @@ class Run:
             self.done('catch', caught=len(have))
             return 0
         if empties < need:
-            return self.stop(EXIT_CATCH, f'{ct} 寵物欄空格 {empties} < 還要抓的 {need}（舊寵物沒存完 / 舊騎寵沒給 --store-mount？）')
+            return self.stop(EXIT_CATCH, f'{ct} 寵物欄空格 {empties} < 還要抓的 {need}（舊寵物沒存完？rebirth.py 的 storepets 階段應已全存；寵物欄還有寵物請先清空）')
         before = pets[ct]
         if o.get('confirm_buy_catch'):                                     # 使用者規定：騎寵直接用石幣「+」買可抓捕數（每個 50,000）→ 買到 = n 再直接抓
             rc = self._buy_catch(ct, n)
@@ -1400,11 +1346,8 @@ class Run:
 
 def write_quest_log(o: dict, prog: dict, final: dict) -> None:
     lines = [f'\n## 轉生後寵物重整（腳本 rebirth_pets.py，{time.strftime("%Y-%m-%d")}）',
-             f'- 參數：轉 {o["trans"]}、騎寵 {o["mount_species"]}、戰寵 {o["battle_pet"]}、捉寵角色 {o["catcher"]}、{o["count"]} 隻、--store-mount {o["store_mount"] or "（無）"}。',
+             f'- 參數：轉 {o["trans"]}、騎寵 {o["mount_species"]}、戰寵 {o["battle_pet"]}、捉寵角色 {o["catcher"]}、{o["count"]} 隻。',
              f'- 完成階段：{"、".join(prog.get("done", []))}。']
-    left = prog.get('data', {}).get('left_in_bar')
-    if left:
-        lines.append(f'- 存倉後仍留在寵物欄：{left}')
     if final:
         lines.append('- 結束寵物欄：' + '；'.join(f'{r} ' + ' / '.join(f'{n}({s})' for n, s in v) for r, v in final.items()) + '。')
     try:
@@ -1428,6 +1371,10 @@ def run(trans=1, from_stage: str = 'preflight', to_stage: str = 'cleanup', dry_r
         print(f'{SRC}：--catcher {o["catcher"]!r} 不認得（這個視窗的名單：{ALL_ROLES or "沒有登錄（clients.ROSTERS）"}）', file=sys.stderr)
         return EXIT_ARGS
     o['catcher'] = cc
+    if from_stage == 'store' or to_stage == 'store':                     # store 段已拿掉（2026-10-16）：舊的 --from / --to store 當作 boxes→catch 的邊界
+        print(f'{SRC}：store 階段已拿掉（舊寵物改由 rebirth.py storepets 全存）；--from store 改從 catch、--to store 改到 boxes', file=sys.stderr)
+        from_stage = 'catch' if from_stage == 'store' else from_stage
+        to_stage = 'boxes' if to_stage == 'store' else to_stage
     if from_stage not in STAGES or to_stage not in STAGES or STAGES.index(from_stage) > STAGES.index(to_stage):
         print(f'{SRC}：--from / --to 階段不對（{STAGES}）', file=sys.stderr)
         return EXIT_ARGS
@@ -1437,11 +1384,8 @@ def run(trans=1, from_stage: str = 'preflight', to_stage: str = 'cleanup', dry_r
         return EXIT_ARGS
     o['mount_species'], o['battle_pet'] = uikit.snap_pet(o['mount_species']), uikit.snap_pet(o['battle_pet'])
     if o['store_mount']:
-        sm = uikit.snap_pet(o['store_mount'])
-        if not sm or sm not in uikit.MOUNTS:
-            print(f'{SRC}：--store-mount {o["store_mount"]!r} 不是騎寵名單 {uikit.MOUNTS} 之一', file=sys.stderr)
-            return EXIT_ARGS
-        o['store_mount'] = sm
+        print(f'{SRC}：--store-mount 已無作用（2026-10-16 起舊寵物由 rebirth.py storepets 在轉生前全存，本腳本不再有 store 段）', file=sys.stderr)
+        o['store_mount'] = None
     if o.get('confirm_buy_catch'):
         o['direct_catch'] = True                                                 # 買到 count 個可抓捕數就直接抓（不取誘餌、不試抓）
     if not 2 <= o['count'] <= 5:
@@ -1492,9 +1436,9 @@ def main(argv=None) -> int:
     ap.add_argument('--catcher', default=DEFAULTS['catcher'])
     ap.add_argument('--count', type=int, default=DEFAULTS['count'])
     ap.add_argument('--family', default=None)
-    ap.add_argument('--store-mount', default=None, help='使用者當次明講才用：舊騎寵（例 瑪斯貝卡）也存個人倉庫')
-    ap.add_argument('--from', dest='from_stage', default='preflight', choices=STAGES)
-    ap.add_argument('--to', dest='to_stage', default='cleanup', choices=STAGES)
+    ap.add_argument('--store-mount', default=None, help='已無作用（保留參數，印一行提示）：舊寵物改由 rebirth.py storepets 全存')
+    ap.add_argument('--from', dest='from_stage', default='preflight', choices=STAGES + ['store'])
+    ap.add_argument('--to', dest='to_stage', default='cleanup', choices=STAGES + ['store'])
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--no-boxes', action='store_true')
     ap.add_argument('--direct-catch', action='store_true', help='catch：可抓捕數已用外掛「+」買好 = count，不取誘餌、不試抓，直接抓')

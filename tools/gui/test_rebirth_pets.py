@@ -57,26 +57,7 @@ def S(n, **k):
 
 E = lambda n: {'slot': n, 'empty': True}    # noqa: E731
 bar = [S(1, name='瑪斯貝卡', state='騎乘', mountlike=True), S(2, name='迪基格斯', state='出戰'), S(3, unnamed='1/2/3/4', raw_name='?(1/2/3/4)'), E(4), E(5)]
-names, mount, left = rp.stores_for(bar, None)
-check('stores_for：沒給 --store-mount → 騎寵與沒名字未確認的留下，只存迪基格斯', names == ['迪基格斯'] and mount is None and [x[0] for x in left] == [1, 3], str(left))
-names, mount, left = rp.stores_for(bar, '瑪斯貝卡')
-check('stores_for：--store-mount 瑪斯貝卡 → 騎寵也存、回報要先設等待', names == ['瑪斯貝卡', '迪基格斯'] and mount == '瑪斯貝卡')
-names, mount, left = rp.stores_for(bar, '布拉奇多斯')
-check('stores_for：--store-mount 名字與寵物不同 → 瑪斯貝卡仍不碰', '瑪斯貝卡' not in names and mount is None)
-bar2 = [S(1, unnamed='49/9/8/2', raw_name='?(49/9/8/2)', species=BRA, mountlike=True), S(2, name=DOR)]
-check('stores_for：沒名字但物種是騎寵（布拉奇多斯）→ 沒給旗標不存', rp.stores_for(bar2, None)[0] == [DOR] and rp.stores_for(bar2, BRA)[0] == [BRA, DOR])
-# 縮圖比對認物種（3d0362b）：沒名字 + mountlike + img_score >= 0.9 + img_species == --store-mount 才放行
-def _um(**k):
-    d = {'slot': 1, 'unnamed': True, 'mountlike': True, 'img_species': BRA, 'img_score': 0.95}
-    d.update(k)
-    return d
-check('stores_for：縮圖 0.95 認出 --store-mount 物種 → 存', rp.stores_for([_um()], BRA) == ([BRA], BRA, []))
-check('stores_for：縮圖 0.9（邊界）→ 存', rp.stores_for([_um(img_score=0.9)], BRA)[0] == [BRA])
-check('stores_for：縮圖 0.89 → 留下回報', rp.stores_for([_um(img_score=0.89)], BRA)[0] == [] and len(rp.stores_for([_um(img_score=0.89)], BRA)[2]) == 1)
-check('stores_for：縮圖物種與 --store-mount 不同 → 留下', rp.stores_for([_um(img_species=DOR)], BRA)[0] == [])
-check('stores_for：沒給 --store-mount → 縮圖再準也不存', rp.stores_for([_um()], None)[0] == [])
-check('stores_for：不是 mountlike 的沒名字寵物，縮圖不放行', rp.stores_for([_um(mountlike=False)], BRA)[0] == [])
-check('stores_for：img_score 缺 → 當 0、留下', rp.stores_for([_um(img_score=None)], BRA)[0] == [])
+check('store 段已拿掉：STAGES 沒有 store、stores_for 不存在', 'store' not in rp.STAGES and not hasattr(rp, 'stores_for'))
 check('new_unnamed：前一次空格、這次有沒名字 → 新增', [s['slot'] for s in rp.new_unnamed([S(1, name='x'), E(2), E(3)], [S(1, name='x'), S(2, unnamed='1/1/1/1'), E(3)])] == [2]
       and rp.new_unnamed([S(1, name='x'), E(2)], [S(1, name='x'), S(2, name='y')]) == [])
 check('role_ident：騎寵 = 沒名字 → growth；戰寵 = name；找不到 / 兩隻 → None',
@@ -111,7 +92,7 @@ class Fake:
         self.team = True
         self.locks = {r: {'騎寵': True, '戰寵': True} for r in ROLES}
         self.lock_ident = {}
-        self.bar = {r: [dict(name='迪基格斯', state='出戰'), dict(name='瑪斯貝卡', state='騎乘'), None, None, None] for r in ROLES}
+        self.bar = {r: [None, None, None, None, None] for r in ROLES}      # 2026-10-16 起從空寵物欄開始（舊寵物已由 rebirth.py storepets 全存）
         self.depot = {r: {'personal': [DOR], 'public': []} for r in ROLES}
         shared = []
         for r in ROLES:
@@ -397,7 +378,7 @@ class Fake:
 
 
 def mkopts(**kw):
-    return dict(mount_species=BRA, battle_pet=DOR, catcher='DKBO2', count=5, store_mount='瑪斯貝卡', **kw)
+    return dict(mount_species=BRA, battle_pet=DOR, catcher='DKBO2', count=5, **kw)
 
 
 def go(fake, **kw):
@@ -430,11 +411,11 @@ check('CLI --no-grind 帶入 run', _kw.get('no_grind') is True, str(_kw))
 # ---------------- dry-run / 參數 ----------------
 f = Fake()
 rc, out = go(f, dry_run=True)
-check('--dry-run：rc 0、完全沒呼叫 Tools、印出 9 個階段', rc == 0 and f.calls == [] and all(s in out for s in rp.STAGES), out[-200:])
-check('--dry-run 的計畫列出舊騎寵處理（--store-mount）與雷龍系', '瑪斯貝卡' in out and '雷龍系' in out)
+check('--dry-run：rc 0、完全沒呼叫 Tools、印出全部階段', rc == 0 and f.calls == [] and all(s in out for s in rp.STAGES), out[-200:])
+check('--dry-run 的計畫沒有 store 段、有雷龍系', '[store]' not in out and '雷龍系' in out)
 f = Fake()
-check('參數：catcher 不認得 / count 超範圍 / 騎寵名不在 Monster 表 / store-mount 不是騎寵 / --from 在 --to 後 → 109 且零呼叫',
-      all(go(Fake(), **kw)[0] == 109 for kw in ({'catcher': 'XYZ'}, {'count': 9}, {'mount_species': '亂碼寵'}, {'store_mount': '迪基格斯'}, {'from_stage': 'lock', 'to_stage': 'store'})))
+check('參數：catcher 不認得 / count 超範圍 / 騎寵名不在 Monster 表 / --from 在 --to 後 → 109 且零呼叫',
+      all(go(Fake(), **kw)[0] == 109 for kw in ({'catcher': 'XYZ'}, {'count': 9}, {'mount_species': '亂碼寵'}, {'from_stage': 'lock', 'to_stage': 'catch'})))
 
 # ---------------- 完整流程 ----------------
 f = Fake()
@@ -449,8 +430,8 @@ check('外掛：5 人鎖定騎寵（物種名，找不到退回成長字串）�
       all(f.locks[r] == {'騎寵': True, '戰寵': True} and f.lock_ident[(r, '騎寵')] == ('name', BRA, (), G5) and f.lock_ident[(r, '戰寵')] == ('name', DOR) for r in ROLES),
       str(f.lock_ident.get(('DKBO', '騎寵'))))
 ci = lambda name: [i for i, c in enumerate(f.calls) if c[0] == name]    # noqa: E731
-check('順序：preflight < 禮盒 < store < 抓寵 < distribute < ride < battle < lock < cleanup',
-      ci('disband')[0] < ci('box_open')[0] < ci('store_many')[0] < ci('catch_setup')[0] < [i for i, c in enumerate(f.calls) if c[0] == 'store_many' and c[3] == 'public'][0]
+check('順序：preflight < 禮盒 < 抓寵 < distribute < ride < battle < lock < cleanup（沒有 store 段）',
+      ci('disband')[0] < ci('box_open')[0] < ci('catch_setup')[0] < [i for i, c in enumerate(f.calls) if c[0] == 'store_many' and c[3] == 'public'][0]
       < [i for i, c in enumerate(f.calls) if c[0] == 'set_state' and c[3] == '騎乘'][0] < [i for i, c in enumerate(f.calls) if c[0] == 'take_many' and c[3] == 'personal'][0]
       < [i for i, c in enumerate(f.calls) if c[0] == 'lock_set' and c[3]][0] < ci('bait_return')[-1])
 check('preflight：外掛解鎖先於存倉（5 人 × 2 項）、解散隊伍', len([c for c in f.calls if c[0] == 'lock_set' and c[3] is False]) == 10 and ci('disband'))
@@ -458,7 +439,7 @@ check('抓寵：先試 1（誘餌留 1、可抓捕數 1）、還原名字、再 
       [c[1:] for c in f.calls if c[0] == 'catch_setup'] == [('DKBO2', '雷龍系', BRA, 1), ('DKBO2', '雷龍系', BRA, 4)]
       and [c[2] for c in f.calls if c[0] == 'bait_take'] == [1, 4] and [c[1] for c in f.calls if c[0] == 'reset_names'] == [('DKBO2',), ('DKBO2',)]
       and not ci('learn_species') and ci('catch_wait')[0] < ci('reset_names')[0] < ci('catch_setup')[1])
-check('舊騎寵：--store-mount 瑪斯貝卡 → 先設等待（allow-mount）再存，存倉名單帶旗標', ('set_state', 'DKBO', '瑪斯貝卡', '等待', True) in f.calls and any(c[0] == 'store_many' and c[3] == 'personal' and '瑪斯貝卡' in c[2] and c[4] == ('瑪斯貝卡',) for c in f.calls))
+check('沒有 store 段：不存個人倉庫、不設等待', not any(c[0] == 'store_many' and c[3] == 'personal' for c in f.calls) and not any(c[0] == 'set_state' and c[3] == '等待' for c in f.calls))
 check('分配：catcher 存 4 隻進公共（取最後格 pick=last、旗標只放行布拉奇多斯）、其他 4 人各取 1',
       ('store_many', ('DKBO2',), (BRA,) * 4, 'public', (BRA,), 'last') in f.calls and ('take_many', ('DKBO', 'DKBO3', 'DKBO4', 'DKBO5'), (BRA,), 'public') in f.calls)
 check('戰寵：5 人從個人倉庫取朵拉比斯、設出戰（不帶 allow_mount）', ('take_many', tuple(ROLES), (DOR + '@1',), 'personal') in f.calls and all(('set_state', r, DOR, '出戰', False) in f.calls for r in ROLES))
@@ -466,11 +447,13 @@ check('誘餌：公共 = 禮盒 50 個（沒有花石幣），catcher 背包最�
 check('收尾：當前 DKBO、quest-log 有寫', f.cur == 'DKBO' and '轉生後寵物重整' in rp.QUEST_LOG.read_text(encoding='utf-8'))
 check('騎寵保護：所有 store_many 呼叫中，騎寵名只在 allow 名單內', all(set(c[2]) & set(uikit.MOUNTS) <= set(c[4]) for c in f.calls if c[0] == 'store_many'))
 
-# ---------------- 沒給 --store-mount ----------------
+# ---------------- --store-mount 已無作用 ----------------
 f = Fake()
-rc, out = go(f, store_mount=None)
-check('沒給 --store-mount：舊騎寵不碰 → catch 欄位不夠 rc 103、沒抓寵、沒設任何等待', rc == 103 and not ci('catch_setup') and not any(c[0] == 'set_state' for c in f.calls) and 'store-mount' in out.replace('--store-mount', 'store-mount'), f'rc={rc}')
-check('  瑪斯貝卡仍在寵物欄（沒存）', all(any(p and p['name'] == '瑪斯貝卡' for p in f.bar[r]) for r in ROLES))
+rc, out = go(f, store_mount='瑪斯貝卡')
+check('--store-mount：只印提示、rc 0、不存倉不設等待（沒有 store 段）', rc == 0 and '已無作用' in out and not any(c[0] == 'set_state' and c[3] == '等待' for c in f.calls) and 'store' not in rp.LAST['done'], f'rc={rc}')
+f = Fake()
+rc, _ = go(f, to_stage='store')
+check('舊的 --to store → 改到 boxes', rc == 0 and rp.LAST['done'] == ['preflight', 'boxes'], str(rp.LAST.get('done')))
 
 # ---------------- 失敗路徑 ----------------
 f = Fake()
@@ -492,7 +475,7 @@ f.fail['box_open'] = 95
 check('禮盒失敗 → 101', go(f)[0] == 101 and not ci('store_many'))
 f = Fake()
 f.fail['store_many'] = 76
-check('存倉失敗 → 102（info 有 pet_rc）', go(f)[0] == 102 and rp.LAST.get('pet_rc') == 76)
+check('pet_store_many 失敗（現在只剩 distribute 用）→ 104、info 有 pet_rc', go(f)[0] == 104 and rp.LAST.get('pet_rc') == 76)
 f = Fake()
 f.fail['bait_take'] = 95
 check('取誘餌失敗 → 103、沒設外掛', go(f)[0] == 103 and not ci('catch_setup'))
@@ -542,11 +525,6 @@ f = Fake()
 f.fail['take_many'] = 72
 check('分配取不到 → 104（或戰寵取不到 106）；先到的是 distribute', go(f)[0] == 104)
 f = Fake()
-f.fail['set_state'] = 74
-rc, _ = go(f, store_mount=None, from_stage='preflight', to_stage='preflight')
-rc2 = go(f)[0]
-check('設狀態失敗（鎖定擋住 74）→ 先在 store 設舊騎寵等待就停 102', rc2 == 102)
-f = Fake()
 orig = f.pet_set_state
 f.pet_set_state = lambda r, name, state, allow_mount=False: (105 if state == '騎乘' else orig(r, name, state, allow_mount))
 check('設騎乘失敗 → 105', go(f)[0] == 105)
@@ -562,7 +540,7 @@ check('鎖定 OCR 找不到選項 → 107', go(f)[0] == 107)
 # ---------------- --from 續跑 ----------------
 f = Fake()
 rc, _ = go(f, to_stage='catch')
-check('--to catch：跑到抓寵就停（進度檔有 4 個階段）', rc == 0 and rp.LAST['done'] == ['preflight', 'boxes', 'store', 'catch'])
+check('--to catch：跑到抓寵就停（進度檔有 3 個階段）', rc == 0 and rp.LAST['done'] == ['preflight', 'boxes', 'catch'])
 n0 = len(f.calls)
 rc, _ = go(f, from_stage='distribute')
 check('--from distribute 接著跑完：rc 0、沒有重做 preflight / 禮盒 / 存倉 / 抓寵', rc == 0 and rp.LAST['done'][-1] == 'cleanup'
