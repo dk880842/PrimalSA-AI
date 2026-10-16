@@ -27,7 +27,10 @@ status：ok（沒事）/ reconnected（重連 / 重新登錄成功，已恢復�
   python tools/gui/netwatch.py --once                 檢查一次
   python tools/gui/netwatch.py --watch [--interval 10]  常駐（沒有其他腳本在跑、只是掛機時用）
   python tools/gui/netwatch.py --status                印目前 halt / 失敗計數
-退出碼：0 正常、9 本視窗驗證停手旗標、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援。
+版本錯誤（2026-10-16 伺服器改版 1.0.1 → 1.0.2）：按登錄後頂端閃黑條「登錄失敗！版本錯誤！」→ 腳本迴圈（guard）halt 退 10、理由提示跑 clientupdate.py；
+命令列 --once / --watch 直接接 clientupdate.run（關本視窗 → 重開 → 熱更新 → 登入 → grind ensure；--no-update 不接）。
+「提示：伺服器已關閉！」提示窗（同款單鈕）也按確定回登入畫面（未實機）。帳號欄核對容許字尾文字游標（重打後一定有，accounts.classify caret）。
+退出碼：0 正常、9 本視窗驗證停手旗標、10 需要人類登入（halt）、11 連續重連失敗、2 版面不支援；版本錯誤接 clientupdate 時回它的退出碼（210～219）。
 狀態檔（tools/.cache/，非主視窗在 tools/.cache/clients/<程序名>/；不進 git）：netwatch.halt（存在 = 已停手，等人類登入；HUD 回來後自動刪除）、
 netwatch.json（連續失敗計數）、netwatch.act.lock（動作鎖：同時只有一支腳本在處理重連，不會互相亂點）、netwatch.lock（--watch 單例）。
 """
@@ -72,6 +75,7 @@ SIG_DIALOG = screen_sigs.sig_str(screen_sigs.NET_DIALOG)
 SIG_LOGIN = screen_sigs.sig_str(screen_sigs.NET_LOGIN)
 MSG_BOX = (585, 370, 260, 40)        # 提示視窗訊息文字（OCR 輔助確認，白字深邊）
 MSG_KEYS = ('網', '路', '異', '重', '連')
+SERVER_CLOSED_KEYS = ('伺服', '關閉')   # 「提示：伺服器已關閉！」（伺服器維修 / 改版前；同款單鈕窗，確定 715,557 → 回登入畫面；2026-10-16 p1 手動看過，未實機自動）
 LOGIN_BOX = (460, 380, 520, 130)     # 登入畫面「帳號 / 密碼」標籤（只讀標籤，不讀欄位內容）
 SWITCH_BTN = (763, 760)
 # 登錄流程（2026-10-10 實測）
@@ -92,6 +96,14 @@ ALL_LOGIN_BTN = (740, 640)           # 選擇角色面板「一鍵全登」
 SIG_CHARSEL = screen_sigs.sig_str(screen_sigs.NET_CHARSEL)
 SWITCH_ALL_BTN = (716, 578)          # 切換角色面板「全部登錄」
 LOGIN_TIMEOUT = 120                  # 登錄後等進遊戲的上限（秒）
+# 「登錄失敗！版本錯誤！」（伺服器改版、客戶端沒更新；2026-10-16 p1 17:08 實際看過）：按登錄後頂端閃一條黑條（約 0.5 秒，y≈188 置中），畫面停在登入畫面。
+# 偵測（未實機，沒有黑條當下的截圖）：按登錄前先讀一次這排點當基準，按完 VERSION_WATCH_S 秒內快速連讀；
+# ≥ VERSION_MIN 點「變成深色（max<90）且比基準暗 90 以上」= 黑條（登入畫面這排是 Logo，本來不是一整排黑）。
+VERSION_PTS = [(x, 188) for x in range(600, 841, 24)]
+VERSION_MIN = 7
+VERSION_WATCH_S = 3.0
+VERSION_HALT = '登錄失敗：版本錯誤（伺服器改版）'
+STUCK_LOGIN_S = 15                   # on_version='return' 時：按登錄後一直停在登入畫面超過幾秒（沒選角 / 沒提示窗）也當版本錯誤（重開客戶端無害）
 CARDS_BOX = (560, 280, 450, 230)     # 切換角色面板的角色卡片（讀「單人 / 隊長 / 隊員」）
 
 
@@ -179,14 +191,14 @@ def hud_ok() -> bool:
 def net_glyph() -> bool | None:
     """現場讀「網路異常，是否重連?」白字字形（screen_sigs.net_lost：框 + 字形，watch 用同一份）→ True / False；讀不到 None"""
     pts = screen_sigs.net_points()
-    rc, out = _ps('pixel', ' '.join(f'{x},{y}' for x, y in pts))
-    try:
-        cols = [tuple(int(v) for v in c.split(',')) for c in out.split()]
-    except ValueError:
-        return None
-    if rc != 0 or len(cols) != len(pts) or any(len(c) != 3 for c in cols):
-        return None
-    return screen_sigs.net_lost(dict(zip(pts, cols)))
+    cols = _pixels(pts)
+    return None if cols is None else screen_sigs.net_lost(dict(zip(pts, cols)))
+
+
+def server_closed_text(txt: str) -> bool:
+    """OCR 訊息是「伺服器已關閉」（兩個關鍵字都要有；OCR 常把「伺服器」讀成「伺服 器」→ 先去空白）"""
+    t = ''.join((txt or '').split())
+    return all(k in t for k in SERVER_CLOSED_KEYS)
 
 
 def detect() -> str | None:
@@ -197,6 +209,9 @@ def detect() -> str | None:
         if net_glyph() is True:
             return 'dialog'
         txt = ''.join(_ocr(MSG_BOX, '-Light', 200, '-Zooms', '2,3'))
+        if txt and server_closed_text(txt):
+            log('netwatch：提示視窗是「伺服器已關閉」，按確定回登入畫面（之後登錄若版本錯誤 → clientupdate.py）', act=False)
+            return 'dialog'
         if txt and not any(k in txt for k in MSG_KEYS):
             log(f'netwatch：像素像提示視窗，但訊息是「{txt}」不是網路異常，不處理', act=False)
             return None
@@ -450,19 +465,22 @@ def login_mode(procs=None) -> tuple:
     return how, why, ''
 
 
-def read_account(mine: str, tries: int = 2) -> str:
+def read_account(mine: str, tries: int = 3) -> str:
     """OCR 帳號欄 → 'self' / 'other' / 'unreadable'（accounts.classify：2 / 3 / 4 倍各自的整欄文字一致才算讀得出）。
-    讀不出時重讀一次。只回判定，**讀到的字不回傳、不 log**"""
+    欄位有焦點時字尾有文字游標（重打後一定有；2026-10-16 三個視窗重打後都核對「不符 / 讀不出」就是它）→ caret=True：
+    字尾像游標的字元容錯，且不能跟設定檔裡別的視窗帳號混淆（accounts.classify）。不點別處移焦點（登入畫面不多點東西，鐵則 2）。
+    讀不出時隔 0.7 秒重讀（游標會閃，最多 tries 次）。只回判定，**讀到的字不回傳、不 log**"""
     v = 'unreadable'
+    others = accounts.all_accounts()
     for _ in range(tries):
         by_zoom: dict = {}
         for l in _ocr_lines(ACCT_OCR, *ACCT_OCR_OPTS):
             by_zoom.setdefault(l.get('zoom'), []).append(l)
         texts = [''.join(str(l.get('text', '')) for l in sorted(ls, key=lambda l: l.get('x', 0))) for ls in by_zoom.values()]
-        v = accounts.classify(texts, mine)
+        v = accounts.classify(texts, mine, caret=True, others=others)
         if v != 'unreadable':
             return v
-        time.sleep(0.5)
+        time.sleep(0.7)
     return v
 
 
@@ -524,9 +542,49 @@ def retype_account(mine: str) -> str:
     return ''
 
 
-def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: bool = True) -> dict:
+def _pixels(pts) -> list | None:
+    """一次讀一組點 → [(r,g,b)...]；讀不到 / 點數不符 None"""
+    rc, out = _ps('pixel', ' '.join(f'{x},{y}' for x, y in pts))
+    try:
+        cols = [tuple(int(v) for v in c.split(',')) for c in out.split()]
+    except ValueError:
+        return None
+    if rc != 0 or len(cols) != len(pts) or any(len(c) != 3 for c in cols):
+        return None
+    return cols
+
+
+def version_bar(base, cols) -> bool:
+    """按登錄前基準 base 與現在 cols（VERSION_PTS 的顏色）比 → 是不是頂端黑條「登錄失敗！版本錯誤！」。
+    base 讀不到（None）時只要求 cols 幾乎全黑（max<50）"""
+    if not cols:
+        return False
+    n = 0
+    for i, c in enumerate(cols):
+        if base and i < len(base):
+            if max(c) < 90 and sum(base[i]) - sum(c) >= 90:
+                n += 1
+        elif max(c) < 50:
+            n += 1
+    return n >= VERSION_MIN
+
+
+def watch_version(base, secs: float = VERSION_WATCH_S) -> bool:
+    """按完登錄後 secs 秒內連讀 VERSION_PTS（常駐 server 約 0.1 秒一次），看到黑條就回 True"""
+    end = time.time() + secs
+    while time.time() < end:
+        if version_bar(base, _pixels(VERSION_PTS)):
+            return True
+    return False
+
+
+def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: bool = True,
+            on_version: str = 'halt', clear_halt: bool = False) -> dict:
     """登入畫面 → 檢查帳密欄有內容 → 點「登錄」→ 處理選擇角色 / 載入 → 回到遊戲 → recover。
-    失敗規則：欄位空 / 出現提示視窗（密碼錯誤、封停、維護、驗證）/ 看不懂的畫面逾時 / 連續 3 次 → halt（不重試）"""
+    失敗規則：欄位空 / 出現提示視窗（密碼錯誤、封停、維護、驗證）/ 看不懂的畫面逾時 / 連續 3 次 → halt（不重試）。
+    版本錯誤（按登錄後頂端黑條，watch_version）：on_version='halt'（預設，腳本迴圈的 guard）→ halt，理由 VERSION_HALT + 提示跑 clientupdate.py；
+    on_version='return'（clientupdate.py 用）→ 不 halt、不算登錄失敗，回 {'status': 'version'}；這時「按登錄後停在登入畫面 STUCK_LOGIN_S 秒」也算。
+    clear_halt=True（clientupdate.py 用）：帳號核對通過、要按登錄前刪本視窗 netwatch.halt（只在本次剛核對通過時）"""
     if not _take(ACT_LOCK, 300):
         return {'status': 'ok', 'busy': True}
     try:
@@ -572,18 +630,34 @@ def relogin(src: str, grind_ensure: bool = True, encounter: bool = True, team: b
                     why = retype_account(acct)
                     if why:
                         return halt(why, src)
+            if clear_halt and HALT.exists():
+                _release(HALT)
+                log('netwatch：帳號核對通過，刪本視窗 netwatch.halt（clientupdate）')
             i = errlog.add('斷線回到登入畫面，自動按「登錄」重新登入（使用者授權'
                            + ('；帳號欄核對符合' if how == 'account' else '') + '）', source=src)
             log('netwatch：登入畫面，' + ('帳號欄核對符合' if how == 'account' else '帳密欄已有內容') + ' → 按登錄')
+            base = _pixels(VERSION_PTS)
             gui('click', str(LOGIN_BTN[0]), str(LOGIN_BTN[1]), note='按登錄')
+            flash = watch_version(base)
         finally:
             if held:
                 _release(LOGIN_INPUT_LOCK)
+        if flash:
+            errlog.fix(i, '按登錄後頂端黑條「登錄失敗！版本錯誤！」→ 伺服器改版，要重開客戶端更新（clientupdate.py）')
+            log(f'netwatch：{VERSION_HALT}（頂端黑條）')
+            if on_version == 'return':
+                return {'status': 'version', 'flash': True}
+            r = halt(f'{VERSION_HALT} → 跑 clientupdate.py run（重開本視窗客戶端、熱更新、再登入）', src)
+            return r | {'version': True}
         deadline = time.time() + LOGIN_TIMEOUT
         picked = 0                       # 一鍵全登最多點 2 次
         t0 = time.time()
         while time.time() < deadline:
             time.sleep(2)
+            if on_version == 'return' and picked == 0 and time.time() - t0 >= STUCK_LOGIN_S and _match(SIG_LOGIN) is True:
+                errlog.fix(i, f'按登錄後 {STUCK_LOGIN_S} 秒仍在登入畫面（沒看到黑條，當版本錯誤處理）→ clientupdate 重開客戶端')
+                log(f'netwatch：按登錄後 {STUCK_LOGIN_S} 秒仍停在登入畫面，當版本錯誤')
+                return {'status': 'version', 'flash': False}
             if hud_ok():
                 st['login_fails'] = 0
                 st['fails'] = 0
@@ -668,6 +742,14 @@ def check_and_reconnect(shot=None, src: str = 'netwatch', encounter: bool = True
         _release(ACT_LOCK)
 
 
+def run_clientupdate(grind: bool = True) -> int:
+    """命令列（--once / --watch，watch.py 另開的也是）登錄版本錯誤 → 直接接 clientupdate.run（關本視窗 → 重開 → 熱更新 → 登入）。
+    腳本迴圈裡的 guard 不做（只 halt 退 10，提示跑 clientupdate.py）：重開客戶端會打斷呼叫端，交給命令列 / 使用者"""
+    log('netwatch：登錄版本錯誤 → 自動跑 clientupdate.py run（--no-update 可關）')
+    import clientupdate                 # 延後 import：clientupdate → netwatch
+    return clientupdate.run(grind=grind)
+
+
 def guard(src: str, **kw) -> dict:
     """給腳本迴圈用：要停手（halt / fatal / verify）就直接 sys.exit(10 / 11 / 9)（會跑 finally），重連成功回傳 dict（呼叫端依 'reconnected' 重設自己的狀態）"""
     r = check_and_reconnect(src=src, **kw)
@@ -690,6 +772,7 @@ def main() -> int:
     ap.add_argument('--no-team', action='store_true', help='恢復時不檢查隊伍')
     ap.add_argument('--no-encounter', action='store_true', help='恢復時不管原地遇敵')
     ap.add_argument('--no-grind', action='store_true', help='重登後不自動跑 grind.py ensure')
+    ap.add_argument('--no-update', action='store_true', help='登錄版本錯誤時不自動跑 clientupdate.py（只 halt 提示）')
     a = ap.parse_args()
     if a.status:
         print('halt:', HALT.read_text(encoding='utf-8').strip() if HALT.exists() else '無', '| 狀態:', _load())
@@ -701,6 +784,8 @@ def main() -> int:
     if not a.watch:
         r = check_and_reconnect(**kw)
         print(json.dumps(r, ensure_ascii=False, default=str))
+        if r.get('version') and not a.no_update:
+            return run_clientupdate(grind=not a.no_grind)
         return {'halt': EXIT_HALT, 'fatal': EXIT_FATAL, 'verify': EXIT_VERIFY}.get(r['status'], 0)
     if not _take(WATCH_LOCK, 120):
         log('已有另一支 netwatch --watch 在跑（tools/.cache/netwatch.lock）')
@@ -716,6 +801,9 @@ def main() -> int:
             if r['status'] == 'verify':
                 log(r['reason'])
                 return EXIT_VERIFY
+            if r.get('version') and not a.no_update:
+                _release(WATCH_LOCK)
+                return run_clientupdate(grind=not a.no_grind)
             if r['status'] in ('halt', 'fatal'):
                 return EXIT_HALT if r['status'] == 'halt' else EXIT_FATAL   # 人類登入後重新啟動即可（halt 檔會自動清）
             time.sleep(a.interval)

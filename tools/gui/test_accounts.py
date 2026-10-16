@@ -73,6 +73,19 @@ check('classify：全空 → unreadable', accounts.classify([], 'test01') == 'un
 check('classify：怪字 → unreadable', accounts.classify(['te$t01'] * 3, 'te$t01') == 'unreadable')
 check('實測寫法（字母 o 被讀成 0）：xyzo001 讀成 xyz0001 → self', accounts.classify(['xyz0001'] * 3, 'xyzo001') == 'self')
 check('實測寫法：xyz0001 對 xyzo002 → other', accounts.classify(['xyz0001'] * 3, 'xyzo002') == 'other')
+# 文字游標容錯（caret=True；2026-10-16 三個視窗重打帳號後核對「不符 / 讀不出」：字尾有游標「|」）
+check('caret：字尾 | → self', accounts.classify(['xyz0001|'] * 3, 'xyzo001', caret=True) == 'self')
+check('caret：各倍數游標讀法不同（| / I / 沒讀到）→ self', accounts.classify(['xyz0001|', 'xyz0001I', 'xyz0001'], 'xyzo001', caret=True) == 'self')
+check('caret 關（舊行為）：字尾 | → other / unreadable 不變', accounts.classify(['xyz0001|'] * 3, 'xyzo001') == 'other'
+      and accounts.classify(['xyz0001|', 'xyz0001'], 'xyzo001') == 'unreadable')
+check('caret：別的帳號 + 游標 → other', accounts.classify(['xyz0002|'] * 3, 'xyzo001', caret=True) == 'other')
+check('caret：本帳號 test0、欄位是設定檔另一帳號 test01 → unreadable（分不出，停手）',
+      accounts.classify(['test01'] * 3, 'test0', caret=True, others=['test0', 'test01']) == 'unreadable')
+check('caret：本帳號 test01、欄位 test01| → self（others 有 test0 也不混淆：交集只有 test01 / test01 去尾不成立）',
+      accounts.classify(['test01|'] * 3, 'test01', caret=True, others=['test0', 'test01']) == 'self')
+check('caret：尾碼 2 ≠ 1 → other（游標容錯不吃真數字差）', accounts.classify(['test02'] * 3, 'test01', caret=True) == 'other')
+check('caret：只有 1 個倍數讀到 → unreadable', accounts.classify(['test01|', '', ''], 'test01', caret=True) == 'unreadable')
+check('caret：倍數之間不一致 → unreadable', accounts.classify(['test01', 'test02', 'test01'], 'test01', caret=True) == 'unreadable')
 no_cfg()
 
 # ================================================================ 2) netwatch.relogin 帳號核對（假畫面）
@@ -143,6 +156,7 @@ def run(scr, **kw):
     netwatch._dark_count = scr.dark
     netwatch._ocr_lines = scr.ocr_lines
     netwatch.hud_ok = scr.hud
+    netwatch._pixels = lambda pts: None          # 版本錯誤黑條偵測不讀真畫面（None = 讀不到 → 不判黑條）
     netwatch.HALT.unlink(missing_ok=True)
     netwatch.STATE.write_text('{"fails": 0}')
     buf = io.StringIO()
@@ -189,7 +203,7 @@ check('重打後讀不出（打字沒進去）→ halt、沒按登錄', r['statu
 s = Screen('acct_a', ocr_mode='flaky')
 r = run(s)
 check('OCR 倍數不一致（讀不出）→ halt、沒點任何東西', r['status'] == 'halt' and not s.calls and '讀不出' in r['reason'], r)
-check('  讀不出會重讀一次（2 次 OCR）', s.ocr_n == 2, s.ocr_n)
+check('  讀不出會重讀（游標會閃，最多 3 次 OCR）', s.ocr_n == 3, s.ocr_n)
 s = Screen('acct_a', ocr_mode='blind')
 r = run(s)
 check('OCR 完全讀不到 → halt、沒點', r['status'] == 'halt' and not s.calls)

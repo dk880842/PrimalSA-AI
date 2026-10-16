@@ -15,7 +15,8 @@
   1 preflight（版面 / netwatch halt / battle.lock / 畫面不是 unknown）→ 畫面必須是主畫面（或設置面板已開；--stuck 另收巡路中 / 快速戰鬥 VS 牌）
   2 開設置面板（1210,760，標題板特徵 + ✕）→ 讀「全員登出」鈕顏色（橘紅，樣本 p4/panel_setting.png 量得）才點 517,731
   3 「是否登出全部角色?」提示：像素特徵（米色單鈕提示窗，同網路異常）+ OCR 訊息含「登 / 出 / 全」（OCR 讀不出就信任像素；讀到別的字 → 不點）→ 確定 715,557
-  4 等回登入畫面（≤ 60 s）→ netwatch.relogin：帳密欄有內容才點「登錄」590,585（帳密欄空 / 登錄後提示窗 / 連續 3 次失敗 = halt）→ 選角面板「一鍵全登」740,640 → 等進遊戲（約 20 s）
+  4 等回登入畫面（≤ 60 s）→ netwatch.relogin：帳密欄有內容才點「登錄」590,585（帳密欄空 / 登錄後提示窗 / 連續 3 次失敗 = halt）
+    （登錄後頂端黑條「版本錯誤」= 伺服器改版 → halt 10，訊息提示跑 clientupdate.py run）→ 選角面板「一鍵全登」740,640 → 等進遊戲（約 20 s）
   5 team.check（5 人、隊長 DKBO）；全員單人才 team.form；最後 char.ensure DKBO（重登後當前角色會變 DKBO5）
 鐵則 2：登入畫面只點「登錄」（遊戲自動帶入的帳密）；不點鑰匙 / 註冊、不把帳號寫進 log、登入畫面不存截圖；密碼欄絕不碰。
   例外（2026-10-15）：有本機帳號對照時，帳號欄是別的帳號 → 只清空並重打帳號欄成本視窗帳號（netwatch.retype_account）。
@@ -136,6 +137,8 @@ def relogin_stage() -> int:
     if st == 'reconnected':
         return 0
     if st == 'halt':
+        if r.get('version'):                 # 登錄失敗：版本錯誤（伺服器改版）→ 重開客戶端更新交給 clientupdate.py（會打斷呼叫端，不在這裡自動跑）
+            log('登錄版本錯誤：跑 `uv run --no-project python tools/gui/clientupdate.py run`（關本視窗 → 重開 → 熱更新 → 登入）')
         return uikit.EXIT_HALT
     if st == 'fatal':
         return netwatch.EXIT_FATAL
