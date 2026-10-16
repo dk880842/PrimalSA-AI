@@ -434,14 +434,48 @@ def make_world_fixture() -> list:
     return miss
 
 
+# ---- 驗證停手重設計（2026-10-16 使用者定案）：網路異常窗字形（screen_sigs.net_lost）/ 答題介面（screen_sigs.quiz_screen）----
+# 檔名 → 期望 'net_lost' / 'quiz' / None（負例：兩個都不能中）。
+# 網路異常：net1（10-10）+ 10-16 08:00 三個視窗的 watch 警報截圖（同一個字形逐點相同）；負例 = 同框的單鈕「提示」窗（任務條件不達標 kr322 / qd-after、
+#   背包刪除確認 del2 / 032408 / unknown-1792078745）。
+# 答題介面：**沒有實機截圖**，正例是 tools/extract/uimock.py 從 prefab 合成的模擬圖（npcanswer-extract/mock_*）；負例 = 全部實機截圖掃描最接近的幾張
+#   （設置面板 ui/j_*、組隊面板、任務詳情），以及網路異常 / 刪除確認窗。
+VERIFY_SRC = {
+    'net1.png': 'net_lost', 'watch-alerts/unknown-1792108847.png': 'net_lost',
+    'clients/PrimalSA2/watch-alerts/unknown-1792108852.png': 'net_lost', 'clients/PrimalSA3/watch-alerts/unknown-1792108855.png': 'net_lost',
+    'kr322.png': None, 'qd-after.png': None, 'del2.png': None, 'ui-log/032408-bag-purge-list-DKBO.png': None, 'watch-alerts/unknown-1792078745.png': None,
+    'npcanswer-extract/mock_field_k10546_+0+0.png': 'quiz', 'npcanswer-extract/mock_village_k10546_+0+0.png': 'quiz',
+    'npcanswer-extract/mock_battle_k10546_+0+0.png': 'quiz', 'npcanswer-extract/mock_idle_k10546_+0+0.png': 'quiz',
+    'npcanswer-extract/mock_field_k10466_+0+0.png': 'quiz', 'npcanswer-extract/mock_field_k10620_+0+0.png': 'quiz',
+    'npcanswer-extract/mock_battle_k10546_+6-5.png': 'quiz', 'npcanswer-extract/mock_village_k10546_-6+5.png': 'quiz',
+    'ui/j_chat.png': None, 'ui/j_sound.png': None, 'team4.png': None, 'qd-man-支線-3.png': None, 'ui/team.png': None,
+}
+
+
+def make_verify_fixture() -> list:
+    """verify_px.json：points = watch 實際讀的全部點（points + annot_points + loading_points）；每張存 hex 與期望。回缺的檔案"""
+    pts = list(dict.fromkeys(screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()))
+    samples, miss = [], []
+    for rel, want in VERIFY_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = {tuple(map(int, k.split(','))): tuple(v) for k, v in grab(p, pts).items()}
+        samples.append({'f': rel, 'expect': want, 'px': ''.join('%02x%02x%02x' % px[pt] for pt in pts)})
+    write('verify_px.json', {'note': '驗證停手重設計樣本（2026-10-16）：expect = net_lost（網路異常窗：框 + 字形）/ quiz（答題介面，合成模擬圖，未實機）/ null（負例）；'
+                                     'points = watch 讀的全部點', 'points': [list(p) for p in pts], 'samples': samples})
+    return miss
+
+
 def main() -> int:
-    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del / bag_itempop / numglyph / itemname_newtag）
+    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del / bag_itempop / numglyph / itemname_newtag / verify）
         names = sys.argv[sys.argv.index('--only') + 1].split(',')
         for n in names:
             miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture,
                     'panel': make_panel_fixture, 'popup': make_popup_fixture, 'bag_del': make_bag_del_fixture,
                     'bag_itempop': make_bag_itempop_fixture, 'numglyph': make_numglyph_fixture,
-                    'itemname_newtag': make_itemname_newtag_fixture}[n]()
+                    'itemname_newtag': make_itemname_newtag_fixture, 'verify': make_verify_fixture}[n]()
             print(n, '缺', miss) if miss else None
         return 0
     done, skipped = [], []

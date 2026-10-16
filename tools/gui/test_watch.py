@@ -30,6 +30,26 @@ import winenv  # noqa: E402
 
 watch.DIGIT_ON = False    # 既有 HUD 測試走 stat.ps1 OCR；digitmatch 路徑的測試在檔尾自己開
 watch.OCR_ON = False      # 既有測試只看 pixel / info；HUD 數值（stat.ps1）的測試在檔尾自己開
+SPAWNS = []               # 網路異常 → netwatch 委派：測試絕不真的開程序，只記次數
+
+
+class _FakeProc:
+    pid = 4242
+
+    def __init__(self):
+        self.done = False
+
+    def poll(self):
+        return 0 if self.done else None
+
+
+def _fake_spawn():
+    p = _FakeProc()
+    SPAWNS.append(p)
+    return p
+
+
+watch.spawn_netwatch = _fake_spawn
 
 fails = 0
 
@@ -163,15 +183,25 @@ for fn in ast.walk(tree):
         for n in ast.walk(fn):
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in ('run_ps', '_oneshot') and fn.name not in ('_gui', '_ps'):
                 bad_sites.append((fn.name, n.func.attr))
+popen_ok = []             # 唯一允許的程序委派：_spawn_netwatch 裡一處 subprocess.Popen（netwatch.py --once，2026-10-16）
+for fn in ast.walk(tree):
+    if isinstance(fn, ast.FunctionDef):
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name) and n.func.value.id == 'subprocess' \
+                    and n.func.attr == 'Popen':
+                (popen_ok if fn.name == '_spawn_netwatch' else bad_calls).append((fn.name, 'Popen'))
 for n in ast.walk(tree):
     if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
         owner = n.func.value.id if isinstance(n.func.value, ast.Name) else ''
-        if (owner == 'subprocess' and n.func.attr in ('run', 'Popen', 'call', 'check_call', 'check_output')) or (owner == 'os' and n.func.attr in ('system', 'startfile', 'popen')):
+        if (owner == 'subprocess' and n.func.attr in ('run', 'call', 'check_call', 'check_output')) or (owner == 'os' and n.func.attr in ('system', 'startfile', 'popen')):
             bad_calls.append((owner, n.func.attr))
 runps_in_gui = sum(1 for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef) and fn.name in ('_gui', '_ps')
                    for n in ast.walk(fn) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'run_ps')
 check('AST：run_ps / _oneshot 只在 _gui / _ps 裡呼叫（各一處）', not bad_sites and runps_in_gui == 2, f'{bad_sites} {runps_in_gui}')
-check('AST：沒有 subprocess.run / Popen / os.system 等其他程序呼叫', not bad_calls, str(bad_calls))
+check('AST：沒有 subprocess.run / Popen / os.system 等其他程序呼叫（只有 _spawn_netwatch 一處 Popen）', not bad_calls and len(popen_ok) == 1, str((bad_calls, popen_ok)))
+_sn = (HERE / 'watch.py').read_text(encoding='utf-8')
+_sn = _sn[_sn.index('def _spawn_netwatch'):_sn.index('spawn_netwatch = _spawn_netwatch')]
+check('_spawn_netwatch 只開 netwatch.py --once', "'netwatch.py'), '--once']" in _sn and _sn.count('Popen(') == 1)
 check('GUI_ALLOWED == (pixel, info)；PS_ALLOWED == (stat.ps1, ocr.ps1, digitmatch.ps1)', watch.GUI_ALLOWED == ('pixel', 'info') and watch.PS_ALLOWED == ('stat.ps1', 'ocr.ps1', 'digitmatch.ps1'))
 
 # ---------------------------------------------------------------- 2. 鎖三種情況 + token
@@ -652,8 +682,9 @@ check('unknown 未滿 10 s → 沒有警報', st['screen']['state'] == 'unknown'
 for _ in range(3):
     w.cycle(); clk.t += 0.9
 st = watchstate.read()
-check('unknown 連續 ≥ 10 s → alerts.unknown_long + verify_suspect', st['flags']['verify_suspect'] is True and [a['kind'] for a in st['alerts']] == ['unknown_long']
-      and st['alerts'][0]['shot'] is None and '安全' not in st['alerts'][0]['msg'], str(st['alerts']))
+check('unknown 連續 ≥ 10 s → alerts.unknown_long + unknown_screen（只顯示「不認得的畫面」；verify_suspect 不亮、不設旗標，2026-10-16）',
+      st['flags']['unknown_screen'] is True and st['flags']['verify_suspect'] is False and [a['kind'] for a in st['alerts']] == ['unknown_long']
+      and st['alerts'][0]['shot'] is None and '安全' not in st['alerts'][0]['msg'] and '不認得的畫面' in st['alerts'][0]['msg'], str(st['alerts']))
 rows = errlog._read(errlog.LOG)
 check('errlog 寫一筆（source=watch，沒有 battle.lock 也寫）', len(rows) == 1 and rows[0]['source'] == 'watch' and rows[0]['fix'] is None, str(rows))
 for _ in range(5):
@@ -662,11 +693,11 @@ check('持續 unknown 不重複寫 errlog、alert 的 since 不變', len(errlog.
 # 恢復：連續 5 s 已知畫面才清除
 fk.pixel = (0, px_out('idle'), '')
 w.cycle(); clk.t += 0.9
-check('剛恢復（< 5 s）警報還在', watchstate.read()['flags']['verify_suspect'] is True)
+check('剛恢復（< 5 s）警報還在', watchstate.read()['flags']['unknown_screen'] is True)
 for _ in range(7):
     w.cycle(); clk.t += 0.9
 st = watchstate.read()
-check('連續 5 s 已知畫面 → 警報清除、verify_suspect = False', st['alerts'] == [] and st['flags']['verify_suspect'] is False)
+check('連續 5 s 已知畫面 → 警報清除、unknown_screen / verify_suspect = False', st['alerts'] == [] and st['flags']['verify_suspect'] is False and st['flags']['unknown_screen'] is False)
 rows = errlog._read(errlog.LOG)
 check('清除時補 errlog fix', rows[0]['fix'] and '已恢復' in rows[0]['fix'], str(rows[0]['fix']))
 # unknown 中途閃回已知一次 → 累積歸零
@@ -735,7 +766,7 @@ d = {(x, y): f'{round(r / 2)},{round(g / 2)},{round(b / 2)}' for x, y, r, g, b i
 fk.pixel = (0, ' '.join(d.get(pt, '70,70,70') for pt in ALLPTS), '')      # 背包被壓暗、上面的彈窗不認得（= 驗證視窗 / 道具詳情）
 for _ in range(13):
     w.cycle(); clk.t += 0.9
-check('壓暗的背包 + 不認得的彈窗 ≥ 10 s → 照樣 unknown_long + verify_suspect', watchstate.read()['flags']['verify_suspect'] is True)
+check('壓暗的背包 + 不認得的彈窗 ≥ 10 s → 照樣 unknown_long（不認得的畫面）', watchstate.read()['flags']['unknown_screen'] is True)
 
 # ---- 背包刪除確認窗（2026-10-15 23:34 / 23:39 p1 purge 核對清單時 watch 誤設驗證停手旗標）：用真截圖取點 fixture ----
 _dfx = json.loads((HERE / 'fixtures' / 'bag_del_px.json').read_text(encoding='utf-8'))
@@ -758,7 +789,8 @@ w, clk, fk = make('popup-netnotice')
 fk.pixel = (0, px_fixture('kr322.png'), '')                                 # 同一個「提示」單鈕窗框、沒有綠字清單、底下不是刪除模式背包
 for _ in range(13):
     w.cycle(); clk.t += 0.9
-check('同框的單鈕提示窗（任務條件不達標）≥ 10 s → 照樣 unknown_long + verify_suspect', watchstate.read()['flags']['verify_suspect'] is True)
+check('同框的單鈕提示窗（任務條件不達標）≥ 10 s → 照樣 unknown_long（不認得的畫面）、不叫 netwatch',
+      watchstate.read()['flags']['unknown_screen'] is True and watchstate.read()['flags']['net_lost'] is False)
 
 
 # ---- 面板辨識 / 主畫面多組 / 載入 / 黑畫面 / 警報截圖（2026-10-11：使用者開寵物視窗被誤報疑似驗證）----
@@ -1353,10 +1385,159 @@ check('讀圖時間早於旗標時間 → 不算', verifyhalt.active() is not No
 run_s(w, clk, 90)
 check('之後主畫面穩定 → 清除', verifyhalt.active() is None)
 # 面板上疊已知彈窗（道具說明彈窗等 popup_*）算已知正常
-check('normal_screen：主畫面 / 跑路 / 戰鬥 / 認得的面板 / popup_* = 正常；dialog / reward / select / unknown / login / 提示視窗 = 不正常',
-      all(screen_sigs.normal_screen(s_, a_) for s_, a_ in (('idle', []), ('walking', []), ('battle', []), ('panel', []), ('unknown', ['popup_item', 'over_bag'])))
-      and not any(screen_sigs.normal_screen(s_, a_) for s_, a_ in (('dialog', []), ('reward', []), ('select', []), ('unknown', []), ('unknown', ['login']),
-                                                                   ('unknown', ['loading']), ('idle', ['notice_dialog']), ('error', []), ('minimized', []), (None, []))))
+check('normal_screen：主畫面 / 跑路 / 戰鬥 / 認得的面板 / popup_* / 登入 / 選角 / 載入 / 網路異常窗 = 正常；dialog / reward / select / unknown / 提示視窗 / 答題 = 不正常',
+      all(screen_sigs.normal_screen(s_, a_) for s_, a_ in (('idle', []), ('walking', []), ('battle', []), ('panel', []), ('unknown', ['popup_item', 'over_bag']),
+                                                           ('unknown', ['login']), ('unknown', ['charsel']), ('unknown', ['loading']), ('unknown', ['net_lost'])))
+      and not any(screen_sigs.normal_screen(s_, a_) for s_, a_ in (('dialog', []), ('reward', []), ('select', []), ('unknown', []), ('unknown', ['black']),
+                                                                   ('idle', ['notice_dialog']), ('unknown', ['quiz']), ('idle', ['quiz']), ('error', []), ('minimized', []), (None, []))))
+verifyhalt.clear(why='test')
+
+# ---------------------------------------------------------------- 驗證停手重設計（使用者 2026-10-16：正面辨識 + 3 分鐘兜底、網路異常交給 netwatch）
+TRIPS = []
+_real_trip = watch.trip_verify
+watch.trip_verify = lambda reason: TRIPS.append(reason) or True
+_vfx = json.loads((HERE / 'fixtures' / 'verify_px.json').read_text(encoding='utf-8'))
+check('verify fixture 點順序 = watch.pts', [tuple(p) for p in _vfx['points']] == ALLPTS)
+
+
+def px_vfix(f):
+    h = next(s_['px'] for s_ in _vfx['samples'] if s_['f'] == f)
+    return ' '.join(f'{int(h[i:i + 2], 16)},{int(h[i + 2:i + 4], 16)},{int(h[i + 4:i + 6], 16)}' for i in range(0, len(h), 6))
+
+
+# 1. 答題介面（合成模擬圖）→ 第一輪就設旗標（不等 10 秒）
+w, clk, fk = make('vr-quiz')
+fk.pixel = (0, px_vfix('npcanswer-extract/mock_field_k10546_+0+0.png'), '')
+TRIPS.clear()
+w.cycle(); clk.t += 0.5
+st = watchstate.read()
+check('答題介面正面命中 → 第一輪就 trip、alerts.kind=quiz、verify_suspect、label 答題 / 驗證視窗',
+      len(TRIPS) == 1 and '答題' in TRIPS[0] and [a['kind'] for a in st['alerts']] == ['quiz'] and st['flags']['verify_suspect'] is True
+      and st['screen']['label'].startswith('答題 / 驗證視窗') and st['screen']['annot'] == ['quiz'], str((TRIPS, st['alerts'], st['screen']['label'])))
+run_s(w, clk, 20)
+check('答題介面持續 20 s：只 trip 一次、errlog 一筆', len(TRIPS) == 1 and len(errlog._read(errlog.LOG)) == 1)
+fk.pixel = (0, px_out('idle'), '')
+run_s(w, clk, 8)
+check('答題介面消失 5 s 以上 → quiz 警報清除、errlog 補 fix', watchstate.read()['alerts'] == [] and errlog._read(errlog.LOG)[0]['fix'])
+
+# 2. 不認得的畫面：10 秒只截圖 / 警報、不 trip；沒有進度滿 180 秒才 trip（兜底）
+def run_to(w, clk, t_end, step=0.5):
+    """跑到假時鐘 ≥ t_end（每輪讀圖本身也會讓假時鐘前進，所以用時鐘判斷、不數輪數）"""
+    while clk.t < t_end:
+        w.cycle(); clk.t += step
+
+
+w, clk, fk = make('vr-stuck')
+fk.pixel = UNK
+TRIPS.clear()
+_t0 = clk.t
+run_s(w, clk, 12)
+check('unknown 12 s：unknown_long、沒有 trip', not TRIPS and [a['kind'] for a in watchstate.read()['alerts']] == ['unknown_long'])
+run_to(w, clk, _t0 + 175)
+check('unknown 175 s（未滿 180）：仍沒有 trip', not TRIPS and watchstate.read()['flags']['verify_suspect'] is False)
+run_to(w, clk, _t0 + 182)
+st = watchstate.read()
+check('unknown 且沒有進度滿 180 s → trip 一次、alerts.kind=unknown_stuck、verify_suspect',
+      len(TRIPS) == 1 and '沒有進度' in TRIPS[0] and [a['kind'] for a in st['alerts']] == ['unknown_stuck'] and st['flags']['verify_suspect'] is True, str((TRIPS, st['alerts'])))
+run_s(w, clk, 60)
+check('之後持續 unknown 不重複 trip', len(TRIPS) == 1)
+
+
+# 3. 有進度不 trip：畫面大幅變化（換了一個不認得的視窗）/ 腳本動作 log 有新行 → 從那一刻重新計時
+def px_unk(base):
+    return (0, px_with(base=base), '')
+
+
+w, clk, fk = make('vr-prog-screen')
+TRIPS.clear()
+for i in range(8):                   # 每 60 秒換一個不同的不認得畫面（70 ↔ 200 灰：全部點 diff 130 > 60）
+    fk.pixel = px_unk('70,70,70' if i % 2 == 0 else '200,200,200')
+    run_s(w, clk, 60)
+check('unknown 8 分鐘但每 60 s 畫面大幅變化（有進度）→ 不 trip', not TRIPS and [a['kind'] for a in watchstate.read()['alerts']] == ['unknown_long'])
+fk.pixel = px_unk('70,70,70')
+_t1 = clk.t
+run_to(w, clk, _t1 + 175)
+check('最後一次變化後未滿 180 s → 不 trip', not TRIPS)
+run_to(w, clk, _t1 + 182)
+check('最後一次變化後滿 180 s 沒有進度 → trip', len(TRIPS) == 1)
+w, clk, fk = make('vr-prog-small')
+TRIPS.clear()
+fk.pixel = UNK
+_small = px_with(base='70,70,70').split()
+for i in range(0, len(_small), 10):
+    _small[i] = '200,200,200'        # 10% 的點變化（小動畫）不算進度
+for i in range(12):
+    fk.pixel = (0, ' '.join(_small), '') if i % 2 else UNK
+    run_s(w, clk, 16)
+check('只有 10% 的點在變（小動畫 / 閃動）→ 不算進度，滿 180 s trip', len(TRIPS) == 1)
+w, clk, fk = make('vr-prog-act')
+TRIPS.clear()
+fk.pixel = UNK
+for i in range(8):
+    run_s(w, clk, 60)
+    actlog.add('click', f'測試腳本動作 {i}')        # 本視窗腳本還在動作（actions.log 有新行）
+check('unknown 8 分鐘但腳本動作 log 每 60 s 有新行（有進度）→ 不 trip', not TRIPS)
+for i in range(8):
+    run_s(w, clk, 30)
+    actlog.add('watch', f'watch 自己寫的 {i}')       # watch / verifyhalt 自己寫的不算
+check('只有 watch 自己寫的 log → 不算進度，滿 180 s trip', len(TRIPS) == 1)
+
+# 4. 網路異常窗：已知畫面（不 unknown、不 trip）→ 3 秒後叫 netwatch --once；旗標在 / 動作鎖在 / 上一支還在跑 → 不叫
+w, clk, fk = make('vr-net')
+TRIPS.clear()
+SPAWNS.clear()
+fk.pixel = (0, px_vfix('net1.png'), '')
+run_s(w, clk, 2)
+check('網路異常窗 2 s：還不叫 netwatch', not SPAWNS and watchstate.read()['screen']['annot'] == ['net_lost'])
+run_s(w, clk, 2)
+st = watchstate.read()
+check('網路異常窗 ≥ 3 s → 叫一次 netwatch.py --once、flags.net_lost / netwatch_spawn、不 trip、沒有 unknown 警報',
+      len(SPAWNS) == 1 and st['flags']['net_lost'] is True and (st['flags']['netwatch_spawn'] or {}).get('pid') == 4242 and not TRIPS and st['alerts'] == []
+      and st['screen']['label'] == '網路異常窗（交給 netwatch）', str((len(SPAWNS), st['flags'], st['alerts'])))
+check('actions.log 記一筆「啟動 netwatch.py --once」', '啟動 netwatch.py --once' in actlog.LOG.read_text(encoding='utf-8'))
+run_s(w, clk, 120)
+check('上一支 netwatch 還在跑 → 不再叫', len(SPAWNS) == 1)
+SPAWNS[0].done = True
+run_s(w, clk, 2)
+check('上一支結束且距上次 ≥ 60 s → 再叫一次', len(SPAWNS) == 2)
+SPAWNS[1].done = True
+lk = clients.cache_dir() / 'netwatch.act.lock'
+lk.parent.mkdir(parents=True, exist_ok=True)
+lk.write_text('1 1', encoding='utf-8')
+run_s(w, clk, 70)
+check('netwatch.act.lock 有效（腳本裡的 guard 正在處理）→ 不叫', len(SPAWNS) == 2)
+lk.unlink()
+w, clk, fk = make('vr-net-flag')
+SPAWNS.clear()
+vh_set(clk, reason='舊旗標')
+fk.pixel = (0, px_vfix('net1.png'), '')
+run_s(w, clk, 4)
+check('驗證停手旗標在 → 先不叫 netwatch（它會 exit 9）', not SPAWNS)
+run_s(w, clk, 4)
+check('網路異常窗算已知正常畫面：旗標 5 秒後自動清 → 接著叫 netwatch（10-16 08:00 死結的修正）', verifyhalt.active() is None and len(SPAWNS) == 1,
+      str((verifyhalt.active(), len(SPAWNS))))
+w, clk, fk = make('vr-net-neg')
+SPAWNS.clear()
+fk.pixel = (0, px_vfix('kr322.png'), '')
+run_s(w, clk, 15)
+check('同框的「任務條件不達標」窗 → 不是 net_lost、不叫 netwatch、照舊 unknown_long', not SPAWNS and watchstate.read()['flags']['unknown_screen'] is True)
+
+# 5. quest 警報只轉述、不 trip
+w, clk, fk = make('vr-qrelay')
+TRIPS.clear()
+watchstate.QUEST_LOG.write_text('2026-10-16 08:00:00 警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）→ 停止自動操作\n', encoding='utf-8')
+run_s(w, clk, 4)
+st = watchstate.read()
+check('quest「連續 3 次不認得」警報：只轉述顯示（alerts.kind=quest_unknown）、不 trip、verify_suspect 不亮',
+      not TRIPS and [a['kind'] for a in st['alerts']] == ['quest_unknown'] and st['flags']['verify_suspect'] is False, str(st['alerts']))
+_b = {'v': 1, 'ts': time.time(), 'seq': 1, 'watcher': {'running': True, 'platform': winenv.platform_kind(), 'token': 't'}, 'flags': {'verify_suspect': False}}
+fresh_dir('vr-vs')
+_ok_vs = []
+for _k in ('unknown_long', 'unknown_stuck', 'quiz', 'quest_unknown'):
+    watchstate.write({**_b, 'alerts': [{'kind': _k}]}, 'x')
+    _ok_vs.append(watchstate.verify_suspect() is True)
+check('verify_suspect()（follow / VerifyGuard 用）：unknown_long / unknown_stuck / quiz / quest_unknown 都算（保守暫停）', all(_ok_vs), str(_ok_vs))
+watch.trip_verify = _real_trip
 verifyhalt.clear(why='test')
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive
 

@@ -223,10 +223,15 @@ check('VerifyGuard.check → timeout（呼叫端停止）', vg.check() == 'timeo
 check('clear → 消失', verifyhalt.clear() and verifyhalt.active() is None and verifyhalt.main(['status']) == 0)
 check('clear 沒有旗標 → False', verifyhalt.clear() is False)
 
-# 設旗標的入口：uikit.fail(…, 9) / preflight 連 3 次不認得（多視窗才寫）
+# 設旗標的入口：uikit.fail(…, 9) / preflight（多視窗才寫；2026-10-16 起只有答題介面正面命中才設，其餘 watch 3 分鐘兜底）
 import errlog  # noqa: E402
+_qn = uikit.quiz_now
+uikit.quiz_now = lambda: False
 uikit.fail('t', uikit.EXIT_UNKNOWN_SCREEN, '畫面連 3 次不認得')
-check('多視窗：uikit.fail(9) → 設旗標', verifyhalt.active() is not None and verifyhalt.active()['src'] == 't')
+check('多視窗：uikit.fail(9) 但沒認出答題介面 → 不設旗標', verifyhalt.active() is None)
+uikit.quiz_now = lambda: True
+uikit.fail('t', uikit.EXIT_UNKNOWN_SCREEN, '畫面連 3 次不認得')
+check('多視窗：uikit.fail(9) 且現場認出答題介面 → 設旗標', verifyhalt.active() is not None and verifyhalt.active()['src'] == 't')
 verifyhalt.clear()
 uikit.fail('t', 50, '別的錯')
 check('uikit.fail 其他退出碼 → 不設', verifyhalt.active() is None)
@@ -244,8 +249,14 @@ netwatch.guard = lambda src, **k: {'status': 'ok'}
 uikit.screen = lambda *a, **k: {'state': 'unknown'}
 uikit.transition_now = lambda: False
 uikit.sleep = lambda *_: None
-check('多視窗：preflight 連 3 次不認得 → 9 且設旗標', uikit.preflight('pf') == 9 and (verifyhalt.active() or {}).get('src') == 'pf')
+_sa = uikit.screen_annot
+uikit.screen_annot = lambda: ({'state': 'unknown'}, [])
+uikit.quiz_now = lambda: False
+check('多視窗：preflight 連 3 次不認得 → 9 但不設旗標（交給 watch 3 分鐘兜底）', uikit.preflight('pf') == 9 and verifyhalt.active() is None)
+uikit.screen_annot = lambda: ({'state': 'unknown'}, ['quiz'])
+check('多視窗：preflight 看到答題介面 → 9 且設旗標', uikit.preflight('pf') == 9 and (verifyhalt.active() or {}).get('src') == 'pf')
 verifyhalt.clear()
+uikit.screen_annot, uikit.quiz_now = _sa, _qn
 layout.current, netwatch.guard = _lc, _ng
 
 # ---- 各自視窗停手（使用者 2026-10-15）：旗標每視窗一份，只停出事的視窗 ----
@@ -375,12 +386,14 @@ layout.current, netwatch.guard = _lc2, _ng2
 uikit.verify_screen = lambda: VS_READS.append(1) or ('unknown', [], '不認得的畫面')
 os.environ['PSA_TEST_PROCS'] = _procs
 
-# watch.py：unknown_long / quest 警報兩處都 trip，state.flags 帶 verify_halt（靜態）
+# watch.py：答題介面正面命中 / unknown 3 分鐘沒有進度兜底兩處 trip（quest 轉述只顯示，2026-10-16），state.flags 帶 verify_halt（靜態）
 ws = (GUI / 'watch.py').read_text(encoding='utf-8')
-check('watch.py：unknown_long 與 quest 轉述警報都呼叫 trip_verify、flags 有 verify_halt',
-      ws.count('trip_verify(') == 3 and "'verify_halt': verifyhalt.active() is not None" in ws)
+check('watch.py：答題介面與 3 分鐘兜底兩處呼叫 trip_verify（quest 轉述不 trip）、flags 有 verify_halt',
+      ws.count('trip_verify(') == 3 and "trip_verify('watch：答題 / 驗證介面正面命中" in ws and "trip_verify(f'watch：不認得的畫面連續 {stuck} 秒沒有進度" in ws
+      and "trip_verify(f'watch 轉述 quest 警報" not in ws and "'verify_halt': verifyhalt.active() is not None" in ws)
 qs = (GUI / 'quest.py').read_text(encoding='utf-8')
-check('quest.py：連續 3 次不認得 → verifyhalt.trip', "verifyhalt.trip('quest.py 連續 3 次遇到不認得的畫面" in qs)
+check('quest.py：答題介面正面命中 → verifyhalt.trip；連續 3 次不認得不再 trip',
+      "verifyhalt.trip('quest.py 看到答題 / 驗證介面（正面命中）'" in qs and "verifyhalt.trip('quest.py 連續 3 次遇到不認得的畫面" not in qs)
 
 # ================================================================ 4) netwatch 多視窗不按登錄 / relogin.py 109
 os.environ['PSA_TEST_PROCS'] = 'PrimalSA'

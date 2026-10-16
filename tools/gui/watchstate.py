@@ -260,14 +260,15 @@ def peek_battle_lock(path=None) -> dict | None:
 
 # ---------------------------------------------------------------- 消費端：疑似驗證視窗時暫停（heal --watch / petwatch）
 def verify_suspect(max_age: float = 5.0, path=None, now=time.time, sleep=time.sleep, platform: str | None = None):
-    """True = watch 標了疑似驗證視窗（flags.verify_suspect 或 alerts 有 kind=verify / unknown_long）；False = 沒標；
+    """True = watch 標了疑似驗證視窗或不認得的畫面（flags.verify_suspect 或 alerts 有 kind=verify / quiz / unknown_long / unknown_stuck / quest_unknown；
+    消費端〔follow / heal --watch / petwatch〕照舊暫停，2026-10-16 起 unknown_long 不再設驗證停手旗標，但暫停仍保守保留）；False = 沒標；
     None = state 不可用（watch 沒跑 / 太舊）。注意「False」不代表沒有驗證視窗（watch 只認得有限幾種畫面）"""
     st = fresh(max_age, path=path, now=now, sleep=sleep, platform=platform)
     if not st:
         return None
     fl = st.get('flags') or {}
     kinds = {a.get('kind') for a in (st.get('alerts') or []) if isinstance(a, dict)}
-    return bool(fl.get('verify_suspect')) or bool(kinds & {'verify', 'unknown_long'})
+    return bool(fl.get('verify_suspect')) or bool(kinds & {'verify', 'quiz', 'unknown_long', 'unknown_stuck', 'quest_unknown'})
 
 
 class VerifyGuard:

@@ -14,6 +14,10 @@
 log 只記字數）→ 再讀一次 = 本視窗帳號才按登錄、放鎖；重打後仍不符 / 讀不出 / 清不掉 / 密碼欄變空 / 畫面不是登入畫面 → halt。密碼欄絕對不碰。
 沒設定檔 / 本視窗不在對照表 / 設定檔格式錯 → 上面的舊行為逐字不變。log / errlog 只寫「帳號欄核對：符合 / 不符 / 讀不出」，不寫帳號名。
 本視窗驗證停手旗標（verifyhalt.py，每視窗一份）存在 → check_and_reconnect 回 status 'verify'、guard sys.exit(9)，什麼都不點。
+網路異常窗辨識（2026-10-16）：框（screen_sigs.NET_DIALOG）+ 訊息白字字形（screen_sigs.net_lost，比像素不用 OCR）符合 = 網路異常；
+字形不符才退回舊的 OCR 過濾。watch.py 也用同一份特徵：正面認出網路異常窗持續 3 秒就另開 `netwatch.py --once`（watch 自己不點；
+ACT_LOCK 避免和腳本裡的 guard 重複處理）；網路異常窗 / 登入 / 選角 / 載入畫面都算已知正常畫面，驗證停手旗標 5 秒後自動清，
+不會再出現「旗標擋 netwatch、網路異常窗又清不掉旗標」的死結（10-16 08:00 三視窗同時斷線的根因）。
 
   import netwatch
   r = netwatch.guard('quest')            # 腳本迴圈每輪呼叫；要停手時直接 sys.exit(10 / 11)，否則回傳 dict
@@ -172,10 +176,26 @@ def hud_ok() -> bool:
     return bool(s.get('ok') and (s.get('pos') or s.get('level'))) and _match(SIG_LOGIN) is False
 
 
+def net_glyph() -> bool | None:
+    """現場讀「網路異常，是否重連?」白字字形（screen_sigs.net_lost：框 + 字形，watch 用同一份）→ True / False；讀不到 None"""
+    pts = screen_sigs.net_points()
+    rc, out = _ps('pixel', ' '.join(f'{x},{y}' for x, y in pts))
+    try:
+        cols = [tuple(int(v) for v in c.split(',')) for c in out.split()]
+    except ValueError:
+        return None
+    if rc != 0 or len(cols) != len(pts) or any(len(c) != 3 for c in cols):
+        return None
+    return screen_sigs.net_lost(dict(zip(pts, cols)))
+
+
 def detect() -> str | None:
     """'dialog'（網路異常提示）/ 'login'（登入畫面）/ None。不點任何東西。
-    提示視窗：像素特徵符合 → OCR 訊息若讀到文字卻不含 網路異常 相關字，就當成別種提示（不亂點）；OCR 讀不到則信任像素。"""
+    提示視窗：像素框符合 → 先比訊息白字字形（2026-10-16，不用 OCR；符合就是網路異常）；字形不符 / 讀不到才走舊規則：
+    OCR 訊息若讀到文字卻不含 網路異常 相關字，就當成別種提示（不亂點）；OCR 讀不到則信任像素。"""
     if _match(SIG_DIALOG) is True:          # None（讀不到）當「不是對話框」往下判斷
+        if net_glyph() is True:
+            return 'dialog'
         txt = ''.join(_ocr(MSG_BOX, '-Light', 200, '-Zooms', '2,3'))
         if txt and not any(k in txt for k in MSG_KEYS):
             log(f'netwatch：像素像提示視窗，但訊息是「{txt}」不是網路異常，不處理', act=False)

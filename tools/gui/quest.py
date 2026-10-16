@@ -295,6 +295,17 @@ def transition_screen() -> str | None:
     return screen_sigs.transition(dict(zip(pts, cols))) if len(cols) == len(pts) else None
 
 
+def quiz_screen() -> bool:
+    """現場讀一次 → 答題 / 驗證介面（screen_sigs.quiz_screen，npcanswer 正面辨識；未實機）。讀不到 = False"""
+    pts = screen_sigs.quiz_points()
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
+        cols = [tuple(int(v) for v in c.split(',')) for c in out]
+    except Exception:
+        return False
+    return len(cols) == len(pts) and screen_sigs.quiz_screen(dict(zip(pts, cols)))
+
+
 def loading_screen() -> bool:
     """相容舊名：是不是轉場畫面（載入圖 / 全黑）"""
     return transition_screen() is not None
@@ -2432,6 +2443,13 @@ def _main() -> int:
             time.sleep(1.0)
             continue
         elif st == 'unknown' or st == 'error':          # trans_t0 不在這裡清：全黑超時落到這裡後，下一輪不可再重新等 60 秒
+            if st == 'unknown' and quiz_screen():         # 答題 / 驗證介面正面命中（2026-10-16）：不等 3 次，立刻停手設旗標
+                shot = snap('QUIZ')
+                event('警告：Clef 判斷可能是答題 / 驗證視窗（npcanswer 介面正面命中）→ 立刻停止自動操作，請使用者處理', shot)
+                print('!!! 答題 / 驗證視窗：請人工處理（鐵則 5：不可亂猜答案）', flush=True)
+                import verifyhalt
+                verifyhalt.trip('quest.py 看到答題 / 驗證介面（正面命中）', 'quest')   # 多視窗：本視窗停手旗標（其他視窗照常）
+                return 2
             if unknown == 0:
                 unknown_t0 = time.time()
                 if st == 'unknown':
@@ -2445,8 +2463,7 @@ def _main() -> int:
                 shot = snap('UNKNOWN')
                 event('警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）→ 停止自動操作，請使用者處理', shot)
                 print('!!! 請人工檢查畫面（鐵則 5：驗證視窗不可亂猜答案）', flush=True)
-                import verifyhalt
-                verifyhalt.trip('quest.py 連續 3 次遇到不認得的畫面（疑似答題 / 驗證視窗）', 'quest')   # 多視窗：本視窗停手旗標（其他視窗照常）
+                # 2026-10-16 使用者定案：不認得的畫面只停這支腳本、不設驗證停手旗標（答題介面正面命中才設，見上；其餘交給 watch 3 分鐘沒有進度兜底）
                 return 2
         if a.once:
             return 0

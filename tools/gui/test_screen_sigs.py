@@ -289,7 +289,8 @@ check('全黑轉場：annotate=[black]、label=黑畫面（轉場）', c['state'
 bk[S.BLACK_PTS[3]] = (S.BLACK_MAX, 0, 0)
 check('黑畫面：任一點亮度 ≥ BLACK_MAX → 不是黑畫面', S.annotate(bk, S.classify(bk)) == [])
 check('黑 / 載入只在 classify=unknown 時附註（idle 畫面剛好暗不算）', S.annotate({**bk, **{pt: (0, 0, 0) for pt in S.BLACK_PTS}}, {'state': 'idle'}) == [])
-check('ANNOT_KNOWN = login / charsel / loading / black + 三種面板上已知彈窗 + 背包刪除確認窗 + 道具說明彈窗', set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item'})
+check('ANNOT_KNOWN = login / charsel / loading / black / net_lost + 三種面板上已知彈窗 + 背包刪除確認窗 + 道具說明彈窗（quiz 不在內）',
+      set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'net_lost', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item'})
 
 # ---- 6. 面板上疊已知彈窗（2026-10-12，watch 誤報 #243 #244 #254 #261 #264）----
 PP = json.loads((HERE / 'fixtures' / 'popup_px.json').read_text(encoding='utf-8'))
@@ -430,8 +431,9 @@ check(f'bag_del fixture：刪除確認窗 {_dcnt["delok"]} 張（1～5 行清單
       f'負例 {_dcnt[None]} 張（網路 / 任務條件提示窗、疊在任務詳情上的提示窗、創角確認窗、普通背包、寵物確定 / 取消窗）都不認',
       not _dbad and _dcnt['delok'] >= 9 and _dcnt['delmode'] >= 3 and _dcnt[None] >= 8, str(_dbad[:4]))
 _net = _dsmp['net1.png']
-check('網路提示窗：annotate 仍是 notice_dialog（不在 ANNOT_KNOWN）→ watch 照舊算 unknown',
-      S.annotate(_net, S.classify(_net)) == ['notice_dialog'] and 'notice_dialog' not in S.ANNOT_KNOWN)
+check('網路異常窗（框 + 字形）：annotate = net_lost（已知畫面，2026-10-16）；同框別的提示窗仍是 notice_dialog（不在 ANNOT_KNOWN）',
+      S.annotate(_net, S.classify(_net)) == ['net_lost'] and 'notice_dialog' not in S.ANNOT_KNOWN
+      and S.annotate(_dsmp['kr322.png'], S.classify(_dsmp['kr322.png'])) == ['notice_dialog'])
 _ok = _dsmp['watch-alerts/unknown-1792078474.png']
 check('刪除確認窗（4 行清單）：bag.py 用的窗框 7/8 中（舊 690,470 是問句白字）', S.need_match(_ok, S.BAG_DELOK_FRAME, S.BAG_DELOK_NEED))
 _g = dict(_ok)
@@ -505,6 +507,66 @@ _g[S.BAG_ITEMPOP_BG[3][:2]] = (0, 0, 0)
 check('窗外 1 點被蓋 → 仍認', S.bag_itempop(_g))
 check('bag_itempop 缺點 → False', not S.bag_itempop({}))
 check('ANNOT_KNOWN 含 popup_item', 'popup_item' in S.ANNOT_KNOWN)
+
+# ---- 驗證停手重設計（2026-10-16）：網路異常窗字形 net_lost / 答題介面 quiz（fixtures/verify_px.json，make_fixtures --only verify）----
+_vfx = _json.loads((HERE / 'fixtures' / 'verify_px.json').read_text(encoding='utf-8'))
+_vpts = [tuple(p) for p in _vfx['points']]
+check('verify fixture 取樣點 == watch 讀的點（含 net_points / quiz_points）',
+      _vpts == list(dict.fromkeys(S.points() + S.annot_points() + S.loading_points())) and set(S.net_points() + S.quiz_points()) <= set(_vpts))
+_vsmp, _vbad, _vcnt = {}, [], {'net_lost': 0, 'quiz': 0, None: 0}
+for smp in _vfx['samples']:
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(_vpts)}
+    _vsmp[smp['f']] = px
+    want = smp['expect']
+    _vcnt[want] += 1
+    c = S.classify(px)
+    a = S.annotate(px, c)
+    ok_ = S.net_lost(px) == (want == 'net_lost') and S.quiz_screen(px) == (want == 'quiz')
+    if want == 'quiz':
+        ok_ = ok_ and a == ['quiz'] and not S.normal_screen(c['state'], a) and S.label(c, a).startswith('答題 / 驗證視窗')
+    elif want == 'net_lost':
+        ok_ = ok_ and a == ['net_lost'] and S.normal_screen(c['state'], a) and S.label(c, a) == '網路異常窗（交給 netwatch）'
+    else:
+        ok_ = ok_ and 'quiz' not in a and 'net_lost' not in a
+    if not ok_:
+        _vbad.append((smp['f'], c['state'], a))
+check(f'verify fixture：網路異常窗 {_vcnt["net_lost"]} 張（net1 + 10-16 08:00 三視窗）全認、答題模擬圖 {_vcnt["quiz"]} 張（4 種背景 / k 1.0466～1.062 / 位移 ±6）全認、'
+      f'負例 {_vcnt[None]} 張（任務條件不達標 / 刪除確認同框窗、設置 / 組隊 / 任務詳情面板）都不認',
+      not _vbad and _vcnt['net_lost'] >= 4 and _vcnt['quiz'] >= 8 and _vcnt[None] >= 10, str(_vbad[:4]))
+_n = _vsmp['net1.png']
+_g = dict(_n)
+for pt in S.NET_MSG_ON[:6]:
+    _g[pt] = (243, 213, 175)                     # 6 / 48 筆畫點不白（> 10%）
+check('網路異常字形：筆畫點 6 / 48 不白 → 不認（門檻 90%）', not S.net_msg(_g) and not S.net_lost(_g))
+_g = dict(_n)
+for pt in S.NET_MSG_ON[:4]:
+    _g[pt] = (243, 213, 175)
+check('網路異常字形：筆畫點 4 / 48 不白 → 仍認', S.net_lost(_g))
+_g = dict(_n)
+for pt in S.NET_MSG_OFF[:6]:
+    _g[pt] = (255, 255, 255)
+check('網路異常字形：非筆畫點 6 / 48 變白（別的字）→ 不認', not S.net_lost(_g))
+_g = dict(_n)
+_g[S.NET_DIALOG[5][:2]] = (243, 213, 175)
+check('網路異常：框不中（確定鈕不是藍）→ 不認', not S.net_lost(_g))
+check('net_lost / quiz 缺點 → False', not S.net_lost({}) and not S.quiz_screen({}))
+_q = _vsmp['npcanswer-extract/mock_field_k10546_+0+0.png']
+_g = dict(_q)
+for x, y, *_ in S.QUIZ_GROUPS['btn']:
+    _g[(x, y)] = (240, 210, 175)
+check('答題介面：整組（確認鈕）不中 → 仍認（7 組要 6 組）', S.quiz_screen(_g))
+for x, y, *_ in S.QUIZ_GROUPS['title']:
+    _g[(x, y)] = (240, 210, 175)
+check('答題介面：兩組不中 → 不認', not S.quiz_screen(_g))
+_g = {pt: tuple(int(v * 0.4) for v in c) for pt, c in _q.items()}
+check('答題介面整張壓暗 ×0.4（被別的模態窗蓋住）→ 不認', not S.quiz_screen(_g))
+_c = S.classify(_q)
+check('答題介面不管 classify 判成什麼都先標 quiz、label 不出現「安全」', S.annotate(_q, {'state': 'dialog'}) == ['quiz'] and '安全' not in S.label(_c, ['quiz']))
+check('normal_screen：quiz 永遠不正常；登入 / 選角 / 載入 / 網路異常窗算正常（旗標可自動清）',
+      not S.normal_screen('idle', ['quiz']) and not S.normal_screen('unknown', ['quiz'])
+      and all(S.normal_screen('unknown', [a]) for a in ('login', 'charsel', 'loading', 'net_lost'))
+      and not S.normal_screen('unknown', ['black']) and not S.normal_screen('unknown', ['notice_dialog']) and not S.normal_screen('unknown', []))
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

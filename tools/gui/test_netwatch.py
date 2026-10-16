@@ -111,6 +111,37 @@ check('hud_ok：_match 讀不到（None）→ False', netwatch.hud_ok() is False
 use(R(1))
 check('detect：全部讀不到 → None（不動作）', netwatch.detect() is None)
 
+# ---- detect：網路異常窗字形（2026-10-16，screen_sigs.net_lost；fixtures/verify_px.json 的真截圖取點）----
+import json as _json  # noqa: E402
+import screen_sigs  # noqa: E402
+_vfx = _json.loads((Path(__file__).resolve().parent / 'fixtures' / 'verify_px.json').read_text(encoding='utf-8'))
+_vpts = [tuple(p) for p in _vfx['points']]
+
+
+def _pix_out(rel):
+    h = next(s_ for s_ in _vfx['samples'] if s_['f'] == rel)['px']
+    m = {pt: h[i * 6:i * 6 + 6] for i, pt in enumerate(_vpts)}
+    return ' '.join(f'{int(m[pt][0:2], 16)},{int(m[pt][2:4], 16)},{int(m[pt][4:6], 16)}' for pt in screen_sigs.net_points())
+
+
+_keep_match, _keep_ocr = netwatch._match, netwatch._ocr
+_ocr_calls = []
+netwatch._match = lambda sig: sig == netwatch.SIG_DIALOG
+for _rel, _txt, _want, _what in (('net1.png', ['接取任務條件不達標'], 'dialog', '字形符合 → dialog、不跑 OCR'),
+                                 ('watch-alerts/unknown-1792108847.png', [], 'dialog', '10-16 08:00 那張 → dialog'),
+                                 ('kr322.png', ['接取任務條件不達標'], None, '任務條件不達標（字形不符）→ OCR 讀到別的字 → None'),
+                                 ('kr322.png', [], 'dialog', '字形不符、OCR 讀不到 → 照舊信任框（舊行為）')):
+    _ocr_calls.clear()
+    netwatch._ocr = lambda *a, _t=_txt, **k: _ocr_calls.append(a) or _t
+    use(R(0, _pix_out(_rel)))
+    _got = netwatch.detect()
+    check(f'detect：{_what}', _got == _want and (bool(_ocr_calls) == (_want != 'dialog' or _rel == 'kr322.png')), f'{_got} ocr={len(_ocr_calls)}')
+use(R(1))
+_ocr_calls.clear()
+netwatch._ocr = lambda *a, **k: _ocr_calls.append(a) or []
+check('detect：字形讀不到（pixel 失敗）→ 退回 OCR 舊規則', netwatch.net_glyph() is None and netwatch.detect() == 'dialog' and _ocr_calls)
+netwatch._match, netwatch._ocr = _keep_match, _keep_ocr
+
 # ---- _dark_count / login_fields_filled ----
 box = netwatch.ACCT_BOX
 n = len(range(box[2], box[3], 3)) * len(range(box[0], box[1], 3))
