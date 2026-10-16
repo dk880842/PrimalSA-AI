@@ -23,6 +23,8 @@
   uv run --no-project python tools/gui/itemname_match.py read <截圖.png> [--kind bag|depot|both] [--json]   # 每個有道具的格：名字 / 分數 / 狀態
   uv run --no-project python tools/gui/itemname_match.py learn-shot <截圖.png> --kind bag --labels 0=巴巴洛的許可證,3=風的鎖   # 人工核對過的標籤學樣板
   uv run --no-project python tools/gui/itemname_match.py list                                                  # 現有樣板（名稱 → 變體數）
+  uv run --no-project python tools/gui/itemname_match.py forget 3轉新手禮盒 --kind depot --variants 0,1,3          # 刪學錯的樣板（不給 --variants = 整個名稱）
+名稱含數字（1～5轉新手禮盒）：命中門檻 DIGIT_HIT_MIN 0.98、有紅角標的格不認也不學（數字在紅標底下）；2026-10-17 p1 倉庫 5轉禮盒被認成 3轉跳過的根因。
   uv run --no-project python tools/gui/itemname_match.py seed                                                  # 用人工標好的 fixtures/itemname_samples.json 學進樣板（冷啟動用）
 程式用：read_page(img, kind) / read_cell(img, kind, slot) / learn(img, kind, slot, name) / names_hidden(page) / same_name(a, b) / seed()
 img 可以是 get(x, y)、{(x, y): rgb}、pngread.decode 結果或 PNG 路徑（imgmatch.as_getter）；格號與 bag.py 相同（0 起）。
@@ -60,6 +62,7 @@ MARGIN = 0.15            # 與次佳「別的名稱」至少差這麼多
 MAX_VARIANTS = 8         # 同名變體上限：5 欄各自的半像素相位 + 選取框 / 新道具紅標
 DUP_IOU = 0.98           # 與既有變體這麼像就不重複存
 PRUNE = 0.5              # 白點數比例 < 這個（IoU 上限）就不比
+DIGIT_HIT_MIN = 0.98     # 名稱含數字（1～5轉新手禮盒）的命中門檻：只差一個數字的不同道具 IoU 0.94～0.965（2026-10-17 p1 實圖），同欄同名 = 1.0
 
 
 def _pred(c) -> bool:
@@ -231,7 +234,15 @@ def match_rows(rows, kind: str, tpl: dict | None = None, new: bool = False) -> d
     if new:
         rows, tpl = mask_rows(rows, kind), _masked_tpl(tpl, kind)
     name, best, second = namematch.decide(scores(petmatch.pack(rows), kind, tpl), HIT_MIN, MARGIN)
-    return {'name': name, 'score': round(best, 3), 'second': round(second, 3), 'ink': ink, 'new': new}
+    out = {'name': name, 'score': round(best, 3), 'second': round(second, 3), 'ink': ink, 'new': new}
+    if name and has_digit(name) and (new or best < DIGIT_HIT_MIN):
+        out['name'], out['digit_guess'] = None, name   # 數字被紅角標蓋住 / 分數不夠分辨數字 → 不認（呼叫端走縮圖 / 彈窗核對）
+    return out
+
+
+def has_digit(name) -> bool:
+    """名稱含阿拉伯數字（1～5轉新手禮盒、2倍智慧果…）：只差數字的道具樣板分不太開，比對 / 學習都要更保守"""
+    return any(ch.isdigit() for ch in str(name or ''))
 
 
 def _cell_state(get, kind: str, slot: int):
@@ -279,9 +290,14 @@ def names_hidden(page: dict) -> bool:
 
 
 # ---- 學習 ----
-def learn_rows(rows, kind: str, name: str, tpl: dict, log=None) -> bool:
-    """純函式：名字圖加進 tpl（不存檔）。白點不足 / 與既有「別的名稱」IoU ≥ HIT_MIN（標籤可疑）/ 已有幾乎相同變體 / 變體已滿 → False"""
+def learn_rows(rows, kind: str, name: str, tpl: dict, log=None, new: bool = False) -> bool:
+    """純函式：名字圖加進 tpl（不存檔）。白點不足 / 與既有「別的名稱」IoU ≥ HIT_MIN（標籤可疑）/ 已有幾乎相同變體 / 變體已滿 → False。
+    new = 這格有「新」紅標：名稱含數字就不學（數字在紅標底下，學了會跟只差數字的道具混在一起，2026-10-17）"""
     if not name or petmatch.ink(rows) < NAME_INK_MIN:
+        return False
+    if new and has_digit(name):
+        if log:
+            log(f'itemname：{kind} 「{name}」含數字且格子有紅角標（數字被蓋住），不學')
         return False
     img = petmatch.pack(rows)
     book = tpl.setdefault(kind, {})
@@ -307,7 +323,7 @@ def learn(img, kind: str, slot: int, name: str, save: bool = True, log=None) -> 
         return False
     tpl = load_tpl()
     tpl = {k: {n: list(v) for n, v in b.items()} for k, b in tpl.items()}      # 複本：不汙染快取
-    if not learn_rows(rows_at(get, kind, slot), kind, name, tpl, log):
+    if not learn_rows(rows_at(get, kind, slot), kind, name, tpl, log, new=new_tag(get, kind, slot)):
         return False
     if save:
         save_tpl(tpl)
@@ -328,6 +344,25 @@ def rows_decode(s: str, kind: str) -> list:
     v = int.from_bytes(zlib.decompress(base64.b64decode(s)), 'big')
     b = format(v, f'0{w * h}b')
     return [b[j * w:(j + 1) * w] for j in range(h)]
+
+
+def forget(kind: str, name: str, variants=None, save: bool = True, log=print) -> int:
+    """刪樣板：kind 本的 name（same_name）整個名稱，或只刪 variants（變體序號清單）→ 刪掉幾個變體。用來清學錯的樣板"""
+    tpl = {k: {n: list(v) for n, v in b.items()} for k, b in load_tpl().items()}
+    book = tpl.get(kind) or {}
+    key = next((k for k in book if same_name(k, name)), None)
+    if key is None:
+        return 0
+    vs = book[key]
+    drop = set(range(len(vs))) if variants is None else {v for v in variants if 0 <= v < len(vs)}
+    book[key] = [h for j, h in enumerate(vs) if j not in drop]
+    if not book[key]:
+        book.pop(key)
+    if drop and save:
+        save_tpl(tpl)
+    if log:
+        log(f'itemname forget：{kind}「{key}」刪 {len(drop)} 個變體（剩 {len(book.get(key) or [])}）')
+    return len(drop)
 
 
 def load_samples(path=None) -> dict:
@@ -376,12 +411,19 @@ def main(argv=None) -> int:
     p.add_argument('--kind', required=True, choices=['bag', 'depot'])
     p.add_argument('--labels', required=True, help='格號=名稱,格號=名稱（格號 0 起）')
     sub.add_parser('list', help='列出樣板')
+    p = sub.add_parser('forget', help='刪學錯的樣板（整個名稱或指定變體序號）')
+    p.add_argument('name')
+    p.add_argument('--kind', required=True, choices=['bag', 'depot'])
+    p.add_argument('--variants', default=None, help='變體序號（0 起，逗號分隔）；不給 = 整個名稱')
     p = sub.add_parser('seed', help='用人工標籤樣本（fixtures/itemname_samples.json）學樣板')
     p.add_argument('--fixture', default=None)
     a = ap.parse_args(argv)
     if a.cmd == 'seed':
         seed(a.fixture)
         return 0
+    if a.cmd == 'forget':
+        vs = [int(x) for x in a.variants.split(',')] if a.variants else None
+        return 0 if forget(a.kind, a.name, vs) else 1
     if a.cmd == 'list':
         tpl = load_tpl()
         for k in BOXES:

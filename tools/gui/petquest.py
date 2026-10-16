@@ -431,6 +431,23 @@ def load_progress() -> dict:
         return {}
 
 
+def clear_progress(reason: str = '') -> bool:
+    """整個進度檔作廢（轉生後 / postrebirth --fresh）：舊轉的 battle / orig / slot2_stored 不能沿用（2026-10-17 p2 一轉後
+    猜謎三兄弟沿用 0 轉記的「迪基格斯」→ petwatch --back 迪基格斯 5 人換回失敗）。回 True = 有刪檔"""
+    try:
+        PROGRESS.unlink()
+    except OSError:
+        return False
+    event(f'進度檔已清空（{reason or "手動"}）：{PROGRESS}')
+    return True
+
+
+def stale_trans(allp: dict, cur) -> bool:
+    """純函式：進度檔記的轉數（頂層 'trans'）與目前轉數都知道、而且不同 → True（舊轉的紀錄作廢）"""
+    t = allp.get('trans') if isinstance(allp, dict) else None
+    return isinstance(t, int) and isinstance(cur, int) and t != cur
+
+
 def save_progress(d: dict) -> None:
     try:
         PROGRESS.parent.mkdir(parents=True, exist_ok=True)
@@ -443,6 +460,11 @@ def save_progress(d: dict) -> None:
 class Tools:
     def sleep(self, s):
         uikit.sleep(s)
+
+    def cur_trans(self):
+        """目前隊長轉數（grind.load_trans：背包讀字 / rebirth 轉生確認時寫的 trans.json；讀不到 None）"""
+        import grind
+        return grind.load_trans()
 
     def clock(self):
         return time.time()
@@ -491,6 +513,12 @@ class Run:
         self.qid, self.T, self.o = qid, T, o
         self.q = QUESTS[qid]
         allp = load_progress()
+        cur = self.cur_trans()
+        if stale_trans(allp, cur):
+            event(f'進度檔是 {allp.get("trans")} 轉時記的（現在 {cur} 轉）→ 整個作廢、從頭（battle / orig / slot2_stored 都不沿用）')
+            allp = {}
+        if cur is not None:
+            allp['trans'] = cur                                            # 之後 save 一起寫：下一轉一讀就知道是舊紀錄
         p = allp.get(str(qid)) or {}
         if o.get('fresh') or time.time() - (p.get('ts') or 0) > PROGRESS_TRUST_S:
             p = {}
@@ -498,6 +526,14 @@ class Run:
         self.p.setdefault('done', [])
         self.info: dict = {}
         self.prep_ran = False                                              # 本次 run 剛做完 prep（單人 + 遇敵關）→ 第 1 輪 catch 不再 solo；不存檔
+
+    def cur_trans(self):
+        """目前隊長轉數（grind trans.json；讀不到 None = 不判斷）。測試替身可換 T.cur_trans"""
+        f = getattr(self.T, 'cur_trans', None)
+        try:
+            return f() if f else None
+        except Exception:                                              # noqa: BLE001
+            return None
 
     def save(self):
         self.p['ts'] = time.time()
@@ -912,12 +948,34 @@ class Run:
         if not back:
             return self.fail(EXIT_ARGS, f'各角色戰寵名不同 {self.battle_names()}：petwatch --back 只收單一名字 → 不自動練（猜謎）',
                              '手動 petwatch.py 逐人，或只對同名的人跑')
+        back, rc = self.verify_back(back)
+        if rc:
+            return rc
         args = ['--pet', q['pet'], '--level', q['level'], '--back', back, '--exp-fruit']
         rc, _ = self.sub('petwatch.py', args, 4 * 3600)
         if rc:
             return self.pass_or(rc, EXIT_TRAIN, f'petwatch 失敗 rc={rc}（4 = 有人換回失敗被放棄）',
                                 f'uv run --no-project python tools/gui/petwatch.py {" ".join(map(str, args))}；放棄的人：pet_catch.py --unlock 戰寵 --roles X → pet.py set-state X {back} 出戰 → pet_catch.py --lock 戰寵 --roles X --battle-pet {back}')
         return 0
+
+    def verify_back(self, back: str) -> tuple:
+        """petwatch --back 取值前核對 5 人寵物欄真的有 back（2026-10-17 p2：進度檔沿用 0 轉的「迪基格斯」，一轉後戰寵已是朵拉比斯 → 5 人換回失敗 rc 4）。
+        → (名字, 0)：全員有 → back；有人沒有、但全員都有 BATTLE_PET（朵拉比斯）→ 改用它並更新進度檔。
+        否則 (None, 退出碼)：不猜（讀寵物欄失敗照 pass_or）"""
+        rc, rs = self.pet_list()
+        if rc:
+            return None, self.pass_or(rc, EXIT_TRAIN, f'練寵前核對 --back「{back}」：讀寵物欄失敗 pet rc={rc}', 'uv run --no-project python tools/gui/pet.py list --role all')
+        has = lambda nm: [r for r in ALL_ROLES if not any(strict_species(sl) == nm for sl in (rs.get(r) or []))]   # noqa: E731
+        miss = has(back)
+        if not miss:
+            return back, 0
+        if back != BATTLE_PET and not has(BATTLE_PET):
+            event(f'進度檔記的戰寵「{back}」{miss} 寵物欄沒有（舊轉紀錄？）→ 改用 5 人都有的 {BATTLE_PET}')
+            self.p['battle'] = {r: BATTLE_PET for r in ALL_ROLES}
+            self.save()
+            return BATTLE_PET, 0
+        return None, self.fail(EXIT_TRAIN, f'petwatch --back「{back}」：{miss} 寵物欄沒有這隻（進度檔可能是舊轉的紀錄）→ 不練（練完會換回失敗）',
+                  'uv run --no-project python tools/gui/pet.py list --role all 確認戰寵；之後手動 petwatch.py --back 戰寵名')
 
     def s_step1(self) -> int:
         if self.p.get('already_done'):

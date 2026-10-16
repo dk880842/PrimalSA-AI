@@ -374,6 +374,94 @@ def test_bag(d):
     clear_tpl()
 
 
+# ---- 5. 名稱含數字：1～5轉新手禮盒（2026-10-17 p1 rebirth_pets --trans 5 boxes：倉庫第 1 格 5轉禮盒被樣板認成 3轉 → 跳過 → 「倉庫找不到」）----
+def box5_fixture():
+    import base64
+    import json as _j
+    import zlib
+    fx = _j.loads((HERE / 'fixtures' / 'itemname_box5.json').read_text(encoding='utf-8'))
+    x0, y0, w, h = fx['box']
+    raw = zlib.decompress(base64.b64decode(fx['rgb']))
+    pic = {(x0 + k % w, y0 + k // w): tuple(raw[k * 3:k * 3 + 3]) for k in range(w * h)}
+    return fx, (lambda a, b: pic.get((a, b), EMPTY))
+
+
+def use_tpl(tpl):
+    import json as _j
+    p = N.tpl_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_j.dumps(tpl, ensure_ascii=False), encoding='utf-8')
+    N._CACHE.clear()
+
+
+def test_digits():
+    import bag
+    W = '5轉新手禮盒'
+    check('digits_conflict：4轉 / 3轉 ≠ 5轉；漏數字不算衝突', bag.digits_conflict('4轉新手禮盒', W) and bag.digits_conflict('3轉新手禮盒 3轉新手禮盒', W)
+          and not bag.digits_conflict('轉新手禮盒', W) and not bag.digits_conflict('5轉新手禮盒', W) and not bag.digits_conflict('?轉新手禮', W))
+    check('digit_unsure：沒讀到同位置的 5 → 不確定', bag.digit_unsure('轉新手禮盒', W) and bag.digit_unsure('S轉新手禮盒', W) and not bag.digit_unsure('5轉新手禮盒', W)
+          and not bag.digit_unsure('龍王的守護', '龍王的守護'))
+    check('name_match：只差數字 → 不吻合（舊版模糊比對 0.83 會過）', not bag.name_match('4轉新手禮盒', W) and not bag.name_match('3轉新手禮盒', W)
+          and bag.name_match('5轉新手禮盒', W) and bag.name_match('轉新手禮盒', W))
+    check('name_match：數字在別處（疊數 / 魅力）不影響', bag.name_match('薩姆吉爾百飾 5 魅力', '薩姆吉爾的首飾') and bag.name_match('2倍智慧果(綁定) 12', '2倍智慧果')
+          and not bag.name_match('3倍智慧果', '2倍智慧果'))
+    check('strip_digits / _may_be：只差數字 → 不能排除；別的道具 → 可排除', bag.strip_digits(W) == '轉新手禮盒' and bag._may_be('3轉新手禮盒', W)
+          and bag._may_be('5轉新手禮盒', W) and not bag._may_be('英雄的祝福', W))
+
+
+def test_box5():
+    import bag
+    import uikit
+    import test_bag_icon as TB
+    fx, get = box5_fixture()
+    use_tpl(fx['polluted'])
+    r0 = N.read_cell(get, 'depot', 0)
+    check('實圖：倉庫第 1 格（5轉禮盒、紅角標）不再被汙染樣板認成 3轉（digit_guess 留底）', r0['name'] is None and r0.get('digit_guess') == '3轉新手禮盒'
+          and r0['new'] and r0['state'] == 'unknown', r0)
+    pg = N.read_page(get, 'depot')
+    check('實圖：第 2、3 格照舊認得（英雄的祝福 / 老爺爺的護身符）', pg['names'] == {1: '英雄的祝福', 2: '老爺爺的護身符'}, pg['names'])
+    # 汙染樣板：「3轉新手禮盒」4 個變體互相差一個數字 → forget 只留真正的 3（序號 2）
+    n = N.forget('depot', '3轉新手禮盒', [0, 1, 3], log=lambda m: None)
+    check('forget：刪指定變體、留下其餘', n == 3 and len(N.load_tpl(reload=True)['depot']['3轉新手禮盒']) == 1)
+    check('forget：整個名稱', N.forget('depot', '3轉新手禮盒', log=lambda m: None) == 1 and '3轉新手禮盒' not in N.load_tpl(reload=True)['depot'])
+    # learn：紅角標格 + 名稱含數字 → 不學；沒數字照學
+    tpl = {'bag': {}, 'depot': {}}
+    rows0 = N.rows_at(get, 'depot', 0)
+    check('learn_rows：紅角標格的「5轉新手禮盒」不學（數字被蓋住）', not N.learn_rows(rows0, 'depot', '5轉新手禮盒', tpl, new=True) and not tpl['depot'])
+    check('learn_rows：沒紅標照學', N.learn_rows(rows0, 'depot', '5轉新手禮盒', tpl, new=False))
+    check('match_rows：含數字名稱有紅標 → 不認', N.match_rows(rows0, 'depot', tpl, new=True)['name'] is None
+          and N.match_rows(rows0, 'depot', tpl, new=False)['name'] == '5轉新手禮盒')
+
+    # bag.find_item 接線（假彈窗 / 假 OCR）
+    keep_mode = bag.ITEM_MATCH
+    bag.ITEM_MATCH = 'auto'
+    try:
+        use_tpl(fx['polluted'])
+        bag._CUR.clear(), bag._SHOT.clear()
+        pops = {0: '5轉新手禮盒', 1: '英雄的祝福', 2: '老爺爺的護身符'}
+        st = TB.install(get, popups=pops)
+        i = bag.find_item('5轉新手禮盒', depot=True)
+        check('find_item：汙染樣板下倉庫第 1 格 5轉禮盒找得到、第 1 個開的就是第 1 格（不先掃到最後）', i == 0 and st['popup'][:1] == [0], (i, st['popup'], st['ocr']))
+        st = TB.install(get, popups=pops, texts={0: '轉新手禮盒'})
+        i = bag.find_item('5轉新手禮盒', depot=True)
+        check('find_item：格名 OCR 漏數字（「轉新手禮盒」）→ 開彈窗核對才回', i == 0 and 0 in st['popup'], (i, st['popup']))
+        st = TB.install(get, popups=pops, texts={0: '3轉新手禮盒'})
+        i = bag.find_item('5轉新手禮盒', depot=True)
+        check('find_item：格名讀成 3轉（同圖多名）→ 仍開彈窗，彈窗是 5轉 → 回第 1 格', i == 0 and 0 in st['popup'], (i, st['popup']))
+        st = TB.install(get, popups={0: '4轉新手禮盒', 1: '英雄的祝福', 2: '老爺爺的護身符'})
+        i = bag.find_item('5轉新手禮盒', depot=True)
+        check('find_item：彈窗是 4轉 → 不回（不會取錯禮盒）', i is None and 0 in st['popup'], (i, st['popup']))
+        st = TB.install(get, popups={0: '轉新手禮盒', 1: '英雄的祝福', 2: '老爺爺的護身符'})
+        i = bag.find_item('5轉新手禮盒', depot=True)
+        check('find_item：彈窗也讀不到數字 → 不算吻合（寧可找不到也不取錯）', i is None, (i, st['popup']))
+        st = TB.install(get, popups=pops)
+        i = bag.find_item('英雄的祝福', depot=True)
+        check('find_item：沒數字的道具照舊名字樣板直接命中、不開彈窗', i == 1 and not st['popup'], (i, st['popup']))
+    finally:
+        bag.ITEM_MATCH = keep_mode
+    clear_tpl()
+
+
 def main(argv=None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if '--make-fixtures' in argv:
@@ -387,10 +475,12 @@ def main(argv=None) -> int:
     test_learn_rules(d)
     test_read_page(d)
     test_new_tag(d)
+    test_digits()
     try:
         import itemimg_match
         itemimg_match.index()
         test_bag(d)
+        test_box5()
     except FileNotFoundError:
         print('SKIP bag 接線測試（沒有 tools/.cache/item-images；先跑 tools/extract/item_images.py）')
     print('全部通過' if not fails else f'{fails} 項失敗')

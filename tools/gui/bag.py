@@ -31,6 +31,9 @@ AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md
 ① 名字樣板（itemname_match：「顯示道具名」白字整名圖，學出來的，tools/.cache/item-name-tpl/）認得的格 = 確定名稱 →
 ② 沒認出的格才比 GameClient 道具圖（itemimg_match，只認得到 imageId，同圖多名）→ ③ 還是沒認出 / 被浮字蓋住的格才名稱 OCR。
 名字樣板只在「彈窗核對過名稱」或「格名稱 OCR 精確命中 Item 表」時學（同角色、同頁、120 秒內那張截圖；縮圖矛盾 / 跟別的名稱太像不學）。
+名稱含數字（1～5轉新手禮盒，縮圖都是 50055；2026-10-17，離線測試，未實機）：name_match 同位置數字不同 = 不吻合（digits_conflict）；
+格名 / 彈窗沒讀到那個數字（紅角標蓋住）= 不確定（digit_unsure）→ find_item 開彈窗核對、彈窗也要讀到同一個數字；
+find_item 只跳過「確定是別的道具」的格（_may_be：只差數字 / 同圖多名都不跳），同圖多名的格名沒精確吻合一律開彈窗。
 動作類（use / store / take / drop / purge）照舊開彈窗 / 提示窗核對名稱，不省。
 PSA_ITEM_MATCH=auto（預設：名字 → 縮圖 → OCR）| name（只用名字樣板）| iconocr（舊 auto：縮圖 → OCR）| icon（只縮圖）| ocr（最舊：全 OCR）。
 
@@ -159,6 +162,8 @@ def name_match(text, want, cutoff: float = 0.72) -> bool:
     if not a or not w:
         return False
     a, w = a.translate(OCR_CONFUSE), w.translate(OCR_CONFUSE)   # 「首 / 百」等 OCR 常混淆字先對齊（薩姆吉爾的首飾 常讀成 薩姆百爾的百飾）
+    if digits_conflict(a, w):                       # 「4轉新手禮盒」≠「5轉新手禮盒」（模糊比對只差一字會過，2026-10-17 p1 根因）
+        return False
     if w in a:
         return True
     if difflib.SequenceMatcher(None, a, w).ratio() >= cutoff:
@@ -166,6 +171,38 @@ def name_match(text, want, cutoff: float = 0.72) -> bool:
     # 名字被兩行切開或前後多字：用最佳子字串視窗
     n = len(w)
     return any(difflib.SequenceMatcher(None, a[i:i + n], w).ratio() >= cutoff for i in range(max(1, len(a) - n + 1)))
+
+
+# ---- 名稱裡的數字（2026-10-17 p1 rebirth_pets 5轉新手禮盒）----
+# 1～5 轉新手禮盒只差一個數字、縮圖一樣（imageId 50055）：name_match 的模糊比對（相似度 0.72）會把「4轉新手禮盒」當成「5轉新手禮盒」，
+# 彈窗核對因此把 1／2／4 轉的格學成「3轉新手禮盒」名字樣板 → 之後倉庫第 1 格（5轉）被樣板認成 3轉、整格跳過 → 「倉庫找不到」。
+def _digit_ctx(s: str) -> list:
+    """純函式：s 裡每段數字 → [(數字, 前一字, 後一字)]（沒有前 / 後字給 ''）"""
+    return [(m.group(), s[m.start() - 1:m.start()], s[m.end():m.end() + 1]) for m in re.finditer(r'\d+', s)]
+
+
+def _same_pos_digits(text: str, want: str) -> list:
+    """純函式（輸入已 norm_name）：want 每段數字 → text 裡「前一字或後一字相同」位置讀到的數字清單 [(want 數字, [text 數字…])]"""
+    tc = _digit_ctx(text)
+    return [(d, [td for td, tp, tn in tc if (n and tn == n) or (p and tp == p)]) for d, p, n in _digit_ctx(want)]
+
+
+def digits_conflict(text, want) -> bool:
+    """純函式：want 的數字（「5轉」的 5）在 text 同一位置（前一字或後一字相同）讀到的全是別的數字 → True（確定不是 want）。
+    text 那個位置沒讀到數字（被紅角標蓋住 / OCR 漏字）→ False（不確定，交給 digit_unsure / 彈窗）"""
+    a, w = norm_name(text), norm_name(want)
+    return any(got and d not in got for d, got in _same_pos_digits(a, w))
+
+
+def digit_unsure(text, want) -> bool:
+    """純函式：want 含數字，但 text 同一位置沒讀到相同數字（「轉新手禮盒」「?轉新手禮盒」）→ True（名字吻合也要開彈窗核對才算數）"""
+    a, w = norm_name(text), norm_name(want)
+    return any(d not in got for d, got in _same_pos_digits(a, w))
+
+
+def strip_digits(t) -> str:
+    """純函式：norm_name 後去掉數字（「5轉新手禮盒」→「轉新手禮盒」）"""
+    return re.sub(r'\d+', '', norm_name(t))
 
 
 def protected(text) -> str | None:
@@ -635,10 +672,12 @@ def popup_name(want: str | None = None) -> str:
     `-Light 170` 讀成「三三」、`-Dark 0` 才讀到名稱，舊版第一組有字就停 → 96）。不給 want（例：讀武器格舊武器名稱當身分）維持只用第一組，
     不把多組雜訊串進名稱"""
     base = (_ocr_join(POPUP_NAME_BOX, NAME_OPTS) + ' ' + _ocr_join(POPUP_NAME_ALT, NAME_OPTS)).strip()
-    if want is None or name_match(base, want):
+    if want is None or (name_match(base, want) and not digit_unsure(base, want)):
         return base
     more = (_ocr_all(POPUP_NAME_BOX, NAME_OPTS[1:]) + ' ' + _ocr_all(POPUP_NAME_ALT, NAME_OPTS[1:])).strip()
-    return more if name_match(more, want) else base
+    if name_match(more, want) and (not digit_unsure(more, want) or not name_match(base, want)):
+        return more                                     # 第一組數字讀不清（「轉新手禮盒」）而其餘參數讀到數字 → 採用（_popup_verify 再判數字）
+    return base
 
 
 def is_pair_layout() -> bool:
@@ -1065,10 +1104,26 @@ def _popup_verify(i: int, depot: bool, want: str, tried: set) -> bool:
     tried.add(i)
     nm = popup_name(want)
     close_popup()
-    if nm and name_match(nm, want):
+    if nm and name_match(nm, want) and not digit_unsure(nm, want):     # 名稱含數字（N轉新手禮盒）：彈窗要讀到同一個數字才算（2026-10-17）
         _learn_verified('depot' if depot else 'bag', i, want)
         return True
+    if nm and name_match(nm, want):
+        log(f'第 {i + 1} 格彈窗「{nm}」讀不到「{want}」的數字 → 不算吻合（不學樣板）')
     return False
+
+
+def _may_be(name, want) -> bool:
+    """名字樣板 / 格名 OCR 讀到 name 時，這格還**不能排除**是 want：同名、扣掉數字後相同（1～5轉新手禮盒，紅角標蓋住數字 / 數字讀錯），
+    或兩個名稱共用同一張縮圖（同圖多名一律以彈窗核對為準，2026-10-17）。只有確定是別的道具才回 False"""
+    if _same_item(name, want) or (strip_digits(want) and strip_digits(name) == strip_digits(want)):
+        return True
+    IM = _imgmod()
+    if IM is None:
+        return False
+    try:
+        return bool(set(IM.ids_for_name(name)) & set(IM.ids_for_name(want)))
+    except KeyError:
+        return False
 
 
 def find_item(want: str, depot: bool = False, popup_fallback: bool = True, hint: int | None = None) -> int | None:
@@ -1093,18 +1148,16 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True, hint:
             c = ir['cells'][i]
             if c.get('by') == 'name' or not c.get('ambiguous'):
                 return i                               # 名字樣板認出 / 這張圖只屬於 want（呼叫端動作前照舊開彈窗核對名稱）
-            t = read_slot_name(i, depot)               # 同圖多名（千年龜的殼 / 未知的殼…）：先讀這格名字（約 0.2 s）
-            if t.strip():
-                if name_match(t, want):
-                    _learn_ocr(kind, {i: t})
-                    return i
-                continue
-            if _popup_verify(i, depot, want, tried):   # 名字沒顯示：開彈窗核對
+            t = read_slot_name(i, depot)               # 同圖多名（千年龜的殼 / 未知的殼 / 1～5轉新手禮盒…）：先讀這格名字（約 0.2 s）
+            if t.strip() and name_match(t, want) and not digit_unsure(t, want):
+                _learn_ocr(kind, {i: t})
+                return i
+            if _popup_verify(i, depot, want, tried):   # 格名沒讀到 / 讀成別的 / 數字讀不清：同圖多名一律開彈窗核對（2026-10-17 改：舊版讀成別的名字就跳過）
                 return i
         if not _use_ocr():
             return None
         # auto：沒中 ≠ 沒有（被蓋住 / 沒學過名字 / 沒有道具圖 / 分數不夠）→ 照舊路徑再確認
-    skip = tried | {i for i, n in named.items() if not _same_item(n, want)}    # 名字樣板認出是別的道具的格不必再開
+    skip = tried | {i for i, n in named.items() if not _may_be(n, want)}    # 名字樣板認出「確定是別的道具」的格不必再開（只差數字 / 同圖多名不算，2026-10-17）
     cand = icon_match_slots(want, depot)
     if cand is not None:
         for i in cand:
@@ -1121,8 +1174,12 @@ def find_item(want: str, depot: bool = False, popup_fallback: bool = True, hint:
             continue
         t = read_slot_name(i, depot)
         if t and name_match(t, want):
-            _learn_ocr(kind, {i: t})
-            return i
+            if not digit_unsure(t, want):
+                _learn_ocr(kind, {i: t})
+                return i
+            if _popup_verify(i, depot, want, tried):  # 格名吻合但數字讀不清（「轉新手禮盒」）→ 彈窗核對
+                return i
+            continue
         unread.append((-sum(1 for c in set(norm_name(want)) if c in norm_name(t)), i))
     if not popup_fallback:
         return None

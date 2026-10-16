@@ -14,7 +14,7 @@
     --wear-hero-items   強制覆寫判斷：不管轉數一律不刪、改戴（舊旗標保留）
     --confirm-buy-bait  無作用（照傳給 petquest 也無害）：2026-10-15 起 petquest 誘餌不夠一律自動用外掛「+」買缺額，不需旗標（按前讀不到鑽石 / 鑽石有變就停）
     --spot 點名         收尾固定練功點（預設不給 = 去練功 grind.py start：依等級選點 + 未滿地雷區起 follow；2026-10-15 起不寫死地雷區）
-    --from / --to       只跑某幾段（段名見 plan）；進度檔 tools/.cache/postrebirth.json 記完成的段（24 小時內），重跑 = 續跑；--fresh 從頭
+    --from / --to       只跑某幾段（段名見 plan）；進度檔 tools/.cache/postrebirth.json 記完成的段（24 小時內），重跑 = 續跑；--fresh 從頭（同時清 petquest.json，2026-10-17）
   可 import：postrebirth.run(tools=…, …) → 退出碼；結果在 postrebirth.LAST
 
 規則：龍王的守護依 questdefs.NO_DRAGON（questrun 一律帶 --dragon，彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 不吃；紅暴 dragon_required 必吃）；
@@ -245,6 +245,11 @@ def save_progress(d: dict) -> None:
 
 
 class Tools:
+    def clear_petquest(self, reason: str) -> bool:
+        """petquest 進度檔 tools/.cache/petquest.json 整個作廢（petquest.clear_progress）"""
+        import petquest
+        return petquest.clear_progress(reason)
+
     def cached_trans(self):
         """本視窗 trans.json 的隊長轉數（grind.load_trans，背包讀字 / 轉生確認時寫）；沒有 None"""
         import grind
@@ -537,6 +542,8 @@ def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, conf
         print_plan(o)
         return 0
     T = tools or Tools()
+    if fresh and hasattr(T, 'clear_petquest'):       # 從頭 = 寵物任務的進度檔也作廢（舊轉記的 battle / orig 不能沿用；2026-10-17 p2 3003 --back 迪基格斯）
+        T.clear_petquest('postrebirth --fresh')
     r = Run(T, o)
     o['keep_autoswap'] = katan_follows(from_seg, to_seg, r.p['done'])
     i0 = SEGMENTS.index(from_seg) if from_seg else 0

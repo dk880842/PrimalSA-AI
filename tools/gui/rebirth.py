@@ -254,9 +254,15 @@ class Tools:
         return rc, sts.get(role), msg
 
     def save_trans(self, n):
-        """轉生確認後記下隊長轉數（grind 去練功讀不到背包時的備援）"""
+        """轉生確認後記下隊長轉數（grind 去練功讀不到背包時的備援）；寵物任務進度檔（petquest.json）同時作廢：
+        轉生後任務全部重置、戰寵也換了，舊轉記的 battle / orig 不能沿用（2026-10-17 p2 一轉後 3003 --back 迪基格斯 → 換回失敗）"""
         import grind
         grind.save_trans(n, src='rebirth')
+        try:
+            import petquest
+            petquest.clear_progress(f'轉生確認 {n} 轉')
+        except Exception as e:                                  # noqa: BLE001  清不掉不影響轉生（petquest 自己也會比對轉數）
+            event(f'清 petquest 進度檔失敗：{e}')
 
     def teleport20(self):
         import heal
@@ -901,7 +907,7 @@ class Run:
             for r in ALL_ROLES:
                 rc, st, msg = T.ass_pet(r, act)
                 if rc == 0 and st and st.get('skipped'):
-                    self.warn(f'{r} 戰寵一般動作下拉沒有「{act}」（剛轉生 Lv1 戰寵只有 攻擊 / 防禦）→ 已收下拉、跳過，維持 {st.get("normal")}')
+                    self.warn(f'{r} 戰寵一般動作下拉沒有「{act}」（剛轉生 Lv1 戰寵只有 攻擊 / 防禦，或沒戰寵）→ 已收下拉、跳過，維持 {st.get("normal")}')
                     continue
                 if rc == 0:
                     continue

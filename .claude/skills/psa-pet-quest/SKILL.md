@@ -31,6 +31,8 @@ description: Use when a PrimalSA (精靈王石器) quest requires handing in pet
 
 ## 總控腳本 `petquest.py`（2026-10-13，**只有離線測試，整支未實機**）
 一行跑完一個寵物任務（接取 → 抓 / 分 / 練 → 交 → 丟獎勵寵 → 換回原戰寵），每段呼叫下面各節的既有腳本，失敗停在該段、印手動指令，進度檔 `tools/.cache/petquest.json` 續跑：
+（2026-10-17，離線 test_petquest.py，未實機）**進度檔跨轉生作廢**：頂層記 `trans`（隊長轉數，grind trans.json），讀到與目前轉數不同 → 整個作廢從頭；`rebirth.py` 轉生確認時、`postrebirth.py run --fresh` 開頭都會 `petquest.clear_progress()` 刪檔。
+猜謎 train 呼叫 `petwatch --back` 前先 `pet.py list` 核對 5 人寵物欄真的有那隻（`verify_back`）：有人沒有 → 若 5 人都有朵拉比斯就改用它並更新進度檔，否則 166 不練（根因：p2 一轉後進度檔沿用 0 轉記的「迪基格斯」→ 5 人換回失敗 petwatch rc 4）。
 ```
 uv run --no-project python tools/gui/petquest.py plan 2016|2019|3003                     # 先看每段指令（不碰遊戲）
 uv run --no-project python tools/gui/petquest.py run 2016 --confirm-drop   # 恐龍博士（誘餌不夠自動買「+」，不需旗標；--confirm-buy-bait 無作用）

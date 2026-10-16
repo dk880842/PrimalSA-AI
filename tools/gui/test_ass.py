@@ -34,6 +34,8 @@ class Game:
         self.dd = None                  # 目前展開的下拉 'first' / 'normal'
         self.scrolled = False           # 右半面板被捲離頂端
         self.dd_stuck = False           # 選了選項沒生效
+        self.dd_sticky = False          # 下拉開著時只有點選項才收（▼ / X / 頭像都被吃掉；2026-10-17 p1 五轉實況）
+        self.dd_frozen = False          # 搭 dd_sticky：連點選項都收不起來
 
     def sleep(self, d):
         self.t += d
@@ -658,6 +660,9 @@ class PGame(Game):
         return ['攻擊', '防禦'] + self.skills[self.role]
 
     def click(self, x, y):
+        if self.panel and self.dd and self.dd_sticky and (x != ass.PET_OPT_X or self.dd_frozen):
+            self.clicks.append((x, y))          # 被下拉清單吃掉
+            return
         if self.panel and self.dd and x == ass.PET_OPT_X:
             self.clicks.append((x, y))
             idx = round((y - ass.PET_DD[self.dd][1]) / ass.PET_OPT_DY) - 1
@@ -706,9 +711,10 @@ check('技能名依文字找（DKBO3 學了猛擊 → 第 4 項）；DKBO 沒這
 g = PGame(skills={'DKBO2': []})                 # 剛轉生 Lv1 戰寵：下拉只有 攻擊 / 防禦（2026-10-15 四轉 rebirth 87）
 psetup(g)
 rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '忠犬'}, 'DKBO': {'normal': '忠犬'}}, skip_missing=True)
-check('skip_missing：DKBO2 下拉沒有忠犬 → 收下拉（點回下拉鈕）、記 skipped、繼續 DKBO 改成忠犬、rc 0',
+check('skip_missing：DKBO2 下拉沒有忠犬 → 收下拉（點目前值「攻擊」，2026-10-17 改；舊版點回 ▼）、記 skipped、繼續 DKBO 改成忠犬、rc 0',
       rc == 0 and sts['DKBO2'] == {'normal': '攻擊', 'skipped': '忠犬'} and g.pets['DKBO2']['normal'] == '攻擊' and g.pets['DKBO']['normal'] == '忠犬'
-      and g.clicks.count(ass.PET_DD['normal']) == 3 and len([c for c in g.clicks if c[0] == ass.PET_OPT_X]) == 1 and not g.panel, f'{rc} {sts} {g.clicks}')
+      and g.clicks.count(ass.PET_DD['normal']) == 2 and [c for c in g.clicks if c[0] == ass.PET_OPT_X] == [(ass.PET_OPT_X, ass.PET_DD['normal'][1] + 42), (ass.PET_OPT_X, ass.PET_DD['normal'][1] + 126)]
+      and not g.panel, f'{rc} {sts} {g.clicks}')
 g = PGame(skills={'DKBO2': []})
 psetup(g)
 rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '忠犬'}, 'DKBO': {'normal': '忠犬'}})
@@ -717,8 +723,47 @@ g = PGame()
 g.ocr_fail = {'DKBO2'}
 psetup(g)
 rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '防禦'}, 'DKBO': {'normal': '防禦'}})
-check('下拉 OCR 讀不到 → rc 12、不點選項、後面的人不動', rc == ass.EXIT_NO_OPTION and g.pets['DKBO2']['normal'] == '攻擊' and g.pets['DKBO']['normal'] == '攻擊'
-      and not [c for c in g.clicks if c[0] == ass.PET_OPT_X])
+check('下拉 OCR 讀不到 → rc 12、只點目前值「攻擊」的固定列位收下拉（不改）、後面的人不動', rc == ass.EXIT_NO_OPTION and g.pets['DKBO2']['normal'] == '攻擊'
+      and g.pets['DKBO']['normal'] == '攻擊' and [c for c in g.clicks if c[0] == ass.PET_OPT_X] == [(ass.PET_OPT_X, ass.PET_DD['normal'][1] + 42)] and g.dd is None)
+# ---- 2026-10-17 p1 五轉 rebirth heal 87：DKBO 下拉沒有忠犬，點回 ▼ 收不起來（清單一直開著）→ 關面板 X 被吃、DKBO2 頭像選不到 ----
+g = PGame(skills={'DKBO': []})
+g.dd_sticky = True
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO': {'normal': '忠犬'}}, skip_missing=True)
+check('下拉 ▼ 收不起來：點目前值「攻擊」收下拉 → skipped、rc 0、沒改、面板關',
+      rc == 0 and sts['DKBO'] == {'normal': '攻擊', 'skipped': '忠犬'} and g.pets['DKBO']['normal'] == '攻擊' and g.dd is None and not g.panel
+      and (ass.PET_OPT_X, ass.PET_DD['normal'][1] + 42) in g.clicks, f'{rc} {sts} {msg} {g.clicks}')
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '忠犬'}}, skip_missing=True)
+check('  接著 DKBO2 照常選到、設成忠犬（rebirth heal 逐人呼叫）', rc == 0 and g.pets['DKBO2']['normal'] == '忠犬' and not g.panel, f'{rc} {msg}')
+g = PGame(normals={'DKBO': '防禦'}, skills={'DKBO': []})
+g.dd_sticky = True
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO': {'normal': '忠犬'}}, skip_missing=True)
+check('目前值是防禦：收下拉點「防禦」那列（不會被改成攻擊）', rc == 0 and g.pets['DKBO']['normal'] == '防禦' and g.dd is None, f'{rc} {g.clicks}')
+g = PGame()
+g.dd_sticky, g.panel, g.dd = True, True, 'normal'     # 上一輪留下展開的下拉（舊版 87 的現場）
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO2': {'normal': '忠犬'}}, skip_missing=True)
+check('上一輪下拉還開著、頭像點不到 → 先收下拉（點目前值）再選一次 → 選到 DKBO2、設好', rc == 0 and g.pets['DKBO2']['normal'] == '忠犬' and g.dd is None and not g.panel,
+      f'{rc} {msg} {g.clicks}')
+
+
+class NoPetGame(PGame):
+    """DKBO3 沒有戰寵：欄位空白、下拉清單沒有任何選項（實機長相未知，未實機）"""
+    def opts(self):
+        return [] if self.role == 'DKBO3' else super().opts()
+
+
+g = NoPetGame(normals={'DKBO3': ''})
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO3': {'normal': '忠犬'}, 'DKBO': {'normal': '忠犬'}}, skip_missing=True)
+check('沒戰寵（欄位空、清單空）→ 收下拉、skipped、繼續下一個人 rc 0', rc == 0 and sts['DKBO3'].get('skipped') == '忠犬' and g.pets['DKBO']['normal'] == '忠犬'
+      and g.dd is None and not g.panel, f'{rc} {sts} {msg}')
+g = PGame(skills={'DKBO': []})
+g.dd_sticky, g.dd_frozen = True, True               # 點什麼都收不起來
+psetup(g)
+rc, sts, msg, info = ass.set_pet_many({'DKBO': {'normal': '忠犬'}}, skip_missing=True)
+check('下拉怎麼點都收不起來 → rc 18（不當成略過）', rc == ass.EXIT_DD_STUCK, f'{rc} {msg}')
 g = PGame()
 g.dd_stuck = True
 psetup(g)

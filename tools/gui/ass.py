@@ -26,7 +26,7 @@
       主畫面看不到外掛鈕（對話 / 載入中）或被擋 → 等待重試，最多 OPEN_TIMEOUT 秒，失敗回報、不亂點。
 退出碼：0 成功 / 1 參數錯 / 2 面板打不開 / 3 選不到角色（面板開著但頭像被遮住 / 點了不變）/ 4 設定確認失敗（點了沒變，不再補點）/ 5 版面不是 2880×1659 / 6 面板中途消失（讀不到；選角色時面板被遊戲關掉、重開 2 次仍不行）/ 7 右半面板不在頂端（pet：戰寵動作標題讀不到，不點）/
         12 多人 pet：下拉找不到指定選項（不點、停在該角色）/ 13 battle：人物首次動作的值確定不對（不自動改）/
-        17 heal：OCR 找不到「精靈補血」標籤（捲了仍找不到，不點）/ 15 points：加點方案不是 POINTS_PLAN（目標值輸入流程未實測 = 座標待量測，不改不勾）/ 16 points：特色設定分頁 / 加點視窗 OCR 讀不到（不點勾選）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
+        17 heal：OCR 找不到「精靈補血」標籤（捲了仍找不到，不點）/ 18 多人 pet：戰寵動作下拉展開後收不起來（點目前值 / ▼ / 攻擊都沒收；2026-10-17，未實機）/ 15 points：加點方案不是 POINTS_PLAN（目標值輸入流程未實測 = 座標待量測，不改不勾）/ 16 points：特色設定分頁 / 加點視窗 OCR 讀不到（不點勾選）/ 8 戰鬥中（BATTLE_WAIT 秒內沒等到戰鬥結束，或加了 --no-wait）：沒開面板、沒改任何設定。
 戰鬥中保護（2026-10-10 碧青洞窟事故：BOSS 戰開始 1 秒後外掛設定被改動 → 隊長脫隊）：get / set / pet 一律先判斷是不是戰鬥中
   （戰鬥畫面像素 = battleguard.screen_in_battle，或 quest.py 寫的鎖檔 tools/.cache/battle.lock 有效〔pid 活著且 30 分鐘內〕），
   是 → 不開面板、不改任何勾選，等戰鬥結束（連續 2 次讀到非戰鬥才算，最多 BATTLE_WAIT=90 秒）再做；逾時回退出碼 8。
@@ -84,6 +84,7 @@ CONFIRM_WAIT2 = 0.9              # 還沒變就多等一次（不補點，避免
 
 EXIT_OK, EXIT_USAGE, EXIT_NO_PANEL, EXIT_NO_ROLE, EXIT_CONFIRM, EXIT_LAYOUT, EXIT_PANEL_LOST, EXIT_NOT_TOP = 0, 1, 2, 3, 4, 5, 6, 7
 EXIT_NO_OPTION = 12              # 多人戰寵動作：下拉找不到指定選項（不亂點）
+EXIT_DD_STUCK = 18               # 多人戰寵動作：下拉展開後收不起來（collapse_dropdown 三種點法都沒收）
 EXIT_IN_BATTLE = 8               # 戰鬥中：等不到結束（或 --no-wait）→ 不開面板、不改設定
 BATTLE_WAIT = 90.0               # 戰鬥中最多等幾秒（一般一場 < 60 秒；BOSS 戰約 20~40 秒）
 BATTLE_POLL = 1.5                # 等待時的輪詢秒數
@@ -670,6 +671,9 @@ def _many(plan: dict, visit, no_wait: bool = False) -> tuple:
             i += 1
             t = clock()
             rc_, why = select_role_reopen(role, no_wait, info)
+            if rc_ and panel_open() and collapse_any_dropdown():     # 2026-10-17 p1 五轉：前一人的下拉沒收，蓋住頭像 → 收掉再選一次
+                log(f'ass：選不到 {role} 時戰寵動作下拉還開著 → 已收下拉，再選一次')
+                rc_, why = select_role_reopen(role, no_wait, info)
             if rc_:
                 info['role'] = role
                 return rc_, out, why, info
@@ -685,7 +689,7 @@ def _many(plan: dict, visit, no_wait: bool = False) -> tuple:
             info['secs'][role] = round(clock() - t, 2)
         return EXIT_OK, {r: out[r] for r in plan}, '', info
     finally:
-        if not close_panel():
+        if not close_panel() and not (collapse_any_dropdown() and close_panel()):    # 下拉開著時點 X 可能被吃掉（2026-10-17 p1）
             print('警告：外掛面板沒關成功（請 shot 看畫面，手動點 X 1318,90）', flush=True)
 
 
@@ -716,6 +720,62 @@ def find_option(key: str, want: str) -> tuple | None:
     return hits[0] if len(hits) == 1 or (exact and len(set(exact)) == 1) else None
 
 
+def _list_lines(key: str) -> list:
+    y0 = PET_DD[key][1] + PET_LIST_DY
+    return _ocr_lines((PET_LIST_X, y0, PET_LIST_W, PET_LIST_H), '-Zooms', '2,3,4')
+
+
+def dropdown_is_open(key: str, lines=None) -> bool:
+    """純判斷（lines = _list_lines 結果）：欄位正下方第 1、2 列讀到「攻擊」「防禦」（下拉前兩項固定）= 清單展開。
+    清單區平常也有別的設定字，所以要看位置（欄位 y + 42 / + 84，容差 ±16）"""
+    lines = _list_lines(key) if lines is None else lines
+    y = PET_DD[key][1]
+
+    def at(word, k):
+        return any(word in t.replace(' ', '') and abs(ly - (y + PET_OPT_DY * k)) <= 16 for t, _, ly in lines)
+    return at(PET_OPTS[0], 1) and at(PET_OPTS[1], 2)
+
+
+def collapse_dropdown(key: str, cur: str | None = None, assume_open: bool = False) -> bool:
+    """戰寵動作下拉展開著 → 收起來（不改設定）。2026-10-17 p1 五轉 rebirth heal：DKBO 下拉沒有忠犬，舊版「點回 ▼」沒收起來，
+    清單一直開著 → 關面板的 X 被吃掉、下一個人 DKBO2 頭像選不到 → 87（手動點「攻擊」〔= 目前值〕才收掉）。
+    依序：① 點清單裡的目前值（cur；OCR 位置，讀不到就用固定列位 PET_OPTS 第 n 項 = 欄位 y + 42×(n+1)；選同一項 = 不變）
+    ② 點 ▼ ③ cur 不在清單（沒戰寵 / 讀不到）才點「攻擊」（第 1 項）。每步後 OCR 確認收起；回 True = 已收（或本來就沒開）。
+    assume_open = 呼叫端剛點開下拉：清單 OCR 整個讀不到時仍當開著處理（否則讀不到 = 不動）。未實機"""
+    lines = _list_lines(key)
+    if (lines or not assume_open) and not dropdown_is_open(key, lines):
+        return True
+    x, y = PET_DD[key]
+    hit = [ly for t, _, ly in lines if cur and t.replace(' ', '') == cur]
+    if not hit and cur in PET_OPTS:
+        hit = [y + PET_OPT_DY * (PET_OPTS.index(cur) + 1)]
+    steps = [(PET_OPT_X, hit[0], f'點目前值「{cur}」')] if hit else []
+    steps.append((x, y, '點 ▼'))
+    if not hit:
+        steps.append((PET_OPT_X, y + PET_OPT_DY, f'目前值「{cur or "?"}」不在清單 → 點「{PET_OPTS[0]}」'))
+    for cx, cy, what in steps:
+        if not panel_open():
+            return False
+        gui('seq', f'click {cx} {cy}; wait 500', note=f'ass.py 戰寵{key} 收下拉：{what}')
+        if not dropdown_is_open(key):
+            log(f'ass：戰寵{key} 下拉已收（{what}）')
+            return True
+    log(f'ass：戰寵{key} 下拉收不起來（{"、".join(w for _, _, w in steps)} 都試過）')
+    return False
+
+
+def collapse_any_dropdown() -> bool:
+    """首次 / 一般動作兩個下拉，展開著的就收（選頭像失敗 / 關面板失敗時用）。回 True = 有收掉至少一個"""
+    done = False
+    for key in PET_DD:
+        lines = _list_lines(key)
+        if dropdown_is_open(key, lines):
+            cur = read_pet_text(key)
+            cur = next((o for o in PET_OPTS if o in cur), cur or None)
+            done = collapse_dropdown(key, cur) or done
+    return done
+
+
 def read_pet_text(which: str) -> str:
     return _ocr(PET_FIELD[which], '-Zooms', '2,3,4').replace(' ', '')
 
@@ -726,8 +786,9 @@ def _field_is(which: str, want: str) -> bool:
 
 def _visit_pet_normal(want: str, dry_run: bool, skip_missing: bool = False):
     """多人戰寵 一般動作的逐人動作。回 (退出碼, {'normal': 值}, 訊息, 改了哪些)。
-    skip_missing：下拉裡找不到該選項（例：剛轉生 Lv1 戰寵只有「攻擊 / 防禦」，2026-10-15 四轉 rebirth heal 階段 87）→
-    點回下拉鈕收起清單、狀態帶 'skipped': want、回 0 繼續下一個人（不失敗、不亂點清單）"""
+    skip_missing：下拉裡找不到該選項（例：剛轉生 Lv1 戰寵只有「攻擊 / 防禦」/ 沒戰寵，2026-10-15 四轉、10-17 五轉 rebirth heal 階段 87）→
+    collapse_dropdown 收起清單（點目前值，不改設定）、狀態帶 'skipped': want、回 0 繼續下一個人。沒給 skip_missing → 收下拉後回 12。
+    收不起來 → 18（2026-10-17：舊版點回 ▼ 收不起來、下拉一直開著）"""
     def visit(role):
         if not pet_on_top():
             return EXIT_NOT_TOP, None, f'{role}：右半面板不在頂端（讀不到「戰寵動作」標題）；不點', []
@@ -740,12 +801,13 @@ def _visit_pet_normal(want: str, dry_run: bool, skip_missing: bool = False):
         x, y = PET_DD['normal']
         gui('seq', f'click {x} {y}; wait 500', note=f'ass.py {role} 戰寵normal 開下拉')
         pos = find_option('normal', want)
-        if pos is None and skip_missing:
-            gui('seq', f'click {x} {y}; wait 500', note=f'ass.py {role} 戰寵normal 收下拉（沒有「{want}」）')
-            log(f'ass：{role} 戰寵一般動作下拉沒有「{want}」→ 收下拉、跳過（維持 {cur}）')
-            return EXIT_OK, {'normal': cur, 'skipped': want}, '', []
-        if pos is None:
-            return EXIT_NO_OPTION, {'normal': cur}, f'{role}：下拉裡找不到唯一的「{want}」選項（該寵物沒學這技能？OCR 讀不到？）；不亂點，下拉隨面板關閉', []
+        if pos is None:                                # 沒有這個選項 / 沒戰寵：先收下拉（點目前值，不改設定），再決定略過或停
+            if not collapse_dropdown('normal', cur if cur in txt else None, assume_open=True):
+                return EXIT_DD_STUCK, {'normal': cur}, f'{role}：下拉沒有「{want}」，而且下拉收不起來（請 shot 看畫面）', []
+            if skip_missing:
+                log(f'ass：{role} 戰寵一般動作下拉沒有「{want}」（沒學 / 沒戰寵）→ 已收下拉、跳過（維持 {cur}）')
+                return EXIT_OK, {'normal': cur, 'skipped': want}, '', []
+            return EXIT_NO_OPTION, {'normal': cur}, f'{role}：下拉裡找不到唯一的「{want}」選項（該寵物沒學這技能？OCR 讀不到？）；已收下拉、不亂點', []
         if not panel_open():
             return EXIT_PANEL_LOST, {'normal': cur}, f'{role}：開下拉後面板消失', []
         gui('seq', f'click {PET_OPT_X} {pos[1]}; wait 500', note=f'ass.py {role} 戰寵normal → {want}')

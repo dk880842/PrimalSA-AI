@@ -517,6 +517,41 @@ s.quest = lambda a: s.out(3)                                  # 真的沒反應�
 rc = go(3003, s, confirm_drop=True)
 check('猜謎步 1 quest.py 3 且步號仍 1 → 161', rc == pq.EXIT_ACCEPT, f'rc={rc}')
 
+# ---------------- 跨轉生的舊進度檔（2026-10-17 p2 一轉後 3003：進度檔沿用 0 轉記的「迪基格斯」→ petwatch --back 迪基格斯 → 5 人換回失敗 rc 4）
+check('stale_trans：轉數都知道且不同才作廢', pq.stale_trans({'trans': 0}, 1) and not pq.stale_trans({'trans': 1}, 1)
+      and not pq.stale_trans({}, 1) and not pq.stale_trans({'trans': 0}, None))
+OLD3003 = {'done': ['accept', 'step1', 'prep'], 'ts': time.time(), 'step': 2, 'battle': {r: '迪基格斯' for r in ROLES}, 'orig': {r: 30 for r in ROLES}}
+
+
+def sim_at_train(battle='朵拉比斯'):
+    s = Sim(3003, step=2, battle=battle)
+    for r in ROLES:
+        s.bar[r].append(P('金布伊', '出戰', 1))
+        s.bar[r][1]['state'] = '等待'
+    return s
+
+
+s = Sim(3003)
+s.cur_trans = lambda: 1
+pq.PROGRESS.write_text(json.dumps({'trans': 0, '3003': OLD3003}), encoding='utf-8')
+rc = go(3003, s, confirm_drop=True, reset=False)
+check('進度檔是 0 轉記的、現在 1 轉 → 整個作廢從頭：--back 朵拉比斯、進度檔改記 1 轉', rc == 0
+      and ('--pet', '金布伊', '--level', '77', '--back', '朵拉比斯', '--exp-fruit') in names(s, 'petwatch.py')
+      and json.loads(pq.PROGRESS.read_text(encoding='utf-8')).get('trans') == 1, f'rc={rc} {names(s, "petwatch.py")} {pq.LAST.get("info")}')
+s = sim_at_train()
+pq.PROGRESS.write_text(json.dumps({'3003': OLD3003}), encoding='utf-8')         # 舊格式（沒記轉數）、轉數也讀不到 → 沿用 → 由 --back 核對擋下
+rc = go(3003, s, confirm_drop=True, reset=False)
+check('進度檔記迪基格斯但寵物欄沒有、5 人都有朵拉比斯 → --back 改朵拉比斯（不會換回失敗）', rc == 0
+      and [a[a.index('--back') + 1] for a in names(s, 'petwatch.py')] == ['朵拉比斯']
+      and set(json.loads(pq.PROGRESS.read_text(encoding='utf-8'))['3003']['battle'].values()) <= {'朵拉比斯'}, f'rc={rc} {names(s, "petwatch.py")} {pq.LAST.get("info")}')
+s = sim_at_train(battle='布伊')
+pq.PROGRESS.write_text(json.dumps({'3003': OLD3003}), encoding='utf-8')
+rc = go(3003, s, confirm_drop=True, reset=False)
+check('進度檔記迪基格斯、寵物欄沒有、也不是人人有朵拉比斯 → 166、不跑 petwatch（不猜）', rc == pq.EXIT_TRAIN and not names(s, 'petwatch.py'), f'rc={rc}')
+pq.PROGRESS.write_text('{}', encoding='utf-8')
+with contextlib.redirect_stdout(io.StringIO()):
+    check('clear_progress：刪檔 → True；沒檔 → False', pq.clear_progress('測試') and not pq.PROGRESS.exists() and not pq.clear_progress('測試'))
+
 # ---------------- 其他
 s = grow(Sim(2016))
 s.fail[('questrun.py', 'run')] = 9

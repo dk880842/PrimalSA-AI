@@ -201,6 +201,10 @@ uv run --no-project python tools/gui/ass.py pet all normal 防禦 --no-resume   
 - **不確認當前角色**（不開切換面板；每次 char.ensure 都開關一次切換面板，掛機中戰鬥時還會讀不到而重試）：當前角色依規定維持 DKBO，恢復掛機的 grind ensure 開頭會驗一次。曾因先 char.ensure 再關遇敵，在快速戰鬥中重試造成切換面板反覆開關（已改）。
 - 需要常駐 server（CLI 會自動 `winenv.enable_server()`）；沒開時 char 讀像素常逾時（rc 60）。
 - 實測 2026-10-11（地雷區 60049 掛機中）：**使用者指定 5 人戰寵 一般動作 = 防禦**，改前 5 人都是 攻擊 → 改後 5 人都是 防禦（逐人 OCR 讀回確認），約 25 s（含關遇敵）；之後 grind ensure rc 0（2 次 EXP 橫幅）掛機恢復。
+- **下拉收不起來（2026-10-17 p1 五轉 rebirth heal rc 87；離線 test_ass.py (24)，未實機）**：DKBO 戰寵一般動作下拉沒有忠犬，舊版「點回 ▼」收不起來，清單一直開著 → 關面板 X 被吃、下一次 DKBO2 頭像選不到 → 87（手動點「攻擊」〔= 目前值〕才收掉）。
+  改：`ass.collapse_dropdown(key, cur)` 依序 ① 點清單裡的**目前值**（OCR 位置，讀不到用固定列位 PET_OPTS 第 n 項 = 欄位 y + 42×(n+1)；選同一項 = 不改設定）② 點 ▼ ③ 目前值不在清單（沒戰寵 / 讀不到）才點「攻擊」；每步 OCR 看欄位下第 1、2 列是不是「攻擊」「防禦」確認收起。
+  找不到選項 / 沒戰寵：先收下拉，`skip_missing` 記 skipped 略過該人（rebirth heal 不回 87），沒給則 12；收不起來 → **18**（`EXIT_DD_STUCK`）。
+  `_many` 選頭像失敗且面板開著 → 先 `collapse_any_dropdown()`（兩個下拉展開的就收）再選一次，仍不行照舊失敗；關面板失敗也先收下拉再關。
 - API：`ass.set_pet_many({角色: {'normal': 值}}, no_wait, dry_run)` → 同 set_many；`ass.run_pet_many(roles, 值, dry_run, pause, resume)` 含暫停 / 恢復掛機。離線測試 test_ass.py (24)(25)。
 
 ## 腳本 API：`ass.set_many` / `select_role`（P8，2026-10-11）
