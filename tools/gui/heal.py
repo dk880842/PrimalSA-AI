@@ -121,6 +121,13 @@ def set_encounter(on: bool) -> None:
     raise RuntimeError('切換原地遇敵失敗')
 
 
+def encounter_off_wait() -> None:
+    """關原地遇敵並等這場戰鬥打完（關遇敵不會中止正在打的那場；等 VS 牌消失最多 20 秒）。
+    questrun.Tools.encounter_off_wait / depot_use / eatbuff 共用（2026-10-16：戰鬥中點道具「使用」會無效，吃前一定先靜下來）"""
+    set_encounter(False)
+    gui('seq', f'waitpix 20000 {SIG_NO_BATTLE} 40')
+
+
 LAST_OUT = ''                        # 最近一次傳送 seq 的輸出（含 pre 動作的結果）
 
 

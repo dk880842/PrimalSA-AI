@@ -10,7 +10,8 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py level DKBO|all              # 唯讀：「N轉M級」（背包中間名牌下方）
   uv run --no-project python tools/gui/bag.py hp DKBO|all                 # 唯讀：每人 HP（背包頁 HP 條上的「目前/最大」；回 [目前, 最大, %]）
   uv run --no-project python tools/gui/bag.py find DKBO 精靈王之弓 [名稱…]    # 唯讀：每個名稱在背包哪一格（空格用像素判；「顯示道具名」被關會點開一次）
-  uv run --no-project python tools/gui/bag.py use DKBO 龍王的守護           # 背包 → 彈窗名稱核對 → 使用（隊長吃龍王的守護）
+  uv run --no-project python tools/gui/bag.py use DKBO 龍王的守護 [--no-reopen]  # 背包 → 彈窗名稱核對 → 使用（隊長吃龍王的守護）。buff 道具（龍王 / 2倍智慧果）走 eatbuff.eat_have：
+                                                                    # 關遇敵 + 等戰鬥結束 → 讀吃前 buff 剩餘 → 使用 → 關背包 → 剩餘時間沒增加 = 95（不比數量）→ 開回遇敵
   uv run --no-project python tools/gui/bag.py weapon all                  # 唯讀：逐人讀武器格名稱
   uv run --no-project python tools/gui/bag.py swap-weapon DKBO [--keep-old] # 穿精靈王之弓、丟舊武器（名稱防護）
   uv run --no-project python tools/gui/bag.py take DKBO 龍王的守護 [--depot public|personal]   # 倉庫取出（整疊）
@@ -2279,6 +2280,7 @@ def main() -> int:
     p = sub.add_parser('list'); p.add_argument('role')
     p = sub.add_parser('purge'); p.add_argument('role'); p.add_argument('--names', required=True); p.add_argument('--dry-run', action='store_true')
     p = sub.add_parser('use'); p.add_argument('role'); p.add_argument('name')
+    p.add_argument('--no-reopen', action='store_true', help='吃 buff 道具後不開回原地遇敵（預設開回；跑任務時用）')
     p = sub.add_parser('wear'); p.add_argument('role'); p.add_argument('names', nargs='+')
     p.add_argument('--strict', action='store_true', help='背包沒有某件就失敗（92）；預設略過（已穿上）')
     p = sub.add_parser('store-items'); p.add_argument('role')
@@ -2318,6 +2320,10 @@ def main() -> int:
         rc, d = purge(roles, names, a.dry_run)
         return _out(rc, {'purge': d, 'dry_run': a.dry_run})
     if a.cmd == 'use':
+        if buff_kind(a.name):                          # 2倍智慧果 / 龍王：關遇敵等戰鬥結束 → 用 buff 剩餘時間判斷吃到沒（eatbuff.py）
+            import eatbuff
+            rc, info = eatbuff.eat_have(r, a.name, reopen=not a.no_reopen)
+            return _out(rc, info)
         return _out(use_item(r, a.name, verify_buff=True), {})
     if a.cmd == 'wear':
         rc, d = wear_many(roles, a.names, not a.strict)

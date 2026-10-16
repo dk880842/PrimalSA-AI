@@ -239,8 +239,7 @@ class Tools(rebirth.Tools):
     def encounter_off_wait(self):
         """關原地遇敵並等這場戰鬥打完（關遇敵不會中止正在打的那場）"""
         import heal
-        heal.set_encounter(False)
-        heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')
+        heal.encounter_off_wait()
 
     def task_status(self, detail):
         import questdetail

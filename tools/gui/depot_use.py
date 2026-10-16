@@ -5,7 +5,8 @@
   uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果 [--depot public] [--no-restore] [--have]
 流程：暫停遇敵 + 等戰鬥結束（heal.set_encounter(False)）→ buff 列已有該道具的圖示（bag.BUFF_KIND：龍王的守護 = 人形 dragon、2倍智慧果 = EXP exp）就跳過
 → bag.depot_take（整疊取出）→ bag.use_item → bag.depot_store（剩餘存回）→ 關背包後等 buff 列出現圖示（4 秒）→ 開回遇敵（不管成敗都會開回）。
-成敗判準：BUFF_KIND 的道具一定要看到圖示才回 0，沒看到 = 95（剩的已存回倉庫）；use_item 回 0 只代表「按了使用、彈窗關了」
+成敗判準（2026-10-16 起共用 eatbuff.verify）：BUFF_KIND 的道具吃後要看到圖示、且 buff 剩餘時間增加（吃前沒圖示 = 0；讀不出時間以圖示為準），沒吃到 = 95（剩的已存回倉庫；不比道具數量）；use 後背包還開著 → eatbuff.close_bag_leftover 再關；
+舊版判準：BUFF_KIND 的道具一定要看到圖示才回 0，沒看到 = 95；use_item 回 0 只代表「按了使用、彈窗關了」
 （2026-10-12 2倍智慧果按了使用、彈窗關了卻沒扣道具，舊版沒驗就回 0）。不在 BUFF_KIND 的道具沒辦法驗，維持 use_item 結果。
 每步失敗就停、回該步的退出碼（bag 90～96），不重點；取出後失敗會提醒「道具還在背包」。
 任何出口（成功 / 失敗 / 例外）都由 bag.Session 結束時 close_leftover 收尾；另外**非 0 結束一律再 tidy()**（等 1 秒再 close_leftover 一次：
@@ -25,7 +26,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import bag  # noqa: E402
-import bufftime  # noqa: E402
+import bufftime  # noqa: E402,F401
+import eatbuff  # noqa: E402
 import heal  # noqa: E402
 import uikit  # noqa: E402
 
@@ -88,8 +90,7 @@ def run(role: str, item: str, depot: str = 'public', restore: bool = True, have:
 
 def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict) -> tuple:
     kind = bag.buff_kind(item)
-    heal.set_encounter(False)
-    heal.gui('seq', f'waitpix 20000 {heal.SIG_NO_BATTLE} 40')       # 關遇敵不會中止正在打的那場：等 VS 牌消失
+    heal.encounter_off_wait()                                    # 關遇敵 + 等 VS 牌消失（戰鬥中點「使用」無效，2026-10-16）
     if kind and bag.has_buff(kind):                              # 圖示已在 = 還有效，整個跳過（不開背包）；吃了也驗不出有沒有吃到
         info.update(buff_before=True, buff=True, step='skip', note=f'buff 列已有 {kind} 圖示，不吃')
         return 0, info
@@ -121,19 +122,12 @@ def _run(role: str, item: str, depot: str, restore: bool, have: bool, info: dict
             elif st and st != bag.EXIT_ITEM:
                 info['warn'] = f'{item} 還在 {role} 背包，沒存回倉庫（rc {st}）'
                 return (use_rc or st), info
-    if kind and not use_rc:                                          # 成功判定看 buff 列圖示（龍王 = 人形、2倍智慧果 = EXP）；背包已關才看得到
-        info['buff'] = bag._wait(lambda: bag.has_buff(kind), 4.0)
-        if info['buff']:                                             # 驗到圖示 → 到期時間直接算好寫 bufftime.json（psa-hud 倒數；寫失敗只記警告）
-            try:
-                if bufftime.record_eaten(kind, eat_ts):
-                    info['bufftime'] = 'eat'
-            except Exception as e:                                   # noqa: BLE001
-                info['warn_bufftime'] = f'寫到期快取失敗：{e}'
-        if not info['buff']:
+    eatbuff.close_bag_leftover(info)                                 # use 後背包沒關（戰鬥蓋住等）→ 再關一次
+    if kind and not use_rc:                                          # 成功判定看 buff 剩餘時間增加（吃前沒圖示 = 0）；背包已關才讀得到
+        if eatbuff.verify(kind, 0, eat_ts, info):
             use_rc = bag.EXIT_VERIFY
-            info['warn_buff'] = f'使用後 buff 列沒看到 {kind} 圖示（沒吃到；剩的已存回倉庫）'
             info['step'] = 'verify'
-            uikit.snap('depot-use-nobuff')
+            info['warn_buff'] = info.get('warn_buff', '') + '（剩的已存回倉庫）'
     if use_rc:
         return use_rc, info
     info['step'] = 'done'

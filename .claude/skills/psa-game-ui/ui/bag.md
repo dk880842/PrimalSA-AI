@@ -141,6 +141,14 @@ bash tools/gui/gui.sh seq "click 83 <頭像Y>; wait 700; click 547 200; wait 600
 
 **背包滿自動刪（questrun 用，2026-10-13）**：`bag.AUTO_PURGE` = 上表去掉有條件的「亞姆亞姆的斧頭」（任務完成後才刪；同名兩個道具 2448 獎勵 / 2416 是步 1 要交的條件道具）。questrun preflight 空位不足、或任務 NPC 只剩再見 / 信封發亮要領信時，只對空格不足的人 `bag.purge(人, AUTO_PURGE)`；test_questdefs 核對名單都在本表、不在保護名單、不是任何 questdefs 任務的條件道具。改本表時要同步 `bag.AUTO_PURGE`。
 
+## 吃 buff 道具要先靜下來 + 用剩餘時間判斷（2026-10-16，`tools/gui/eatbuff.py`，離線測試 test_eatbuff.py，**未實機**）
+p2 DKBO6 事件：遇敵開著、掛機戰鬥中 `bag.py use 2倍智慧果` 兩次都回 ok / buff=true（其實 buff 本來就在）或 buff=false，數量沒少 = 沒吃到；先關遇敵等戰鬥結束再吃就吃到（推測：戰鬥中點「使用」無效）。
+- 吃前 `heal.encounter_off_wait()`（關原地遇敵 + 等 VS 牌消失；questrun 交接 / depot_use / eatbuff 共用）。吃完預設**開回**遇敵（`--no-reopen` / `reopen=False` 不開；跑任務時用）。
+- 判斷改看 **buff 剩餘時間**（`bufftime.read`），不比數量：吃前讀（沒圖示 = 0）→ 吃後讀 → 增加量 ≥ 持續時間 − 容許（智慧果 6 小時 − 5 分；龍王 10 分 − 3 分 20 秒）才算吃到，否則 95。吃前有圖示卻讀不出時間 → 不吃。吃前沒圖示：吃後圖示出現且時間讀不出 → 視為吃到並 `record_eaten`。
+- `bag.py use <角色> <buff 道具>` 走 `eatbuff.eat_have`（背包已有；使用者要多吃的路徑）；`depot_use.run` 吃前仍「看到圖示就跳過」，吃後同用 `eatbuff.verify`。其他道具照舊 `use_item`。
+- use 後背包面板沒關：推測同因（使用時戰鬥開打、畫面被蓋住，close_leftover 看不到背包外框）；`eatbuff.close_bag_leftover` 在 use 之後再確認一次，外框 / 彈窗還在就 `bag.close_leftover`。
+- 未改：rebirth.py / rebirth_pets.py / newchar.py 直接呼叫 `bag.use_item`（龍王 / 箱子等），沒套這套。
+
 ## 公共倉庫取一顆用（2026-10-11 實測：`tools/gui/depot_use.py`）
 `uv run --no-project python tools/gui/depot_use.py DKBO 2倍智慧果`：關遇敵 + 等戰鬥 → 倉庫取出（整疊）→ 背包使用一個 → 剩餘存回公共 → 開回遇敵。
 - **成敗看 buff 列圖示（2026-10-12 修）**：`bag.BUFF_KIND`（龍王的守護 = `dragon` 人形、2倍智慧果 = `exp` EXP 圖示）的道具，關背包後 4 秒內 `bag.has_buff(kind)` 沒看到 → **退出碼 95**（剩的已存回倉庫，存圖 `depot-use-nobuff`）；吃之前圖示已在 → 跳過不吃（rc 0、step skip）。`bag.use_item` 回 0 只代表「按了使用、彈窗關了」，**不代表伺服器真的扣了道具**：2026-10-12 15:03 舊版吃 2倍智慧果 rc 0，但聊天只有存回時的「扣除道具 X6」、buff 列沒 EXP（根因沒重現，同一條路徑 15:40 實機正常扣 X1；推測是按鈕在彈窗剛出現時落空，同 0846024 的取出症狀）。吃到時畫面上方 / 聊天會跳「扣除道具:2倍智慧果（綁定）X1」，堆疊數 −1；「使用」一次只吃 1 顆、沒有數量輸入（「更多」才有其他選項，未點過）。

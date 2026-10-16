@@ -162,6 +162,8 @@ check('Session：進來時背包已開（外層 Session）→ 不關', not _ss.o
 
 # depot_use.run：吃失敗仍存回；成功全流程
 import heal  # noqa: E402
+import bufftime as _bt  # noqa: E402
+_bt.read = lambda kind='all', dry_run=False: {'ok': False, 'rc': 132, 'buffs': [], 'errors': ['stub']}   # 時間讀不出 → 退回圖示判斷（時間判斷見 test_eatbuff.py）
 heal.set_encounter = lambda on: None
 heal.gui = lambda *a, **k: ''
 class FakeSession:
