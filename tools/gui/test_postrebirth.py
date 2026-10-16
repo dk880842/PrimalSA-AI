@@ -91,14 +91,14 @@ check('PURGE1 含 2026-10-14 核准的 8 項', {'仙尼亞的花', '郵寄物', 
 check('PURGE2 = PURGE1 + 杉的手環 / 月光的手鐲 / 巴巴洛的許可證；都不是保護名稱', set(pr.PURGE2) - set(pr.PURGE1) == {'杉的手環', '月光的手鐲', '巴巴洛的許可證'}
       and not [n for n in pr.PURGE2 if __import__('bag').purge_guard(n)])
 check('pets_ok：朵拉比斯出戰 1 隻 + 騎乘', pr.pets_ok(pets_ok_json()['roles']) == {} and 'DKBO' in pr.pets_ok({'DKBO': [{'name': '朵拉比斯', 'state': '等待'}]}))
-check('順序 = 使用者定案（猜謎三兄弟在卡坦之後、紅暴在 1.82 前段之前、兩次清背包）', pr.SEGMENTS == ['inventory', 'adult', 'yayoi', 'hero', 'q182a', 'bag1', 'q182b', 'bag2',
+check('順序 = 使用者定案（猜謎三兄弟在卡坦之後、紅暴在 1.82 前段之前、三次清背包⓪①②）', pr.SEGMENTS == ['inventory', 'adult', 'yayoi', 'hero', 'bag0', 'q182a', 'bag1', 'q182b', 'bag2',
                                                                                  'caves', 'dino', 'katan', 'quiz', 'finish'])
 
 # ---------------- happy path
 f = Fake()
 rc = go(f, confirm_drop=True)
 qr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
-check('happy：rc 0、13 段全跑', rc == 0 and pr.LAST['ran'] == pr.SEGMENTS, f'rc={rc} {pr.LAST}')
+check('happy：rc 0、14 段全跑', rc == 0 and pr.LAST['ran'] == pr.SEGMENTS, f'rc={rc} {pr.LAST}')
 check('questrun 每段 --after none；成人儀式 / 1.82 / 洞窟帶 --dragon；紅暴帶丟寵 / 丟首飾旗標', all('--after' in a and a[a.index('--after') + 1] == 'none' for a in qr)
       and all('--dragon' in a for a in qr if a[1] in ('2999', '2015', '2025', '2000')) and '--drop-items' in qr[2] and '巴朵蘭恩' in qr[2], str(qr))
 check('1.82 前段 / 後段 / 洞窟的任務順序', qr[3][1:9] == tuple(map(str, pr.Q182A)) and qr[4][1:7] == tuple(map(str, pr.Q182B))
@@ -126,6 +126,14 @@ check('沒 --confirm-drop → 只 --dry-run、174 停並印 purge 指令', rc ==
 f = Fake(bag_lists=[bags({'DKBO': 3}, {'DKBO': ['儀之兜']}), bags({'DKBO': 4}, {'DKBO': ['某種沒核准的道具']})])
 rc = go(f, confirm_drop=True, from_seg='bag2', to_seg='bag2')
 check('刪完白名單仍不足 → 174（名單外不刪）', rc == pr.EXIT_BAG and '仍有人空格' in pr.LAST['info']['msg'])
+
+f = Fake(bag_lists=[bags({'DKBO': 4}, {'DKBO': ['儀之兜']}), bags(14)])
+rc = go(f, confirm_drop=True, from_seg='bag0', to_seg='bag0')
+pu = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'purge']
+check('清背包⓪：空 4 < 5 → 刪；NEED0 = 5', rc == 0 and pr.NEED0 == 5 and len(pu) == 2 and pu[0][-1] == '--dry-run', f'rc={rc} {pu}')
+f = Fake(bag_lists=[bags({'DKBO': 5}, {'DKBO': ['儀之兜']})])
+rc = go(f, from_seg='bag0', to_seg='bag0')
+check('清背包⓪：空 5 ≥ 5 → 不刪', rc == 0 and not [a for s, a in f.calls if s == 'bag.py' and a[0] == 'purge'])
 
 # ---------------- 失敗 / 續跑
 f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 0]})
@@ -244,7 +252,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     pr.run(dry_run=True, confirm_drop=True)
 t = buf.getvalue()
-check('plan：13 段、每段指令、退出碼', all(f'[{s}]' in t for s in pr.SEGMENTS) and 'petquest.py run 2019' in t and 'questrun.py run 2031' in t and '170' in t)
+check('plan：14 段、每段指令、退出碼', all(f'[{s}]' in t for s in pr.SEGMENTS) and 'petquest.py run 2019' in t and 'questrun.py run 2031' in t and '170' in t)
 
 # ---------------- dino 帶 --keep-autoswap（後面還有卡坦）+ 中斷保險
 def dino_args(f):

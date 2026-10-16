@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""轉生後任務重做總控（2 轉 → 3 轉之間等）：盤點 → 成人儀式 → 彌生和日美子 → 紅暴 → 1.82 前段 → 清背包① → 1.82 後段 → 清背包② → 四大洞窟
+"""轉生後任務重做總控（2 轉 → 3 轉之間等）：盤點 → 成人儀式 → 彌生和日美子 → 紅暴 → 清背包⓪ → 1.82 前段 → 清背包① → 1.82 後段 → 清背包② → 四大洞窟
 → 恐龍博士 → 卡坦的願望 → 猜謎三兄弟 → 收尾（去練功：依等級選點，未滿地雷區背景起 follow）。只用標準函式庫。順序是使用者 2026-10-13 定案（notes/plan-post2-quests.md「使用者決定」9～12）。
 **只有離線測試（test_postrebirth.py），整支未實機**；每段呼叫的 questrun / petquest / bag / grind 各自的實機狀態見各檔。
 
@@ -23,7 +23,7 @@
 
 段（SEGMENTS）與退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；postrebirth 自己 170～179）：
   inventory  唯讀盤點：exp.py read、bag.py list all、pet.py list --role all（失敗只警告；9 / 10 停）；開頭先 quiet（2026-10-15：follow 停 + 關原地遇敵 + 等戰鬥結束，共用 questrun.Tools.encounter_off_wait / wait_battle_end）
-  bag1 / bag2 開頭同樣先 quiet（失敗 174）；questrun / petquest 各段交接自己會關遇敵，不重複
+  bag0 / bag1 / bag2 開頭同樣先 quiet（失敗 174）；questrun / petquest 各段交接自己會關遇敵，不重複
   adult      questrun.py run 2999 --after none --dragon                                       失敗 172
   yayoi      questrun.py run 2017 --after none --dragon（NO_DRAGON：實際不吃）                  失敗 172
   hero       questrun.py run 2031 --after none [--drop-reward 巴朵蘭恩 … --drop-items 薩姆吉爾的首飾 …]
@@ -31,6 +31,7 @@
              questrun.py run 2031 --solo …（同樣的丟棄 / 買藥參數；psa-quest-solo：解散 → quest.py --solo 跑到 NPC → 組隊對話 → 步 6 便捷傳送組隊 --fight
              → 步 7 / 8 組隊 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾 → DKBO 戰寵改回；2026-10-14 02:41～02:55 手動流程）；
              單人逃跑也失敗 → 173；其他 172
+  bag0       清背包⓪：同 bag1，門檻 5 格（1.82 前段最大 bag_slots 4〔2020〕+ 龍王 1），名單 PURGE1；要 --confirm-drop，沒帶照 bag1（只 --dry-run、空格不夠 174）
   q182a      questrun.py run 2015 2027 2018 2011 2024 2023 2020 2028 --after none --dragon    失敗 172
   bag1       清背包①：bag.py list all → 有人空格 < 6（1.82 後段最大 bag_slots 5 + 龍王 1）才刪 PURGE1 白名單（龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時一起刪）
              → 先 purge --dry-run、再實刪（要 --confirm-drop）→ 重讀仍不足 174
@@ -88,7 +89,7 @@ PURGE1 = ['儀之兜', '龍之槍', '龍之鎧', '龍之衣', '薩頓家的秘�
           '仙尼亞的花', '郵寄物', '切繩石', '馬祖的斧頭', '馬祖的矛', '馬祖的棍棒', '空想的帽子', '空想的豎琴']
 PURGE2 = PURGE1 + ['杉的手環', '月光的手鐲', '巴巴洛的許可證']
 FLUTE, DRAGON_GEAR = '龍的魅力之笛', ('龍之槍', '龍之鎧', '龍之衣')
-NEED1, NEED2 = 6, 8                # 清背包①（1.82 後段最大 bag_slots 5 + 龍王 1）/ ②（四大洞窟，使用者建議 ≥ 8）
+NEED0, NEED1, NEED2 = 5, 6, 8                # 清背包⓪（1.82 前段最大 bag_slots 4〔2020〕+ 龍王 1）/ ①（1.82 後段最大 bag_slots 5 + 龍王 1）/ ②（四大洞窟，使用者建議 ≥ 8）
 HERO_SOLO = ['--solo']            # questrun 156（沒龍王）→ 單人逃跑重跑同一段（2026-10-14 起自動，不再停 173 交人）
 HERO_DROP_PET = ['--drop-reward', '巴朵蘭恩', '--confirm-drop', '巴朵蘭恩']
 HERO_DROP_ITEMS = ['--drop-items', '薩姆吉爾的首飾', '--confirm-drop-items', '薩姆吉爾的首飾']
@@ -118,8 +119,8 @@ def hero_drop(o: dict) -> list:
     return list(HERO_DROP if o.get('hero_mode') == 'drop' else HERO_DROP_PET)
 
 PURGE_CHUNK = 3
-SEGMENTS = ['inventory', 'adult', 'yayoi', 'hero', 'q182a', 'bag1', 'q182b', 'bag2', 'caves', 'dino', 'katan', 'quiz', 'finish']
-TITLES = {'inventory': '盤點交接', 'adult': '成人儀式', 'yayoi': '彌生和日美子', 'hero': '紅暴（英雄島前傳）', 'q182a': '1.82 前段',
+SEGMENTS = ['inventory', 'adult', 'yayoi', 'hero', 'bag0', 'q182a', 'bag1', 'q182b', 'bag2', 'caves', 'dino', 'katan', 'quiz', 'finish']
+TITLES = {'inventory': '盤點交接', 'adult': '成人儀式', 'yayoi': '彌生和日美子', 'hero': '紅暴（英雄島前傳）', 'bag0': '清背包⓪', 'q182a': '1.82 前段',
           'bag1': '清背包①', 'q182b': '1.82 後段', 'bag2': '清背包②', 'caves': '四大洞窟', 'dino': '恐龍博士', 'katan': '卡坦的願望',
           'quiz': '猜謎三兄弟', 'finish': '收尾'}
 
@@ -173,6 +174,7 @@ def seg_cmds(seg: str, o: dict) -> list:
         'yayoi': [('questrun.py', ['run', 2017, '--after', 'none', '--dragon'] + vd)],
         'hero': [('questrun.py', ['run', 2031, '--after', 'none'] + vd + hero_drop(o))],
         'q182a': [('questrun.py', ['run'] + Q182A + ['--after', 'none', '--dragon'] + vd)],
+        'bag0': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE1) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
         'bag1': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE1) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
         'q182b': [('questrun.py', ['run'] + Q182B + ['--after', 'none', '--dragon'] + vd)],
         'bag2': [('bag.py', ['list', 'all']), ('bag.py', ['purge', '<不足的人>', '--names', ','.join(PURGE2) + '[,龍的魅力之笛]', '--dry-run']), ('bag.py', ['purge', '…（要 --confirm-drop）'])],
@@ -317,7 +319,7 @@ class Run:
         return rc, lines
 
     def quiet(self, where: str) -> int:
-        """面板類段落（inventory / bag1 / bag2）開頭：關遇敵 + 等戰鬥結束（T.quiet；測試用 Fake 沒有就略過）→ 0 或失敗碼"""
+        """面板類段落（inventory / bag0 / bag1 / bag2）開頭：關遇敵 + 等戰鬥結束（T.quiet；測試用 Fake 沒有就略過）→ 0 或失敗碼"""
         q = getattr(self.T, 'quiet', None)
         if q is None:
             return 0
@@ -406,7 +408,7 @@ class Run:
         return rc if rc in PASS else self.fail(code, f'{TITLES[seg]}：{script} 退出碼 {rc}（意義見該腳本檔頭）', f'{fmt(script, args)}；修好後 postrebirth.py run --from {seg}')
 
     def s_bag(self, seg) -> int:
-        need, names = (NEED1, PURGE1) if seg == 'bag1' else (NEED2, PURGE2)
+        need, names = {'bag0': (NEED0, PURGE1), 'bag1': (NEED1, PURGE1)}.get(seg, (NEED2, PURGE2))
         if self.quiet(TITLES[seg]):
             return self.fail(EXIT_BAG, f'{TITLES[seg]}：開背包前關遇敵 / 等戰鬥結束失敗（請人看畫面）', f'postrebirth.py run --from {seg}')
         rc, lines = self.sub('bag.py', ['list', 'all'], 1200)
@@ -485,7 +487,7 @@ class Run:
     def do(self, seg) -> int:
         if seg == 'inventory':
             return self.s_inventory()
-        if seg in ('bag1', 'bag2'):
+        if seg in ('bag0', 'bag1', 'bag2'):
             return self.s_bag(seg)
         if seg == 'finish':
             return self.s_finish()
@@ -511,8 +513,8 @@ def print_plan(o: dict) -> None:
         print(f'[{seg}] {TITLES[seg]}')
         for script, args in seg_cmds(seg, o):
             print('  ' + fmt(script, args))
-        if seg in ('bag1', 'bag2'):
-            print(f'  （空格 < {NEED1 if seg == "bag1" else NEED2} 的人才刪；龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時；四大洞窟產物 / 龍王 / 誘餌等 bag.PURGE_FORBID 永不刪）')
+        if seg in ('bag0', 'bag1', 'bag2'):
+            print(f'  （空格 < { {'bag0': NEED0, 'bag1': NEED1}.get(seg, NEED2) } 的人才刪；龍的魅力之笛只在該人有龍之槍 / 鎧 / 衣時；四大洞窟產物 / 龍王 / 誘餌等 bag.PURGE_FORBID 永不刪）')
         if seg == 'hero':
             m = o['hero_mode']
             how = {'wear': f'0 轉 / 強制 → 只丟巴朵蘭恩、不帶 --drop-items；紅暴成功後 bag.py list all → 背包有「{HERO_RING}」的人 bag.py wear <角色> {HERO_RING}；戴失敗只警告',
@@ -544,6 +546,9 @@ def run(tools=None, from_seg: str | None = None, to_seg: str | None = None, conf
     for seg in SEGMENTS[i0:i1 + 1]:
         if seg in r.p['done'] and not from_seg:
             event(f'[{seg}] {TITLES[seg]}：進度檔記已完成 → 跳過')
+            continue
+        if seg == 'bag0' and not from_seg and 'q182a' in r.p['done']:     # 舊進度檔（bag0 新增前）：1.82 前段已做完就不回頭清
+            event(f'[{seg}] {TITLES[seg]}：舊進度檔 1.82 前段已完成 → 跳過')
             continue
         event(f'== [{seg}] {TITLES[seg]} ==')
         rc = r.do(seg)
