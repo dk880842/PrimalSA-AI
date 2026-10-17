@@ -54,6 +54,8 @@
                 0 = 任務已完成 → 其餘段跳過，只做 restore（第 2 格照樣取回、出戰、鎖定；練好的任務寵留在寵物欄）
     turnin[N]   questrun.py run <ID> --after none --pet-turnin [--rested]（train 段 30 分內 rest-all 成功才帶：questrun 交件前不重做 rest-all）
                 （恐龍：解散逐人 pet_turnin；卡坦：隊長交一次）；卡坦第 1 輪交完讀步號 = 2 才算
+                卡坦 turnin1 可跳過（2026-10-17）：accept 回 155 且輸出「需先抓 / 練寵：步 2」= 接取對話已把第 1 步（鯊魚）交掉 → 記進度檔 turned、turnin1 直接略過進 drop1（不再白跑 questrun 36 秒）；
+                恐龍博士 accept 回 115（步 1 manual 不交寵）→ turnin 才是真正交件，不能省
     drop[N]     （--confirm-drop）petdrop.py all <獎勵寵> --confirm-name <獎勵寵> --max-level 1（恐龍 布克布克；卡坦第 1 輪 修寶）
     store_reward（卡坦）獎勵朵拉比斯（Lv1）5 人存個人倉庫
     restore     （2026-10-16 精簡）pet.py take-many --depot personal --plan "角色:第 2 格名字@原等級"（prep 記的；成功記進度檔 restore_taken，續跑看記號跳過、不讀寵物欄）
@@ -161,6 +163,19 @@ def stages_of(qid: int) -> list:
     if q.get('store_reward'):
         out.append('store_reward')
     return out + ['restore']
+
+
+def accept_turned_in(rc: int, tail, q: dict) -> int:
+    """接取那次 questrun 的退出碼 / 輸出判斷「第 1 輪已在接取對話交完」→ 回輪號（1）；否則 0。
+    條件：多輪 catch 任務（卡坦）、rc 155、輸出「需先抓 / 練寵：步 N」的 N 已超過第 1 輪的步（rounds[0]['step']）。
+    恐龍博士（步 1 manual → 115，接取不交寵）、猜謎 → 一律 0"""
+    rounds = q.get('rounds') or []
+    if rc != 155 or len(rounds) < 2:
+        return 0
+    m = re.search(r'需先抓 / 練寵：步 (\d+)', '\n'.join(tail or []))
+    if m and int(m.group(1)) > (rounds[0].get('step') or 1):
+        return 1
+    return 0
 
 
 def stage_round(stage: str) -> int:
@@ -582,12 +597,18 @@ class Run:
 
     # -- 段 --
     def s_accept(self) -> int:
-        rc, _ = self.sub('questrun.py', ['run', self.qid, '--after', 'none'] + self.verify_args(), 4 * 3600)
+        rc, tail = self.sub('questrun.py', ['run', self.qid, '--after', 'none'] + self.verify_args(), 4 * 3600)
         if rc == 0:
             event(f'任務 {self.qid}：questrun 回 0 = 任務已完成 → 跳過抓 / 練 / 交，只做收尾')
             self.p['already_done'] = True
             return 0
         if rc in (115, 155, 117):
+            done1 = accept_turned_in(rc, tail, self.q)
+            if done1:
+                # 卡坦：接取對話時寵物已備妥 → 第 1 步當場交掉，追蹤已在步 2（2026-10-17 p3 實測 12:09:51 accept 155 訊息「步 2」）；
+                # 再跑 turnin1 只是白試 36 秒（又開詳情 + 點追蹤兩次沒反應 155）→ 記起來讓 turnin1 直接跳過
+                self.p['turned'] = sorted(set(self.p.get('turned') or []) | {done1})
+                event(f'任務 {self.qid}：接取回 155 且追蹤已在步 {done1 + 1} → 第 {done1} 輪接取時已交完，跳過 turnin{done1}')
             if self.q['kind'] == 'quiz':
                 self.p['step'] = self.T.read_step(self.q['track'])
             return 0
@@ -1016,6 +1037,9 @@ class Run:
         rounds = self.q['rounds']
         r = stage_round(stage)
         last = r == len(rounds)
+        if r in (self.p.get('turned') or []) and not last:
+            event(f'交寵物第 {r} 輪：接取時已交完 → 跳過（不重跑 questrun）')
+            return 0
         args = ['run', self.qid, '--after', 'none', '--pet-turnin']
         rs_ = self.p.get('rested') or {}
         if rs_.get('stage') == stage and 0 <= self.T.clock() - (rs_.get('ts') or 0) <= RESTED_S:   # 本輪 train 段剛 rest-all 成功 → questrun 交件前不重做（review 1013b §2.2）

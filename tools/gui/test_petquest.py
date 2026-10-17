@@ -116,6 +116,13 @@ class Sim:
         if self.done:
             return self.out(0)
         if '--pet-turnin' not in args:
+            if self.qid == 2019 and getattr(self, 'accept_hands', False) and self.step == 1:
+                rd1 = pq.QUESTS[2019]['rounds'][0]
+                sps1 = [sp for _, _, sp in rd1['assign']]
+                for r in ROLES:
+                    self.bar[r] = [p for p in self.bar[r] if p['name'] not in sps1] + [P('修寶')]
+                self.step = 2
+                return self.out(155, '[questrun] 失敗 rc=155：任務 2019：追蹤沒反應，需先抓 / 練寵：步 2 4 色火雞各 Lv25+')
             if self.qid == 3003:
                 ok = all(any(p['name'] == '金布伊' and p['level'] >= 77 for p in self.bar[r]) for r in ROLES)
                 if ok and self.step == 2:
@@ -483,7 +490,7 @@ s = grow(Sim(2019))
 rc = go(2019, s, confirm_drop=True)
 seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'pet_catch.py')]
 i_acc = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' not in a]
-i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'set-state-slot' and a[-1] == '等待']
+i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'set-state-slot' and '等待' in a]
 i_shark = [i for i, (sc, a) in enumerate(seq) if sc == 'pet_catch.py' and '鯊魚系' in ' '.join(a)]
 i_bird = [i for i, (sc, a) in enumerate(seq) if sc == 'pet_catch.py' and '火雞系' in ' '.join(a)]
 i_t1 = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' in a]
@@ -494,6 +501,24 @@ s.quest_q = {2019: [155, 117]}                               # 第 1 輪交完 q
 s.read_step = lambda t: 1
 rc = go(2019, s, confirm_drop=True)
 check('第 1 輪交完步號沒進到 2 → 167', rc == pq.EXIT_TURNIN, f'rc={rc} {pq.LAST.get("info")}')
+
+# 卡坦 accept 回 155 且訊息「步 2」= 第 1 輪接取時已交完 → turnin1 不再跑 questrun --pet-turnin、直接 drop1（2026-10-17 p3 白試 36 秒）
+check('accept_turned_in：卡坦 155 + 步 2 = 1；步 1 / 117 / 恐龍 115 / 猜謎 = 0',
+      pq.accept_turned_in(155, ['x 需先抓 / 練寵：步 2 4 色火雞'], pq.QUESTS[2019]) == 1
+      and pq.accept_turned_in(155, ['x 需先抓 / 練寵：步 1 4 色鯊魚'], pq.QUESTS[2019]) == 0
+      and pq.accept_turned_in(117, ['需先抓 / 練寵：步 2'], pq.QUESTS[2019]) == 0
+      and pq.accept_turned_in(115, ['步 1 kind=manual；需先抓 / 練寵：步 1 魯尼帖斯'], pq.QUESTS[2016]) == 0
+      and pq.accept_turned_in(155, [], pq.QUESTS[2019]) == 0)
+s = grow(Sim(2019))
+s.accept_hands = True
+rc = go(2019, s, confirm_drop=True)
+qr = [a for a in names(s, 'questrun.py')]
+check('卡坦 accept 已交第 1 輪：questrun 只跑 accept 1 次 + 第 2 輪交件 1 次（turnin1 跳過）、修寶照丟、全程 rc 0',
+      rc == 0 and len(qr) == 2 and '--pet-turnin' not in qr[0] and '--pet-turnin' in qr[1]
+      and ('all', '修寶', '--confirm-name', '修寶', '--max-level', '1') in names(s, 'petdrop.py'), f'rc={rc} {qr}')
+s = grow(Sim(2019))                                          # accept 沒交掉（舊行為：155 沒有「步 2」）→ turnin1 照跑
+rc = go(2019, s, confirm_drop=True)
+check('卡坦 accept 沒交掉第 1 輪：turnin1 照跑（questrun 共 3 次）', rc == 0 and len(names(s, 'questrun.py')) == 3, f'rc={rc} {names(s, "questrun.py")}')
 
 # ---------------- 猜謎三兄弟
 s = Sim(3003)
@@ -570,7 +595,7 @@ s = grow(Sim(2016))
 rc = go(2016, s, confirm_drop=True)
 seq = [(c[0], c[1]) for c in s.calls if c[0] in ('questrun.py', 'pet.py', 'team.py')]
 i_acc = [i for i, (sc, a) in enumerate(seq) if sc == 'questrun.py' and '--pet-turnin' not in a]
-i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'set-state-slot' and a[-1] == '等待']
+i_rest = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'set-state-slot' and '等待' in a]
 i_store = [i for i, (sc, a) in enumerate(seq) if sc == 'pet.py' and a[0] == 'store-many' and '--depot' in a and a[a.index('--depot') + 1] == 'personal']
 i_dis = [i for i, (sc, a) in enumerate(seq) if sc == 'team.py']
 check('恐龍新順序：解散 → 存第 2 格（個人倉庫）在最前、接任務在 rest-all 之後', rc == 0 and i_dis[0] < i_store[0] < i_rest[0] < i_acc[0] and seq[0][0] == 'team.py',
@@ -679,7 +704,7 @@ def _pet(a):
 s.pet = _pet
 rc = go(2016, s, confirm_drop=True)
 tr = [i for i, c in enumerate(s.calls) if c[0] == 'grind.py']
-ra = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'set-state-slot' and c[1][-1] == '等待'][0]
+ra = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'set-state-slot' and '等待' in c[1]][0]
 seq = [c[1][0] for c in s.calls[tr[0]:ra] if c[0] == 'pet.py' and c[1][0] in ('list', 'levels')]
 check('練寵讀等級：只 levels（讀失敗下一輪再讀 levels），不呼叫 list，仍練完', rc == 0 and seq and set(seq) == {'levels'} and len(seq) >= 4, f'rc={rc} {seq[:8]}')
 pc = names(s, 'pet_catch.py')
@@ -1045,6 +1070,6 @@ check('續跑：看到 restore_taken 跳過取回、不讀 list，直接出戰 �
 # 練完等待只改最後一格、在關遇敵之前
 s = grow(Sim(2016))
 go(2016, s, confirm_drop=True, to_stage='train')
-ix = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'set-state-slot' and c[1][-1] == '等待']
+ix = [i for i, c in enumerate(s.calls) if c[0] == 'pet.py' and c[1][0] == 'set-state-slot' and '等待' in c[1]]
 eo = [i for i, c in enumerate(s.calls) if c == ('enc_off',)]
 check('練完：第二次讀到最後一格達標 → 立刻 set-state-slot 只改最後那一格（第 3 格）等待，在關遇敵之前', len(ix) == 1 and s.calls[ix[0]][1][s.calls[ix[0]][1].index('--slots') + 1] == '3' and eo and ix[0] < eo[-1], f'{ix} {eo}')
