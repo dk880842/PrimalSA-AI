@@ -526,6 +526,13 @@ _use('quest-log/080443-UNKNOWN.png')
 check('close_known_panel：背包 → 點 ✕ 1280,113（bag.BAGANY）', uikit.close_known_panel() == 'bag' and _closed == [('BAGANY', (1280, 113))], str(_closed))
 check('known_panel_obj：沒專用 Panel 的（任務詳情）用 PANEL_X ✕', uikit.known_panel_obj('quest').close_xy == screen_sigs.PANEL_X['quest'][:2]
       and uikit.known_panel_obj('pet') is uikit.PET and uikit.known_panel_obj('nope') is None)
+check('known_panel_obj：NPC 商店用 SHOP_X ✕（1207,107）', uikit.known_panel_obj('shop').close_xy == screen_sigs.SHOP_X[:2] == (1207, 107))
+_pts_shop = screen_sigs.points() + screen_sigs.panel_points()
+_shop_cols = {(x, y): (r, g, b) for x, y, r, g, b in screen_sigs.SHOP_PTS}
+_shop_cols[screen_sigs.SHOP_X[:2]] = screen_sigs.SHOP_X[2:5]
+uikit.px = lambda pts: [_shop_cols.get(pt, (70, 70, 70)) for pt in pts]
+_closed.clear()
+check('close_known_panel：NPC 商店 → 點 ✕ 1207,107（只關、不碰購買鈕）', uikit.known_panel() == 'shop' and uikit.close_known_panel() == 'shop' and _closed == [('SHOP', (1207, 107))], str(_closed))
 uikit.px, uikit.close_panel = _keep_px, _keep_close
 
 print('失敗', fails)

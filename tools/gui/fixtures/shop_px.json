@@ -1,0 +1,820 @@
+{
+ "note": "NPC 商店辨識樣本（2026-10-15）：points = ✕ + SHOP_PTS；expect_shop = 人工看圖的標籤（正例 = p2 競技場便利店 2 張，其餘是各種不是商店的畫面）",
+ "points": [
+  [
+   1207,
+   107
+  ],
+  [
+   840,
+   190
+  ],
+  [
+   1160,
+   300
+  ],
+  [
+   1165,
+   400
+  ],
+  [
+   1165,
+   250
+  ],
+  [
+   880,
+   160
+  ],
+  [
+   1120,
+   160
+  ],
+  [
+   880,
+   465
+  ],
+  [
+   1112,
+   465
+  ],
+  [
+   910,
+   595
+  ],
+  [
+   1085,
+   595
+  ],
+  [
+   1000,
+   620
+  ],
+  [
+   600,
+   700
+  ],
+  [
+   760,
+   700
+  ],
+  [
+   440,
+   700
+  ],
+  [
+   280,
+   300
+  ],
+  [
+   805,
+   400
+  ]
+ ],
+ "samples": [
+  {
+   "f": "clients/PrimalSA2/watch-alerts/unknown-1792043285.png",
+   "expect_shop": true,
+   "px": "be4a31af484ab34e4cb45546983b43c44e51a94546ffe359ffe25b77a0d66189bc3a669eebcca7ebcca7ebcca79675547c5e43"
+  },
+  {
+   "f": "clients/PrimalSA2/watch-alerts/unknown-1792043435.png",
+   "expect_shop": true,
+   "px": "be4a31af484ab34e4cb45546983b43c44e51a94546ffe359ffe25b77a0d66189bc3a669eebcca7ebcca7ebcca79675547c5e43"
+  },
+  {
+   "f": "a.png",
+   "expect_shop": false,
+   "px": "3c4d4cd7dcd7f3e1b56b462c52615b54636053615decc9a1e5c79b0000000000000000000000000000000000006275666b462c"
+  },
+  {
+   "f": "a1.png",
+   "expect_shop": false,
+   "px": "837d630040dbffffffdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbdddddb0040dbafadafdddddb"
+  },
+  {
+   "f": "al_620_385.png",
+   "expect_shop": false,
+   "px": "d38e454c5e5e42595300000042443c5c64474b5f5c000200000000000000000000000000000000000000000000f5ddb754604f"
+  },
+  {
+   "f": "at_210_322.png",
+   "expect_shop": false,
+   "px": "a57649583c24613f309b7b546341315d412a5f402aae8c65ae8c65fadebbab8962ab8962f5e1c19b7b54f5ddbf603f299b7b54"
+  },
+  {
+   "f": "b1.png",
+   "expect_shop": false,
+   "px": "482b13dfbb93dfbb93a48264684b31ddbc91ddbc91664a3163492edfbb93dfbb93632e206f51323767a16f51327d6243dfbb93"
+  },
+  {
+   "f": "b3.png",
+   "expect_shop": false,
+   "px": "2b1a0b857058857058634e3c3e2d1d837157837157261c163b2b1b3529228570583b1b13271d16211f2442301e6c5216352922"
+  },
+  {
+   "f": "b_a1.png",
+   "expect_shop": false,
+   "px": "535e595c676259655f59645e5c676348544f5a656158635e57625d59645c535e5918ef185a655f57625d17191854605b535e5a"
+  },
+  {
+   "f": "battle-samples/neg_reward.png",
+   "expect_shop": false,
+   "px": "54391b8251311d461b1d471c1a441b0c231618421af1d7b31b441cf1d6af1e461c305023315325325024030c04625848f2d8b3"
+  },
+  {
+   "f": "battle-samples/neg_reward_b2_3.png",
+   "expect_shop": false,
+   "px": "54391b8251311d461b1d471c1a441b0c231618421af1d7b31b441cf1d6af1e461c305023315325325024030c04625848f2d8b3"
+  },
+  {
+   "f": "battle-samples/neg_reward_b2_6.png",
+   "expect_shop": false,
+   "px": "54391b8251311d461b1d471c1a441b0c231618421af1d7b31b441cf1d6af1e461c305023315325325024030c04625848f2d8b3"
+  },
+  {
+   "f": "battle-samples/seq_4.png",
+   "expect_shop": false,
+   "px": "62532e694d247b54317651286451296a5426645224655019e94600784d00685128bb70209c80619c80611f1c07705226685025"
+  },
+  {
+   "f": "battle-samples/vs_13.png",
+   "expect_shop": false,
+   "px": "62532e694d247b54317651286451296a5426645224655019e53e02784d03685128665322694e206f4e221f1c07705226685025"
+  },
+  {
+   "f": "battle-samples/vs_9.png",
+   "expect_shop": false,
+   "px": "62532e694d247b54317651286451296a5426645224655019e53e027049026851286653229c80619c80611f1c07705226685025"
+  },
+  {
+   "f": "c470.png",
+   "expect_shop": false,
+   "px": "4e38227c54332d1e164a3a272e1f172c1f142d1e14f0d7b352422fdab59051412e51412e746b5b4a3a2774695a453a15222222"
+  },
+  {
+   "f": "c599.png",
+   "expect_shop": false,
+   "px": "4e38227c54332d1e164a3a272e1f172c1f142d1e14f0d7b352422fdab59051412e51412e746b5b4a3a2774695a453a15222222"
+  },
+  {
+   "f": "c695.png",
+   "expect_shop": false,
+   "px": "4e38227c54332d1e164a3a272e1f172c1f142d1e14f0d7b352422fdab59051412e51412e746b5b4a3a2774695a453a15222222"
+  },
+  {
+   "f": "catch-m0/p_02.png",
+   "expect_shop": false,
+   "px": "a57649fedd899b7d52b39162b49162ffffe0ab7f54ae8d60b39162b39162eace9bb39362aa4024f6e3c2af6a3db39162a17f52"
+  },
+  {
+   "f": "catch-m0/split.png",
+   "expect_shop": false,
+   "px": "23150a9890476f5d485140316969686e5e476e5e47605f0d312416dcc0976f5d4831160f6f5c451b334f6f5d4823190eedd5b0"
+  },
+  {
+   "f": "catch-m0/switch0.png",
+   "expect_shop": false,
+   "px": "694621865331000000000000000000764925000000a97f540000005a74134a3c1df5d9b3352a142e24140c09047a6e5abcaa8f"
+  },
+  {
+   "f": "clients/PrimalSA2/shot.png",
+   "expect_shop": false,
+   "px": "d38e45747f764c605a000000526162838b7d4f615c506160000000526155abb2aac4c6bf000000000000fffffff5ddb7657667"
+  },
+  {
+   "f": "d0.png",
+   "expect_shop": false,
+   "px": "a57649fedd8932a114a79281ffffffffffe0ab7f54ae8d60b39162b39162eace9bb39362b24125f6e3c2b66e3eb39162fffaff"
+  },
+  {
+   "f": "d2.png",
+   "expect_shop": false,
+   "px": "a57649af7f54288011b391620e2437ffffe1fbdb87ae8d60b39162b39162eace9bb39362bb793ff6e3c2b0884821598fa81a14"
+  },
+  {
+   "f": "dep_195.png",
+   "expect_shop": false,
+   "px": "482b13dfbb93dfbb93a482644b5d5eddbc91ddbc91664a3163492edfbb93dfbb93632e206f513235639a6f51327d6243dfbb93"
+  },
+  {
+   "f": "e3.png",
+   "expect_shop": false,
+   "px": "837d63a7a7a7dddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbffffff0040dbafadafdddddb"
+  },
+  {
+   "f": "eq1.png",
+   "expect_shop": false,
+   "px": "2013082e241e645442493a2c2128292e241e6354412118142c20142e241e6454422c140e2e241e1f1c1f64544220160d2e241e"
+  },
+  {
+   "f": "exp-r1/r03.png",
+   "expect_shop": false,
+   "px": "d38e45b98f4b5d5434000000724c21070000634e256e552800000059461d2b1106674f282a281b0000001c150af5ddb70f0b0c"
+  },
+  {
+   "f": "exp-r1/r35.png",
+   "expect_shop": false,
+   "px": "d38e45ac85455d5434000000724c21030000634e256e552800000059461d2b1106674f282a281b0000001c150af5ddb70f0b0c"
+  },
+  {
+   "f": "f3.png",
+   "expect_shop": false,
+   "px": "23150ad9b67a6f5d485140313325186e5e476e5e47ceb582312416d5b9846f5d48332a226f5c451b334f6f5d4823190e463d32"
+  },
+  {
+   "f": "f4.png",
+   "expect_shop": false,
+   "px": "23150a9890476f5d485140313325186e5e476e5e47605f0d312416dcc0976f5d4831160f6f5c451b334f6f5d4823190eedd5b0"
+  },
+  {
+   "f": "g.png",
+   "expect_shop": false,
+   "px": "edcfa657700e74432adfbb9352321cf5ddba9a6543f5dfbbdfbb93dfbb93dfbb93dfbb93f9d35ed1af8bd1af8ba08d20d1af8b"
+  },
+  {
+   "f": "g4.png",
+   "expect_shop": false,
+   "px": "837d63a7a7a7dddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbb1b1af0040dbafadafb1b1af"
+  },
+  {
+   "f": "h5.png",
+   "expect_shop": false,
+   "px": "23150a9890476f5d485140313325186e5e476e5e47605f0d312416dcc0976f5d4831160f6f5c451b334f6f5d4823190eedd5b0"
+  },
+  {
+   "f": "i1.png",
+   "expect_shop": false,
+   "px": "23150a9890476f5d485140313325186e5e476e5e47605f0d312416dcc0976f5d4831160f6f5c451b334f6f5d4823190eedd5b0"
+  },
+  {
+   "f": "k4.png",
+   "expect_shop": false,
+   "px": "a57649af7f54288011cd9a00754100ffffe1fbdb87ae8d60b39162b39162eace9bb39362bb793ff6e3c2b08848603f29a81a14"
+  },
+  {
+   "f": "kr322.png",
+   "expect_shop": false,
+   "px": "6443207c543360533554433c5e605a343e3e5b5e5bf0d7b3786406dab590423022473c31000000000000000000746956797979"
+  },
+  {
+   "f": "kr450.png",
+   "expect_shop": false,
+   "px": "6443207c543360533554433c5e605a343e3e5b5e5bf0d7b3786406dab590423022473c31000000000000000000746956797979"
+  },
+  {
+   "f": "kr580.png",
+   "expect_shop": false,
+   "px": "6443207c543360533554433c5e605a343e3e5b5e5bf0d7b3786406dab590423022473c31000000000000000000746956797979"
+  },
+  {
+   "f": "kr700.png",
+   "expect_shop": false,
+   "px": "6443207c543360533554433c5e605a343e3e5b5e5bf0d7b3786406dab590423022473c31000000000000000000746956797979"
+  },
+  {
+   "f": "m-a0.png",
+   "expect_shop": false,
+   "px": "6946218653312e2919000000382610764925312612a97f540000005a7413150803f5d9b315140d0000000e0a057a6e5abcaa8f"
+  },
+  {
+   "f": "m-a1.png",
+   "expect_shop": false,
+   "px": "21160aaea5530e0d08000000110c0525160b0f0c05dfbb93000000dfbb93070301ddbd93142647142547f2d3aa26221c583425"
+  },
+  {
+   "f": "m-a2.png",
+   "expect_shop": false,
+   "px": "21160aaea5530e0d08000000110c0525160b0f0c05dfbb93000000a9754607030172523d142647142547f2d3aa26221c583425"
+  },
+  {
+   "f": "m-a3.png",
+   "expect_shop": false,
+   "px": "21160aaea5530e0d08000000110c0525160b0f0c05dfbb93000000a9754607030172523d142647142547f2d3aa26221c583425"
+  },
+  {
+   "f": "m-a4.png",
+   "expect_shop": false,
+   "px": "21160aaea5530e0d08000000110c0525160b0f0c05e0bc93000000a9754607030172523d142647142547f2d3aa26221c583425"
+  },
+  {
+   "f": "m.png",
+   "expect_shop": false,
+   "px": "d38e454e5e544c5d52040304495b49434c4a505f5552616352616314518a000000000000115087134e83090c0aedd5af4e6160"
+  },
+  {
+   "f": "m1.png",
+   "expect_shop": false,
+   "px": "a57649583c24613f309b7b546341315d412a5f402aae8c65ae8c65fadebbab8962ab8962f5e1c19b7b54f5ddbfb391629b7b54"
+  },
+  {
+   "f": "net1.png",
+   "expect_shop": false,
+   "px": "6443207c54330000000000000000005c5444000000f0d7b3000000dab590473a1b0704013228132c22130c090472634eb09d82"
+  },
+  {
+   "f": "net5.png",
+   "expect_shop": false,
+   "px": "b5b2adf1dfbb9c633b935c31ffb4728db21b86ccffe8d0ac98632f2b5494925d29edd5b1b5bcc1ffde9ce5b86f9ebccff5e6d0"
+  },
+  {
+   "f": "net6.png",
+   "expect_shop": false,
+   "px": "b5b2adf1dfbb9c633b935c31ffb4728db21b86ccffe8d0ac98632f2b5494925d29edd5b1b5bcc1ffde9ce5b86f9ebccff5e6d0"
+  },
+  {
+   "f": "now.png",
+   "expect_shop": false,
+   "px": "4e38227c54334a3b2655452e55452e7d7c6a513c27f0d7b355452edab5906f614a55462e541f11756c5b56341e00111ef1d5b2"
+  },
+  {
+   "f": "o.png",
+   "expect_shop": false,
+   "px": "d38e4533403d0f4d840e4c833d54545a707453615d0d4b84175589435752104e830d4d8418558a0f4c86ffffffedd5af4f5e56"
+  },
+  {
+   "f": "p1.png",
+   "expect_shop": false,
+   "px": "a57649583c24613f309b7b546341315d412a5f402aae8c65ae8c65fadebbab8962ab8962f5e1c19b7b54f5ddbf5d3e269b7b54"
+  },
+  {
+   "f": "p210.png",
+   "expect_shop": false,
+   "px": "4e38227c5433123c0855452e8484837d7c6a513c27f0d7b355452edab5906f614a55462e541f11756c5b56341e55452ef1d5b2"
+  },
+  {
+   "f": "p340.png",
+   "expect_shop": false,
+   "px": "4e38227c5433174b0a55452e8484837d7c6a513c27f0d7b355452edab5906f614a55462e541f11756c5b56341e55452ef1d5b2"
+  },
+  {
+   "f": "p3_a_1.png",
+   "expect_shop": false,
+   "px": "b5b2ade0f4ff9c633b935c31ffb472c5e5ff86ccff739eb398632f7c9368925d29d5d563b5bcc1ffde9ce5b86f9ebccf88aba3"
+  },
+  {
+   "f": "p3_b_pre.png",
+   "expect_shop": false,
+   "px": "694621865331000000000000000000764925000000a97f540000005a74134a3c1df5d9b35c5d5c2e24140c09047a6e5abcaa8f"
+  },
+  {
+   "f": "p5.png",
+   "expect_shop": false,
+   "px": "4e38227c54332d1e164a3a272e1f172c1f142d1e14f0d7b352422fdab59051412e51412e746b5b4a3a2774695a00111e222222"
+  },
+  {
+   "f": "pp599.png",
+   "expect_shop": false,
+   "px": "a57649fedd89288011cd9a000e2437ffffe0ab7f54ae8d60b39162b39162eace9bb39362aa4024f6e3c2af6a3d603f29fffc00"
+  },
+  {
+   "f": "qd-after.png",
+   "expect_shop": false,
+   "px": "70624d7c54336774783337376a59467469576a5946f0d7b3675f58dab5904b3c317061504b5f766353426353423f3227797979"
+  },
+  {
+   "f": "s7.png",
+   "expect_shop": false,
+   "px": "837d630040dbffffffdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbdddddb0040dbafadafdddddb"
+  },
+  {
+   "f": "scroll_1.png",
+   "expect_shop": false,
+   "px": "edcfa657700ed9f5ff6c7576dfbb93f5ddbadfbb93f5dfbbd9c8badfc59d9f7e67eeceac9fc9fcd1af8bd1af8bcdaa85d1af8b"
+  },
+  {
+   "f": "scroll_4.png",
+   "expect_shop": false,
+   "px": "edcfa657700ed9f5ff6c7576dfbb93f5ddbadfbb93f5dfbbd9c8badfc59d9f7e67eeceac9fc9fcd1af8bd1af8b846b53d1af8b"
+  },
+  {
+   "f": "t.png",
+   "expect_shop": false,
+   "px": "69462186533175673c79715675693f7649257a7052a97f547a71565a7413797054f5d9b37970527970563736307a6e5abcaa8f"
+  },
+  {
+   "f": "t1.png",
+   "expect_shop": false,
+   "px": "8f573987835f786f4e74a36369aaa3d1b98dd5b9864ab5b5b7b458218fa859b5ab2191abc0b79379a5a0d9b983735e4666401f"
+  },
+  {
+   "f": "t_pre5.png",
+   "expect_shop": false,
+   "px": "837d630040dbffffffdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbdddddb0040dbafadafdddddb"
+  },
+  {
+   "f": "team4.png",
+   "expect_shop": false,
+   "px": "f2d8afe4c098d0ad8cffe4bffbe5c0fae1bbffe4c3edd9b5ecd7b5c8ae8cc9af8bf5ddbff5e1c0fab553f3debbe1ba90e1c29b"
+  },
+  {
+   "f": "team_solo.png",
+   "expect_shop": false,
+   "px": "f2d8afe4c098d0ad8cffe4bffbe5c0fae1bbffe4c3edd9b5ecd7b5c8ae8cc9af8bf5ddbff5e1c0a8cdf7f3debbc9a986e1c29b"
+  },
+  {
+   "f": "ui/after.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c19a9a99fcd30c31392b8a684976b7de6f442800000065491ffbe5c34f2611"
+  },
+  {
+   "f": "ui/ass.png",
+   "expect_shop": false,
+   "px": "837d63a7a7a7dddddbecece9dddddbdddddbdddddbffffffdddddbffffffbdbbbcffffffdddddbdddddb0040dbafadafecece9"
+  },
+  {
+   "f": "ui/bag.png",
+   "expect_shop": false,
+   "px": "482b13dfbb93dfbb93a48264684b31ddbc91ddbc91664a3163492edfbb93dfbb93632e20dfb88e3767a1dfbb9346311cdfbb93"
+  },
+  {
+   "f": "ui/bell.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c19a9a99fcd30c31392b8a684976b7de6f442800000065491ffbe5c3ff6a06"
+  },
+  {
+   "f": "ui/bourse.png",
+   "expect_shop": false,
+   "px": "ddbd93c3a179f9e5c7fbe5c3f9e5c3836144dfbb93998b83998b7efee3c7ffe9c7f9e5c77f61457f61457f61457b5d42ead6b5"
+  },
+  {
+   "f": "ui/c1.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c19a9a99fcd30c31392b8a68499ccbef000000000000ebebebf5ddb7eb521f"
+  },
+  {
+   "f": "ui/d_minimapoff.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499ccbef000000000000ebebebf5ddb7eb521f"
+  },
+  {
+   "f": "ui/d_sound.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499fcdf46f442800000065491ffbe5c3fd6615"
+  },
+  {
+   "f": "ui/detail.png",
+   "expect_shop": false,
+   "px": "edcfa657700edfbb93dfbb9352321cf5ddba965f3cf5dfbbdfbb93dfbb93dfbb93dfbb93d1af8bd1af8bd1af8ba08d20d1af8b"
+  },
+  {
+   "f": "ui/e_bell.png",
+   "expect_shop": false,
+   "px": "643f266e4b347b5d427b5d427b5d428853308c5535e5cba77b5d427b5d427b5d42fbe5c3946d489c704d7a5638714c2ff59679"
+  },
+  {
+   "f": "ui/e_bell_esc.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499ccbef000000000000ebebebf5ddb750260a"
+  },
+  {
+   "f": "ui/e_mail.png",
+   "expect_shop": false,
+   "px": "f5e0bff7e0bcf6e0b7f9dfbbf5ddb76d60506b5e4ef5dfbbf9e1bff5e3bffae4bff9e3bfb69e83f5e0bb7b5d42f6e3c5fbe5bf"
+  },
+  {
+   "f": "ui/e_mail_esc.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499ccbef000000000000ebebebf5ddb7ff6802"
+  },
+  {
+   "f": "ui/emoji.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c19a9a99fcd30c31392b8a68499ccbef6f442800000065491ffbe5c3ff6802"
+  },
+  {
+   "f": "ui/f_arrow.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a684976b7de000000000000ebebebf5ddb74e2610"
+  },
+  {
+   "f": "ui/f_arrow2.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499ccbef000000000000ebebebf5ddb7ff6a06"
+  },
+  {
+   "f": "ui/f_petmgr.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a684976b7de000000000000ebebebf5ddb74d2516"
+  },
+  {
+   "f": "ui/f_petmgr_esc.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a684976b7de000000000000ebebebf5ddb7f86321"
+  },
+  {
+   "f": "ui/family.png",
+   "expect_shop": false,
+   "px": "f2d4aa483d37f1d19fffefdfedce9b52281b545524f5dfc2e3c697edd19bf3d5a3f3d5a3dbb17c3d68a0dab17da97546a97546"
+  },
+  {
+   "f": "ui/g_botcollapse.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a684976b7de000000000000ebebeb000000fd6615"
+  },
+  {
+   "f": "ui/g_chatup.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499ccbef000000000000ffffff0000004c2415"
+  },
+  {
+   "f": "ui/g_leftcollapse.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a684976b7de000000000000ebebeb000000fd6615"
+  },
+  {
+   "f": "ui/g_teamtab.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499ccbef000000000000ebebebf6ddb7f86321"
+  },
+  {
+   "f": "ui/h_bag.png",
+   "expect_shop": false,
+   "px": "482b13dfbb93dfbb93a48264684b31ddbc91ddbc91664a3163492edfbb93dfbb93632e20dfb88e3767a1dfbb9346311cdfbb93"
+  },
+  {
+   "f": "ui/h_book.png",
+   "expect_shop": false,
+   "px": "482b13f3d5aff1d7b3f3d9b3f1d7b3edd3afedd2acf2d7b3f2d5b3f1d7b3f1d7b3edd5afa98770a9856efbe6bfa98869f1d7b3"
+  },
+  {
+   "f": "ui/h_item.png",
+   "expect_shop": false,
+   "px": "2b1a0b857058857058634e3c3e2d1d837157837157261c163b2b1b3529228570583b1b13352921211f248570582a1d12352922"
+  },
+  {
+   "f": "ui/h_store.png",
+   "expect_shop": false,
+   "px": "482b13dfbb93dfbb93a48264684b31ddbc91ddbc91664a3163492edfbb93dfbb93632e206f51323767a16f51327d6243dfbb93"
+  },
+  {
+   "f": "ui/i_tp.png",
+   "expect_shop": false,
+   "px": "8f57398685528d5d3b5f3a21754526d9d5c9c7d0c12991ab5eae8b93a9313199b35964494f9bab38a1b3b5a991735e46f8ddb7"
+  },
+  {
+   "f": "ui/i_tphero.png",
+   "expect_shop": false,
+   "px": "8f57395c5854617b3d6c7c30a7b8b8494c4a8a9493f5d9b3838035707a7effe5b1f9dbb327bed036bedefaf5e9735e468d5a4e"
+  },
+  {
+   "f": "ui/i_tplevel.png",
+   "expect_shop": false,
+   "px": "8f573981826a94912a97613f8e603dd3ba8ecdb98e2292ab9964429ba858419eb3a5967490a99f56a0afd7b98bc48c36bcac8b"
+  },
+  {
+   "f": "ui/i_tpquick.png",
+   "expect_shop": false,
+   "px": "8f573987835f786f4e74a36369aaa3d1b98dd5b9864ab5b5b7b458218fa859b5ab2191abc0b79379a5a0d9b983735e4666401f"
+  },
+  {
+   "f": "ui/j_chat.png",
+   "expect_shop": false,
+   "px": "5c3925f4dabcf5ddbff5ddbff3dbbff3d9bbf3d9bbf3d9bbf5ddbf6b462c6b462c6b462cd57b3d8b5831edbd62805e42f3d9bb"
+  },
+  {
+   "f": "ui/j_other.png",
+   "expect_shop": false,
+   "px": "5c3925ead8c09e7445a06a48f3dbbff3d9bbf3d9bbf3d9bb38261b6b462c6b462c6b462cd57b3d8b5831edbd62805e42f3d9bb"
+  },
+  {
+   "f": "ui/j_set.png",
+   "expect_shop": false,
+   "px": "5c3925866857a4764af5ddbff3dbbff3d9bbf3d9bbf3d9bbf5ddbf6b462c6b462c6b462cd57b3d8b5831edbd62736d29ffe7c8"
+  },
+  {
+   "f": "ui/j_sound.png",
+   "expect_shop": false,
+   "px": "5c3925f3d9bb8e5929634735f3dbbff3d9bbf3d9bbf3d9bbf5ddbf6b462c6b462c6b462cd57b3d8b5831edbd62805e42ffe7c8"
+  },
+  {
+   "f": "ui/k_ass.png",
+   "expect_shop": false,
+   "px": "837d63a7a7a7dddddbecece9dddddbdddddbdddddbffffffdddddbffffffbdbbbcffffffdddddbdddddb0040dbafadafecece9"
+  },
+  {
+   "f": "ui/k_catch.png",
+   "expect_shop": false,
+   "px": "837d63a7a7a7dddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbffffff0040dbafadafdddddb"
+  },
+  {
+   "f": "ui/k_general.png",
+   "expect_shop": false,
+   "px": "837d630040dbffffffdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbdddddb0040dbafadafdddddb"
+  },
+  {
+   "f": "ui/lucky.png",
+   "expect_shop": false,
+   "px": "5e93c5b19d7f6a9cc36ba1cb160e0653412e503f2d85a7a9b330612d261f45392d473a2efac339694f3afcc9495a4639d7a975"
+  },
+  {
+   "f": "ui/m1.png",
+   "expect_shop": false,
+   "px": "583a1db9c4bb836c5a69493195774b000000583a1e000000d7b38c746a58ffff00381f17ffdfbbffe1bbffe5780000007dcc5c"
+  },
+  {
+   "f": "ui/m2.png",
+   "expect_shop": false,
+   "px": "907955527b9de5e2c2977c6053422a482f18ffcd5eaf987f8c6139e7d5b2ffff0000000068777baab3aaad9671d2e8aa90785a"
+  },
+  {
+   "f": "ui/m3.png",
+   "expect_shop": false,
+   "px": "fbe5c3dfbb93fbe5c3fbe5c3fbe5c3735f28fee3c3dfbb93e9c79fe7d5b2ffff0000000068777baab3aafbe5c3d1af8bdfbb93"
+  },
+  {
+   "f": "ui/m4.png",
+   "expect_shop": false,
+   "px": "fbe5c3808e8dfbe5c3fbe5c3fbe5c3000000fee3c3000000e9c79f746a58ffff00000000905c33545954915f31fbe5c37dcc5c"
+  },
+  {
+   "f": "ui/m5.png",
+   "expect_shop": false,
+   "px": "6a4c38cde5fb7243184b4038502f1ec1ddfbdcb585cfab83eed2ab37332bffff00000000dfbb93dfbb93c69a6bcfab835b3c25"
+  },
+  {
+   "f": "ui/m6.png",
+   "expect_shop": false,
+   "px": "fbe5c3dddddbfbe5c3fbe5c3fbe5c3dededcfee3c3ffffffe9c79fffffffffffffffffffffffffffffffffffffdddddbdddddb"
+  },
+  {
+   "f": "ui/mail.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c19a9a99fcd30c31392b8a68499ccbef6f442800000065491ffbe5c3fc6511"
+  },
+  {
+   "f": "ui/minimap.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c1999997fcd30c31392b8a68499fcdf4000000000000000000f5ddb74d2516"
+  },
+  {
+   "f": "ui/n1.png",
+   "expect_shop": false,
+   "px": "fbe5c3b9c4bbfbe5c3fbe5c3fbe5c3000000fee3c3000000e9c79fffffffffffffffffffffffffffffffffffff0000007dcc5c"
+  },
+  {
+   "f": "ui/n2.png",
+   "expect_shop": false,
+   "px": "000000f5ddbb0000005f5545e5bd91fbe1bfd9b787fbe1bf0000005d5547373700000000fbe1bff9dfbdf9ddb77b5d42f6deba"
+  },
+  {
+   "f": "ui/n3.png",
+   "expect_shop": false,
+   "px": "000000b9c4bb0000005f5545e5bd91000000d9b787000000000000e7d5b2ffff0000000068777baab3aaad96710000007dcc5c"
+  },
+  {
+   "f": "ui/n4.png",
+   "expect_shop": false,
+   "px": "000000b9c4bb0000005f5545000000000000000000000000000000e7d5b2bfbf0000000068777baab3aaad96710000007dcc5c"
+  },
+  {
+   "f": "ui/p1.png",
+   "expect_shop": false,
+   "px": "8d7d66664a315f482d857058543c225a3d2729190e63452b8d7c6437332b000000000000dfbb93dfbb9388603bc69d6e915937"
+  },
+  {
+   "f": "ui/p2.png",
+   "expect_shop": false,
+   "px": "5236293e5a29e5e2c2977c60d27b24b1b7a2af917684a5a38c6139746a58121200000000ddc9869ea99380a195b1b4a3615749"
+  },
+  {
+   "f": "ui/p3.png",
+   "expect_shop": false,
+   "px": "65462af5ddbf8c674881634bdbc380d9b690140e0843311b6240255d5547ffff00000000f3d9bbf3d9bbf3d9bbf5ddbfb6a585"
+  },
+  {
+   "f": "ui/p4.png",
+   "expect_shop": false,
+   "px": "c5e3ffdddddbdddddbdddddbdddddbdededc49484affffffffffff746a58ffff00000000dddddbdddddbdddddbdddddbdddddb"
+  },
+  {
+   "f": "ui/pet.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a684976b7de000000000000bfbfbff5ddb7ff6a06"
+  },
+  {
+   "f": "ui/planet.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c19a9a99fcd30c31392b8a68499fcdf46f442800000065491ffbe5c3ff6711"
+  },
+  {
+   "f": "ui/quicktp.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a684976b7de000000000000000000f5ddb74d2616"
+  },
+  {
+   "f": "ui/rank.png",
+   "expect_shop": false,
+   "px": "78553ecfab839bbed49c9273bfddf7cfab8392bbe1cfab838a653ecfab83cfab83cfab83cfab83cfab83cfab834d2e1ecfab83"
+  },
+  {
+   "f": "ui/setting.png",
+   "expect_shop": false,
+   "px": "5c3925866857a4764af5ddbff3dbbff3d9bbf3d9bbf3d9bbf5ddbf6b462c6b462c6b462cd57b3d8b5831edbd62736d29ffe7c8"
+  },
+  {
+   "f": "ui/shop.png",
+   "expect_shop": false,
+   "px": "694621fbdfbaffffecbf9970bf9970583a1ddfbb93583a1edfbb93f5d8b2dfbc95dfbb93210807484524ffdfbbf7dab3fbdfb7"
+  },
+  {
+   "f": "ui/sound.png",
+   "expect_shop": false,
+   "px": "d38e45544e000000000000000000006d8283c0c6c19a9a99fcd30c31392b8a68499ccbef6f442800000065491ffbe5c3fc6511"
+  },
+  {
+   "f": "ui/sponsor.png",
+   "expect_shop": false,
+   "px": "5e3c1cffe1bb556390af77519eb93efadeb9f9ddb75f1b05ae754abc8761bc8762e57120011201ffe7c8f9e1bf0bb8f9b3754d"
+  },
+  {
+   "f": "ui/switch.png",
+   "expect_shop": false,
+   "px": "6946218653310000000000000000007649255f635fa97f547e69065a7413443323f5d9b337211400000032240f7d7260bcaa8f"
+  },
+  {
+   "f": "ui/team.png",
+   "expect_shop": false,
+   "px": "f2d8afe4c098d0ad8cffe4bffbe5c0fae1bbffe4c3edd9b5ecd7b5c8ae8cc9af8bf5ddbff5e1c0a8cdf7f3debbc9a986e1c29b"
+  },
+  {
+   "f": "ui/transfer.png",
+   "expect_shop": false,
+   "px": "8f57398685528d5d3b5f3a21754526d9d5c9c7d0c12991ab5eae8b93a9313199b35964494f9bab38a1b3b5a991735e46f8ddb7"
+  },
+  {
+   "f": "ui/z_after.png",
+   "expect_shop": false,
+   "px": "d38e45544e00ccae70af8e7fc5cabf6d8283c0c6c19a9a99fcd30c31392b8a68499fcdf4000000000000fffffff5ddb7f86321"
+  },
+  {
+   "f": "up_3.png",
+   "expect_shop": false,
+   "px": "edcfa657700ed9f5ff6c7576dfbb93f5ddbadfbb93f5dfbbd9c8badfc59d9f7e67eeceac9fc9fcd1af8bd1af8b8c725ad1af8b"
+  },
+  {
+   "f": "v695.png",
+   "expect_shop": false,
+   "px": "a57649583c24613f309b7b546341315d412a5f402aae8c65ae8c65fadebbab8962ab8962f5e1c19b7b54f5ddbfb391629b7b54"
+  },
+  {
+   "f": "w2.png",
+   "expect_shop": false,
+   "px": "482b13dfbb93dfbb93a48264d4d4d3ddbc91ddbc91664a3163492edfbb93dfbb93632e206f51323767a16f51327d6243dfbb93"
+  },
+  {
+   "f": "w3.png",
+   "expect_shop": false,
+   "px": "2b1a0b857058857058634e3c7d7d7e837157837157261c163b2b1b3529228570583b1b13271d16211f2442301e4b3a28352922"
+  },
+  {
+   "f": "w5.png",
+   "expect_shop": false,
+   "px": "837d630040dbffffffdddddbdddddbdddddbdddddbdddddbdddddbdddddbdddddbffffffdddddbdddddb0040dbafadafdddddb"
+  },
+  {
+   "f": "watch-m0/p10.png",
+   "expect_shop": false,
+   "px": "d38e45ac825f000000000000000000c3b0900000007f6c1e000000000000967a3b0e08026b54295e4929191308f5ddb75a4522"
+  },
+  {
+   "f": "watch-m0/p9.png",
+   "expect_shop": false,
+   "px": "d38e45ac825f000000000000000000c3b0900000007f6c1e000000000000967a3b0e08026b54295e4929191308f5ddb75a4522"
+  },
+  {
+   "f": "watch-m0/s1.png",
+   "expect_shop": false,
+   "px": "d38e45ac825f000000000000000000c3b0900000007f6c1e000000000000967a3b0e08026b54295e4929191308f5ddb75a4522"
+  },
+  {
+   "f": "watch-panels/pet-0.png",
+   "expect_shop": false,
+   "px": "a57649583c24613f309b7b546341315d412a5f402aae8c65ae8c65fadebbab8962ab8962f5e1c19b7b54f5ddbf5d3e269b7b54"
+  },
+  {
+   "f": "watch-panels/pet-1.png",
+   "expect_shop": false,
+   "px": "a57649583c24613f309b7b546341315d412a5f402aae8c65ae8c65fadebbab8962ab8962f5e1c19b7b54f5ddbf5d3e269b7b54"
+  },
+  {
+   "f": "watch-panels/role-0.png",
+   "expect_shop": false,
+   "px": "82574a7b25146390c8d3d3d3f3d7b0ffe560dfbb93edd3afedd3af68482aa47e55edd3afb89d98d3a874b8a8a4c37c6adfbb93"
+  },
+  {
+   "f": "watch-panels/role-1.png",
+   "expect_shop": false,
+   "px": "82574a8729176390c8d3d3d3f3d7b0dfbb93dfbb93edd3afedd3af68482aa47e55edd3afb89d98d3a874b8a8a4c37c6adfbb93"
+  },
+  {
+   "f": "watch-panels/role-2.png",
+   "expect_shop": false,
+   "px": "82574a8729176390c8d3d3d3f3d7b0dfbb93dfbb93edd3afedd3af68482aa47e55edd3afb89d98d3a874b8a8a4c37c6adfbb93"
+  },
+  {
+   "f": "watch-panels/role-3.png",
+   "expect_shop": false,
+   "px": "82574a8729176390c8d3d3d3f3d7b0dfbb93dfbb93edd3afedd3af68482aa47e55edd3afb89d98d3a874b8a8a4c37c6adfbb93"
+  }
+ ]
+}

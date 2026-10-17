@@ -165,7 +165,7 @@ check('label：任何 annotate 組合都不出現「安全」「無驗證」', a
 # ---- 5. 面板辨識（2026-10-11）：樣本 fixture + 邊界 + 主畫面多組 + 載入 / 黑畫面 ----
 PX = json.loads((HERE / 'fixtures' / 'panel_px.json').read_text(encoding='utf-8'))
 ppts = [tuple(p) for p in PX['points']]
-check('panel fixture 取樣點 == points() + annot_points()', ppts == S.points() + S.annot_points())
+check('panel fixture 取樣點 = points() + annot_points() 的前綴（之後新增的面板點只會接在 annot_points 尾端；凍結結果不重產）', ppts == (S.points() + S.annot_points())[:len(ppts)])
 bad, pos_n, neg_n, per = [], 0, 0, {}
 for smp in PX['samples']:
     h = smp['px']
@@ -214,7 +214,7 @@ check('panel fixture 有人物資訊 4 張正例（watch-panels/role-0～3）', 
 check('panel fixture 有今天使用者開的寵物視窗（watch-panels/pet-0、pet-1）', {'watch-panels/pet-0.png', 'watch-panels/pet-1.png'} <= {x['f'] for x in PX['samples']})
 check('panel fixture 負例涵蓋 unknown / idle / dialog / battle / loading / login', {x['state'] for x in PX['samples'] if not x['expect_panel']} >= {'unknown', 'idle', 'dialog', 'battle'}
       and any(x['annot'] == ['loading'] for x in PX['samples']) and any(x['annot'] == ['login'] for x in PX['samples']))
-check('PANEL_X / PANEL_PTS / PANEL_NAMES 的面板一致、每面板 8 點', set(S.PANEL_X) == set(S.PANEL_PTS) == set(S.PANEL_NAMES) and all(len(v) == 8 for v in S.PANEL_PTS.values()))
+check('PANEL_X / PANEL_PTS / PANEL_NAMES 的面板一致（PANEL_NAMES 多一個 shop：NPC 商店用 SHOP_* 另判）、每面板 8 點', set(S.PANEL_X) == set(S.PANEL_PTS) == set(S.PANEL_NAMES) - {'shop'} and all(len(v) == 8 for v in S.PANEL_PTS.values()))
 check('PANEL_TITLE 每面板 8 點、都在 panel_points() 內', set(S.PANEL_TITLE) == set(S.PANEL_X) and all(len(v) == 8 for v in S.PANEL_TITLE.values())
       and all((x, y) in set(S.panel_points()) for v in S.PANEL_TITLE.values() for x, y, *_ in v))
 check('panel_points 與 classify 的 points 不重複', not (set(S.panel_points()) & set(S.points())))
@@ -254,6 +254,49 @@ for nm in S.PANEL_X:
     check(f'{nm}：只有標題（沒有 ✕ / 框線）→ panel={nm}', S.classify(title_px(nm))['panel'] == nm)
     check(f'{nm}：標題 1 點不符仍認得、2 點不符 → 不認得', S.classify(title_px(nm, 1, S.TITLE_TOL + 1))['panel'] == nm and S.classify(title_px(nm, 2, S.TITLE_TOL + 1))['state'] == 'unknown')
     check(f'{nm}：標題點偏 TITLE_TOL 剛好仍中', S.classify(title_px(nm, 8, S.TITLE_TOL))['panel'] == nm)
+# ---- NPC 商店（2026-10-15）：shop_px.json 真實取點 + 合成邊界 ----
+SX = json.loads((HERE / 'fixtures' / 'shop_px.json').read_text(encoding='utf-8'))
+spts = [tuple(p) for p in SX['points']]
+check('shop fixture 取樣點 = SHOP_X + SHOP_PTS', spts == [S.SHOP_X[:2]] + [(x, y) for x, y, *_ in S.SHOP_PTS])
+check('SHOP_PTS 16 點、都在 panel_points() 內（watch / uikit 都會讀到）、panel_points 與 points 仍不重複', len(S.SHOP_PTS) == 16
+      and {(x, y) for x, y, *_ in S.SHOP_PTS} | {S.SHOP_X[:2]} <= set(S.panel_points()))
+sbad, spos, sneg = [], 0, 0
+for smp in SX['samples']:
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(spts)}
+    got, strict = S.panel_of(px) == 'shop', S.panel_strict(px) == 'shop'
+    if smp['expect_shop']:
+        spos += 1
+        if not (got and strict):
+            sbad.append((smp['f'], 'recall'))
+    else:
+        sneg += 1
+        if got or strict or S.shop_hit(px, 9):          # 負例連 9 / 16 都不到（餘裕大）
+            sbad.append((smp['f'], 'FP'))
+check(f'shop fixture：{spos} 張商店正例認對（panel_of 與 panel_strict）、{sneg} 張負例（含商城 / 交易所 / LuckyCard / 贊助 / 各面板 / 主畫面）0 誤判', not sbad and spos == 2 and sneg >= 60, str(sbad[:4]))
+check('shop 負例含商城（ui/shop.png）、交易所（ui/bourse.png）、LuckyCard（ui/lucky.png）、贊助（ui/sponsor.png）',
+      {'ui/shop.png', 'ui/bourse.png', 'ui/lucky.png', 'ui/sponsor.png'} <= {x['f'] for x in SX['samples'] if not x['expect_shop']})
+
+
+def shop_px(miss=0, delta=0, x_delta=0):
+    px = {pt: (70, 70, 70) for pt in S.points() + S.panel_points()}
+    for i, (x, y, r, g, b) in enumerate(S.SHOP_PTS):
+        px[(x, y)] = shifted((r, g, b), delta) if i < miss else (r, g, b)
+    x, y, r, g, b, t = S.SHOP_X
+    px[(x, y)] = shifted((r, g, b), x_delta)
+    return px
+
+
+c = S.classify(shop_px())
+check('商店：16 點 + ✕ 全中 → state=panel、panel=shop、label「面板：NPC 商店」', c['state'] == 'panel' and c['panel'] == 'shop' and S.label(c) == '面板：NPC 商店')
+check('商店：4 點不符仍認得（別家店內容不同蓋住幾點）、5 點不符 → unknown', S.classify(shop_px(4, S.SHOP_TOL + 1))['panel'] == 'shop' and S.classify(shop_px(5, S.SHOP_TOL + 1))['state'] == 'unknown')
+check('商店：✕ 偏 tol+1 → 不認得', S.classify(shop_px(0, 0, S.SHOP_X[5] + 1))['state'] == 'unknown')
+check('商店：只有 16 點沒有 ✕ → 不認得', S.classify({**shop_px(), S.SHOP_X[:2]: (70, 70, 70)})['state'] == 'unknown')
+check('panel_strict（要動手點 ✕ 關）：2 點不符仍可、3 點不符 → None（比 panel_of 嚴）', S.panel_strict(shop_px(2, S.SHOP_TOL + 1)) == 'shop' and S.panel_strict(shop_px(3, S.SHOP_TOL + 1)) is None
+      and S.panel_of(shop_px(3, S.SHOP_TOL + 1)) == 'shop')
+check('沒讀 shop 點（舊 fixture / quest.read_screen 只讀 points()）→ 不認得、不丟例外', S.classify({pt: (70, 70, 70) for pt in S.points()})['panel'] is None)
+check('商店特徵不會把既有 10 種面板的合成 / 真實樣本認成商店（上面 panel fixture 0 誤判已含，這裡再看合成）', all(S.panel_of(panel_px(nm)) == nm for nm in S.PANEL_X))
+check('商店 ✕ 是紅圈、不是購買鈕：✕ 座標離購買鈕（996,592）> 300 px', abs(S.SHOP_X[0] - 996) + abs(S.SHOP_X[1] - 592) > 300)
 check('沒讀 panel_points（舊 fixture / quest.read_screen）→ 不認得新面板、不丟例外', S.classify({pt: (70, 70, 70) for pt in S.points()})['panel'] is None)
 check('label：面板：寵物 / 外掛 / 快速組隊；舊切換面板', S.label({'state': 'panel', 'panel': 'pet'}) == '面板：寵物' and S.label({'state': 'panel', 'panel': 'ass'}) == '面板：外掛'
       and S.label({'state': 'panel', 'panel': 'qteam'}) == '面板：快速組隊' and S.label({'state': 'panel'}) == '切換角色面板')
@@ -295,7 +338,7 @@ check('ANNOT_KNOWN = login / charsel / loading / black / net_lost + 三種面板
 # ---- 6. 面板上疊已知彈窗（2026-10-12，watch 誤報 #243 #244 #254 #261 #264）----
 PP = json.loads((HERE / 'fixtures' / 'popup_px.json').read_text(encoding='utf-8'))
 qpts = [tuple(p) for p in PP['points']]
-check('popup fixture 取樣點 == points() + annot_points()', qpts == S.points() + S.annot_points())
+check('popup fixture 取樣點 = points() + annot_points() 的前綴', qpts == (S.points() + S.annot_points())[:len(qpts)])
 bad, npos, nneg, kinds = [], 0, 0, {}
 for smp in PP['samples']:
     h = smp['px']

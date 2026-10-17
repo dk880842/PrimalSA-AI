@@ -803,6 +803,18 @@ def px_panel(name):
     return ' '.join(d.get(pt, '70,70,70') for pt in ALLPTS)
 
 
+# NPC 商店（2026-10-15：p2 競技場便利店開著被報 unknown_long 誤警報）：用 screen_sigs 的 SHOP 特徵合成，開 36 s 不警報
+w2_, clk2_, fk2_ = make('shop1')
+_d = {(x, y): f'{r},{g},{b}' for x, y, r, g, b in screen_sigs.SHOP_PTS}
+_x = screen_sigs.SHOP_X
+_d[(_x[0], _x[1])] = f'{_x[2]},{_x[3]},{_x[4]}'
+fk2_.pixel = (0, ' '.join(_d.get(pt, '70,70,70') for pt in ALLPTS), '')
+for _ in range(40):
+    w2_.cycle(); clk2_.t += 0.9
+st = watchstate.read()
+check('NPC 商店開 36 s：state=panel、panel=shop、label=面板：NPC 商店、沒有 unknown_long、verify_suspect=False',
+      st['screen']['state'] == 'panel' and st['screen']['panel'] == 'shop' and st['screen']['label'] == '面板：NPC 商店'
+      and st['alerts'] == [] and st['flags']['verify_suspect'] is False, str(st['screen']))
 w, clk, fk = make('panel1')
 fk.pixel = (0, px_panel('pet'), '')
 for _ in range(40):                  # 36 s：遠超過 UNKNOWN_LONG_S

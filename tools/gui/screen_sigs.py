@@ -73,7 +73,24 @@ PANEL_PTS = {
     'role': [(1116, 274, 158, 124, 89), (996, 546, 76, 77, 32), (1148, 714, 179, 71, 42), (300, 610, 197, 142, 75), (1380, 698, 83, 46, 31), (596, 98, 228, 188, 140), (676, 578, 155, 121, 82), (996, 330, 201, 162, 113)],
 }
 PANEL_NAMES = {'pet': '寵物', 'bag': '背包', 'quest': '任務', 'transfer': '傳送', 'setting': '設置', 'team': '組隊', 'qteam': '快速組隊',
-               'switch': '切換角色', 'ass': '外掛', 'role': '人物資訊'}
+               'switch': '切換角色', 'ass': '外掛', 'role': '人物資訊', 'shop': 'NPC 商店'}
+
+# ---- NPC 商店（便利店 / 道具商店；2026-10-15，watch 對它報過 unknown_long 誤警報）----
+# 框架：木框大面板 + 左側商品格兩欄 + 右側紅色卷軸（商品說明）+ 數量 −/＋ + 藍色「購買」鈕 + 右上紅圈 ✕；標題木牌的字隨 NPC 不同（便利店…），所以**不看標題字**，
+# 只取「各家商店一樣的結構色」：卷軸紅邊 6 點、數量 −/＋ 黃符號 2 點、購買鈕藍 3 點、面板下緣米色帶 3 點、商品格暗框 2 點 = 16 點 + ✕。
+# 判定 = ✕（tol 40）+ 16 點中 SHOP_NEED 個在 SHOP_TOL 內（panel_strict 另要 SHOP_NEED_STRICT）。
+# 樣本只有 p2 競技場「便利店」2 張（watch-alerts/unknown-1792043285 / 1792043435，同一家店）；離線掃 tools/.cache 2550 張 1440×830 負例
+#（含商城 ui/shop.png、交易所、各面板、對話框、戰鬥）最多只命中 1 / 16，所以門檻 12 有 11 點餘裕。別家店若因商品格 / 卷軸內容不同被蓋住 1～4 點仍認得。
+# 商城（newstore，紅區）框架完全不同（牛角標題板 + 綠色數量鈕 + 金色購買鈕 + 右側鑽石 / 活力分頁），0 點命中，不會混淆；交易所 / LuckyCard 是全螢幕，也不命中。
+SHOP_X = (1207, 107, 190, 74, 49, TOL)
+SHOP_PTS = [(840, 190, 175, 72, 74), (1160, 300, 179, 78, 76), (1165, 400, 180, 85, 70), (1165, 250, 152, 59, 67), (880, 160, 196, 78, 81), (1120, 160, 169, 69, 70),
+            (880, 465, 255, 227, 89), (1112, 465, 255, 226, 91),
+            (910, 595, 119, 160, 214), (1085, 595, 97, 137, 188), (1000, 620, 58, 102, 158),
+            (600, 700, 235, 204, 167), (760, 700, 235, 204, 167), (440, 700, 235, 204, 167),
+            (280, 300, 150, 117, 84), (805, 400, 124, 94, 67)]
+SHOP_TOL = 16
+SHOP_NEED = 12               # panel_of（watch 顯示用）
+SHOP_NEED_STRICT = 14        # panel_strict（要動手點 ✕ 關時用）
 
 # ---- 標題板字（面板辨識主判據，2026-10-11）----
 # 每個面板頂端都有木框標題板（寵物 / 背包 / 任務詳情 / 地圖傳送 / 設置 / 組隊 / 提示 / 切換角色 / 人物資訊；外掛是灰米色 Automatic Synchronized System 橫條），
@@ -263,7 +280,7 @@ def panel_points() -> list:
     """面板 / 主畫面多組 / 載入 / 黑畫面要的取樣點（不在 points() 裡，讓 screen_px.json 與 quest / uikit 的 classify 不變；watch 另外讀）"""
     seen, out = set(points()), []
     cand = [(x, y) for x, y, *_ in PANEL_X.values()] + [(x, y) for pts in PANEL_PTS.values() for x, y, *_ in pts] + [(x, y) for pts in PANEL_TITLE.values() for x, y, *_ in pts] + \
-           [(x, y) for pts in HUD_GROUPS.values() for x, y, *_ in pts] + BLACK_PTS
+           [(x, y) for pts in HUD_GROUPS.values() for x, y, *_ in pts] + BLACK_PTS + [SHOP_X[:2]] + [(x, y) for x, y, *_ in SHOP_PTS]     # 商店點放最後（annot_points 以 panel_points 結尾，舊 fixture 的點清單仍是前綴）
     for pt in cand:
         if pt not in seen:
             seen.add(pt)
@@ -284,7 +301,15 @@ def panel_of(px: dict):
     for name, (x, y, r, g, b, tol) in PANEL_X.items():
         if (x, y) in px and close(px[(x, y)], (r, g, b), tol) and _count_ok(px, PANEL_PTS[name], PANEL_TOL) >= PANEL_NEED:
             return name
+    if shop_hit(px, SHOP_NEED):
+        return 'shop'
     return None
+
+
+def shop_hit(px: dict, need: int) -> bool:
+    """NPC 商店：✕ 命中 + SHOP_PTS 至少 need 點命中（缺點當不符）"""
+    x, y, r, g, b, tol = SHOP_X
+    return (x, y) in px and close(px[(x, y)], (r, g, b), tol) and _count_ok(px, SHOP_PTS, SHOP_TOL) >= need
 
 
 def panel_strict(px: dict):
@@ -295,6 +320,8 @@ def panel_strict(px: dict):
         x, y, r, g, b, tol = PANEL_X[name]
         if _count_ok(px, pts, TITLE_TOL) >= TITLE_NEED and (x, y) in px and close(px[(x, y)], (r, g, b), tol):
             return name
+    if shop_hit(px, SHOP_NEED_STRICT):               # NPC 商店：✕ 關閉不會買東西（購買鈕在 ✕ 的另一邊，不會點到）
+        return 'shop'
     return None
 
 
