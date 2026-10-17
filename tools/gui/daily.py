@@ -38,6 +38,15 @@
           大字 OCR 帶 -Small 1（POP_NAME_OPTS）：實機先縮成跟截圖同一張 1440 縮圖再裁（根因：實機原生 2880 取像讀空、截圖讀得出，2026-10-17 dev-pop-live）
   翻頁（2026-10-17 dev-shop-title，未實機）：goto_page 讀頁碼（dp.page_vote 各倍率一致才收）到目標頁再等 0.4 秒重讀確認，盲翻後也要讀到頁碼；
           mid / final 每項合成前、提交前都 goto_page（修：翻頁 4 → 5 立刻讀成 5、面板其實在 4/5 → 點第 5 環項 229 彈窗沒開）
+  翻頁根因（2026-10-18 dev-goto-page，p1 00:45 / 00:46 mid 連 2 次 229「翻不到第 N 頁」，離線測試、未實機）：
+          **已提交的環那一頁沒有兩顆藍色合成鈕** → 舊版翻頁 safe_click 用 uikit.DAILY（含合成鈕兩點）判「面板不在」→ 不點、goto_page 直接 False（沒寫頁碼讀值）。
+          頁碼 OCR 本身沒問題（actlog「翻頁 5 → 3」「1 → 5」是不同次 goto_page 的「目前 → 目標」，每次讀值都對；離線 -Image / -Small 1 讀頁碼一致）。
+          規律（actlog 推得）：開面板固定在第 1 頁；提交後面板跳回第 1 頁。兩次失敗都是翻到已提交的第 3 環那頁時停。
+          修：翻頁 / 盲翻 / next_page / panel_open / daily_open 都改用 DAILY_BASE（不含合成鈕）；點不到時寫事件帶讀值。合成鈕 / 提交 / 合成後驗綠仍用 uikit.DAILY
+  sam 掉出店外（2026-10-18 p1 224，DKBO5 在 1009:17,23 快速走路往 25,17、2 秒後在 1000:106,91；根因未確定）：buy_at 進店失敗且人在城鎮 →
+          Tools.reenter_shop（出口落點旁先 walk.unstick_click 點開一步，再 walk_to 城鎮出口進店）→ 再 shop_enter 一次；仍不行才 224
+  組隊複查（2026-10-18 p1 00:35 223：form 47 / 43 OCR 矛盾，但 team status 隨後看是完整隊伍）：Tools.form 遇 FORM_RECHECK_RC（41～44、47）
+          等 2 秒 team.check 唯讀複查，完整（0）就當組好；40 / 45 / 46 等照回
   final-close（2026-10-17 p1 play-p1-daily5 三個實機問題，離線測試、未實機）：
           ① 5 環全提交後面板沒有藍色合成鈕 → uikit.DAILY 特徵（含兩顆合成鈕）不中，daily_close / char.clear_panels 判「沒開」不關 → 切下一人 rc 9。
             修：daily.DAILY_BASE（DAILY_SIG 去掉合成鈕兩點）判開著；daily_close 兩輪關彈窗 + 面板並回是否關掉；Tools.close_panels（switch_to / leader_current 切角色前都呼叫）先用它關
@@ -153,6 +162,7 @@ NAME_OPTS = ('-Zooms', '2,3,4,5', '-Dark', '0')                   # 褐字米色
 NAME_MORE_OPTS = ('-Zooms', '6,7,8', '-Dark', '0')
 # 委託面板的基本特徵（不含兩顆藍色合成鈕）：最後一環提交後面板沒有合成鈕，uikit.DAILY 不中（2026-10-17 play-p1-daily5）
 DAILY_BASE = uikit.Panel('DAILY', None, uikit.DAILY.sig[:-2], uikit.DAILY.close_xy, forbidden=uikit.DAILY.forbidden)
+FORM_RECHECK_RC, FORM_RECHECK_S = (41, 42, 43, 44, 47), 2.0     # team.form 這些碼 → 等 2 秒 team.check 唯讀複查（223 暫時現象）；40 / 45 / 46 / 驗證視窗等不複查
 POP_WAIT_N = 18                                                  # 點合成後等快速合成彈窗：18 × 0.25 秒 + 失敗前再 1 秒重檢
 MERGE_XY = [(735, 265), (735, 370)]                              # 兩顆「合成」藍鈕
 STATE_PX = [(390, 291), (390, 396)]                              # 兩項計數「0」紅字像素（舊單點；只留給文件 / 測試對照，判色改用 STATE_GRID）
@@ -315,7 +325,14 @@ class Tools:
     def form(self) -> int:
         """快速組隊（已組好 = 0 不點；不完整隊伍 → 解散重組 regroup=True：續跑時隊伍狀態不明也接得上）"""
         import team
-        return team.form(LEADER, len(ROLES), regroup=True)
+        rc = team.form(LEADER, len(ROLES), regroup=True)
+        if rc in FORM_RECHECK_RC:                              # 2026-10-18 p1 00:35 223：form 47 / 43（OCR 矛盾）但 team status 隨後看是完整 5 人隊（隊長 DKBO）
+            uikit.sleep(FORM_RECHECK_S)                        # → 等一下用 team.check 唯讀複查一次（只讀切換面板、不點組隊），完整就當組好
+            rc2 = team.check(len(ROLES), LEADER)
+            event(f'daily 組隊 team.form rc {rc} → 複查 team.check rc {rc2}' + ('（完整，繼續）' if rc2 == 0 else ''))
+            if rc2 == 0:
+                return 0
+        return rc
 
     def disband(self) -> int:
         import team
@@ -337,6 +354,22 @@ class Tools:
             print(f'{SRC}：走到 {map_id}:{x},{y} 失敗：{e}', file=sys.stderr)
             return False
         return True
+
+    def reenter_shop(self, shop_map: int) -> bool:
+        """在便利店 1009 / 2009 內走路掉出店外、站在城鎮那側出口落點（2026-10-18 p1 224：DKBO5 在 1009:17,23 快速走路往 25,17，
+        2 秒後在 1000:106,91）→ 走回店內一次。不在對應城鎮 → False（不處理別的情況）。
+        站在出口格旁（≤ 1 格）先 walk.unstick_click 點開一步（避開出口 ≥ 2 格），再 walk_to 城鎮出口進店；回是否已在 shop_map"""
+        import walk
+        town, walk_ = (VILLAGE, SAM_WALK) if shop_map == dp.SAM_MAP else (MARINAS_MAP, FISH_WALK)
+        p = walk.wait_pos(4)
+        if not p or p[0] != town:
+            return False
+        if max(abs(p[1] - walk_[1]), abs(p[2] - walk_[2])) <= 1:
+            walk.unstick_click(town, p[1], p[2])
+        if not self.walk_to(*walk_, exit_map=shop_map):
+            return False
+        q = walk.wait_pos(4, shop_map)
+        return bool(q and q[0] == shop_map)
 
     def click_route(self, village: bool):
         """送一個 seq 的固定點擊路線（route_seq）→ 讀一次座標回傳（讀不到 None）"""
@@ -413,7 +446,7 @@ class Tools:
         點 → 等面板特徵；沒開再點一次（共 2 次；進醫院後右側小框會吃第一下）"""
         import walk
         for _ in range(2):
-            if uikit.is_open(uikit.DAILY):
+            if uikit.is_open(DAILY_BASE):                      # 不看合成鈕：開面板落在已提交環那頁（第 1 環已提交）時沒有藍色合成鈕
                 return True
             p = self.settled_pos()
             xy = None
@@ -436,10 +469,10 @@ class Tools:
                 xy = NPC_FALLBACK_XY
             uikit.gui('seq', f'click {xy[0]} {xy[1]}; wait 700', note=f'daily 點委託接取 NPC（站 {p}）')
             for _i in range(8):
-                if uikit.is_open(uikit.DAILY):
+                if uikit.is_open(DAILY_BASE):
                     return True
                 uikit.sleep(0.2)
-        return uikit.is_open(uikit.DAILY)
+        return uikit.is_open(DAILY_BASE)
 
     def daily_open_any(self) -> bool:
         """委託面板或快速合成彈窗開著（含 5/5 後沒有藍色合成鈕的面板：用 DAILY_BASE 特徵）"""
@@ -458,7 +491,7 @@ class Tools:
         return False
 
     def panel_open(self) -> bool:
-        return uikit.is_open(uikit.DAILY)
+        return uikit.is_open(DAILY_BASE)
 
     def page_no(self):
         """頁碼「n/5」：各倍率各自 parse、一致才收（dp.page_vote）；讀不出 / 不一致 → None"""
@@ -486,23 +519,26 @@ class Tools:
                     blind = True
                     event(f'daily 頁碼讀不出 → 盲翻到第 {page} 頁')
                     for _i in range(dp.RINGS - 1):
-                        if not uikit.safe_click(*PREV_XY, uikit.DAILY, note='daily 盲翻：上一頁', wait_ms=400):
+                        if not uikit.safe_click(*PREV_XY, DAILY_BASE, note='daily 盲翻：上一頁', wait_ms=400):
+                            event(f'daily 翻頁點不到：委託面板特徵不在（頁碼各次讀值 {seen}）')
                             return False
                     for _i in range(page - 1):
-                        if not uikit.safe_click(*NEXT_XY, uikit.DAILY, note='daily 盲翻：下一頁', wait_ms=400):
+                        if not uikit.safe_click(*NEXT_XY, DAILY_BASE, note='daily 盲翻：下一頁', wait_ms=400):
+                            event(f'daily 翻頁點不到：委託面板特徵不在（頁碼各次讀值 {seen}）')
                             return False
                 else:
                     self.sleep(0.5)
                 continue
             miss = 0
             x, y = NEXT_XY if cur < page else PREV_XY
-            if not uikit.safe_click(x, y, uikit.DAILY, note=f'daily 翻頁 {cur} → {page}', wait_ms=600):
+            if not uikit.safe_click(x, y, DAILY_BASE, note=f'daily 翻頁 {cur} → {page}', wait_ms=600):
+                event(f'daily 翻頁點不到：委託面板特徵不在（頁碼各次讀值 {seen}）')
                 return False
         event(f'daily 翻不到第 {page} 頁（頁碼各次讀值 {seen}）')
         return False
 
     def next_page(self) -> bool:
-        return uikit.safe_click(*NEXT_XY, uikit.DAILY, note='daily 下一頁', wait_ms=500)
+        return uikit.safe_click(*NEXT_XY, DAILY_BASE, note='daily 下一頁', wait_ms=500)
 
     def read_page(self) -> dict:
         """目前頁：{'names': [OCR 原始行 ×2（uikit.ocr_lines，多倍率）], 'states': ['red'|'green'|'?' ×2]}（呼叫端 dp.vote_lines 逐倍率投票）"""
@@ -1033,7 +1069,13 @@ class Daily:
         rc = T.preflight()
         if rc:
             self.tool_fail(rc, EXIT_BUY, f'preflight 失敗（rc {rc}）')
-        if not T.shop_enter(store):
+        ok = T.shop_enter(store)
+        if not ok:                                              # 2026-10-18 p1 224：店內快速走路掉出店外 → 走回店內再試一次
+            p = T.pos()
+            if p and p[0] != store.map and store.map in dp.MAP_STAGE and T.reenter_shop(store.map):
+                event(f'{role} 走「{store.name}」途中掉出店外（{p}）→ 已走回 {store.map}，再試一次')
+                ok = T.shop_enter(store)
+        if not ok:
             T.cleanup()
             self.fail(EXIT_WALK, f'{role} 走不到 / 點不開「{store.name}」（{store.map}:{store.x},{store.y}）的道具商店', role=role)
         done = []

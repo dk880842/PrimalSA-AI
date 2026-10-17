@@ -1864,6 +1864,144 @@ T.inj['personal_full'] = True
 d.evict_many(role, ['材A', '材B'])
 check('批次存：個人倉庫滿（95）→ 兩樣改批次存公倉並記 in_public', set(d.st[role]['in_public']) == {'材A', '材B'} and {'材A', '材B'} <= set(W.public) and T.panel_opens == 2, f'{d.st[role]} {T.panel_opens}')
 
+# ---------------- 2026-10-18 p1 mid 229「翻不到第 N 頁」根因：已提交環那頁沒有藍色合成鈕 → uikit.DAILY（含合成鈕）safe_click 判面板不在 ----------------
+# fixtures/daily_panel_sig.json = DAILY_SIG 9 點實機取色：submitted（5/5 全提交後面板）/ normal（未提交環各頁）
+PS = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_panel_sig.json').read_text(encoding='utf-8'))
+_pts = [tuple(p) for p in PS['points']]
+_pxd = lambda smp: {p: tuple(c) for p, c in zip(_pts, smp['px'])}  # noqa: E731
+check('面板特徵：已提交環那頁 uikit.DAILY（含合成鈕）不中、DAILY_BASE 中（重現 229 根因）',
+      all(not screen_sigs.match(_pxd(s), uikit.DAILY.sig) and screen_sigs.match(_pxd(s), daily.DAILY_BASE.sig) for s in PS['submitted']))
+check('面板特徵：未提交環各頁 uikit.DAILY / DAILY_BASE 都中',
+      all(screen_sigs.match(_pxd(s), uikit.DAILY.sig) and screen_sigs.match(_pxd(s), daily.DAILY_BASE.sig) for s in PS['normal']), str(len(PS['normal'])))
+
+
+def run_goto_sub(target, start=1, submitted=(3,), base=None):
+    """真 uikit.safe_click（禁區 + is_open）＋ 假 is_open / gui：submitted 頁沒有合成鈕 → uikit.DAILY 不中、DAILY_BASE 中。
+    base = 暫時換掉 daily.DAILY_BASE（重現舊行為用 uikit.DAILY）"""
+    T = daily.Tools()
+    real = {'p': start}
+    clicks, evs = [], []
+    T.page_no = lambda: real['p']
+    T.sleep = lambda s: None
+
+    def fake_open(p):
+        if p is uikit.DAILY:
+            return real['p'] not in submitted
+        return p is daily.DAILY_BASE or p.sig == daily.DAILY_BASE.sig
+
+    def fake_gui(*a, note='', **k):
+        x, y = (int(v) for v in a[1].split(';')[0].split()[1:3])
+        clicks.append((x, y))
+        real['p'] = max(1, min(5, real['p'] + (1 if (x, y) == daily.NEXT_XY else -1)))
+        return ''
+    keep = (uikit.is_open, uikit.gui, daily.event, daily.DAILY_BASE)
+    uikit.is_open, uikit.gui, daily.event = fake_open, fake_gui, evs.append
+    if base is not None:
+        daily.DAILY_BASE = base
+    try:
+        ok = T.goto_page(target)
+        po = T.panel_open()
+    finally:
+        uikit.is_open, uikit.gui, daily.event, daily.DAILY_BASE = keep
+    return ok, real['p'], clicks, evs, po
+
+
+ok, real, clicks, evs, _po = run_goto_sub(5, base=uikit.DAILY)
+check('goto_page 舊行為（翻頁用 uikit.DAILY）：1 → 5 經過已提交的第 3 頁 → 停在 3、False（重現 00:45:24 229）', not ok and real == 3 and len(clicks) == 2, f'{ok} {real} {clicks}')
+check('goto_page：翻頁點不到時寫事件（帶頁碼讀值）', any('翻頁點不到' in e for e in evs), str(evs))
+ok, real, clicks, evs, _po = run_goto_sub(5)
+check('goto_page 修後：1 → 5 經過已提交的第 3 頁 → 到第 5 頁 True', ok and real == 5 and len(clicks) == 4, f'{ok} {real} {clicks} {evs}')
+ok, real, clicks, evs, _po = run_goto_sub(4, start=1, submitted=(1, 3))
+check('goto_page 修後：從已提交的第 1 頁翻到第 4 頁（00:46:05 第 2 次 229 情境）', ok and real == 4, f'{ok} {real} {clicks}')
+ok, real, clicks, evs, po = run_goto_sub(1, start=1, submitted=(1,))
+check('panel_open：開面板落在已提交的第 1 頁（沒合成鈕）也算開著', ok and po is True, f'{ok} {po}')
+_src = Path(daily.__file__).read_text(encoding='utf-8')
+check('翻頁 / 開面板判斷都不用 uikit.DAILY（只有合成鈕 / 提交 / 合成後驗綠用）',
+      'PREV_XY, uikit.DAILY' not in _src and 'NEXT_XY, uikit.DAILY' not in _src and 'x, y, uikit.DAILY' not in _src
+      and _src.count('uikit.is_open(DAILY_BASE)') >= 4)
+
+# ---------------- 2026-10-18 p1 00:35 223：team.form 47 / 43 但隊伍其實完整 → team.check 複查 ----------------
+class _FakeTeam:
+    def __init__(self, form_rc, check_rc):
+        self.form_rc, self.check_rc, self.calls = form_rc, check_rc, []
+
+    def form(self, *a, **k):
+        self.calls.append('form')
+        return self.form_rc
+
+    def check(self, *a, **k):
+        self.calls.append('check')
+        return self.check_rc
+
+
+def _form_case(form_rc, check_rc):
+    ft = _FakeTeam(form_rc, check_rc)
+    keep = (sys.modules.get('team'), uikit.sleep, daily.event)
+    sys.modules['team'], uikit.sleep, daily.event = ft, (lambda s: None), (lambda m: None)
+    try:
+        return daily.Tools().form(), ft.calls
+    finally:
+        if keep[0] is None:
+            sys.modules.pop('team', None)
+        else:
+            sys.modules['team'] = keep[0]
+        uikit.sleep, daily.event = keep[1], keep[2]
+
+
+rc, calls = _form_case(43, 0)
+check('form：team.form 43（OCR 矛盾）→ team.check 0 完整 → 0 繼續（223 修）', rc == 0 and calls == ['form', 'check'], f'{rc} {calls}')
+rc, calls = _form_case(47, 41)
+check('form：team.form 47 → 複查仍不完整 → 回原碼 47', rc == 47 and calls == ['form', 'check'], f'{rc} {calls}')
+rc, calls = _form_case(40, 0)
+check('form：切換面板打不開（40）不複查、照回', rc == 40 and calls == ['form'], f'{rc} {calls}')
+rc, calls = _form_case(0, 41)
+check('form：成功不複查', rc == 0 and calls == ['form'], f'{rc} {calls}')
+
+# ---------------- 2026-10-18 p1 00:34 224：DKBO5 在 1009 內快速走路掉出店外（1000:106,91）→ 走回店內再試一次 ----------------
+with FakeGeo((1000, 106, 91)) as g:
+    g.walk.unstick_click = lambda m, x, y: g.log.append(('unstick', m, x, y)) or (0, 0)
+    ok = GeoTools(g).reenter_shop(1009)
+check('reenter_shop：站在 1000:106,91（出口落點）→ 先點開一步 → walk_to 出口進 1009', ok and g.log == [('unstick', 1000, 106, 91), ('walk_to', 1000, 106, 91, 1009)], f'{ok} {g.log}')
+with FakeGeo((1000, 100, 96)) as g:
+    g.walk.unstick_click = lambda m, x, y: g.log.append(('unstick', m, x, y)) or (0, 0)
+    ok = GeoTools(g).reenter_shop(1009)
+check('reenter_shop：離出口遠 → 不點開一步、直接走', ok and g.log == [('walk_to', 1000, 106, 91, 1009)], f'{ok} {g.log}')
+with FakeGeo((1005, 38, 40)) as g:
+    g.walk.unstick_click = lambda m, x, y: g.log.append(('unstick',))
+    ok = GeoTools(g).reenter_shop(1009)
+check('reenter_shop：不在對應城鎮（醫院）→ False、不動', ok is False and g.log == [], f'{ok} {g.log}')
+
+
+class _FallTools(FakeTools):
+    """DKBO5 第一次走店員前掉出店外；reenter_ok = reenter_shop 回什麼"""
+
+    def __init__(self, W, reenter_ok=True):
+        super().__init__(W)
+        self.fell, self.reenter_ok, self.reenters = False, reenter_ok, []
+
+    def shop_enter(self, store):
+        if self.W.cur == 'DKBO5' and not self.fell:
+            self.fell = True
+            self.W.rpos['DKBO5'] = (1000, 106, 91)
+            return False
+        return super().shop_enter(store)
+
+    def reenter_shop(self, m):
+        self.reenters.append(m)
+        if self.reenter_ok:
+            self.W.rpos[self.W.cur] = (m, 10, 25)
+        return self.reenter_ok
+
+
+fresh_dir()
+W = scenario()
+rc, out, T = go(W, _FallTools(W), stop_after='sam')
+check('224 修：DKBO5 掉出店外 → reenter_shop 1009 → 再進店買完（sam 段不停手）', rc == 0 and T.reenters == [1009] and T.fell, f'{rc} {T.reenters} {out[-400:]}')
+fresh_dir()
+W = scenario()
+rc, out, T = go(W, _FallTools(W, reenter_ok=False), stop_after='sam')
+check('224：走不回店內 → 照舊 224', rc == 224 and T.reenters == [1009], f'{rc} {T.reenters}')
+
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))
 print('ALL PASS' if not fails else f'FAILED {fails}')
