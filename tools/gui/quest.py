@@ -80,6 +80,11 @@
            `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
+           **快速連按例外（--fast-dialog，使用者 2026-10-17 選「安全版」）**：只有呼叫端明確打開才生效（questrun 依 questdefs.fast_dialog 帶；轉生 2004～2008 / rebirth.py / 未列任務一律不帶；
+           與 --allow-irreversible 同時給 → 不快）。每串對話的第一頁照舊完整 OCR 防護；按左鈕後等 FAST_DIALOG_GAP=1.0 秒 → **只讀像素**：read_screen 仍是 dialog（不是 fight_fallback / 獎勵窗 / 選擇對象）
+           且兩顆按鈕的字樣指紋（DIALOG_FP_PTS 264 點深色二值，dialog_fp_same 差 ≤ DIALOG_FP_TOL=3 點；391 張樣本同字樣 0 差、不同字樣最少差 10）跟剛 OCR 過那頁相同 → 直接再按同位置（事件「快速連按 #n」），不做 OCR；
+           對話框關了 / 按鈕字樣變了 / 深色點太少（讀不準）/ 剛 OCR 那頁按鈕含「戰鬥」「接受」（FAST_STOP_BUTTONS）→ 不按、回主迴圈照常判斷（下一頁再 OCR）；同一串最多 FAST_DIALOG_MAX=6 次後回正常流程。
+           風險（使用者已接受）：同按鈕字樣的後續頁內文不再 OCR —— 所以只給沒有轉生 / 封印 / 寵物轉生的一般任務用。
 結束時印「走路不計時 N 秒」「本片戰鬥 N 場」兩行（questrun 解析：巡路不計時、沒打仗才沿用全隊 HP）。
 退出碼：43 載入 / 轉場畫面連續 LOADING_MAX_S 秒（結束本片，呼叫端重跑）、42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、44 --solo-talk 到 NPC 後 team.form 失敗（呼叫端重組後跑舊對話步）、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
@@ -200,6 +205,16 @@ DIALOG_BTN_BEIGE = (229, 197, 155)
 DIALOG_BTN_BEIGE_TOL = 40
 DIALOG_BTN_NEED = 3
 FIGHT_BUTTON = '戰鬥'
+# ---- 快速連按（--fast-dialog，2026-10-17）：只讀像素判斷「同一型對話框的下一頁」，省每頁 OCR（約 1 秒）----
+FAST_DIALOG_GAP = 1.0                      # 按左鈕後等這麼久再看（翻頁動畫）
+FAST_DIALOG_MAX = 6                        # 同一串最多連按幾次，之後回正常流程（OCR）
+# 按鈕字樣指紋：左鈕字 920～980、右鈕字 1192～1256（2026-10-17 用 tools/.cache/quest-log 391 張 *-dialog.png 量：字在 y 450～474、分隔線 x≈1084），
+# 每 4 px × 每 3 px 取一點、max(R,G,B) <= DIALOG_FP_DARK 記 1。391 張：同字樣 46 群幾乎全 0 差、不同群最少差 10 點 → 容差 3（超過就當變了、走 OCR）
+DIALOG_FP_PTS = [(x, y) for y in range(451, 475, 3) for x in list(range(920, 981, 4)) + list(range(1192, 1257, 4))]
+DIALOG_FP_DARK = 110
+DIALOG_FP_TOL = 3
+DIALOG_FP_MIN_DARK = 20                    # 深色點少於這個（樣本最少 34）= 按鈕被蓋住 / 讀不準 → 不快
+FAST_STOP_BUTTONS = ('戰鬥', '接受')         # 剛 OCR 那頁的按鈕含這些 → 這串不快速連按（開打 / 接任務的頁照正常流程）
 DIALOG_OCR_TRIES = 2                       # 內文讀不到時最多重讀幾次；仍讀不到 = 無法確認 → 不按（保守）
 # 「只有一顆再見鈕」的閒聊對話（2026-10-12 紅暴步 1：領獎後又跳選擇對象面板，點到同 NPC 的閒聊「可不可以給我耐久力回復藥…」[再見]）：
 # 兩顆鈕的位置（948 / 1220,445）變成棕底、中間 1085,445 一顆米色寬鈕；classify 判 unknown → 舊版連 3 次不認得 rc 2（誤警報）。
@@ -1159,6 +1174,56 @@ def read_dialog_texts() -> dict:
     return out
 
 
+def dialog_fp_from(cols) -> tuple:
+    """純函式：DIALOG_FP_PTS 對應的顏色列 → 深色二值指紋（1 = 字）"""
+    return tuple(1 if max(c[:3]) <= DIALOG_FP_DARK else 0 for c in cols)
+
+
+def read_dialog_fp() -> tuple | None:
+    """一次 gui pixel 讀按鈕字樣指紋；讀不到 / 點數不符 → None（不快）"""
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in DIALOG_FP_PTS)).split()
+        cols = [tuple(int(v) for v in c.split(',')) for c in out]
+    except Exception:
+        return None
+    return dialog_fp_from(cols) if len(cols) == len(DIALOG_FP_PTS) else None
+
+
+def dialog_fp_same(ref, fp) -> bool:
+    """純函式：兩個指紋都有效（深色點 >= DIALOG_FP_MIN_DARK）且差 <= DIALOG_FP_TOL 點 = 按鈕字樣相同"""
+    if not ref or not fp or len(ref) != len(fp):
+        return False
+    if sum(ref) < DIALOG_FP_MIN_DARK or sum(fp) < DIALOG_FP_MIN_DARK:
+        return False
+    return sum(a != b for a, b in zip(ref, fp)) <= DIALOG_FP_TOL
+
+
+def fast_page_ok(a, s: dict, g) -> bool:
+    """純函式：這頁按完要不要接快速連按（--fast-dialog 開、沒 --allow-irreversible、這頁剛做過 OCR 防護且按鈕不含 FAST_STOP_BUTTONS、不是 fight_fallback）"""
+    if not getattr(a, 'fast_dialog', False) or getattr(a, 'allow_irreversible', False) or not g or s.get('fight_fallback'):
+        return False
+    flat = re.sub(r'\s+', '', ''.join(g.get('buttons') or []))
+    return not any(k in flat for k in FAST_STOP_BUTTONS)
+
+
+def fast_dialog_chain(ref, base: int) -> tuple[int, str]:
+    """左鈕剛按完：每 FAST_DIALOG_GAP 秒只讀像素，仍是同型對話框（dialog、按鈕字樣指紋同 ref）就再按同位置，最多 FAST_DIALOG_MAX 次。
+    → (連按次數, 停下原因)。不做 OCR、不碰其他鈕；對話框關了 / 變了就不按（回主迴圈照常判斷）"""
+    n = 0
+    while n < FAST_DIALOG_MAX:
+        time.sleep(FAST_DIALOG_GAP)
+        s2 = read_screen()
+        if s2.get('state') != 'dialog' or s2.get('fight_fallback'):
+            return n, f'對話框已關 / 換畫面（{s2.get("state")}）'
+        if not dialog_fp_same(ref, read_dialog_fp()):
+            return n, '按鈕字樣變了 / 讀不準 → 回正常流程（OCR）'
+        n += 1
+        shot = snap('dialog-fast')
+        gui('seq', f'click {DIALOG_NEXT[0]} {DIALOG_NEXT[1]}')
+        event(f'對話框 #{base + n}：快速連按 #{n}（只讀像素：對話框仍開、按鈕字樣同上一頁）→ 按左鈕 {DIALOG_NEXT}', shot)
+    return n, f'連按 {FAST_DIALOG_MAX} 次上限 → 回正常流程'
+
+
 def check_dialog_irreversible() -> dict:
     """按對話框前的防護：回 {'blocked': bool, 'reason': 說明, 'hits': [關鍵字], 'body': [...], 'buttons': [...]}
     命中關鍵字 → blocked；內文讀不到 → blocked（無法確認不是不可逆選項）。"""
@@ -1850,6 +1915,8 @@ def _main() -> int:
     ap.add_argument('--hp-check-min', type=int, default=0, help='預設模式：每打完 --hp-check-every 場戰鬥、回主畫面閒置確認後讀全隊 HP（開背包約 8 秒），任一人低於這個 %%%% → 結束本片，退出碼 %d（questrun 補血後續片）；0 = 不檢查' % EXIT_HP_LOW)
     ap.add_argument('--hp-check-every', type=int, default=HP_CHECK_EVERY, help='--hp-check-min：路上一般戰鬥每幾場讀一次（預設 %d；0 = 只在任務戰後讀）' % HP_CHECK_EVERY)
     ap.add_argument('--allow-irreversible', action='store_true', help='不檢查對話框是否含不可逆關鍵字（%s）：預設遇到會不按、存 snap、退出碼 %d；人 / agent 看過截圖確認要做才加' % ('、'.join(IRREVERSIBLE_KEYWORDS), EXIT_IRREVERSIBLE))
+    ap.add_argument('--fast-dialog', action='store_true', help='快速連按（2026-10-17，安全任務才由 questrun 依 questdefs 帶）：每串對話第一頁照舊 OCR 防護，之後每 %.1f 秒只讀像素，'
+                    '對話框仍開且按鈕字樣同上一頁就直接再按左鈕（最多 %d 次）；轉生 / 封印 / 未列任務 / rebirth.py 不帶；與 --allow-irreversible 同給 = 不快' % (FAST_DIALOG_GAP, FAST_DIALOG_MAX))
     ap.add_argument('--solo-talk', action='store_true', help='單人逃跑對話步一次跑完（questrun --solo 用，2026-10-17）：--solo 巡路到 NPC（20）→ 清殘留 → team.form 快速組隊（自己最後驗過隊伍）→ '
                     '同一支程序接著 --stop-after-dialog --disband-after（開始前隊伍檢查略過 = --team-fresh）；--max-seconds 管單人巡路、--talk-seconds 管對話。'
                     '退出碼：單人段非 20 原樣回（21 / 5 / 2 / 39 / 33 / 19 / 3…）；組隊失敗 %d（team rc 印在輸出，呼叫端自己重組再跑舊的對話步）；team 9 / 10 透傳；其餘 = 對話段退出碼' % EXIT_SOLO_FORM)
@@ -2205,6 +2272,7 @@ def _run(a) -> int:
             event(f'{"--solo" if a.solo else "--stop-at-npc"} 到達 NPC：對話框已 ESC 關閉，停下交給組隊（退出碼 {EXIT_AT_NPC}）', shot)
             print('到達 NPC（對話框已 ESC 關閉）', flush=True)
             return EXIT_AT_NPC
+        g = None
         if st == 'dialog' and not a.allow_irreversible:
             # 不可逆防護（errlog #68）：內文 / 按鈕含「轉生」等關鍵字、或讀不到內文 → 不按，對話框留著，交給人 / agent 看圖
             g = check_dialog_irreversible()
@@ -2215,11 +2283,18 @@ def _run(a) -> int:
                 return EXIT_IRREVERSIBLE
         if st == 'dialog':
             dialogs += 1
+            fp_ref = read_dialog_fp() if fast_page_ok(a, s, g) else None   # --fast-dialog：按前記下按鈕字樣（剛 OCR 過、確定安全的這頁）
             shot = snap('dialog')
             gui('seq', f'click {DIALOG_NEXT[0]} {DIALOG_NEXT[1]}')
             last_action = time.time()
             post_track = True
             event(f'對話框 #{dialogs}：按左鈕 {DIALOG_NEXT}', shot)
+            if fp_ref:
+                n_fast, why_fast = fast_dialog_chain(fp_ref, dialogs)
+                if n_fast:
+                    dialogs += n_fast
+                    last_action = time.time()
+                    event(f'快速連按結束：連按 {n_fast} 次，{why_fast}')
         elif st == 'reward':
             rewards += 1
             shot = snap('reward')

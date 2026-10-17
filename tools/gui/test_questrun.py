@@ -1951,6 +1951,30 @@ check('grind_start：auto / None → grind.go；點名 → stop_follow + run sta
       and gseen == [('go',), ('go',), ('stop',), ('run', 'start', '波拉島')], str(gseen))
 grind.go, grind.run, grind.stop_follow = _gk
 
+# ================= 快速連按對話框（--fast-dialog，2026-10-17）=================
+import questdefs as _qd  # noqa: E402
+check('questdefs.fast_dialog：轉生 2004～2008 / 未列 9999 不帶，1.82 / 洞窟 / 紅暴 / 寵物任務帶',
+      not any(_qd.fast_dialog(i) for i in (2004, 2005, 2006, 2007, 2008, 9999, 'x'))
+      and all(_qd.fast_dialog(i) for i in (2999, 2017, 2031, 2000, 2016, 2019, 3003, 2010)))
+check('questdefs：FAST_DIALOG 與轉生 ID 不重疊、每個 FAST_DIALOG 都在表內', not (_qd.FAST_DIALOG & _qd.REBIRTH_IDS) and _qd.FAST_DIALOG <= set(_qd.BY_ID))
+check('with_fast_dialog：on 才加、--allow-irreversible 不加、不重複',
+      questrun.with_fast_dialog(['--task', 'x'], True) == ['--task', 'x', '--fast-dialog']
+      and questrun.with_fast_dialog(['--task', 'x'], False) == ['--task', 'x']
+      and questrun.with_fast_dialog(['--allow-irreversible'], True) == ['--allow-irreversible']
+      and questrun.with_fast_dialog(['--fast-dialog'], True) == ['--fast-dialog'])
+_seen = []
+_orig_rq = questrun.rebirth.Tools.quest
+questrun.rebirth.Tools.quest = lambda self, args, timeout=1500: _seen.append(list(args)) or (0, [])
+_t = questrun.Tools()
+_t.quest(['--task', 'x'])
+_t.fast_dialog = True
+_t.quest(['--task', 'x'])
+questrun.rebirth.Tools.quest = _orig_rq
+check('questrun.Tools.quest：fast_dialog 才帶 --fast-dialog（rebirth.Tools 本身不帶）', _seen == [['--task', 'x'], ['--task', 'x', '--fast-dialog']], str(_seen))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2017], after='none', use_dragon=False)
+check('run_task：彌生和日美子（安全任務）→ T.fast_dialog = True', getattr(f, 'fast_dialog', None) is True)
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 
 sys.exit(1 if fails else 0)

@@ -1128,6 +1128,71 @@ rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
 ok &= check('精靈王第 1 頁（無關鍵字）照按', rc == 0 and lclicks(s) == 1, f'rc={rc} 左鈕={lclicks(s)}')
 DLG.clear(); DLG.update({'body': ['你要進入裏面嗎？那趕緊通過吧！'], 'buttons': ['完成', '再見'], 'body_ok': True})
 
+print('--- 快速連按對話框（--fast-dialog，2026-10-17）')
+FP_A = tuple([1] * 40 + [0] * (len(quest.DIALOG_FP_PTS) - 40))
+FP_B = tuple([0] * 40 + [1] * 40 + [0] * (len(quest.DIALOG_FP_PTS) - 80))
+_REAL_FP = quest.read_dialog_fp
+FP_SEQ = []
+def _fake_fp():
+    return FP_SEQ.pop(0) if len(FP_SEQ) > 1 else (FP_SEQ[0] if FP_SEQ else None)
+quest.read_dialog_fp = _fake_fp
+SAFE = {'body': ['你要進入裏面嗎？那趕緊通過吧！'], 'buttons': ['完成', '再見'], 'body_ok': True}
+FASTARGS = ['--no-track', '--max-seconds', '60', '--team-size', '0', '--fast-dialog']
+DLG.clear(); DLG.update(SAFE); FP_SEQ[:] = [FP_A]
+s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(FASTARGS, s)
+ok &= check('fast：3 頁同字樣 → 第 1 頁 OCR 一次，第 2、3 頁不 OCR 直接連按（共 3 次左鈕）', rc == 0 and lclicks(s) == 3 and len(DLG_READS) - n0 == 1, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+gaps = [round(b[0] - a_[0], 1) for a_, b in zip(has(s, 'click 948 461'), has(s, 'click 948 461')[1:])]
+ok &= check('fast：連按間隔 = FAST_DIALOG_GAP 1.0 秒', gaps == [quest.FAST_DIALOG_GAP] * 2, str(gaps))
+s = Script([DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(FASTARGS, s)
+ok &= check('fast：按完對話框就關了 → 不補按（左鈕 1 次）', rc == 0 and lclicks(s) == 1 and len(DLG_READS) - n0 == 1, f'rc={rc} 左鈕={lclicks(s)}')
+s = Script([DIALOG, REWARD, IDLE] + [IDLE] * 4)
+rc = run2(FASTARGS, s)
+ok &= check('fast：按完變獲得物品視窗 → 不按左鈕（左鈕 1 次）', lclicks(s) == 1, f'rc={rc} 左鈕={lclicks(s)}')
+FP_SEQ[:] = [FP_A, FP_B, FP_B]
+s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(FASTARGS, s)
+ok &= check('fast：第 2 頁按鈕字樣變了 → 不連按，下一輪回正常流程再 OCR（OCR 2 次、左鈕 2 次）', lclicks(s) == 2 and len(DLG_READS) - n0 == 2, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+FP_SEQ[:] = [FP_A]
+s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
+ok &= check('非 fast（沒帶旗標）：每頁照舊 OCR（3 頁 3 次）', lclicks(s) == 3 and len(DLG_READS) - n0 == 3, f'左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+DLG.clear(); DLG.update({'body': ['要接這個任務嗎'], 'buttons': ['接受', '再見'], 'body_ok': True})
+s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(FASTARGS, s)
+ok &= check('fast：剛 OCR 那頁按鈕是「接受」→ 這串不快速連按（每頁 OCR）', lclicks(s) == 2 and len(DLG_READS) - n0 == 2, f'左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+DLG.clear(); DLG.update(RB)
+s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+rc = run2(FASTARGS, s)
+ok &= check('fast：第 1 頁含轉生 → 照擋 39、沒按（防護不受 fast 影響）', rc == quest.EXIT_IRREVERSIBLE and lclicks(s) == 0, f'rc={rc}')
+DLG.clear(); DLG.update(SAFE)
+_fp_calls = []
+quest.read_dialog_fp = lambda: _fp_calls.append(1) or FP_A
+s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+rc = run2(FASTARGS + ['--allow-irreversible'], s)
+ok &= check('fast + --allow-irreversible → 不快（不讀指紋、照主迴圈每頁按）', not _fp_calls and lclicks(s) == 2, f'指紋讀 {len(_fp_calls)} 次')
+quest.read_dialog_fp = _fake_fp
+FP_SEQ[:] = [FP_A]
+s = Script([DIALOG] * 30)
+quest.read_screen, quest.gui = s.screen, s.gui
+n, why = quest.fast_dialog_chain(FP_A, 1)
+ok &= check('fast_dialog_chain：一直是同型對話框 → 連按 FAST_DIALOG_MAX=6 次就回正常流程', n == quest.FAST_DIALOG_MAX == 6 and '上限' in why, f'{n} {why}')
+s = Script([dict(DIALOG, fight_fallback=True)])
+quest.read_screen, quest.gui = s.screen, s.gui
+ok &= check('fast_dialog_chain：fight_fallback（戰鬥鈕後備判斷）→ 不按', quest.fast_dialog_chain(FP_A, 1)[0] == 0 and not s.clicks)
+ok &= check('dialog_fp_same：差 ≤ 3 同、> 3 不同、深色點太少 / None 不同',
+            quest.dialog_fp_same(FP_A, FP_A) and quest.dialog_fp_same(FP_A, (0, 0, 0) + FP_A[3:]) and not quest.dialog_fp_same(FP_A, (0, 0, 0, 0) + FP_A[4:])
+            and not quest.dialog_fp_same(FP_A, None) and not quest.dialog_fp_same(tuple([1] * 5 + [0] * 259), tuple([1] * 5 + [0] * 259)))
+ok &= check('dialog_fp_from：max(RGB) <= 110 記 1', quest.dialog_fp_from([(60, 40, 30), (229, 197, 155), (110, 90, 80)]) == (1, 0, 1))
+ok &= check('DIALOG_FP_PTS 264 點（左鈕 16 + 右鈕 17 欄 × 8 列）', len(quest.DIALOG_FP_PTS) == 264)
+quest.read_dialog_fp = _REAL_FP
+
 # read_dialog_texts：用假 ps_json 驗證兩塊區域與參數；內文失敗會重試
 _calls = []
 def _fake_ps(script, *args):

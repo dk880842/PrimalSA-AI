@@ -33,6 +33,9 @@
   dragon      （自動）不在 NO_DRAGON 才 True：questrun --dragon 對這些任務吃龍王的守護（buff 還在就跳過）
               （使用者 2026-10-13 定：除了 彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 之外全部都吃；
                review §3.2 曾改成只吃長巡路，使用者否決。walk_s 仍保留供參考）
+  fast_dialog （自動）id 在 FAST_DIALOG 才 True：questrun 呼叫 quest.py 時帶 --fast-dialog（對話框第一頁 OCR 防護、之後同型頁只讀像素直接連按；quest.py 檔頭）。
+              使用者 2026-10-17 定「安全版」：只給沒有轉生 / 封印 / 寵物轉生對話的一般任務；轉生任務 2004～2008（rebirth.py）不在表內 = 不帶；
+              沒列進 FAST_DIALOG、或資料標了 irreversible_risk=True / 某步 steps[N].irreversible=True 的任務 → 不帶（預設保守）
 前置依賴：prereqs(id) 讀 Task 表第 1 步的 finishTasks（1.82 全部要先完成成人儀式 2999）；questrun 逐人驗證延後時，依賴任務接取前先批次驗
 """
 import sys
@@ -161,10 +164,18 @@ WALK_S = {2999: 43, 2017: 2, 2015: 7, 2027: 79, 2018: 316, 2011: 9, 2024: 63, 20
 DRAGON_WALK_MIN = 120           # （僅參考，不再決定吃不吃）長巡路門檻
 NO_DRAGON = {2017, 3003, 2016, 2019}   # 不吃龍王的任務：彌生和日美子、猜謎三兄弟、恐龍博士、卡坦的願望（使用者 2026-10-13）
 
+# 快速連按對話框（quest.py --fast-dialog）的安全任務（使用者 2026-10-17）：1.82 全部、四大洞窟、紅暴、成人儀式、彌生和日美子、寵物任務 2016 / 2019 / 3003。
+# 轉生 2004～2008 / 寵物轉生 / 封印類一律不列；新任務要開 fast 先確認對話裡沒有不可逆選項再加進來
+FAST_DIALOG = {2999, 2017, 2015, 2027, 2018, 2011, 2024, 2020, 2023, 2028, 2025, 2010, 2014, 2012, 2013, 2021, 3003, 2016, 2019,
+               2000, 2003, 2001, 2002, 2031}
+REBIRTH_IDS = {2004, 2005, 2006, 2007, 2008}   # 漆黑洞窟轉生任務（含精靈王）：絕不 fast（test_questrun 核對）
+
 ALL = Q182 + QCAVE + QOTHER
 for _d in ALL:
     _d['walk_s'] = WALK_S.get(_d['id'])
     _d['dragon'] = _d['id'] not in NO_DRAGON
+    _d['fast_dialog'] = (_d['id'] in FAST_DIALOG and _d['id'] not in REBIRTH_IDS and not _d.get('irreversible_risk')
+                         and not any(sd.get('irreversible') for sd in (_d.get('steps') or {}).values()))
 BY_ID = {d['id']: d for d in ALL}
 DEFAULT_ORDER = [d['id'] for d in Q182]
 STEP_KINDS = ('walk', 'manual', 'fight')
@@ -225,6 +236,15 @@ def bag_need(task_id: int, rows=None) -> int:
         held = (held - cond) | got
         peak = max(peak, len(held))
     return peak
+
+
+def fast_dialog(task_id) -> bool:
+    """這個任務的 quest.py 要不要帶 --fast-dialog（不在表內 / 轉生 / 標了不可逆 → False）"""
+    try:
+        d = BY_ID.get(int(task_id))
+    except (TypeError, ValueError):
+        return False
+    return bool(d and d.get('fast_dialog'))
 
 
 def get(task_id: int) -> dict | None:

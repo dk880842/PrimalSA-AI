@@ -30,7 +30,9 @@
   uv run --no-project python tools/gui/questrun.py status --role all|DKBO3,DKBO5 [任務ID …]   # 逐人：每人 char.switch → 開一次詳情讀這些任務 → 最後切回 DKBO（詳情面板沒有頭像列，只能切角色）
   可 import：questrun.run(ids, dry_run=False, after='grind', tools=None, ...) → 退出碼；結果 dict 在 questrun.LAST
 
-任務資料在 questdefs.py（id / 詳情標題 / 追蹤標題 / 特殊步驟）。全部組隊模式（使用者 2026-10-11）；解任務靠遊戲自動巡路（quest.py 點追蹤、對話按確認、每場戰鬥刷新角色）。
+任務資料在 questdefs.py（id / 詳情標題 / 追蹤標題 / 特殊步驟）。
+快速連按對話框（2026-10-17，離線測試，未實機）：run_task 依 questdefs.fast_dialog(任務) 設 Tools.fast_dialog → 這任務所有 quest.py 子程序帶 --fast-dialog
+（with_fast_dialog：有 --allow-irreversible 不加）；FAST_DIALOG 外的任務、轉生 2004～2008、bossretry 自己起的 quest.py 都不帶 = 每頁 OCR 防護照舊。全部組隊模式（使用者 2026-10-11）；解任務靠遊戲自動巡路（quest.py 點追蹤、對話按確認、每場戰鬥刷新角色）。
 
 流程：
   交接（整次 run 一次）  follow 還在跑就停（已停用，只防呆）→ 清殘留（quest.clear_leftovers：NPC 對話框 / 只有再見 / 選擇對象 → ESC 不回答、獲得物品 → 確認、
@@ -248,8 +250,20 @@ def turnin_groups(steps, maps: dict) -> list:
     return out
 
 
+def with_fast_dialog(args, on: bool) -> list:
+    """純函式：quest.py 參數加 --fast-dialog（on 且沒有 --allow-irreversible、還沒加過）；其餘原樣"""
+    args = list(args)
+    if on and '--allow-irreversible' not in args and '--fast-dialog' not in args:
+        args.append('--fast-dialog')
+    return args
+
+
 class Tools(rebirth.Tools):
     """沿用 rebirth.Tools 的 quest / read_pos / team_* / char_* / track / snap，補 questrun 要的"""
+    fast_dialog = False          # Run.run_task 依 questdefs.fast_dialog(任務) 設；True = 這任務的 quest.py 都帶 --fast-dialog（2026-10-17）
+
+    def quest(self, args, timeout=1500):
+        return super().quest(with_fast_dialog(args, self.fast_dialog), timeout)
 
     def follow_active(self):
         import follow
@@ -1353,6 +1367,7 @@ class Run:
     def run_task(self, d) -> int:
         T = self.T
         tid, track = d['id'], d['track']
+        T.fast_dialog = questdefs.fast_dialog(tid)                     # 安全任務才快速連按對話框（quest.py --fast-dialog；轉生 / 未列 = 照舊每頁 OCR）
         ts = self.st['tasks'].setdefault(str(tid), {})
         ts['detail_opens'] = 0
         self.risk = []

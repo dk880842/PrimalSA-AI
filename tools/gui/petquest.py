@@ -984,7 +984,9 @@ class Run:
             event(f'猜謎三兄弟：追蹤步號 {self.p.get("step")} ≠ 1 → 步 1 已過，跳過')
             return 0
         pet = self.q['pet']
-        rc, _ = self.sub('quest.py', ['--task', self.q['track'], '--stop-after-rewards', 1, '--max-seconds', 900], 2400)
+        import questrun                                                # 安全任務才快速連按對話框（questdefs.fast_dialog，2026-10-17）
+        rc, _ = self.sub('quest.py', questrun.with_fast_dialog(['--task', self.q['track'], '--stop-after-rewards', 1, '--max-seconds', 900],
+                                                             questdefs.fast_dialog(self.qid)), 2400)
         if rc == 3:                                                    # 2026-10-14 13:35（errlog #861）：步 1 對話給了金布伊（沒有獲得物品窗，--stop-after-rewards 不停）→
             st = self.T.read_step(self.q['track'])                     # 追蹤已進「交77金豬」、點追蹤不巡路 → quest.py 3。讀步號：已前進 = 步 1 完成
             if isinstance(st, int) and st > 1:
