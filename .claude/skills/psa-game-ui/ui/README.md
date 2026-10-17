@@ -33,7 +33,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | `char.py current / switch / ensure` | 當前角色讀取 / 切換並驗證；退出碼 60～65 | [team.md](team.md) |
 | `grind.py start / ensure / check` | 開始 / 恢復練功（選點傳送、外掛 5 人 `ass.set_many`、開遇敵、2 次 EXP 確認）；`start` 不給 --spot = 去練功（依等級選點、未滿地雷區背景起 follow）；退出碼 50～58；`--heal` 支援 `spots.py` 全部 9 點 | `../psa-grind-start/SKILL.md`、[transfer.md](transfer.md) |
 | `pet.py list / set-state / rest-all / store / take / reset-name / depot-fix-names` | 寵物面板讀 / 狀態 / 存取（硬性擋騎寵）/ 成長字串還原物種名（名字為主）；退出碼 66 / 67、70～78；**store / take 掛機中要加 `--pause-encounter`**（戰鬥中操作會被吃掉） | [pet.md](pet.md) |
-| `rebirth.py [--trans N] [--from 階段] [--dry-run]` | 漆黑洞窟轉生任務（2004～2008）整段：前置檢查 → 進洞 → 兩場 BOSS → 換弓 → 補血 / 忠犬 → 精靈王轉生 → 收尾；退出碼 80～89；**新寫的 bag.py / petdrop.py 實機沒驗證** | [rebirth.md](rebirth.md) |
+| `rebirth.py [--trans N] [--from 階段] [--dry-run]` | 漆黑洞窟轉生任務（2004～2008）整段：前置檢查 → 進洞 → 兩場 BOSS → 換弓 → 補血（2026-10-17 起不設忠犬）→ 精靈王轉生 → 收尾；退出碼 80～89；**新寫的 bag.py / petdrop.py 實機沒驗證** | [rebirth.md](rebirth.md) |
 | `ass.py get / set / pet`（API：`set_many`） | 外掛面板讀 / 設四項勾選與戰寵動作；`select_role` 內建等遮擋 + 重試（頂部跑馬燈蓋住 DKBO3 → 等它消失）| [ass.md](ass.md) |
 | `daily.py read-all / plan / show / run [--confirm-buy] [--from 段] [--fresh] [--dry-run] [--no-grind]` | 每日任務（委託接取）：全隊一起移動、各買各的、各合成各的（prep → read → plan → sam → mid → fish → final → finish）；不讀石幣 / 鑽石 / 格數；退出碼 220～229（**未實機**，離線 test_daily.py） | [daily.md](daily.md) |
 | `netwatch.py`（`guard` 已接進 quest / petwatch / heal --watch） | 斷線重連 / 自動登錄；重登後清 charstate、`team.form`、自動 `grind.ensure` | [network.md](network.md) |

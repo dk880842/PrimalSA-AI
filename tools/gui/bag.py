@@ -2263,7 +2263,10 @@ def _bag_gained(before) -> bool:
 
 def _popup_take_click(i: int, want: str, kind: str, strict_digits: bool = False) -> tuple:
     """倉庫頁：倉庫第 i 格 → 彈窗核對名稱 / 按鈕 → 按「取出」→ 等彈窗關（停在倉庫頁）→ (rc, 按之前的背包格占用)。
-    空格不開彈窗 → 92（不點取出，空格點取出會進刪除管理）；名稱不符 → 96。strict_digits = 名稱含數字要讀到同一個數字（N轉新手禮盒）"""
+    空格不開彈窗 → 92（不點取出，空格點取出會進刪除管理）；名稱不符 → 96。strict_digits = 名稱含數字要讀到同一個數字（N轉新手禮盒）
+    背包格占用要在**開彈窗前**讀：彈窗開著時整個畫面蓋一層半透明暗幕（p4/depot_popup.png），右半背包空格也偏離空格棕 → 15 格全判有，
+    取出後「新出現的格」永遠找不到（2026-10-17 p2 二轉 rebirth_pets boxes rc 101 / bag 95，before [True×15]，可重現 2 次）"""
+    before = slot_occupancy()                        # 倉庫頁、還沒開彈窗：右半背包格（同背包頁座標）看得清楚
     if not open_slot_popup(i, depot=True):
         return _fail(EXIT_ITEM, f'點倉庫第 {i + 1} 格沒開彈窗（空格？不點取出，會進刪除管理）', 'bag-depot-nopopup'), None
     nm = popup_name(want)
@@ -2277,7 +2280,6 @@ def _popup_take_click(i: int, want: str, kind: str, strict_digits: bool = False)
         return _fail(EXIT_NAME, f'倉庫彈窗按鈕列 OCR 是 {txt!r}，沒有「取出」', 'bag-depot-btn'), None
     uikit.sleep(POPUP_SETTLE_S)                      # 彈窗出現動畫期間點「取出」會落空（2026-10-11 實測：彈窗關了但道具沒動）
     x, y = (722, 662) if kind == 'equip' else (732, 648)
-    before = slot_occupancy()                        # 彈窗疊在倉庫頁上，右半背包格仍看得到（彈窗在中間偏左，蓋不到右半的數量字帶時才有值）
     _SHOT.clear()                                    # 取出後倉庫 / 背包格內容會變
     if not _click(x, y, POPUP, f'bag 倉庫取出「{want}」', allow=(), wait_ms=700):
         return _fail(EXIT_PANEL, '彈窗特徵消失，沒點取出', 'bag-depot-gone'), before

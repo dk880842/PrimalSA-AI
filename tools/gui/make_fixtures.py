@@ -408,6 +408,35 @@ def make_bag_slots_fixture() -> list:
     return miss
 
 
+
+# ---- 倉庫頁取出：背包格占用要在開彈窗前讀（bag._popup_take_click；2026-10-17 p2 二轉 rebirth_pets boxes rc 101）----
+# 彈窗開著時整個畫面蓋半透明暗幕 → 空背包也 15 格全判有。檔名 → 人工看圖的 15 格標記（X 有 / . 空）、說明
+BAG_TAKE_SRC = {
+    'clients/PrimalSA2/ui-log/015756-bag-depot-noitem.png': ('...............', '倉庫頁（公共）、右半背包全空、沒彈窗 = 取出前該讀到的'),
+    'p4/depot_popup.png': ('XXXXXXXXXXXXXXX', '倉庫取出彈窗開著（龍王的守護）：背包其實全空，暗幕讓 15 格全偏離空格棕（舊版在這時讀 before）'),
+    'clients/PrimalSA2/ui-log/153054-bag-take-slot.png': ('X..............', 'p2 DKBO6 取出 2轉新手禮盒後（舊版回 95 時的存證）：禮盒在背包第 1 格'),
+}
+
+
+def make_bag_take_fixture() -> list:
+    """每張圖存 bag.slot_occupancy 用的全部取點（SLOT_PROBE + SLOT_QTY_PROBE）像素；探點改了就重抽"""
+    import bag
+    probes = bag.SLOT_PROBE + bag.SLOT_QTY_PROBE
+    pts = [(x + dx, y + dy) for i in range(bag.n_slots()) for x, y in [bag.slot_xy(i)] for dx, dy in probes]
+    imgs, miss = {}, []
+    for rel, (want, note) in BAG_TAKE_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = grab(p, pts)
+        imgs[rel] = {'expect': want, 'note': note, 'px': ['%02x%02x%02x' % tuple(px[f'{x},{y}']) for x, y in pts]}
+    if imgs:
+        write('bag_take_px.json', {'note': '倉庫頁右半背包 15 格 × (SLOT_PROBE + SLOT_QTY_PROBE) 像素（順序 = 格 0..14、每格 probe 順序）；'
+                                   'expect = 人工標記 X 有 / . 空（彈窗暗幕那張標的是「讀到的」，不是真實內容）',
+                                   'slot_probe': [list(t) for t in bag.SLOT_PROBE], 'qty_probe': [list(t) for t in bag.SLOT_QTY_PROBE], 'images': imgs})
+    return miss
+
 # ---- 左側組隊分頁隊長標（quest.has_leader_badge；2026-10-12 S3：舊紅「隊」字標換成小「L」標）----
 # 檔名 → 期望（True = 隊長列有標、False = 沒隊伍 / 已解散）；人工看圖
 LEADER_BADGE_SRC = {
@@ -561,7 +590,8 @@ def main() -> int:
     done.append('questlist_px.json' + (f'（缺 {miss_ql}）' if miss_ql else ''))
     for n, fn in (('bag_slots_px.json', make_bag_slots_fixture), ('leader_badge_px.json', make_leader_badge_fixture), ('world_px.json', make_world_fixture),
                   ('bag_del_px.json', make_bag_del_fixture), ('bag_itempop_px.json', make_bag_itempop_fixture),
-                  ('numglyph_samples.json', make_numglyph_fixture), ('itemname_newtag.json', make_itemname_newtag_fixture)):
+                  ('numglyph_samples.json', make_numglyph_fixture), ('itemname_newtag.json', make_itemname_newtag_fixture),
+                  ('bag_take_px.json', make_bag_take_fixture)):
         m = fn()
         done.append(n + (f'（缺 {m}）' if m else ''))
     print('完成：', done)

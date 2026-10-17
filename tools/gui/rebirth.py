@@ -9,14 +9,15 @@ boss10 / bow16 進度一律看地圖（boss10 回 37「戰鬥 0」仍以 11F 以
 swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
 
 用法（專案根目錄；WSL / Windows 原生相同）：
-  uv run --no-project python tools/gui/rebirth.py [--trans N] [--from 階段] [--dry-run] [--keep-old-weapon] [--confirm-rebirth] [--pet-action 忠犬|攻擊|防禦|none]
+  uv run --no-project python tools/gui/rebirth.py [--trans N] [--from 階段] [--dry-run] [--keep-old-weapon] [--confirm-rebirth] [--pet-action 攻擊|防禦|忠犬]
     --trans N        這次要轉到第 N 轉（預設 = 目前轉數 + 1；從 preflight 以外階段續跑時用上次進度檔的 N，沒有就要明講）
                      任務組 = 2004 + N - 1；等級門檻 N=1～4 為 131、N=5 為 140（knowledge/quests/tasks.md）
     --from 階段      從這個階段開始（中斷後接著做）：preflight accept enter boss10 bow16 swap heal boss20 storepets rebirth cleanup；--to 階段 = 跑到該階段（含）就停
     --dry-run        只印計畫（階段 / 要跑的指令 / 退出碼），完全不碰遊戲
     --keep-old-weapon 換弓後不丟舊武器
     --confirm-rebirth 精靈王轉生頁確認是「角色轉生」後停下（退出碼 89，對話框維持開著）等人；預設不停直接轉（使用者 2026-10-11：不用停）
-    --pet-action 值  換弓後把 5 人戰寵「一般動作」設成這個（預設忠犬；none = 不動）
+    --pet-action 值  相容參數：預設 none = 不動外掛戰寵動作（2026-10-17 使用者：不需要再設忠犬；剛轉生 Lv1 戰寵下拉只有攻擊 / 防禦，
+                     p2 二轉 heal rc 87）。明確給 攻擊 / 防禦 / 忠犬 才在 heal 逐人設戰寵「一般動作」（舊行為）
     --dragon         opt-in：enter 進洞前吃一次龍王的守護（boss10 / bow16 / boss20 / 重登都不再吃），cleanup 存回公共倉庫。
                      2026-10-17 使用者「之後解任務都先不要龍王守護」→ 預設不吃、不開背包 / 倉庫取、不存回；--no-dragon 保留相容（= 預設，no-op）
     --read-levels    preflight 改用 bag.levels 逐人讀等級當門檻（舊行為；預設是點追蹤卡看有沒有傳送）
@@ -47,7 +48,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
             （三轉實測：給弓時沒算到獎勵，巡路一路打完回 37）→ after_boss 確認滿 5 人（不滿走被打飛者重打）→ 記 boss20_done → heal / boss20 跳過
   swap      5 人各自：背包選弓 → 穿戴 → 武器格確認是弓 → 丟舊武器（名稱防護；--keep-old-weapon 跳過）；
             武器格本來就是弓（already：上一轉的弓）→ 背包裡 16F 新給的那把是多的，bag.drop_spare_bow 丟掉（--allow-protected，武器格不動，二轉實測要丟）
-  heal      （boss20_done → 跳過）heal.py --no-return → ass.py 5 人戰寵一般動作（下拉依 OCR 文字找；剛轉生 Lv1 戰寵只有 攻擊 / 防禦、沒有忠犬 →
+  heal      （boss20_done → 跳過）heal.py --no-return →（預設不設戰寵動作；明確 --pet-action 才 ass.py 5 人戰寵一般動作，下拉依 OCR 文字找；剛轉生 Lv1 戰寵只有 攻擊 / 防禦、沒有忠犬 →
             收下拉、警告、跳過該人，不失敗）→ 便捷傳送「漆黑20樓」→ team.form
   boss20    （boss20_done → 跳過）quest.py 預設模式到 20F 帖拉所伊朵（37 / 38，同上）→ 確認回到 32021:29,57 附近
             便捷傳送落在 32021:31,29（21 樓精靈王旁），BOSS 在上一層 32020:20,9。quest.py 退出碼不是 37 / 38 且人仍在 32021（追蹤沒走回去，如 3 / 19）→
@@ -914,7 +915,7 @@ class Run:
             T.heal()
         except RuntimeError as e:
             return self.fail(EXIT_SETUP, f'補血失敗：{e}')
-        act = self.o.get('pet_action', '忠犬')
+        act = self.o.get('pet_action') or 'none'   # 2026-10-17 預設不設（不需要再設忠犬）
         if act and act != 'none':
             for r in ALL_ROLES:
                 rc, st, msg = T.ass_pet(r, act)
@@ -1053,7 +1054,7 @@ DRY_PLAN = {
     'boss10': ['quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認在 11F 以上（32011～32021，地圖為準）'],
     'bow16': ['quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016', '已過 16F 看地圖：17～20F = 弓已拿到；21F = 20F 也打完 → after_boss（滿 5 人）→ boss20_done，heal / boss20 跳過'],
     'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
-    'heal': ['heal.heal_trip --no-return', 'ass.set_pet_many 逐人 normal={act}（下拉沒有該選項 = 收下拉、警告、跳過；rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
+    'heal': ['heal.heal_trip --no-return', '（--pet-action 明確給值才做，預設 none 跳過）ass.set_pet_many 逐人 normal={act}（下拉沒有該選項 = 收下拉、警告、跳過；rc 4 且讀回 None = 警告不算失敗）', '便捷傳送 漆黑20樓 790,248（87）', 'team.form（83）'],
     'boss20': ['quest.py --task {t} --max-seconds 540 → 37 / 38（同 boss10）→ 確認 32021:29,57 附近', '人仍在 32021 追蹤沒動 → 備援一次：walk 傳送帶 31,47（北區才走）→ 32021 28,59（出口）→ 32020 → team.check → walk 20,11 → quest.py --fight --npc auto（84 / 85）'],
     'storepets': ['pet.py store-all：5 人寵物欄所有寵物存個人倉庫（不驗名字、不擋騎寵 / 騎乘 / 第 1 格；寵物欄已空跳過；倉庫滿 77；其他失敗 86；未實機）'],
     'rebirth': ['team.form', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
@@ -1074,7 +1075,7 @@ def print_plan(n: int, from_stage: str, opts: dict) -> None:
 
 
 def run(trans=None, from_stage: str = 'preflight', dry_run: bool = False, keep_old_weapon: bool = False, confirm_rebirth: bool = False,
-        pet_action: str = '忠犬', use_dragon: bool = False, tools=None, to_stage: str = 'cleanup', read_levels: bool = False) -> int:
+        pet_action: str = 'none', use_dragon: bool = False, tools=None, to_stage: str = 'cleanup', read_levels: bool = False) -> int:
     LAST.clear()
     if from_stage not in STAGES or to_stage not in STAGES or STAGES.index(to_stage) < STAGES.index(from_stage):
         print(f'rebirth：--from / --to 要是 {STAGES} 之一，且 to 不早於 from', file=sys.stderr)
@@ -1134,7 +1135,7 @@ def main() -> int:
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--keep-old-weapon', action='store_true')
     ap.add_argument('--confirm-rebirth', action='store_true')
-    ap.add_argument('--pet-action', default='忠犬', choices=['忠犬', '攻擊', '防禦', 'none'])
+    ap.add_argument('--pet-action', default='none', choices=['忠犬', '攻擊', '防禦', 'none'], help='相容參數：預設 none 不設戰寵動作（2026-10-17 起）；明確給值才在 heal 設')
     ap.add_argument('--dragon', action='store_true', help='opt-in：enter 進洞前吃一次龍王的守護、cleanup 存回公共（2026-10-17 起預設不吃不碰）')
     ap.add_argument('--no-dragon', action='store_true', help='相容舊指令：= 預設（不吃），no-op')
     ap.add_argument('--read-levels', action='store_true', help='preflight 用 bag.levels 逐人讀等級當門檻（舊行為；預設改點追蹤卡看有沒有傳送）')

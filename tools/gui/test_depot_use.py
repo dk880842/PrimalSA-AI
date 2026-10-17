@@ -498,5 +498,50 @@ bag.equipped_name = lambda: '精靈王之弓 (4~6) 攻擊'
 uikit.snap = lambda tag: (snaps.append(tag), None)[1]
 rc, d = bag.weapons(['DKBO', 'DKBO2', 'DKBO3'])
 check('bag.weapons：Session 1 次、3 人逐一讀名稱 rc 0', rc == 0 and len(opened) == 1 and sel == ['DKBO', 'DKBO2', 'DKBO3'] and all('精靈王之弓' in v for v in d.values()))
+
+# ---- 倉庫頁取出：背包格占用要在開彈窗前讀（2026-10-17 p2 二轉 rebirth_pets boxes rc 101 / bag 95，before [True×15]）----
+# 實機像素 fixtures/bag_take_px.json（make_fixtures.make_bag_take_fixture）：取出前空背包 / 彈窗暗幕 / 取出後禮盒在第 1 格
+import json as _json  # noqa: E402
+_tk = _json.loads((HERE / 'fixtures' / 'bag_take_px.json').read_text(encoding='utf-8'))
+check('fixture 取點 = 現行 SLOT_PROBE + SLOT_QTY_PROBE（探點改了要重跑 make_fixtures）',
+      [tuple(t) for t in _tk['slot_probe']] == bag.SLOT_PROBE and [tuple(t) for t in _tk['qty_probe']] == bag.SLOT_QTY_PROBE)
+_TKPX = {k: [tuple(int(h[j:j + 2], 16) for j in (0, 2, 4)) for h in v['px']] for k, v in _tk['images'].items()}
+_TK_EMPTY, _TK_POP, _TK_AFTER = list(_tk['images'])
+_saved = {n: getattr(bag, n) for n in ('open_depot', 'open_slot_popup', 'popup_name', '_learn_verified', '_ocr_join', '_click', 'popup_open', '_wait', 'slot_occupancy')}
+bag.slot_occupancy = _real_occ
+for _k, _v in _tk['images'].items():
+    uikit.px = lambda pts, c=_TKPX[_k]: list(c)
+    _o = bag.slot_occupancy()
+    check(f'slot_occupancy 實機樣本 {_k}（{_v["note"][:16]}…）', ''.join('X' if b else '.' for b in (_o or [])) == _v['expect'])
+uikit.px = lambda pts: list(_TKPX[_TK_EMPTY])
+_b = bag.slot_occupancy()
+uikit.px = lambda pts: list(_TKPX[_TK_AFTER])
+_a = bag.slot_occupancy()
+uikit.px = lambda pts: list(_TKPX[_TK_POP])
+_p = bag.slot_occupancy()
+check('new_slots：開彈窗前讀的 before（全空）→ 取出後新格 [0]', bag.new_slots(_b, _a) == [0])
+check('new_slots：彈窗開著讀的 before（暗幕 15 格全 True）→ 找不到新格（舊 bug 重現）', bag.new_slots(_p, _a) == [])
+# take_slot 整段：畫面狀態機（倉庫頁 → 彈窗 → 取出後），uikit.px 依狀態回實機像素，走真的 slot_occupancy / _popup_take_click
+_scr = ['depot']
+bag.open_depot = lambda sub='public', **k: 0
+bag.open_slot_popup = lambda i, depot=False: (_scr.__setitem__(0, 'popup'), True)[1]
+bag.popup_name = lambda *a: '2轉新手禮盒'
+bag._learn_verified = lambda *a, **k: False
+bag._ocr_join = lambda box, opts: '取出'
+bag.popup_open = lambda: _scr[0] == 'popup'
+bag._click = lambda x, y, panel, note, allow=(), wait_ms=350: (_scr.__setitem__(0, 'after'), True)[1]
+bag._wait = lambda pred, secs=3.0: any(pred() for _ in range(3))
+uikit.sleep = lambda s: None
+uikit.px = lambda pts: list(_TKPX[{'depot': _TK_EMPTY, 'popup': _TK_POP, 'after': _TK_AFTER}[_scr[0]]])
+rc, new = bag.take_slot(0, '2轉新手禮盒', 'personal')
+check('take_slot：空背包取 2轉新手禮盒 → rc 0、新格 [0]（before 在開彈窗前讀）', rc == 0 and new == [0])
+_scr[0] = 'depot'
+_po_reads = []
+_real_occ2 = bag.slot_occupancy
+bag.slot_occupancy = lambda: (_po_reads.append(_scr[0]), _real_occ2())[1]
+bag.take_slot(0, '2轉新手禮盒', 'personal')
+check('take_slot：彈窗開著時完全不讀背包格占用', 'popup' not in _po_reads and _po_reads[0] == 'depot', )
+for _n, _f in _saved.items():
+    setattr(bag, _n, _f)
 print('失敗', fails)
 sys.exit(1 if fails else 0)
