@@ -693,6 +693,19 @@ def parse_page(text) -> int | None:
     return int(m[-1]) if m else None
 
 
+def page_vote(lines) -> int | None:
+    """頁碼框 OCR 原始行（uikit.ocr_lines，多倍率每行帶 zoom）→ **各倍率各自 parse_page**，讀得到的倍率全部一致才收，不一致 / 全讀不到 → None。
+    舊讀法各倍率 join 成一串取最後一個（2026-10-17 p1 mid：翻頁 4 → 5 後讀成 5、面板其實還在 4/5 → 點第 5 環項 → 229 彈窗沒開）"""
+    if isinstance(lines, str) or lines is None:
+        return parse_page(lines)
+    groups = collections.defaultdict(list)
+    for ln in lines:
+        groups[ln.get('zoom')].append(ln)
+    got = {parse_page(''.join(str(ln.get('text', '')) for ln in sorted(g, key=lambda ln: ln.get('x') or 0))) for g in groups.values()}
+    got.discard(None)
+    return got.pop() if len(got) == 1 else None
+
+
 # ---------------- 進度檔 ----------------
 def today(now=None) -> str:
     return time.strftime('%Y-%m-%d', now if now else time.localtime())

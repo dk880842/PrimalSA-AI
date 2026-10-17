@@ -1501,6 +1501,70 @@ check('main mark：DKB04（數字 0）→ DKBO4、rc 0', rcm == 0 and dp.load(dp
 check('main mark 參數不足 → EXIT_ARGS', quiet(daily.main, ['mark', 'DKBO4', '2'])[0] == daily.EXIT_ARGS)
 check('POP_NAME_OPTS 帶 -Small 1、面板名稱 NAME_OPTS 不帶（其他呼叫者不變）', daily.POP_NAME_OPTS[-2:] == ('-Small', '1') and '-Small' not in daily.NAME_OPTS)
 
+# ---------------- 2026-10-17 dev-shop-title：便利店標題 -Small 1、select_item 失敗存證、頁碼確認 ----------------
+check('shopkit 標題主讀法 + 兩組備援都帶 -Small 1（實機先縮成截圖同款 1440 再裁）',
+      shopkit.TITLE_OPTS[-2:] == ('-Small', '1') and all(o[-2:] == ('-Small', '1') for _b, o in shopkit.TITLE_FALLBACK))
+# 使用者實機原生截圖（2009 地方特產品，選中卡魯它那產海藻）重建 2880 畫面，ocr.ps1 -Image 主讀法實測：不帶 -Small 只讀到「藻」（227 根因）、帶 -Small 2 票
+_LND = lambda pairs: [{'text': t, 'x': x, 'zoom': z} for z, t, x in pairs]  # noqa: E731
+_ORD2825 = STORES[2825].items
+NATIVE_NOSMALL = _LND([(6, '藻', 1079)])
+NATIVE_SMALL = _LND([(4, '藻', 1079), (5, '卡魯它那產海藻', 996), (6, '卡魯它那產海藻', 996)])
+check('實機原生不帶 -Small（只讀到「藻」）→ 選不到（重現 227）', not shopkit.title_is(NATIVE_NOSMALL, '卡魯它那產海藻', _ORD2825))
+check('實機原生帶 -Small（2 票）→ 是卡魯它那產海藻；拿同店的鹽 / 貝核對不是',
+      shopkit.title_is(NATIVE_SMALL, '卡魯它那產海藻', _ORD2825) and not shopkit.title_is(NATIVE_SMALL, '卡魯它那產的鹽', _ORD2825)
+      and not shopkit.title_is(NATIVE_SMALL, '卡魯它那產的貝', _ORD2825))
+_logs, _snaps = [], []
+_osnap = uikit.snap
+uikit.snap = lambda tag: (_snaps.append(tag), f'tools/.cache/ui-log/000000-{tag}.png')[1]
+try:
+    GUI_LOG.clear()
+    _ok = shopkit.select_item('卡魯它那產海藻', _ORD2825, {'drags': 0}, reader=lambda: NATIVE_NOSMALL, log=_logs.append)
+finally:
+    uikit.snap = _osnap
+check('select_item 失敗 → 存現場圖 shop-select-fail、log 寫標題各倍率原字',
+      not _ok and _snaps == ['shop-select-fail'] and len(_logs) == 1 and '藻' in _logs[0] and 'shop-select-fail' in _logs[0], f'{_snaps} {_logs}')
+check('daily.shop_select 把 event 傳給 select_item（失敗寫 quest-events.log）', 'log=event' in Path(daily.__file__).read_text(encoding='utf-8'))
+
+_PL = lambda *ts: [{'text': t, 'x': 555, 'zoom': z} for z, t in enumerate(ts, 2)]  # noqa: E731
+check('page_vote：兩倍率一致收、不一致 None、一個讀不到看另一個、字串走 parse_page',
+      dp.page_vote(_PL('4/5', '4/5')) == 4 and dp.page_vote(_PL('4/5', '5/5')) is None and dp.page_vote(_PL('', '3 / 5')) == 3
+      and dp.page_vote(_PL('a', 'b')) is None and dp.page_vote('2/5') == 2 and dp.page_vote(None) is None)
+
+
+def run_goto(target, reads, click_moves=True, start=4):
+    """假頁碼面板：reads = 每次 page_no 依序回的值（用完後回真實頁）；點上 / 下一頁真實頁 ±1（click_moves=False = 點了沒翻）"""
+    T = daily.Tools()
+    real = {'p': start}
+    q = list(reads)
+    clicks = []
+    T.page_no = lambda: q.pop(0) if q else real['p']
+    T.sleep = lambda s: None
+
+    def fake_click(x, y, *a, **k):
+        clicks.append((x, y))
+        if click_moves:
+            real['p'] = max(1, min(5, real['p'] + (1 if (x, y) == daily.NEXT_XY else -1)))
+        return True
+    osc, oev = uikit.safe_click, daily.event
+    uikit.safe_click, daily.event = fake_click, (lambda m: None)
+    try:
+        ok = T.goto_page(target)
+    finally:
+        uikit.safe_click, daily.event = osc, oev
+    return ok, real['p'], clicks
+
+
+ok, real, clicks = run_goto(5, [4, 5, 4])          # 點一次翻頁後立刻讀成 5、確認讀到 4（實際漏翻）→ 再點一次才到
+check('goto_page：第一次讀到目標、確認讀到別頁 → 繼續翻，最後真的在第 5 頁', ok and real == 5, f'{ok} {real} {clicks}')
+ok, real, clicks = run_goto(5, [], click_moves=False)
+check('goto_page：點了不翻 → 最多幾輪後 False（不亂點合成）', not ok and real == 4 and len(clicks) == daily.GOTO_PAGE_TRIES, f'{ok} {real} {len(clicks)}')
+ok, real, clicks = run_goto(3, [None, None])      # 連 2 次讀不出 → 盲翻（上一頁 4 + 下一頁 2）→ 讀到 3 確認
+check('goto_page：連 2 次讀不出 → 盲翻後讀頁碼確認在第 3 頁', ok and real == 3 and clicks.count(daily.PREV_XY) == 4 and clicks.count(daily.NEXT_XY) == 2, f'{ok} {real} {clicks}')
+ok, real, clicks = run_goto(2, [None] * 20)
+check('goto_page：盲翻後仍讀不出頁碼 → False（不再盲信盲翻）', not ok, f'{ok} {real}')
+_src = Path(daily.__file__).read_text(encoding='utf-8')
+check('craft_role：每項合成前、提交前都 goto_page 確認', _src.count('if not T.goto_page(ri):') == 2 and '提交前翻不到第' in _src)
+
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))
 print('ALL PASS' if not fails else f'FAILED {fails}')

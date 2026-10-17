@@ -24,9 +24,11 @@
           不讀材料列、不捲動。保留：彈窗開了（QCRAFT）、計數紅字像素 popup_short（紅 = 不合成）、合成後該項變綠、提交前兩項綠。dp.pop_check 仍給 read 段 peek_item / resolve_name 用
           read 段 peek_item 用 pop_name：投不出名字隔 0.5 秒只重讀大字、最多 3 次（craft_item 不再用）
           大字 OCR 帶 -Small 1（POP_NAME_OPTS）：實機先縮成跟截圖同一張 1440 縮圖再裁（根因：實機原生 2880 取像讀空、截圖讀得出，2026-10-17 dev-pop-live）
+  翻頁（2026-10-17 dev-shop-title，未實機）：goto_page 讀頁碼（dp.page_vote 各倍率一致才收）到目標頁再等 0.4 秒重讀確認，盲翻後也要讀到頁碼；
+          mid / final 每項合成前、提交前都 goto_page（修：翻頁 4 → 5 立刻讀成 5、面板其實在 4/5 → 點第 5 環項 229 彈窗沒開）
   mid / final 每人開頭 sync_greens：還沒記 crafted 的項先看面板計數（STATE_GRID 字區 → dp.count_area），已 1/1 綠 → 記 crafted 不開彈窗；兩項都綠 → 直接提交
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
-  （便利店選商品：shopkit.select_item 標題逐倍率比對該店清單投票 title_is，第二輪離線 132/132）
+  （便利店選商品：shopkit.select_item 標題逐倍率比對該店清單投票 title_is，第二輪離線 132/132；標題 OCR 帶 -Small 1〔dev-shop-title 修 2009 長名 227〕、選不到存 ui-log shop-select-fail 並寫各倍率原字）
   sam     into_shop → 5 人輪流沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
   mid     gather_hospital → 5 人輪流（組隊中）：材料齊的項先合成、該環兩項都綠就提交（沒人有事可做就整段跳過）
   fish    into_shop → 5 人輪流買漁村料
@@ -136,6 +138,7 @@ STATE_PX = [(390, 291), (390, 396)]                              # 兩項計數�
 STATE_GRID = [[(x + dx, y + dy) for dy in range(-6, 9, 2) for dx in range(-4, 13, 2)] for x, y in STATE_PX]
 PAGE_BOX = (520, 672, 70, 45)                                    # 頁碼「n/5」
 PREV_XY, NEXT_XY = (363, 692), (745, 692)
+GOTO_PAGE_TRIES = 8                                               # goto_page 最多幾輪（每輪讀一次頁碼 + 翻一頁 / 確認）
 SUBMIT_XY = (1015, 685)
 REWARD_BOX = (960, 350, 110, 45)                                 # 「完成所有任務額外獎勵」計數 n/5（綠字 986～1044 × 358～387）
 POP_NAME_BOX = (380, 398, 204, 50)                               # 彈窗成品名黃字（置中 x≈481、y 415～431；8 字「精心燉煮過的肉丸」404～557，框容得下 item-book 最長 10 字名；
@@ -420,30 +423,45 @@ class Tools:
         return uikit.is_open(uikit.DAILY)
 
     def page_no(self):
-        return dp.parse_page(''.join(uikit.ocr(PAGE_BOX, '-Zooms', '2,3')))
+        """頁碼「n/5」：各倍率各自 parse、一致才收（dp.page_vote）；讀不出 / 不一致 → None"""
+        return dp.page_vote(uikit.ocr_lines(PAGE_BOX, '-Zooms', '2,3'))
 
     def goto_page(self, page: int) -> bool:
-        """翻到第 page 頁：讀得到頁碼就照差距點上 / 下一頁（每次 wait 500 後重讀）；頁碼讀不出（OCR 失敗）→ 盲翻：上一頁 4 次到第 1 頁（探路：連點 4 次每次都成功、
-        第 1 頁再按上一頁的行為沒量過，假設夾住）再下一頁 page-1 次"""
-        if self.page_no() is None:
-            print(f'{SRC}：頁碼讀不出 → 盲翻到第 {page} 頁', file=sys.stderr)
-            for _ in range(dp.RINGS - 1):
-                if not uikit.safe_click(*PREV_XY, uikit.DAILY, note='daily 盲翻：上一頁', wait_ms=400):
-                    return False
-            for _ in range(page - 1):
-                if not uikit.safe_click(*NEXT_XY, uikit.DAILY, note='daily 盲翻：下一頁', wait_ms=400):
-                    return False
-            return True
-        for _ in range(7):
+        """翻到第 page 頁且**讀頁碼確認**才回 True（2026-10-17 dev-shop-title 修 mid 229：翻頁 4 → 5 後立刻讀成 5、面板其實停在 4/5 → 點到別環 → 彈窗沒開）。
+        讀到 page → 等 0.4 秒再讀一次也是 page 才算到（翻頁動畫 / 漏點）；讀到別頁 → 照差距點上 / 下一頁（每次 wait 600 後重讀）；
+        連 2 次讀不出 → 盲翻一次（上一頁 4 次到第 1 頁〔第 1 頁再按假設夾住〕再下一頁 page-1 次）後照樣要讀到頁碼確認。
+        最多 GOTO_PAGE_TRIES 輪仍不確定 → False（呼叫端 229「翻不到第 N 頁」），log 寫各次讀值"""
+        seen, miss, blind = [], 0, False
+        for _ in range(GOTO_PAGE_TRIES):
             cur = self.page_no()
-            if cur is None:
-                return False
+            seen.append(cur)
             if cur == page:
-                return True
+                self.sleep(0.4)
+                again = self.page_no()
+                seen.append(again)
+                if again == page:
+                    return True
+                continue
+            if cur is None:
+                miss += 1
+                if miss >= 2 and not blind:
+                    blind = True
+                    event(f'daily 頁碼讀不出 → 盲翻到第 {page} 頁')
+                    for _i in range(dp.RINGS - 1):
+                        if not uikit.safe_click(*PREV_XY, uikit.DAILY, note='daily 盲翻：上一頁', wait_ms=400):
+                            return False
+                    for _i in range(page - 1):
+                        if not uikit.safe_click(*NEXT_XY, uikit.DAILY, note='daily 盲翻：下一頁', wait_ms=400):
+                            return False
+                else:
+                    self.sleep(0.5)
+                continue
+            miss = 0
             x, y = NEXT_XY if cur < page else PREV_XY
-            if not uikit.safe_click(x, y, uikit.DAILY, note=f'daily 翻頁 {cur} → {page}', wait_ms=500):
+            if not uikit.safe_click(x, y, uikit.DAILY, note=f'daily 翻頁 {cur} → {page}', wait_ms=600):
                 return False
-        return self.page_no() == page
+        event(f'daily 翻不到第 {page} 頁（頁碼各次讀值 {seen}）')
+        return False
 
     def next_page(self) -> bool:
         return uikit.safe_click(*NEXT_XY, uikit.DAILY, note='daily 下一頁', wait_ms=500)
@@ -564,7 +582,7 @@ class Tools:
         return False
 
     def shop_select(self, name, store, state) -> bool:
-        return shopkit.select_item(name, store.items, state)
+        return shopkit.select_item(name, store.items, state, log=event)
 
     def shop_set_qty(self, q, start=None) -> bool:
         return shopkit.set_qty(q, start=start)
@@ -1056,9 +1074,9 @@ class Daily:
                 if not opened:
                     self.open_daily(role)
                     opened = True
-                if not T.goto_page(ri):
-                    self.fail(EXIT_CRAFT, f'{role} 翻不到第 {ri} 頁', role=role)
                 for k in todo:
+                    if not T.goto_page(ri):                     # 每項合成前都讀頁碼確認在第 ri 頁（2026-10-17 停在 4/5 點第 5 環 → 229）
+                        self.fail(EXIT_CRAFT, f'{role} 翻不到第 {ri} 頁', role=role)
                     it = r['items'][k]
                     ok, why = T.craft_item(k, it['name'])
                     if not ok:
@@ -1070,6 +1088,8 @@ class Daily:
                     self.save_role(role)
                     event(f'{stage_name(final)} {role} 第 {ri} 環「{it["name"]}」合成完成')
                 if dp.ring_ready(rs, r['items']):
+                    if not T.goto_page(ri):                     # 提交前也確認頁碼（提交的是目前頁那環）
+                        self.fail(EXIT_CRAFT, f'{role} 提交前翻不到第 {ri} 頁', role=role)
                     self.submit_ring(role, r, rs)
                     peppers = [n for n, _ in sum((it['mats'] for it in r['items']), []) if n in dp.PEPPERS]
                     if peppers and final:

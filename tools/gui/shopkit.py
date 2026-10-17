@@ -6,7 +6,8 @@
            舊版各倍率 join 成一串；p1 樣本 11 間店 132 張 → 主讀法 130 對、備援補讀後 132 對、0 誤認）、title_match（字串模糊比對，舊介面 / 無清單時）、
            visible_candidates（清單定位候選列）、qty_digit_xy（數字鍵盤鍵位）
   座標     商店面板固定座標（ui/shop.md、notes/daily-probe.md M11～M13；截圖 1440×830、鏡頭最左）
-  動作     shop_open（✕ 紅圓像素）、read_title（回 OCR 原始行；主讀法投不出就 TITLE_FALLBACK 補讀）、select_item（名稱定位 + 捲動）、set_qty（＋ / － 鈕；數字鍵盤留 set_qty_keypad 備援）、buy_once（購買 → 提示確定）、
+  動作     shop_open（✕ 紅圓像素）、read_title（回 OCR 原始行；主讀法投不出就 TITLE_FALLBACK 補讀；全部帶 -Small 1 = 實機取像同截圖，2026-10-17 dev-shop-title）、
+           select_item（名稱定位 + 捲動；失敗存 ui-log shop-select-fail、log 寫各倍率原字）、set_qty（＋ / － 鈕；數字鍵盤留 set_qty_keypad 備援）、buy_once（購買 → 提示確定）、
            qty_now（讀數量框：**像素字形 numglyph kind 'shop'**，2026-10-17 改；OCR 只當位數相符的備援）、close_shop（✕ 1207,107；買完還疊提示窗再補）
 鐵則 3：本模組不讀石幣 / 鑽石（buywendy 自己用 parse_coin 讀石幣；daily 不讀）；只在呼叫端明確要買時才按「購買」。
 數量框（2026-10-17 p1 正式跑 227 修）：Windows OCR 讀單獨一個白色「1」各種參數都回空 → 改 numglyph 像素切字 + 樣板（fixtures/num_glyph_tpl.json 'shop'；
@@ -39,9 +40,12 @@ SHOP_CLOSE = (1207, 107)                         # 便利店右上 ✕（紅圓 
 BUY_BTN, CONFIRM_BTN = (995, 592), (615, 557)    # 購買 / 提示「確定」（同 shopbuy）
 COIN_BOX = (285, 8, 130, 30)                     # 頂端資源列石幣（buywendy 專用；daily 不讀）
 TITLE_BOX = (870, 180, 254, 54)                  # 右側標題（選中的商品名；紅底黃字 255,255,106，字 x 889～1104 × y 194～217，9 字店名都容得下）
-TITLE_OPTS = ('-Zooms', '2,3,4,5,6', '-Dark', '0')   # 不二值化、5 倍率**逐倍率各自比對該店商品清單投票**（title_vote；p1 2026-10-17 132 張 130 對 0 誤認，2 張全倍率讀空 → 備援）
-TITLE_FALLBACK = (((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Dark', '0')),   # 主讀法投不出名字才依序補讀（倍率鍵加前綴、各自投票）
-                  ((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Light', '92')))
+# -Small 1（2026-10-17 dev-shop-title 修 227）：實機 ocr 先縮成 gui shot 同一張 1440 縮圖再裁 = 跟 132 張樣本（-Image 1440，-Small 無作用）同一種像素。
+# 根因：參數是用 1440 截圖調的，實機從原生 2880 取像時長名字（卡魯它那產海藻 7 字）各倍率常只讀到「藻」→ 投不出 → 227；
+# 用使用者原生截圖重建 2880 畫面離線量：主讀法 不帶 0/5 票、帶 2/5 票；備援 1 不帶 0、帶 4/5；備援 2 不帶 1/5、帶 5/5（同 daily POP_NAME_OPTS、ocr.ps1 檔頭）
+TITLE_OPTS = ('-Zooms', '2,3,4,5,6', '-Dark', '0', '-Small', '1')   # 不二值化、5 倍率**逐倍率各自比對該店商品清單投票**（title_vote；p1 2026-10-17 132 張 130 對 0 誤認，2 張全倍率讀空 → 備援）
+TITLE_FALLBACK = (((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Dark', '0', '-Small', '1')),   # 主讀法投不出名字才依序補讀（倍率鍵加前綴、各自投票）
+                  ((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Light', '92', '-Small', '1')))
 QTY_XY = (995, 465)                              # 數量框：點它跳出數字鍵盤（備援 set_qty_keypad 用）
 QTY_MINUS, QTY_PLUS = (880, 466), (1112, 466)    # 數量框兩側綠色「－」「＋」圓鈕（ui/shop.md 競技場實測、daily-probe M13 同版面）
 PLUS_GAP_MS, PLUS_BATCH = 150, 25                # ＋ / － 每下間隔（同鍵盤節奏）/ 每個 seq 最多連點幾下
@@ -246,16 +250,29 @@ def scroll_top(rows: int) -> None:
         uikit.gui('seq', 'drag {} {} {} {}; wait {}'.format(*DRAG_DOWN, DRAG_SETTLE_MS), note='shopkit 清單捲回頂端')
 
 
-def select_item(want: str, order: list, state: dict | None = None, reader=None) -> bool:
+def select_item(want: str, order: list, state: dict | None = None, reader=None, log=None) -> bool:
     """在商店清單選 want（order = 該店商品順序 = 遊戲清單順序，2 欄先左後右；來自 npc-shops.md）。
     靠標題名稱核對定位（不算位移；標題逐倍率比對本店清單投票 title_is）：預測列優先、不對再試鄰近列、視野外就往下拖一次；最多拖 len(order)//4+2 次。
     state = {'drags': n} 跟蹤已拖次數（呼叫端開店時給 {'drags': 0}）；回傳 True = 標題已是 want（已選中）。
     開店時第 1 項自動選中；清單 ≤ 8 項（≤4 列）不用捲。reader 可換（測試）。
-    目標在目前視野上方（之前往下捲過頭）→ scroll_top 往回拖到頂、drags 歸 0 再找（只歸零重找一次）；呼叫端（daily.buy_at）另依清單 index 由小到大買，正常不會觸發"""
+    目標在目前視野上方（之前往下捲過頭）→ scroll_top 往回拖到頂、drags 歸 0 再找（只歸零重找一次）；呼叫端（daily.buy_at）另依清單 index 由小到大買，正常不會觸發
+    回 False 前（2026-10-17 dev-shop-title）：uikit.snap('shop-select-fail') 存現場圖、log（呼叫端給，例 daily.event）寫最後幾次標題各倍率 OCR 原字"""
     reader = reader or (lambda: read_title(order))
     st = state if state is not None else {'drags': 0}
     if want not in order:
         return False
+    reads = []                                               # (視野列, 各倍率原字)：失敗時寫 log
+    ok = _select_scan(want, order, st, reader, reads)
+    if not ok:
+        shot = uikit.snap('shop-select-fail')
+        if log:
+            tail = '；'.join(f'列{r}:{t}' for r, t in reads[-4:]) or '（沒讀到）'
+            log(f'shopkit 選不到「{want}」（第 {order.index(want) + 1} 項，讀 {len(reads)} 次），最後標題各倍率 {tail}；現場圖 {shot}')
+    return ok
+
+
+def _select_scan(want: str, order: list, st: dict, reader, reads: list) -> bool:
+    """select_item 的定位迴圈（每次讀標題的各倍率原字記進 reads）"""
     idx = order.index(want)
     col = idx % 2
     topped = False
@@ -263,8 +280,10 @@ def select_item(want: str, order: list, state: dict | None = None, reader=None) 
         for r in visible_candidates(idx, st['drags']):
             x, y = card_xy(r, col)
             uikit.gui('seq', f'click {x} {y}; wait 450', note=f'shopkit 選商品「{want}」（第 {idx + 1} 項，視野列 {r}）')
-            if title_is(reader(), want, order):
+            lines = reader()
+            if title_is(lines, want, order):
                 return True
+            reads.append((r, title_vote(lines, order)['texts']))
         if idx // 2 - st['drags'] * ROWS_PER_DRAG < 0:        # 目標在視野上方（只會往下拖、之前捲過頭）→ 捲回頂端歸零再找（2026-10-17 227 修）
             scroll_top(len(order) // 2 + 1)
             st['drags'] = 0
