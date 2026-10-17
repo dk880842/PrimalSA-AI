@@ -905,7 +905,7 @@ class FakeTools:
     # -- 背包 / 倉庫 --
     def bag_check(self, role, names):
         assert not self.W.shop and not self.W.panel, '核對背包時商店 / 面板還開著'
-        miss = [n for n in names if self.W.bag[role].get(n, 0) <= 0]
+        miss = [n for n in names if self.W.bag[role].get(n, 0) <= 0 or n in self.inj.get('bag_hide', ())]   # bag_hide：背包其實有、但名稱 OCR 讀不到
         return miss, 0
 
     def depot_store(self, role, name, sub):
@@ -1460,6 +1460,35 @@ T.inj['plus_unread'] = True                                               # ＋ 
 rc, out, _ = go(W, T)
 buys = [a for a in W.log if a[0] == 'buy']
 check('＋ 讀不回 → 每次買 1 個、買 n 次：照樣 5/5、總共買 160 個、每次數量都是 1', rc == 0 and W.bought_n == 160 and all(W.reward[r] == 5 for r in W.roles) and all(a[3] == 1 for a in buys), f'{rc} {out[-300:]}')
+
+# ---------------- 情境：數量框判 bought 但背包名稱 OCR 找不到（p1 DKBO5 水分多的香草）→ 不 227、bought 保留、不重買 ----------------
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+W0 = scenario()
+go(W0, FakeTools(W0))                                                     # 先跑一次取第一個人第一個買的材料名（僅取名，下面各情境用乾淨進度檔）
+_who, _nm = next(a[1:3] for a in W0.log if a[0] == 'buy')
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+T.inj['bag_hide'] = {_nm}
+rc, out, _ = go(W, T)
+nb = sum(1 for a in W.log if a[0] == 'buy')
+check('bought + 背包核對讀不到某材料 → 不 227、5/5 完成', rc == 0 and all(W.reward[r] == 5 for r in W.roles), f'{rc} {out[-300:]}')
+st5 = daily.dp.load(daily.dp.role_path(_who))
+check('bought 進度檔保留（沒被 pop）', bool(st5 and st5['bought'].get(_nm, 0) > 0), str(st5 and list(st5['bought'])[:3]))
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+T.inj['zeroish'] = True
+T.inj['bag_hide'] = {_nm}
+rc, out, _ = go(W, T)
+check('zeroish（認不出的字）+ 背包也找不到 → 仍 227（硬閘保留）', rc == 227, f'{rc} {out[-300:]}')
+st5 = daily.dp.load(daily.dp.role_path(_who))
+check('mark-bought 補記：bought / ledger 寫入、不在商店清單的名字拒絕', daily.mark_bought(_who, _nm, 2) == 0
+      and daily.dp.load(daily.dp.role_path(_who))['bought'][_nm] == 2
+      and daily.dp.Ledger(daily.dp.load(daily.dp.role_path(_who))['ledger']).bag[_nm] == 2
+      and daily.mark_bought(_who, '不存在的東西', 1) == daily.EXIT_ARGS and daily.mark_bought(_who, _nm, 0) == daily.EXIT_ARGS)
 
 # ---------------- 委託面板計數字區（dev-pop-live 2026-10-17）----------------
 CX = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_panel_counts.json').read_text(encoding='utf-8'))

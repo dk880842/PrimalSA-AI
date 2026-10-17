@@ -15,6 +15,8 @@
         （fish 買到一半斷 → 隊伍是散的，重跑 into_shop 先組隊再解散；醫院合成到一半斷 → 隊伍組著，form 不點）
   店內買序（2026-10-17 p1 兩次 227 修）：dailyplan.store_route 與 buy_at 都把店內商品依該店清單 index 由小到大排（只往下捲、不回頭；不再「早環先買」）；
           shopkit.select_item 目標在視野上方時 scroll_top 歸零再找。存倉由 make_room / choose_evict 決定，與買序無關；bought 以名稱記，續跑不重買。
+  買後背包名稱核對不擋（2026-10-17 p1 DKBO5 水分多的香草「多早」OCR 不確定 → 誤 227 + 重買 500 修，離線測試、未實機）：數量框判 bought 當下就記 bought / ledger（本來就是），
+          背包名稱核對找不到只寫 log（不 pop bought、不 227）；只有 zeroish（歸 0 但字認不出）才當硬閘。舊進度檔香草沒記 bought → `daily.py mark-bought DKBO5 水分多的香草 <數量>` 補記再續跑。
   背包放不下（2026-10-17 p1 DKBO3 fish 227 修，離線測試、未實機）：每家店先 dp.buy_batches 排批——存倉順序 **材料（最晚環才用的先）→ 成品（最晚提交環的先）**；
           存完還放不下（這家店種類太多）→ 分批：買放得下的清單前綴 → 關店存倉（剛買、最晚才用的）→ 再進店買剩下的；連一種都放不下才 227（訊息寫背包帳 / 店種類 / 上限）。
           成品存倉後 mid 不提交該環（products_away），final fetch_materials 連成品一起從倉庫取回再提交。
@@ -44,6 +46,7 @@
   uv run --no-project python tools/gui/daily.py plan [--roles ...]                  # 離線：讀進度檔印每人計畫與石幣估算
   uv run --no-project python tools/gui/daily.py show                                # 離線：每人各段 / 各環狀態
   uv run --no-project python tools/gui/daily.py mark <角色> <環> <上|下> crafted|submitted   # 離線：手動補完後同步進度檔（submitted 整環、上下不看）
+  uv run --no-project python tools/gui/daily.py mark-bought <角色> <材料> <數量>      # 離線：數量框 / 遊戲日誌證明已買、進度檔沒記時補記（防重買）
   uv run --no-project python tools/gui/daily.py run [--roles ...] [--from 段] [--confirm-buy] [--fresh] [--dry-run] [--no-grind] [--regroup pull|gather]
     --confirm-buy  買材料（500 / 個）與合成（1000 / 項）都花石幣：沒給 = 讀完清單 + 印計畫就停（221）
     --from 段      prep / read / plan / sam / mid / fish / final / finish；預設從進度檔續跑（段內跳過已完成的人 / 已買的種類 / 已合成的項）
@@ -650,6 +653,7 @@ class Daily:
         if stores is None or where is None:
             stores, where = dp.load_stores()
         self.stores, self.where = stores, where
+        self.zeroish = set()                                   # {(角色, 材料)}：數量框歸 0 但字認不出的購買（背包核對才是硬閘）
         order = [r for r in clients.leader_last() if r in self.roles] or list(self.roles)
         self.order = order                                     # DKBO2 → … → DKBO（隊長最後）
         self.leader = LEADER if LEADER in self.roles else self.order[-1]
@@ -951,15 +955,22 @@ class Daily:
         if missing:
             if unread < 0:
                 self.tool_fail(-unread, EXIT_BUY, f'{role} 買完核對背包失敗（bag rc {-unread}）', role=role)
-            if len(missing) > unread:                           # 比「沒認出名字的格」還多 → 確定缺
+            # 數量框判 bought（買前 → 買後歸 0）= 已證明買到（bought / ledger 買的當下已寫進度檔，不 pop、不重買）→ 背包名稱 OCR 找不到只記 log；
+            # 只有 zeroish（歸 0 但字認不出、沒有證據）才把背包核對當硬閘（2026-10-17 p1 DKBO5 水分多的香草「多早」OCR 不確定 → 誤 227 + 重買修）
+            weak = [n for n in missing if (role, n) in self.zeroish]
+            soft = [n for n in missing if n not in weak]
+            if soft:
+                event(f'{role} 背包名稱核對：{"、".join(soft)} 沒認出（有 {unread} 格沒讀出名字；數量框已判買到 → 視為已買，不 227、bought 保留）')
+            if weak and len(weak) > unread:                     # zeroish 且比「沒認出名字的格」還多 → 確定缺
                 led = dp.Ledger(st['ledger'])
-                for n in missing:
+                for n in weak:
                     st['bought'].pop(n, None)
                     led.bag.pop(n, None)
                 st['ledger'] = led.to_dict()
                 self.save_role(role)
-                self.fail(EXIT_BUY, f'{role} 在「{store.name}」買完，但背包找不到 {"、".join(missing)}（數量框雖歸 0；不重買，請人看）', role=role, missing=missing)
-            event(f'{role} 背包名稱核對：{"、".join(missing)} 沒認出（有 {unread} 格沒讀出名字，視為已買）')
+                self.fail(EXIT_BUY, f'{role} 在「{store.name}」買完，但背包找不到 {"、".join(weak)}（數量框歸 0 但認不出字；不重買，請人看）', role=role, missing=weak)
+            elif weak:
+                event(f'{role} 背包名稱核對：{"、".join(weak)} 沒認出（有 {unread} 格沒讀出名字，視為已買）')
         event(f'{role} {store.name} 買完：' + '、'.join(f'{n}×{dict(mats)[n]}' for n in done))
 
     def buy_item(self, role, plan, store, name, q, nav, protect=()) -> bool:
@@ -996,6 +1007,7 @@ class Daily:
                     left -= c
                     start, i = 0, i + 1
                     if v == 'zeroish':
+                        self.zeroish.add((role, name))           # 只有「認不出的字」才讓背包核對當硬閘；bought 已證明買到 → 背包核對只記 log
                         event(f'{role} 買「{name}」×{c}：數量框變成認不出的字（應為 0，尚無樣板）→ 視為買到，等背包名稱核對')
                     continue
                 if v != 'not_bought':                           # 不確定有沒有買到 → 不重買（避免買兩次），呼叫端 227
@@ -1317,6 +1329,38 @@ def role_plan(st, recipes, where, stores) -> dict:
     return dp.plan_role(st['items'], recipes, where, stores, done)
 
 
+def mark_bought(role, name, qty) -> int:
+    """離線補記「已買」（不碰遊戲）：數量框 / 遊戲日誌證明買到、但進度檔沒記（舊版背包核對失敗會 pop bought）→ 續跑才不會重買。
+    bought[材料] 與 ledger.bag[材料] 都設成 qty（已有就覆寫成這個量，不累加）；材料名須在某家便利店清單裡"""
+    try:
+        qty = int(qty)
+    except ValueError:
+        qty = 0
+    if qty < 1:
+        print(f'{SRC}：用法 daily.py mark-bought <角色> <材料> <數量 ≥1>', file=sys.stderr)
+        return EXIT_ARGS
+    st = dp.load(dp.role_path(role))
+    if not st or not st.get('read'):
+        print(f'{SRC}：{role} 沒有已讀清單的進度檔，不用補記', file=sys.stderr)
+        return EXIT_ARGS
+    if dp.stale(st):
+        print(f'{SRC}：{role} 進度檔日期 {st.get("date")} 不是今天，不補記', file=sys.stderr)
+        return EXIT_ARGS
+    stores, where = dp.load_stores()
+    if name not in where:
+        print(f'{SRC}：「{name}」不在任何便利店清單，不補記（名字要與商店清單完全一樣）', file=sys.stderr)
+        return EXIT_ARGS
+    st['bought'][name] = qty
+    led = dp.Ledger(st['ledger'])
+    if led.bag.get(name, 0) < qty and led.personal.get(name, 0) + led.public.get(name, 0) == 0:
+        led.bag[name] = qty
+    st['ledger'] = led.to_dict()
+    dp.save(dp.role_path(role), st)
+    event(f'mark-bought {role} 「{name}」×{qty}：已寫入 bought / ledger')
+    print(f'{role}「{name}」已記為買到 ×{qty}（bought + 背包帳）')
+    return 0
+
+
 def mark(role, ring, which, what) -> int:
     """離線補記進度檔（不碰遊戲）：手動在遊戲裡補完某項合成 / 提交後同步，續跑才不會再做一次。
     ring = 1～5；which = 上 / 下（submitted 是整環，上下不看）；what = crafted / submitted（dp.mark_item）"""
@@ -1430,8 +1474,8 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('cmd', choices=['read-all', 'plan', 'show', 'run', 'mark'])
-    ap.add_argument('mark_args', nargs='*', help='mark 用：<角色> <環 1～5> <上|下> crafted|submitted')
+    ap.add_argument('cmd', choices=['read-all', 'plan', 'show', 'run', 'mark', 'mark-bought'])
+    ap.add_argument('mark_args', nargs='*', help='mark 用：<角色> <環 1～5> <上|下> crafted|submitted；mark-bought 用：<角色> <材料> <數量>')
     ap.add_argument('--roles', help='逗號分隔角色（預設本視窗名單全部）')
     ap.add_argument('--from', dest='from_stage', choices=list(dp.STAGES), help='從這一段開始（預設從進度檔續跑）')
     ap.add_argument('--confirm-buy', action='store_true', help='買材料（500 / 個）與合成（1000 / 項）；沒給 = 讀清單 + 印計畫就停（221）')
@@ -1454,6 +1498,13 @@ def main(argv=None) -> int:
             return EXIT_ARGS
     if a.cmd == 'show':
         return show()
+    if a.cmd == 'mark-bought':
+        import charname
+        role = next((x for x in ROLES if a.mark_args and charname.canon(x) == charname.canon(a.mark_args[0])), None)
+        if len(a.mark_args) != 3 or not role:
+            print(f'{SRC}：用法 daily.py mark-bought <角色> <材料> <數量>（角色須在本視窗名單 {ROLES}）', file=sys.stderr)
+            return EXIT_ARGS
+        return mark_bought(role, a.mark_args[1], a.mark_args[2])
     if a.cmd == 'mark':
         if len(a.mark_args) != 4:
             print(f'{SRC}：用法 daily.py mark <角色> <環 1～{dp.RINGS}> <上|下> crafted|submitted', file=sys.stderr)
