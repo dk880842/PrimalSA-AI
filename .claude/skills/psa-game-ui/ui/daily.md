@@ -97,3 +97,8 @@
 委託面板 / 快速合成彈窗開著時 HUD 變暗（ASS 254→127）、切換鈕 763,760 被面板下緣蓋住；`uikit.close_known_panel` 2026-10-17 起會先認 `uikit.QCRAFT / DAILY`（同一次讀圖）並點 ✕，preflight 遇到殘留面板會關掉而不是連 3 次不認得。
 委託面板與快速合成彈窗**還沒進 `screen_sigs.PANEL_X`**（只有探路 1 次樣本，不夠做 8 點統計 + fixture）：HUD 會顯示「不認得的畫面」，停留 3 分鐘才會兜底設旗標；daily 每次停留 < 1 分鐘。
 便利店已由 719a2fe 認得（panel=shop）。第一次實跑後有多張樣本再補進 PANEL_X / PANEL_PTS / PANEL_TITLE。
+
+## final-close：最後一環後面板沒合成鈕 / 彈窗晚開 / 走出口誤判（2026-10-17 p1 play-p1-daily5，離線測試、未實機）
+- **5 環全提交後的面板沒有兩顆藍色「合成」鈕**（兩項顯示下一環 0/1 紅、無按鈕）：`screen_sigs.DAILY_SIG` 最後兩點（藍鈕）不中 → `uikit.is_open(uikit.DAILY)` 為 False，`char.clear_panels` 也認不得 → 面板留著、切角色 preflight 不認得 → char rc 9。daily.py 用 `DAILY_BASE`（DAILY_SIG 去掉末兩點，標題板 + ✕ + 邊框點）判「開著」，`daily_close` 先關快速合成彈窗再關面板（兩輪、回是否全關），`Tools.close_panels`（切角色前必呼叫）先關它。現場圖 `tools/.cache/ui-log/play-p1-daily5-panel-left-open.png`。
+- **點「合成」後快速合成彈窗最晚約 4 秒才出現**：`craft_item` 輪詢 18 × 0.25 秒 + 失敗前再等 1 秒重檢（舊 8 × 0.2 秒 → DKBO3 第 2 環 229「彈窗沒開」）。
+- **fish 走 2000:73,103（進 2009 的出口）walk 回報卡 72,103 但其實已進 2009:21,35**：`Tools.walk_to` 拋 RuntimeError 時，有 exit_map 且 `wait_map(exit_map, 3)` 已在目標地圖 → 算成功。

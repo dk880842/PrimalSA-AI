@@ -36,6 +36,7 @@ def fake_gui(*a, **k):
 uikit.gui = fake_gui
 uikit.snap = lambda *a, **k: None
 import errlog  # noqa: E402
+import screen_sigs  # noqa: E402
 errlog.add = lambda *a, **k: 0
 import dailyplan as dp  # noqa: E402
 import shopkit  # noqa: E402
@@ -1672,6 +1673,77 @@ check('續跑：DKBO2 有把成品存個人倉庫（合成石2 / 合成爪2）�
       and W.submitted['DKBO2'] == [True] * 5, str([a for a in W.log if a[1:2] == ('DKBO2',) and a[0] in ('store', 'take')][:20]))
 check('續跑：沒有 buy_full（模型 13 = 假世界背包 13 格，從沒買不進）、背包 / 倉庫沒剩成品',
       not any(a[0] == 'buy_full' for a in W.log) and all(not any(k.startswith('成品:') for k in list(W.bag[r]) + list(W.personal[r])) for r in W.roles))
+
+
+# ---------------- final-close（2026-10-17 play-p1-daily5 三個實機問題）----------------
+_keep3 = (uikit.is_open, uikit.close_panel, uikit.safe_click, uikit.sleep, uikit.ocr_lines, uikit.px, uikit.snap)
+
+# 1. 5/5 後面板沒有藍色合成鈕：uikit.DAILY 特徵不中、DAILY_BASE 中 → daily_close 仍要關
+_st = {'daily': True, 'qcraft': False}
+_closed = []
+uikit.is_open = lambda p: (_st['daily'] if p is daily.DAILY_BASE else _st['qcraft'] if p is uikit.QCRAFT else False)
+uikit.close_panel = lambda p, known_open=False: (_closed.append(p.name), _st.__setitem__('daily', False))[0] or True
+uikit.safe_click = lambda *a, **k: True
+check('DAILY_BASE：特徵 = DAILY_SIG 去掉兩顆藍色合成鈕', daily.DAILY_BASE.sig == screen_sigs.DAILY_SIG[:-2] and daily.DAILY_BASE.close_xy == (1193, 98))
+check('daily_close：5/5 面板（無合成鈕，uikit.DAILY 判沒開）仍關掉、回 True',
+      daily.Tools().daily_close() is True and _closed == ['DAILY'] and not _st['daily'], f'{_closed} {_st}')
+# 切角色前 Tools.close_panels 也要關（char.clear_panels 認不得這種面板）
+_st['daily'] = True; _closed.clear()
+_fc = _Mod(); _fc.clear_panels = lambda: []
+_old_char = sys.modules.get('char'); sys.modules['char'] = _fc
+_old_so = shopkit.shop_open; shopkit.shop_open = lambda: False
+try:
+    shut = daily.Tools().close_panels()
+finally:
+    shopkit.shop_open = _old_so
+    if _old_char is None:
+        sys.modules.pop('char', None)
+    else:
+        sys.modules['char'] = _old_char
+check('close_panels：5/5 面板開著 → 先關（回名單含 daily），切角色不再 rc 9', 'daily' in shut and not _st['daily'], f'{shut} {_closed}')
+# 關不掉 → daily_close 回 False（不無限重試）
+_st['daily'] = True; _n = [0]
+uikit.close_panel = lambda p, known_open=False: (_n.__setitem__(0, _n[0] + 1), False)[1]
+check('daily_close：關不掉 → 回 False，只試 2 輪', daily.Tools().daily_close() is False and _n[0] == 2, str(_n))
+
+# 2. craft_item 彈窗出現得晚（實機約 4 秒）：舊版 8 × 0.2 秒就判「沒開」
+def _late_case(open_at):
+    n = [0]; slept = [0.0]
+    def is_open(p):
+        if p is uikit.QCRAFT:
+            n[0] += 1
+            return n[0] >= open_at
+        return p is uikit.DAILY
+    uikit.is_open = is_open
+    uikit.sleep = lambda t: slept.__setitem__(0, slept[0] + t)
+    uikit.safe_click = lambda *a, **k: True
+    uikit.snap = lambda tag: 'x.png'
+    uikit.ocr_lines = lambda *a, **k: []
+    uikit.px = lambda pts, cmd='pixel': [(255, 40, 40)] * len(pts)        # 彈窗開了之後走到「材料紅字」就停（不合成）
+    ok, why = daily.Tools().craft_item(0, '合成弓箭8')
+    return ok, why, slept[0]
+ok, why, sl = _late_case(15)
+check('craft_item：彈窗第 15 次輪詢才開（約 3.5 秒）→ 不再判「沒開」（走到材料紅字檢查）', '彈窗沒開' not in why and '紅字' in why, f'{ok} {why} {sl}')
+ok, why, sl = _late_case(10 ** 6)
+check('craft_item：彈窗一直沒開 → 229 路徑「沒開」，等了 ≥ 4.5 秒 + 失敗前再等 1 秒重檢', not ok and '彈窗沒開' in why and sl >= 4.5 + 1.0 - 1e-6, f'{ok} {why} {sl}')
+ok, why, sl = _late_case(daily.POP_WAIT_N + 1)
+check('craft_item：輪詢剛好用完、重檢那一次才開 → 放行', '彈窗沒開' not in why, f'{ok} {why}')
+uikit.is_open, uikit.close_panel, uikit.safe_click, uikit.sleep, uikit.ocr_lines, uikit.px, uikit.snap = _keep3
+
+# 3. walk_to 出口回報失敗、但其實已進目標地圖 → 算成功
+class _RaiseGeo(FakeGeo):
+    def walk_to(self, m, x, y, exit_map=None):
+        self.log.append(('walk_to', m, x, y, exit_map))
+        raise RuntimeError('卡在 72,103')
+with _RaiseGeo((2009, 21, 35)) as g:
+    ok = GeoTools(g).walk_to(2000, 73, 103, exit_map=2009)
+check('walk_to：拋 RuntimeError 但已在 2009 → True（算成功）', ok is True, f'{ok} {g.log}')
+with _RaiseGeo((2000, 72, 103)) as g:
+    ok = GeoTools(g).walk_to(2000, 73, 103, exit_map=2009)
+check('walk_to：拋 RuntimeError 且仍在 2000 → False（照舊）', ok is False, f'{ok} {g.log}')
+with _RaiseGeo((2000, 72, 103)) as g:
+    ok = GeoTools(g).walk_to(2000, 73, 103)
+check('walk_to：沒給 exit_map 拋錯 → False（不以地圖判）', ok is False, f'{ok} {g.log}')
 
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))

@@ -31,6 +31,11 @@
           大字 OCR 帶 -Small 1（POP_NAME_OPTS）：實機先縮成跟截圖同一張 1440 縮圖再裁（根因：實機原生 2880 取像讀空、截圖讀得出，2026-10-17 dev-pop-live）
   翻頁（2026-10-17 dev-shop-title，未實機）：goto_page 讀頁碼（dp.page_vote 各倍率一致才收）到目標頁再等 0.4 秒重讀確認，盲翻後也要讀到頁碼；
           mid / final 每項合成前、提交前都 goto_page（修：翻頁 4 → 5 立刻讀成 5、面板其實在 4/5 → 點第 5 環項 229 彈窗沒開）
+  final-close（2026-10-17 p1 play-p1-daily5 三個實機問題，離線測試、未實機）：
+          ① 5 環全提交後面板沒有藍色合成鈕 → uikit.DAILY 特徵（含兩顆合成鈕）不中，daily_close / char.clear_panels 判「沒開」不關 → 切下一人 rc 9。
+            修：daily.DAILY_BASE（DAILY_SIG 去掉合成鈕兩點）判開著；daily_close 兩輪關彈窗 + 面板並回是否關掉；Tools.close_panels（switch_to / leader_current 切角色前都呼叫）先用它關
+          ② craft_item 點合成後彈窗最晚約 4 秒才浮出（舊版只等 1.6 秒 → 229）：輪詢 POP_WAIT_N = 18 × 0.25 秒，失敗前再等 1 秒重檢
+          ③ Tools.walk_to 走出口拋 RuntimeError（卡在中間座標 72,103）但 wait_map(exit_map) 已在目標地圖（2009）→ 算成功（寫 log），不再 224
   mid / final 每人開頭 sync_greens：還沒記 crafted 的項先看面板計數（STATE_GRID 字區 → dp.count_area），已 1/1 綠 → 記 crafted 不開彈窗；兩項都綠 → 直接提交
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
   （便利店選商品：shopkit.select_item 標題逐倍率比對該店清單投票 title_is，第二輪離線 132/132；標題 OCR 帶 -Small 1〔dev-shop-title 修 2009 長名 227〕、選不到存 ui-log shop-select-fail 並寫各倍率原字）
@@ -137,6 +142,9 @@ SAM_WALK = (1000, 106, 91)                                       # 薩村 → 10
 FISH_WALK = (2000, 73, 103)                                      # 瑪麗娜絲 → 2009 出口（快速走路卡 67,90 → walk 自動慢速）
 NAME_BOXES = [(382, 236, 240, 36), (382, 340, 240, 36)]          # 第 1 / 2 項名稱（x386～、y242～268 / 346～372；寬 200 會切掉「肉丸」的丸）
 NAME_OPTS = ('-Zooms', '2,3,4,5', '-Dark', '0')                   # 褐字米色底：不二值化，4 倍率逐倍率 snap 投票（dp.vote_lines；離線 50/50，2026-10-17）
+# 委託面板的基本特徵（不含兩顆藍色合成鈕）：最後一環提交後面板沒有合成鈕，uikit.DAILY 不中（2026-10-17 play-p1-daily5）
+DAILY_BASE = uikit.Panel('DAILY', None, uikit.DAILY.sig[:-2], uikit.DAILY.close_xy, forbidden=uikit.DAILY.forbidden)
+POP_WAIT_N = 18                                                  # 點合成後等快速合成彈窗：18 × 0.25 秒 + 失敗前再 1 秒重檢
 MERGE_XY = [(735, 265), (735, 370)]                              # 兩顆「合成」藍鈕
 STATE_PX = [(390, 291), (390, 396)]                              # 兩項計數「0」紅字像素（舊單點；只留給文件 / 測試對照，判色改用 STATE_GRID）
 # 兩項計數第一個字的字區格點（x 386～402、y 285～299 每 2 點，各 9×8 = 72 點）→ dp.count_area。
@@ -281,6 +289,9 @@ class Tools:
         """切角色前一定先關面板（2026-10-17 使用者）：便利店 ✕ → char.clear_panels（快速合成彈窗 / 委託面板 / 背包等已知面板，點 ✕）。回關掉的名字"""
         import char
         shut = ['shop'] if shopkit.shop_open() and shopkit.close_shop(2) else []
+        if self.daily_open_any():                              # 5/5 後面板長相變了（藍色合成鈕消失）→ uikit.DAILY 特徵不中、char.clear_panels 認不得（2026-10-17 play-p1-daily5）
+            self.daily_close()
+            shut.append('daily')
         return shut + char.clear_panels()
 
     def ensure(self, role) -> int:
@@ -311,6 +322,9 @@ class Tools:
         try:
             walk.walk_to(map_id, x, y, exit_map=exit_map)
         except RuntimeError as e:
+            if exit_map is not None and self.wait_map(exit_map, 3):   # 走路回報卡在中間座標、其實已進目標地圖（play-p1-daily5：2000:73,103 → 2009:21,35）→ 算成功
+                event(f'daily 走到 {map_id}:{x},{y} 回報失敗（{e}），但現在已在地圖 {exit_map} → 算成功')
+                return True
             print(f'{SRC}：走到 {map_id}:{x},{y} 失敗：{e}', file=sys.stderr)
             return False
         return True
@@ -418,12 +432,21 @@ class Tools:
                 uikit.sleep(0.2)
         return uikit.is_open(uikit.DAILY)
 
-    def daily_close(self) -> None:
-        """✕ 關面板（先關快速合成彈窗）；絕不點空白處"""
-        if uikit.is_open(uikit.QCRAFT):
-            uikit.safe_click(*uikit.QCRAFT.close_xy, uikit.QCRAFT, note='daily 關快速合成彈窗', wait_ms=500)
-        if uikit.is_open(uikit.DAILY):
-            uikit.close_panel(uikit.DAILY, known_open=True)
+    def daily_open_any(self) -> bool:
+        """委託面板或快速合成彈窗開著（含 5/5 後沒有藍色合成鈕的面板：用 DAILY_BASE 特徵）"""
+        return uikit.is_open(uikit.QCRAFT) or uikit.is_open(DAILY_BASE)
+
+    def daily_close(self) -> bool:
+        """✕ 關面板（先關快速合成彈窗）；絕不點空白處。用 DAILY_BASE（不看藍色合成鈕）判開著：
+        最後一環提交後面板沒有合成鈕，uikit.DAILY 特徵不中 → 以前判「沒開」不關 → 切角色 rc 9（play-p1-daily5）。回是否已全關"""
+        for _ in range(2):
+            if uikit.is_open(uikit.QCRAFT):
+                uikit.safe_click(*uikit.QCRAFT.close_xy, uikit.QCRAFT, note='daily 關快速合成彈窗', wait_ms=500)
+            if uikit.is_open(DAILY_BASE):
+                uikit.close_panel(DAILY_BASE, known_open=True)
+            if not self.daily_open_any():
+                return True
+        return False
 
     def panel_open(self) -> bool:
         return uikit.is_open(uikit.DAILY)
@@ -530,12 +553,15 @@ class Tools:
         """第 k 項快速合成：開彈窗 → 大字只防點錯項（讀空放行）→ 材料計數不是紅字 → 彈窗「合成」（花 1000 石幣）→ 關彈窗 → 該項變綠。回 (ok, 原因)"""
         if not uikit.safe_click(*MERGE_XY[k], uikit.DAILY, note=f'daily 開第 {k + 1} 項快速合成「{name}」', wait_ms=700):
             return False, '委託面板不在，沒點'
-        for _ in range(8):
+        for _ in range(POP_WAIT_N):                            # 彈窗有時 4 秒才浮出（play-p1-daily5 DKBO3 第 2 環 229）→ 輪詢到約 4.5 秒
             if uikit.is_open(uikit.QCRAFT):
                 break
-            uikit.sleep(0.2)
+            uikit.sleep(0.25)
         else:
-            return False, '快速合成彈窗沒開'
+            if not uikit.is_open(uikit.QCRAFT):                # 失敗前再等一下重檢一次
+                uikit.sleep(1.0)
+            if not uikit.is_open(uikit.QCRAFT):
+                return False, '快速合成彈窗沒開'
 
         def close_pop():
             uikit.safe_click(*uikit.QCRAFT.close_xy, uikit.QCRAFT, note='daily 關快速合成彈窗', wait_ms=500)
