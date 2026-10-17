@@ -14,6 +14,9 @@
   slot  背包格右下角疊數白字（相對格心 SLOT_COUNT；字高 16～17）—— 拆分前讀一次，跟數量框交叉核對
   ass   外掛「捉寵設置」可抓捕數深色字（ASS_COUNT_BOX 1170,300 80×30；字高約 15）
   shop  便利店數量框白字（SHOP_QTY_BOX 968,450 56×32，米底；字高 19，筆畫比 qty 細 → 另一組樣板；2026-10-17 p1 每日任務 OCR 讀單一「1」全空 → 227）
+  reward 每日委託面板「完成所有任務額外獎勵」計數綠字「n/5」（REWARD_BOX 960,350 110×45；字高 24～30、斜線 34；2026-10-18 p1 final OCR 25 次全讀 None）。
+        **分數格式**：用 read_ratio / read_ratio_number（不是 read_number）：切出 3 字 = 分子 + 「/」+ 分母，樣板含「/」；
+        OCR 備援只學分子那一個字（「/」和分母已被樣板認出才學）。種子 0 1 2 5 / 從 tools/.cache 每日面板截圖 44 張切（3、4 沒有樣本，等實機 OCR 學）
 現場取像素的來源（LIVE_SRC，2026-10-17 dev-shop-qty2 查 227 根因）：
   `gui pixel`（uikit.px）取的是客戶區**原生 (2x, 2y) 單點**，`gui shot` 存的是 **HighQualityBicubic 縮圖** —— 兩者點陣不同。
   種子樣板全部從截圖切 → 實機用 px 讀，字形對不上：shop 實機 4 次全 None（同一張存證圖離線讀得出 1，play-p1-dailyrun）；
@@ -30,7 +33,9 @@
   uv run --no-project python tools/gui/numglyph.py read slot <格號 0 起>    # 背包格疊數
   uv run --no-project python tools/gui/numglyph.py shot <截圖.png> qty|ass|shop|slot [格號]   # 離線讀截圖
   uv run --no-project python tools/gui/numglyph.py label <截圖.png> shop 0  # 人工看過截圖的值 → 學進 tools/.cache/num-tpl.json（例：ui-log/*-shop-qty-unread.png）
+  uv run --no-project python tools/gui/numglyph.py shot <截圖.png> reward     # 每日委託獎勵計數「n/5」（label 給分子：label <png> reward 3）
 程式用：read_rows(rows, kind) / read_box(kind, box) / read_number(kind, box, ocr_reads, sleep_fn) / slot_box(i) / digits_ok(n, v) / learn(rows, v, kind)
+        分數（reward）：read_ratio(rows) / read_ratio_box() / read_ratio_number(ocr_reads=…) / learn_ratio(rows, 分子)
 """
 import argparse
 import json
@@ -51,13 +56,15 @@ PREDS = {
     'slot': lambda c: min(c[:3]) > 200,           # 背包格疊數白字（深色描邊）
     'ass': lambda c: max(c[:3]) < 110,            # 外掛面板淺灰底（221,221,219）上的深色字
     'shop': lambda c: min(c[:3]) > 200,           # 便利店數量框白字（米底；鍵盤開著時框內只剩 1 px 寬直線，字高篩掉）
+    'reward': lambda c: c[1] > 200 and c[0] < 210 and c[2] < 190,   # 每日委託獎勵計數綠字（135,255,91 / 167,255,131；棕色面板底 g < 120）
 }
-HEIGHT = {'qty': (17, 22), 'slot': (14, 18), 'ass': (13, 17), 'shop': (16, 22)}     # 字高範圍（px）：其他高度的元件（圖示白點、框線）不算字
+HEIGHT = {'qty': (17, 22), 'slot': (14, 18), 'ass': (13, 17), 'shop': (16, 22), 'reward': (20, 36)}     # 字高範圍（px）：其他高度的元件（圖示白點、框線）不算字
 QTY_BOX = (670, 430, 170, 45)                     # = bag.SPLIT_QTY_BOX
 ASS_COUNT_BOX = (1170, 300, 80, 30)               # 「可抓捕數:」冒號（x≈1158）之後、「+」鈕（x≥1256）之前
 SHOP_QTY_BOX = (968, 450, 56, 32)                 # = shopkit.QTY_BOX（便利店數量框；「1」在 x 991～1001 × y 457～475）
-BOXES = {'qty': QTY_BOX, 'ass': ASS_COUNT_BOX, 'shop': SHOP_QTY_BOX}
-LIVE_SRC = {'qty': 'px', 'slot': 'px', 'ass': 'px', 'shop': 'shot'}   # 現場取像素：'px' = uikit.px 原生單點；'shot' = uikit.spx 截圖同一段縮圖（見檔頭）
+REWARD_BOX = (960, 350, 110, 45)                  # = daily.REWARD_BOX（綠字 986～1044 × 358～387）
+BOXES = {'qty': QTY_BOX, 'ass': ASS_COUNT_BOX, 'shop': SHOP_QTY_BOX, 'reward': REWARD_BOX}
+LIVE_SRC = {'qty': 'px', 'slot': 'px', 'ass': 'px', 'shop': 'shot', 'reward': 'shot'}   # 現場取像素：'px' = uikit.px 原生單點；'shot' = uikit.spx 截圖同一段縮圖（見檔頭）
 SLOT_COUNT = (0, 18, 46, 28)                      # 背包格疊數框（相對格心 dx, dy, w, h；實測「21」在 cx+20～+43、cy+26～+42）
 SLOT_X, SLOT_Y = [752, 860, 966, 1072, 1180], [245, 352, 460]     # = bag.SLOT_X / SLOT_Y（不 import bag：bag 會 import 本模組）
 
@@ -215,6 +222,81 @@ def read_number(kind: str, box=None, ocr_reads=(), sleep_fn=None, tries: int = 2
     return last
 
 
+# ---- 分數「n/d」（reward kind，2026-10-18）----
+RATIO_KINDS = ('reward',)                          # 用 read_ratio 讀的 kind（樣板含「/」）
+
+
+def read_ratio(rows, kind: str = 'reward', tpl: dict | None = None) -> dict:
+    """二值列 → 分數 {'n': 字數, 'text': 'a/b' 或 None, 'value': 分子 a 或 None, 'den': 分母 b 或 None, 'tail': 「/」+ 分母已認出}。
+    每個字都要被樣板認出、而且剛好是「數字 + / + 數字」才給 value；只有分子沒認出時 tail = True（給 OCR 備援學分子用）"""
+    tpl = load_tpl() if tpl is None else tpl
+    segs = segs_of(rows, kind)
+    out = {'n': len(segs), 'text': None, 'value': None, 'den': None, 'tail': False}
+    if len(segs) != 3:
+        return out
+    m = digitmatch.Matcher(tpl.get(kind) or {})
+    chs = [m.classify(g)[0] for _, _, g in segs]
+    out['tail'] = chs[1] == '/' and bool(chs[2]) and chs[2].isdigit()
+    if not out['tail'] or not chs[0] or not chs[0].isdigit():
+        return out
+    out['text'], out['value'], out['den'] = ''.join(chs), int(chs[0]), int(chs[2])
+    return out
+
+
+def learn_ratio(rows, value: int, kind: str = 'reward', save: bool = True) -> int:
+    """可信分子 value（OCR）→ 只學分子那一個字。要切出 3 字、「/」與分母已被樣板認出、value 是 1 位數；矛盾 / 太像別的字不學（petglyph._learn_glyphs）"""
+    import petglyph
+    segs = segs_of(rows, kind)
+    if len(segs) != 3 or value is None or not 0 <= int(value) <= 9 or not read_ratio(rows, kind)['tail']:
+        return 0
+    add = petglyph._learn_glyphs(segs[:1], str(int(value)), kind, load_tpl())
+    n = sum(len(v) for b in add.values() for v in b.values())
+    if n and save:
+        _save_learned(add)
+    return n
+
+
+def read_ratio_box(kind: str = 'reward', box=None) -> dict:
+    """現場讀一次分數框 → read_ratio 結果 + 'rows'（讀不到像素 → n = -1）"""
+    box = box or BOXES[kind]
+    rows = live_rows(box, kind)
+    if rows is None:
+        return {'n': -1, 'text': None, 'value': None, 'den': None, 'tail': False, 'rows': None}
+    r = read_ratio(rows, kind)
+    r['rows'] = rows
+    return r
+
+
+def read_ratio_number(kind: str = 'reward', box=None, ocr_reads=(), sleep_fn=None, tries: int = 2, log=None) -> dict:
+    """讀分數的分子（只讀像素 / OCR，不點擊）→ {'value', 'den', 'n', 'via': 'tpl' | 'ocr' | None, 'ocr': [讀過的 OCR 值]}。
+    每輪：像素切字 → 3 字全認出就回；否則（切出 3 字、「/」與分母已認出 = 字形就位）依序試 ocr_reads（零參數 → 分子 int | None），
+    讀到 0～9 就採用並學分子字形；切不出 3 字 → OCR 不採用（版面不對 / 被蓋住，不猜）。等 0.4 秒重讀，最多 tries 輪；仍不行 value = None"""
+    seen = []
+    last = {'value': None, 'den': None, 'n': -1, 'via': None, 'ocr': seen}
+    for t in range(max(1, tries)):
+        r = read_ratio_box(kind, box)
+        last['n'] = r['n']
+        if r['value'] is not None:
+            return {'value': r['value'], 'den': r['den'], 'n': r['n'], 'via': 'tpl', 'ocr': seen}
+        if r['tail']:
+            for fn in ocr_reads:
+                v = fn()
+                seen.append(v)
+                if v is not None and 0 <= int(v) <= 9:
+                    try:
+                        added = learn_ratio(r['rows'], v, kind)
+                    except Exception:                               # noqa: BLE001  學字失敗不影響讀值
+                        added = 0
+                    if log and added:
+                        log(f'numglyph：{kind} 學到分子字形（讀值 {v}）')
+                    return {'value': int(v), 'den': None, 'n': r['n'], 'via': 'ocr', 'ocr': seen}
+        if t + 1 < tries and sleep_fn:
+            sleep_fn(0.4)
+    if log:
+        log(f'numglyph：{kind} 分數讀不出（像素 {last["n"]} 字、OCR {seen}）→ 不採用')
+    return last
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description='小數字像素字形讀值（唯讀）')
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -235,16 +317,16 @@ def main(argv=None) -> int:
     if a.cmd == 'read':
         import winenv
         winenv.enable_server()
-        res = read_box(a.kind, box)
+        res = read_ratio_box(a.kind, box) if a.kind in RATIO_KINDS else read_box(a.kind, box)
         res.pop('rows', None)
     else:
         import imgmatch
         get = imgmatch.as_getter(a.png)
         x, y, w, h = box
         rows = binarize([get(x + i, y + j) for j in range(h) for i in range(w)], w, h, a.kind)
-        res = read_rows(rows, a.kind)
+        res = read_ratio(rows, a.kind) if a.kind in RATIO_KINDS else read_rows(rows, a.kind)
         if a.cmd == 'label':
-            res['learned'] = learn(rows, a.value, a.kind)
+            res['learned'] = learn_ratio(rows, a.value, a.kind) if a.kind in RATIO_KINDS else learn(rows, a.value, a.kind)
     print(json.dumps(res, ensure_ascii=False))
     return 0
 
