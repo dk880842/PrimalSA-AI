@@ -119,7 +119,7 @@ g = install(Game(mk()))
 fake_time(g)
 g.card_moves = False
 rc, out = run(char.switch, 'DKBO4')
-check('點了當前框沒動 → 62、只點一次、changed true', rc == 62 and len(g.inner_clicks()) == 1 and last_json(out)['changed'], f'{out.strip()} {g.clicks}')
+check('點了當前框沒動 → 重試一次仍沒動 → 62、點 2 次卡片、changed / retried true', rc == 62 and len(g.inner_clicks()) == 2 and last_json(out)['changed'] and last_json(out).get('retried'), f'{out.strip()} {g.clicks}')
 g = install(Game(mk()))
 fake_time(g)
 g.stuck = True
@@ -158,6 +158,60 @@ rc, out = run(char.switch, 'DKBO2')
 check('讀圖後面板消失 → 60、不點', rc == 60 and g.inner_clicks() == [])
 # 失敗有寫 errlog
 check('失敗有寫 errlog', errlog.LOG.exists() and errlog.LOG.read_text(encoding='utf-8').count('"source"') >= 5)
+
+# ---- 2026-10-17：面板開著時切角色（play-p1-daily2：委託面板蓋住切換鈕、HUD 變暗）----
+import screen_sigs  # noqa: E402
+
+
+class DailyGame(Game):
+    """委託面板（DAILY_SIG）開著：HUD 變暗（ASS 127,0,0）、點切換鈕 763,760 沒反應；點 ✕ 1193,98 才關"""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.daily = True
+        self.moves_left = None        # 只有前 N 次點卡片沒反應（測重試成功）
+
+    def color_at(self, x, y):
+        if self.daily:
+            for px_, py_, r, g_, b, _t in screen_sigs.DAILY_SIG:
+                if (x, y) == (px_, py_):
+                    return (r, g_, b)
+            if (x, y) == (1300, 745):
+                return (127, 0, 0)
+            return (90, 70, 40)
+        return super().color_at(x, y)
+
+    def gui(self, *args, note=''):
+        if args[0] == 'seq' and self.daily:
+            for part in args[1].split(';'):
+                w = part.split()
+                if w and w[0] == 'click':
+                    self.clicks.append((int(w[1]), int(w[2])))
+                    if (int(w[1]), int(w[2])) == (1193, 98):
+                        self.daily = False
+            return ''
+        if args[0] == 'seq' and self.moves_left is not None and self.panel:
+            w = args[1].replace(';', ' ').split()
+            if w[:1] == ['click'] and (int(w[1]), int(w[2])) in [click_pos(i) for i in range(len(self.cards))]:
+                self.card_moves = self.moves_left <= 0
+                self.moves_left -= 1
+        return super().gui(*args, note=note)
+
+
+g = install(DailyGame(mk()))
+fake_time(g)
+rc, out = run(char.switch, 'DKBO3')
+j = last_json(out)
+check('委託面板開著 → 先點 ✕ 1193,98 關掉再切 DKBO3：rc 0、closed=[daily]、只點一次卡片', rc == 0 and j['current'] == 'DKBO3' and j.get('closed') == ['daily']
+      and (1193, 98) in g.clicks and g.clicks.index((1193, 98)) < g.clicks.index(click_pos(2)) and g.inner_clicks().count(click_pos(2)) == 1, f'{out.strip()} {g.clicks}')
+g = install(DailyGame(mk()))
+g.daily = False
+g.moves_left = 1
+fake_time(g)
+rc, out = run(char.switch, 'DKBO4')
+j = last_json(out)
+check('第一次點卡片沒切成 → 重試一次切成：rc 0、retried、點 2 次 DKBO4 卡', rc == 0 and j['current'] == 'DKBO4' and j.get('retried') and g.inner_clicks() == [click_pos(3), click_pos(3)], f'{out.strip()} {g.clicks}')
+
 
 # ---- ensure 快路徑（watch 名牌 + current-char.json）----
 import time as _time  # noqa: E402

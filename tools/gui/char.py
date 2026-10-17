@@ -14,14 +14,18 @@
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；char 自己 60～65）：
   60 切換面板打不開或讀圖中途消失（沒點任何面板內座標）
   61 目標卡片找不到：名字沒有被 namematch 樣板（或 OCR 一致）確認、或該卡不是「線上」（離線 / 狀態不明）→ 不點，不猜
-  62 點了卡片但驗證時當前不是目標（不重點第二次）
+  62 點了卡片但驗證時當前不是目標（2026-10-17 起：關面板後整輪重試一次，仍不是才回 62；最多點 2 次卡片）
   63 當前框數量 ≠ 1（讀不準）
   64 名字矛盾（樣板與順序不同、OCR 讀到別人）
   65 點了卡片但「加載中」後 HUD 6 s 內沒回來（可能是別的視窗，停手看畫面）
 
 流程（P-I3 實測 2026-10-11）：點卡片後切換面板一定自己關；加載畫面約 0.25～0.5 s，HUD 在點擊返回後約 0.6 s 回來（整體約 1.2～1.4 s）。
 所以：點卡片前 team.read_state(keep_open) 讀一次，名字確認 + 狀態線上才點；點完先等加載特徵出現（≤1.5 s）再等 SIG_HUD（≤6 s）；
-最後重開面板（read_state）以「當前框 + 名字」驗證，沒到就再等 1.5 s 重讀一次（唯讀，不重點）。成功才寫 charstate。
+最後重開面板（read_state）以「當前框 + 名字」驗證，沒到就再等 1.5 s 重讀一次（唯讀）。成功才寫 charstate。
+切前先關面板（2026-10-17，play-p1-daily2）：clear_panels() = uikit.close_known_panel 連關（每日任務快速合成彈窗 / 委託面板 / 背包 / 便利店…，點 ✕）；
+  第一輪 60（切換面板打不開）/ 62（點了但當前不是目標）→ 再 clear_panels、整輪重試一次（重讀卡片：已是目標就不點），仍不是 → 非 0。
+  根因：委託面板開著時 HUD 變暗（ASS 254→127）、切換鈕 763,760 被面板下緣蓋住，委託面板又不在已知面板清單 → preflight 連 3 次不認得回 9 / 開面板回 60，
+  一下都沒點卡片（actions.log 18:14:36～18:15:43 沒有任何「char 切到」點擊；changed 只有點過卡片才 true）。當時呼叫端沒看退出碼就當成切好了。
 加速（2026-10-11）：preflight 用 watch 快路徑、waitpix 開關面板、namematch 全命中不 OCR；ensure 在 watch 名牌與旁路檔都已是目標且夠新（見 watch_confirms）時完全不開面板。耗時見 ui/team.md。
 """
 import time
@@ -50,6 +54,7 @@ POLL_S = 0.05
 LOADING_GRACE_S = 1.0                # 沒看到加載畫面時，點擊後這麼久才接受 HUD（避免面板剛自關、加載還沒出現那一瞬間的 HUD）
 FAST_NAME_MAX_AGE_S = 8.0            # ensure 快路徑：頭頂名牌多新才採用（watch 名牌每 3～9 s 才核對一次；另外要求名牌核對時間在目前畫面狀態開始之後）
 FAST_CHAR_MAX_AGE_S = 1800.0         # ensure 快路徑：current-char.json 多新才採用
+RETRY_SWITCH_RC = (EXIT_PANEL, EXIT_NOT_SWITCHED)  # switch 第一輪這兩種 → clear_panels 後整輪重試一次（2026-10-17）
 RETRY_RC = (EXIT_NO_CARD, EXIT_CUR_COUNT)  # 暫時性讀不準：飄字 / 戰鬥淡入剛好蓋住卡片（掛機遇敵開著時常見），重讀就好
 READ_TRIES = 3
 READ_RETRY_S = 0.8
@@ -179,9 +184,81 @@ def watch_confirms(target: str) -> bool:
     return bool(cc) and charstate.same(cc.get('name'), target)
 
 
+def clear_panels(max_n: int = 3) -> list:
+    """切角色前關掉擋路的已知面板（uikit.close_known_panel：每日任務快速合成彈窗 → 委託面板 → 背包 / 寵物 / 便利店…，都點 ✕），最多 max_n 個。
+    2026-10-17 play-p1-daily2：委託面板開著時 HUD 變暗、切換鈕被面板下緣蓋住 → 切不成。回關掉的面板名 list（不認得的畫面不碰）"""
+    closed = []
+    for _ in range(max_n):
+        nm = uikit.close_known_panel()
+        if not nm:
+            break
+        closed.append(nm)
+    return closed
+
+
+def _attempt(target: str, info: dict) -> tuple:
+    """讀卡片 → （不是目標才）點目標卡 → 等加載 / HUD → 重開面板以「當前框 + 名字」驗證。→ (rc, msg)；rc 0 = 當前已是 target（msg = 成功訊息）。
+    不寫 errlog（由 switch 統一記最後結果）；點過卡片會設 info['changed']"""
+    clicked = False
+    try:
+        r, a = read_analyse(target, keep_open=True)
+        if not r['ok']:
+            uikit.snap('char-switch-fail')
+            return EXIT_PANEL, r['err']
+        info['current'] = a['current']
+        if a['rc']:                                   # 矛盾 / 當前框數不對 / 當前名字不明：不知道來源狀態，不敢切
+            uikit.snap('char-switch-fail')
+            return a['rc'], a['msg']
+        if charstate.same(a['current'], target):
+            return 0, f'char：當前已是 {target}，沒有點擊'
+        tc = a['target_card']
+        if tc is None:
+            names = [(c.name, c.status, c.check) for c in r['cards']]
+            uikit.snap('char-switch-nocard')
+            return EXIT_NO_CARD, f'找不到可點的 {target} 卡片（要求：名字確認 + 線上）；卡片 {names}'
+        x0, y = team.SLOTS[tc.slot]
+        uikit.mark('read-cards')
+        if not uikit.safe_click(x0 + CLICK_DX, y, uikit.SWITCH, note=f'char 切到 {target}（slot{tc.slot}）', wait_ms=CLICK_WAIT_MS):
+            return EXIT_PANEL, '點卡片前切換面板特徵不在，沒點'
+        clicked = True
+        uikit.mark('click')
+    finally:
+        if not clicked:
+            uikit.close_panel(uikit.SWITCH, known_open=True)
+            uikit.mark('close')
+    # 面板會自己關；等加載 → HUD → 重開面板驗證（唯讀，這一輪不重點）
+    seen, hud, sec = wait_switched()
+    uikit.mark('wait-load+hud')
+    info['loading_seen'] = seen
+    info['changed'] = True                             # 已點擊：畫面可能已換角色，呼叫端要知道
+    if not hud:
+        uikit.snap('char-switch-nohud')
+        return EXIT_NO_HUD, f'點了 {target} 卡片，但 HUD {HUD_TIMEOUT_S:.0f} s 內沒回來（可能是別的視窗）'
+    a = {'rc': EXIT_NOT_SWITCHED, 'msg': '', 'current': None}
+    for i in range(2):
+        r = team.read_state(True)
+        if r['ok']:
+            a = analyse(r)
+            if a['rc'] == 0 and charstate.same(a['current'], target):
+                break
+        else:
+            a = {'rc': EXIT_PANEL, 'msg': r['err'], 'current': None}
+        if i == 0:
+            uikit.sleep(VERIFY_RETRY_S)
+    info['current'] = a['current']
+    if a['rc'] == 0 and charstate.same(a['current'], target):
+        return 0, f'char：已切到 {target}（加載 {"有" if seen else "沒"}看到，HUD 回來 {sec:.1f} s）'
+    uikit.snap('char-switch-verify-fail')
+    if a['rc'] == 0:
+        return EXIT_NOT_SWITCHED, f'點了 {target} 卡片但驗證時當前是 {a["current"]}'
+    return a['rc'], a['msg'] or f'點了 {target} 卡片但驗證讀不準（rc {a["rc"]}）'
+
+
 def switch(target_text: str, fast: bool = False) -> int:
     """切到 target（已是就不點）。回退出碼；最後一行 JSON。
-    fast=True（ensure）：watch 名牌與 current-char.json 都已是 target 且夠新就直接回 0（info['via']='watch'，不開面板、不點）；其餘照舊現場開面板確認"""
+    fast=True（ensure）：watch 名牌與 current-char.json 都已是 target 且夠新就直接回 0（info['via']='watch'，不開面板、不點）；其餘照舊現場開面板確認。
+    2026-10-17：開面板前先 clear_panels() 關掉擋路的已知面板；第一輪 60（切換面板打不開）/ 62（點了但驗證當前不是目標）→ 再關一次面板、整輪重來一次
+    （重讀卡片：已是目標就不點；仍不是才再點一次），仍不是 → 原碼（非 0）"""
     t0 = time.time()
     hit = charstate.norm_char(target_text)
     target = charstate.display(hit) if hit else None
@@ -198,70 +275,22 @@ def switch(target_text: str, fast: bool = False) -> int:
         info.update(current=target, via='watch')
         print(f'char：watch 名牌與旁路檔都是 {target}，沒有開面板、沒有點擊')
         return _out(0, info, t0)
-    clicked = False
-    try:
-        r, a = read_analyse(target, keep_open=True)
-        if not r['ok']:
-            uikit.snap('char-switch-fail')
-            uikit.fail(SRC, EXIT_PANEL, r['err'])
-            return _out(EXIT_PANEL, info, t0, r['err'])
-        info['current'] = a['current']
-        if a['rc']:                                   # 矛盾 / 當前框數不對 / 當前名字不明：不知道來源狀態，不敢切
-            uikit.snap('char-switch-fail')
-            uikit.fail(SRC, a['rc'], a['msg'])
-            return _out(a['rc'], info, t0, a['msg'])
-        if charstate.same(a['current'], target):
-            _record(target)
-            print(f'char：當前已是 {target}，沒有點擊')
-            return _out(0, info, t0)
-        tc = a['target_card']
-        if tc is None:
-            names = [(c.name, c.status, c.check) for c in r['cards']]
-            uikit.snap('char-switch-nocard')
-            msg = f'找不到可點的 {target} 卡片（要求：名字確認 + 線上）；卡片 {names}'
-            uikit.fail(SRC, EXIT_NO_CARD, msg)
-            return _out(EXIT_NO_CARD, info, t0, msg)
-        x0, y = team.SLOTS[tc.slot]
-        uikit.mark('read-cards')
-        if not uikit.safe_click(x0 + CLICK_DX, y, uikit.SWITCH, note=f'char 切到 {target}（slot{tc.slot}）', wait_ms=CLICK_WAIT_MS):
-            msg = '點卡片前切換面板特徵不在，沒點'
-            uikit.fail(SRC, EXIT_PANEL, msg)
-            return _out(EXIT_PANEL, info, t0, msg)
-        clicked = True
-        uikit.mark('click')
-    finally:
-        if not clicked:
-            uikit.close_panel(uikit.SWITCH, known_open=True)
-            uikit.mark('close')
-    # 面板會自己關；等加載 → HUD → 重開面板驗證（唯讀，絕不重點）
-    seen, hud, sec = wait_switched()
-    uikit.mark('wait-load+hud')
-    info['loading_seen'] = seen
-    info['changed'] = True                             # 已點擊：畫面可能已換角色，呼叫端要知道
-    if not hud:
-        uikit.snap('char-switch-nohud')
-        msg = f'點了 {target} 卡片，但 HUD {HUD_TIMEOUT_S:.0f} s 內沒回來（可能是別的視窗）'
-        uikit.fail(SRC, EXIT_NO_HUD, msg)
-        return _out(EXIT_NO_HUD, info, t0, msg)
-    a = {'rc': EXIT_NOT_SWITCHED, 'msg': '', 'current': None}
-    for i in range(2):
-        r = team.read_state(True)
-        if r['ok']:
-            a = analyse(r)
-            if a['rc'] == 0 and charstate.same(a['current'], target):
-                break
-        else:
-            a = {'rc': EXIT_PANEL, 'msg': r['err'], 'current': None}
-        if i == 0:
-            uikit.sleep(VERIFY_RETRY_S)
-    info['current'] = a['current']
-    if a['rc'] == 0 and charstate.same(a['current'], target):
+    closed = clear_panels()
+    if closed:
+        info['closed'] = closed
+        print(f'char：切角色前先關面板 {closed}')
+    rc, msg = _attempt(target, info)
+    if rc in RETRY_SWITCH_RC:
+        more = clear_panels()
+        if more:
+            info['closed'] = info.get('closed', []) + more
+        info['retried'] = True
+        print(f'char：第一輪 rc {rc}（{msg}）→ 關面板 {more or "（沒有）"} 後重試一次')
+        rc, msg = _attempt(target, info)
+    if rc == 0:
         _record(target)
-        print(f'char：已切到 {target}（加載 {"有" if seen else "沒"}看到，HUD 回來 {sec:.1f} s）')
+        print(msg)
         return _out(0, info, t0)
-    rc = a['rc'] or EXIT_NOT_SWITCHED
-    msg = a['msg'] or f'點了 {target} 卡片但驗證時當前是 {a["current"]}'
-    uikit.snap('char-switch-verify-fail')
     uikit.fail(SRC, rc, msg)
     return _out(rc, info, t0, msg)
 

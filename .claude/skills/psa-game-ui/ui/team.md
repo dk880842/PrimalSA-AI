@@ -10,7 +10,9 @@
 - **多視窗（第 3b 步）**：卡片順序 = 該視窗名單順序（`clients.roster()`；`PSA_CLIENT=PrimalSA2` 為 DKBO6～DKBO10），`team.py` 預設隊長 = 名單第 1 個（DKBO6）。OCR 尾碼交叉確認依名單算（PrimalSA2：06～09、010，隊長 DKBO6 的 06 也算；單獨「10」不認）。第一次用 PrimalSA2 先在 5 人在線、切換面板開著時跑 `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/namematch.py learn`（新名字要 OCR 確認才學；樣板檔共用，存檔保留主視窗的名字）。
 - **切換角色優先用 `char.py`**（P3，2026-10-11 實測）：`uv run --no-project python tools/gui/char.py current|switch DKBO2|ensure DKBO`。
   點卡片前先用 namematch 確認名字 + 狀態線上（命中不了 → 61，不猜），點完等「加載中」→ HUD 回來 → 重開面板用「當前藍框 + 名字」驗證，成功才寫 current-char.json；最後一行印 JSON（`changed`、`current`…）。
-  退出碼 60 面板打不開 / 61 目標卡找不到或名字沒確認 / 62 點了但當前沒變（不重點）/ 63 當前框 ≠ 1 / 64 名字矛盾 / 65 點了但 HUD 6 s 沒回來，加共用 1 / 2 / 8 / 9 / 10。
+  退出碼 60 面板打不開 / 61 目標卡找不到或名字沒確認 / 62 點了但當前沒變 / 63 當前框 ≠ 1 / 64 名字矛盾 / 65 點了但 HUD 6 s 沒回來，加共用 1 / 2 / 8 / 9 / 10。
+  **切前先關面板、不對重試一次**（2026-10-17，play-p1-daily2）：`char.clear_panels()` = `uikit.close_known_panel` 連關（每日任務快速合成彈窗 / 委託面板 / 背包 / 寵物 / 便利店…，點 ✕，不認得的不碰）；第一輪 60 / 62 → 再關一次、整輪重來（重讀卡片：已是目標不點；仍不是才再點一次，最多點 2 次卡片），仍不是 → 原碼。JSON 多 `closed`（關掉的面板）/ `retried`。
+  根因：委託面板開著時 HUD 變暗（ASS 254→127）、切換鈕被蓋住，面板又不在已知清單 → preflight 連 3 次不認得回 9 / 開面板 60，一下都沒點卡片（不是假成功；當時呼叫端沒看退出碼）。
   開面板時 HUD 不在（戰鬥 / 轉場 / 對話）會先等 HUD 回來最多 15 s（`team.OPEN_HUD_WAIT_S`，不點任何東西，errlog #32）；仍打不開的錯誤訊息分「HUD 不在（等了 N s）」與「點了 N 次特徵沒出現」，並存 snap `team-panel-open-fail`。
   2026-10-12：**點了開啟鈕之後 HUD 才消失**（任務「接受」後約 3 秒開切換面板，第一下被吃掉、接著 HUD 不見一段時間，龍的巢穴 / 夢幻洞窟 / 解救老爺爺 3 次都 rc 40）→ HUD 不在的期間不算 4 s 逾時（最多從點擊起 15 s），HUD 回來後補點（全程最多 3 下）；失敗訊息多「（點完 HUD 曾消失）」，`uikit.LAST_OPEN['hud_lost_after_click']`。`hud_wait=0` 的其他面板行為不變。**實機未驗證**。
   **2026-10-12 S3 真正根因（rc 40 每個任務幾乎都 1 次）**：失敗時 HUD 一直都在（沒有 `hud_lost_after_click` 紀錄），問題是 `open_panel_ex` 在 seq（click + waitpix 1.5 s）**回來後**才記 `last_click_t`，第 2 下要再等 `RECLICK_S` 2.5 s → 最早 4.1 s 才補點，剛好超過 4 s timeout，所以第一下被吃掉就永遠不補點。改成記「點下去的時間」→ 第 2 下在約 2.5 s 補點、4 s 內完成（所有面板共用）。離線測試 test_uikit 的假畫面也改成 waitpix 失敗耗時 1.5 s + 每次 seq 0.2 s（舊假畫面不耗時，才沒抓到）；舊版在新測試下 FAIL、新版 PASS。實機要等下次 questrun 接取任務時看 actions.log：同一秒內「uikit 開 SWITCH 面板」兩行間隔約 2.5 s 而且沒有 rc 40。

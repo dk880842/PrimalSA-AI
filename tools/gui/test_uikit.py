@@ -533,6 +533,12 @@ _shop_cols[screen_sigs.SHOP_X[:2]] = screen_sigs.SHOP_X[2:5]
 uikit.px = lambda pts: [_shop_cols.get(pt, (70, 70, 70)) for pt in pts]
 _closed.clear()
 check('close_known_panel：NPC 商店 → 點 ✕ 1207,107（只關、不碰購買鈕）', uikit.known_panel() == 'shop' and uikit.close_known_panel() == 'shop' and _closed == [('SHOP', (1207, 107))], str(_closed))
+# 每日任務委託面板 / 快速合成彈窗（2026-10-17：開著時 char.switch 的 preflight 連 3 次不認得、不點卡片）
+for _nm, _sig, _xy in (('daily', screen_sigs.DAILY_SIG, (1193, 98)), ('qcraft', screen_sigs.QCRAFT_SIG, (1080, 156))):
+    _cols = {(x, y): (r, g, b) for x, y, r, g, b, _t in _sig}
+    uikit.px = lambda pts, _c=_cols: [_c.get(tuple(pt), (70, 70, 70)) for pt in pts]
+    _closed.clear()
+    check(f'close_known_panel：{_nm} → 點 ✕ {_xy}', uikit.close_known_panel() == _nm and _closed == [(_nm.upper(), _xy)], str(_closed))
 
 # preflight 遇到已知面板殘留 → 關掉再檢查、不計次（2026-10-15 PrimalSA2：bag.py 留下背包面板 → pet.py list 連 3 次不認得 → verify-halt）
 _keep_pf = (uikit.screen, uikit.transition_now, uikit.sleep, uikit.trip_verify)

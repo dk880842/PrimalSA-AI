@@ -560,11 +560,22 @@ def known_panel() -> str | None:
     """現場讀圖：畫面上是不是「可以放心點 ✕ 關掉」的已知面板 → 面板名（screen_sigs.PANEL_NAMES 的 key）或 None。
     判定 = screen_sigs.panel_strict（標題板字 + ✕ 都命中）；背包另外要 bag.BAGANY 外框（✕ + 刪除管理 / 整理背包兩顆鈕）也在
     （刪除模式 / 圖鑑分頁等子狀態不算，交回呼叫端的不認得規則）。讀不到 / 不認得 = None（不碰）"""
-    pts = screen_sigs.points() + screen_sigs.panel_points()
-    cols = px(pts)
-    if cols is None:
+    m = _known_px()
+    if m is None:
         return None
-    name = screen_sigs.panel_strict(dict(zip(pts, cols)))
+    return _known_from(m)
+
+
+def _known_px() -> dict | None:
+    """known_panel / close_known_panel 共用的一次 pixel 讀（面板點 + 每日任務 QCRAFT / DAILY 特徵點）→ {點: 色}；讀不到 None"""
+    pts = screen_sigs.points() + screen_sigs.panel_points() + [(x, y) for x, y, *_ in QCRAFT.sig + DAILY.sig]
+    cols = px(pts)
+    return None if cols is None else dict(zip(pts, cols))
+
+
+def _known_from(m: dict) -> str | None:
+    """已讀好的像素 → known_panel 的判定（標題板字 + ✕；背包另驗外框）"""
+    name = screen_sigs.panel_strict(m)
     if name == 'bag':
         import bag                                   # 延後 import：bag 也 import uikit
         if not is_open(bag.BAGANY):
@@ -588,8 +599,16 @@ def known_panel_obj(name: str) -> Panel | None:
 
 def close_known_panel() -> str | None:
     """畫面停在已知面板（known_panel）→ 點它的 ✕ 關掉（close_panel：✕ → 再 ✕ → ESC，每步驗證）。
-    回關掉的面板名；不是已知面板 / 關不掉 → None（呼叫端照舊當不認得）"""
-    name = known_panel()
+    回關掉的面板名；不是已知面板 / 關不掉 → None（呼叫端照舊當不認得）。
+    每日任務的快速合成彈窗 / 委託面板（QCRAFT / DAILY，不在 screen_sigs.PANEL_NAMES）先判：開著時 HUD 變暗（ASS 254→127）、
+    切換鈕被面板下緣蓋住 → 以前 char.switch 的 preflight 連 3 次不認得停手、不點卡片（2026-10-17 play-p1-daily2）。彈窗疊在面板上 → 先關彈窗"""
+    m = _known_px()
+    if m is None:
+        return None
+    for p in (QCRAFT, DAILY):                        # 同一次讀圖判（不多讀；preflight 每輪讀圖次數不變）
+        if all(screen_sigs.close(m[(x, y)], (r, g, b), t) for x, y, r, g, b, t in p.sig):
+            return p.name.lower() if close_panel(p, known_open=True) else None
+    name = _known_from(m)
     p = known_panel_obj(name) if name else None
     if not p:
         return None
