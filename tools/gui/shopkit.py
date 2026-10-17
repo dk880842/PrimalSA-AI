@@ -21,6 +21,13 @@
   qty_chunks：數量每位數字都有樣板 → 一次 ＋ 到 n 買；有不認得的數字才拆成「每位數字都有樣板」的幾次（樣板只有 1 3 時 7 → 3+3+1、20 → 13+3+3+1），學到新數字自動變少次。
   buy_checked：購買前後各讀一次數量框 → 'bought'（讀到 0）/ 'zeroish'（變成一個認不出的字：ui/shop.md 競技場實機「購買後數量框自動變 0」，
   0 尚無樣板 → 視為買到，**呼叫端要用背包名稱核對把關**）/ 'not_bought'（點陣跟買前完全一樣 = 仍是原數量）/ 'unknown'（其他：不確定，不重買）。
+選商品一次到位（2026-10-18 dev-shop-speed；依據 10-13～10-18 actions log 的選商品列位統計）：實測每拖 114 px 約捲 2 列（連拖 n 次 ≈ 2n 列，偏差 ±1，到底夾住；最後一列落視野第 4 列）。
+  舊流程逐列：拖一次 → 點列 → 核對 → 不對換鄰近列 → 不夠再拖，第 19 項 / 第 26 項這種要 4～6 次點擊（10～15 秒）。
+  新流程 _select_direct：plan_scroll（純函式：index → 最少拖數、到底夾 max_off、預測視野列）→ 連拖（中間只等 DRAG_CHAIN_MS）→ 點預測列一次、title_is 核對中就選到；
+  沒中 = 點到的是清單裡另一個商品 → read_idx 讀出它是第幾項 → 反推實際視野偏移（st['off']）→ 直接點正確列，最多 3 次點擊；st['off'] 留給下一項（店內 index 由小到大買，同視野不再拖、往後只補需要的拖數）。
+  讀不出是哪個商品 / 預測出視野 / 3 次不中 → 退回舊的逐列鄰近流程 _select_scan（行為不變）。標題核對保留，買錯不可能。
+  等待縮短：購買 → 確定後固定等 900 → 250 ms、buy_checked 改輪詢數量框點陣變了就繼續（最多約 3 秒；沒變才判 not_bought）；close_shop 點 ✕ 後輪詢紅圓消失（原固定 500 ms）。
+  **未實機**：捲動偏差 ±1 是 log 統計值；DRAG_CHAIN_MS（連拖間隔 1.2 s，原 1.5 s）的慣性未量；輪詢的實機節奏待下次每日任務 fish 段看 log。
 選商品（2026-10-17 227 修）：呼叫端（dailyplan.store_route / daily.buy_at）店內依清單 index 由小到大買；select_item 目標在視野上方時 scroll_top 歸零再找。
 **未實機**（select_item / set_qty 的座標取自 daily-probe 探路量測，2026-10-17；shop_open / 購買 / 確定 = 既有實測值）。
 """
@@ -61,6 +68,11 @@ DRAG_UP = (540, 560, 540, 446)                   # 往上拖 114 px = 清單往�
 DRAG_DOWN = (540, 446, 540, 560)                 # 往回拖（捲到頂用）
 DRAG_SETTLE_MS = 1500                            # 慣性停下後才讀（實測 ≥1.2 s）
 ROWS_PER_DRAG = 2
+DRAG_CHAIN_MS = 1200                             # 連拖時前幾次拖完等多久再拖下一次（最後一次仍等 DRAG_SETTLE_MS）；只縮 0.3 s、**慣性是否跟 1.5 s 一致未實機量**（落點偏差有標題核對 + 讀名反推偏移兜底）
+CLOSE_POLL_MAX = 4                               # close_shop 每次點 ✕ 後輪詢面板是否關掉的次數（間隔 0.15 秒）
+BUY_POLL_MAX = 10                                # buy_checked 買後輪詢數量框最多幾次（每次間隔 0.3 秒 + 讀框）
+CONFIRM_WAIT_MS = 250                            # 按「確定」後只等這麼久，之後由 buy_checked 輪詢數量框（買完會變 0 = 特徵出現就繼續），不再固定等 900
+SELECT_WAIT_MS = 450                             # 點商品卡後等標題換好再讀
 
 
 # ---- 純函式 ----
@@ -140,6 +152,41 @@ def visible_candidates(idx: int, n_drags: int, rows: int = VIEW_ROWS) -> list:
         if 0 <= r < rows and r not in out:
             out.append(r)
     return out
+
+
+def max_off(n_items: int) -> int:
+    """清單最大捲動偏移（列）：總列數 − 可見 5 列（實機：拖到底最後一列落在視野第 4 列，2026-10-18 量 10-13～10-18 log）"""
+    return max(0, (n_items + 1) // 2 - VIEW_ROWS)
+
+
+def plan_scroll(idx: int, n_items: int, off: int) -> tuple:
+    """商品第 idx 項（0 起算）、目前視野第一列 = off → (要往下拖幾次, 拖完預測偏移, 預測視野列 pos)。
+    每次拖 ROWS_PER_DRAG 列、到底夾在 max_off；已在視野內 → 0 次。目標在視野上方（r < off）→ n = 0、pos 為負，呼叫端要先 scroll_top。
+    用**最少拖數**讓目標落在視野第 3 / 4 列（實測 log：row 5～14 預測列命中 ≥ 8 成，偏差 ±1 列）"""
+    r = idx // 2
+    if r - off <= VIEW_ROWS - 1:
+        return 0, off, r - off
+    n = -(-(r - off - (VIEW_ROWS - 1)) // ROWS_PER_DRAG)
+    new_off = min(off + n * ROWS_PER_DRAG, max(max_off(n_items), off))
+    return n, new_off, r - new_off
+
+
+def read_idx(lines, order) -> int | None:
+    """標題讀值（OCR 原始行 / 字串）→ 它是 order 的第幾項（0 起算）；讀不出 / 投不出 → None。
+    點到錯的卡片時，標題顯示的是**另一個商品** → 知道它的 index = 知道清單實際捲到哪（一次修正偏移，不用逐列試）"""
+    if lines is None:
+        return None
+    if isinstance(lines, str):
+        for i, o in enumerate(order):
+            if dailyplan.norm(o) == dailyplan.norm(lines):
+                return i
+    name = title_vote(lines, list(order))['name']
+    if not name:
+        return None
+    for i, o in enumerate(order):
+        if name in (o, dailyplan.norm(o)):
+            return i
+    return None
 
 
 def qty_digit_xy(n: int) -> list:
@@ -231,10 +278,12 @@ def buy_checked(n: int, log=None) -> str:
     before = numglyph.read_box('shop', QTY_BOX)
     buy_once()
     after = numglyph.read_box('shop', QTY_BOX)
-    for _ in range(5):
-        if after['n'] >= 1:
+    for _ in range(BUY_POLL_MAX):                         # 輪詢：點陣跟買前不同（框變 0 / 變別的字）= 買完了就繼續；一直沒變最多等約 BUY_POLL_MAX×0.3 秒再判 not_bought
+        if after['n'] >= 1 and after.get('rows') != before.get('rows'):
+            uikit.sleep(0.2)                              # 剛變的那一幀可能是淡入中 → 穩 0.2 秒再讀一次當最終值
+            after = numglyph.read_box('shop', QTY_BOX)
             break
-        uikit.sleep(0.4)
+        uikit.sleep(0.3)
         after = numglyph.read_box('shop', QTY_BOX)
     v = buy_verdict(before, after, n)
     if v in ('zeroish', 'unknown') and after['n'] > 0 and after['value'] is None:
@@ -262,13 +311,69 @@ def select_item(want: str, order: list, state: dict | None = None, reader=None, 
     if want not in order:
         return False
     reads = []                                               # (視野列, 各倍率原字)：失敗時寫 log
-    ok = _select_scan(want, order, st, reader, reads)
+    ok = _select_direct(want, order, st, reader, reads) or _select_scan(want, order, st, reader, reads)
     if not ok:
         shot = uikit.snap('shop-select-fail')
         if log:
             tail = '；'.join(f'列{r}:{t}' for r, t in reads[-4:]) or '（沒讀到）'
             log(f'shopkit 選不到「{want}」（第 {order.index(want) + 1} 項，讀 {len(reads)} 次），最後標題各倍率 {tail}；現場圖 {shot}')
     return ok
+
+
+def _drag_down(n: int, st: dict) -> None:
+    """往下拖 n 次（st['drags'] 累計）；中間只等 DRAG_CHAIN_MS（下一拖開始前慣性不必停完），最後一次等 DRAG_SETTLE_MS 才讀"""
+    for k in range(n):
+        wait = DRAG_SETTLE_MS if k == n - 1 else DRAG_CHAIN_MS
+        uikit.gui('seq', 'drag {} {} {} {}; wait {}'.format(*DRAG_UP, wait), note='shopkit 清單往下捲')
+        st['drags'] += 1
+
+
+def _select_direct(want: str, order: list, st: dict, reader, reads: list) -> bool:
+    """一次到位（2026-10-18）：依商品 index 算要拖幾次（plan_scroll，到底夾住）→ 連拖 → 點預測列一次、標題核對中就選到。
+    沒中：點到的是清單另一個商品 → read_idx 知道它的 index → 實際偏移 = 該 idx 的列 − 被點列，直接點正確列（最多 3 次點擊）。
+    st['off'] = 目前視野第一列（已知時）；沒有就用 drags×ROWS_PER_DRAG。標題核對沿用 title_is（避免買錯）。
+    讀不出是哪個商品 / 預測出視野 / 3 次不中 → 回 False，呼叫端退回逐列鄰近流程（_select_scan）"""
+    idx = order.index(want)
+    r, col = idx // 2, idx % 2
+    off = st['off'] if st.get('off') is not None else st['drags'] * ROWS_PER_DRAG
+    if r < off:                                              # 目標在視野上方 → 先回頂（依已知偏移少拖幾次、多 1 次保底）
+        scroll_top(max(1, off))
+        st['drags'], st['off'], off = 0, 0, 0
+    n, off, _ = plan_scroll(idx, len(order), off)
+    _drag_down(n, st)
+    st['off'] = off
+    for _ in range(3):
+        pos = r - off
+        if not 0 <= pos < VIEW_ROWS:
+            return False
+        x, y = card_xy(pos, col)
+        uikit.gui('seq', f'click {x} {y}; wait {SELECT_WAIT_MS}', note=f'shopkit 選商品「{want}」（第 {idx + 1} 項，視野列 {pos}）')
+        lines = reader()
+        if title_is(lines, want, order):
+            st['last_idx'] = idx
+            return True
+        reads.append((pos, title_vote(lines, order)['texts']))
+        got = read_idx(lines, order)
+        if got is not None and got == st.get('last_idx') and st.get('last_xy') != (x, y):   # 還是上一個商品的名字：標題可能還沒換 → 等一下重讀再信
+            uikit.sleep(0.5)
+            lines = reader()
+            if title_is(lines, want, order):
+                st['last_idx'] = idx
+                return True
+            got = read_idx(lines, order)
+        st['last_xy'] = (x, y)
+        if got is None:
+            return False
+        off = got // 2 - pos                                  # 讀到的商品就在被點的那一列 → 反推實際視野第一列
+        if off < 0:
+            return False
+        st['off'] = off
+        if r < off:
+            return False
+        n, off, _ = plan_scroll(idx, len(order), off)
+        _drag_down(n, st)
+        st['off'] = off
+    return False
 
 
 def _select_scan(want: str, order: list, st: dict, reader, reads: list) -> bool:
@@ -349,7 +454,7 @@ def set_qty_keypad(n: int, reader=None) -> bool:
 
 def buy_once() -> None:
     """按「購買」→ 提示「確定」（同 shopbuy；呼叫端已確認商品 / 數量）"""
-    uikit.gui('seq', f'click {BUY_BTN[0]} {BUY_BTN[1]}; wait 700; click {CONFIRM_BTN[0]} {CONFIRM_BTN[1]}; wait 900', note='shopkit 購買 → 確定')
+    uikit.gui('seq', f'click {BUY_BTN[0]} {BUY_BTN[1]}; wait 700; click {CONFIRM_BTN[0]} {CONFIRM_BTN[1]}; wait {CONFIRM_WAIT_MS}', note='shopkit 購買 → 確定')
 
 
 def close_shop(tries: int = 3) -> bool:
@@ -357,5 +462,9 @@ def close_shop(tries: int = 3) -> bool:
     for _ in range(tries):
         if not shop_open():
             return True
-        uikit.gui('seq', f'click {SHOP_CLOSE[0]} {SHOP_CLOSE[1]}; wait 500', note='shopkit 關便利店（✕）')
+        uikit.gui('seq', f'click {SHOP_CLOSE[0]} {SHOP_CLOSE[1]}; wait 150', note='shopkit 關便利店（✕）')
+        for _ in range(CLOSE_POLL_MAX):                   # ✕ 紅圓消失 = 已關就繼續（不固定等 0.5 s）；沒消失才再點
+            if not shop_open():
+                return True
+            uikit.sleep(0.15)
     return not shop_open()
