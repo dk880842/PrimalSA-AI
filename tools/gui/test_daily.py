@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """daily.py / dailyplan.py / shopkit.py 離線測試（假 Tools 模擬遊戲世界；0 次 powershell、不碰遊戲）。
 用法：uv run --no-project python tools/gui/test_daily.py"""
+import collections
 import contextlib
 import io
 import json
@@ -759,8 +760,10 @@ class FakeTools:
     def talk(self, npc, at, then=''): return True
 
     # -- 委託面板 --
-    def daily_open(self, may_walk=False):
+    def daily_open(self, may_walk=False, settle=True):
         W = self.W
+        self.opens = getattr(self, 'opens', [])
+        self.opens.append((W.cur, settle))
         assert W.map == 1005 and W.team, f'開委託面板：不在醫院或沒組隊（{W.rpos[W.cur]} team={W.team}）'
         assert may_walk == (W.cur == W.roles[0]), '只有隊長可以走'
         self.L('daily_open', W.cur, W.rpos[W.cur])
@@ -849,6 +852,8 @@ class FakeTools:
     def item_states(self):
         """已合成但成品不在背包（存倉了）→ 計數 0/1 紅（假設遊戲面板計數看背包）"""
         r, pg = self.W.cur, self.W.page - 1
+        if self.inj.get('count_bag'):                           # 遊戲計數只看背包有沒有該成品（別環合成的同名成品也算 1/1 綠）
+            return ['green' if self.W.bag[r].get('成品:' + dp.norm(self.W.items[r][pg][k]), 0) > 0 else 'red' for k in range(2)]
         return ['green' if g and self.W.bag[r].get('成品:' + dp.norm(self.W.items[r][pg][k]), 0) > 0 else 'red'
                 for k, g in enumerate(self.W.green[r][pg])]
 
@@ -937,6 +942,8 @@ class FakeTools:
     # -- 背包 / 倉庫 --
     def bag_check(self, role, names):
         assert not self.W.shop and not self.W.panel, '核對背包時商店 / 面板還開著'
+        self.bag_checks = getattr(self, 'bag_checks', [])
+        self.bag_checks.append((role, list(names)))
         miss = [n for n in names if self.W.bag[role].get(n, 0) <= 0 or n in self.inj.get('bag_hide', ())]   # bag_hide：背包其實有、但名稱 OCR 讀不到
         return miss, 0
 
@@ -995,6 +1002,19 @@ class FakeTools:
 
     def depot_take_many(self, role, items, on_item=None):
         return self._batch('take', role, items, on_item)
+
+    @contextlib.contextmanager
+    def depot_session(self, role):
+        """final 一批的背包面板（外層 Session）：記開了幾次；裡面的批次 / 單樣存取不另算開面板"""
+        assert not self.W.shop and not self.W.panel, '開背包時商店 / 委託面板還開著'
+        self.sessions = getattr(self, 'sessions', [])
+        self.sessions.append(role)
+        self.L('bag_session', role)
+        self.in_session = True
+        try:
+            yield self.inj.get('session_rc', 0)
+        finally:
+            self.in_session = False
 
     def cleanup(self):
         self.cleanups += 1
@@ -2001,6 +2021,183 @@ fresh_dir()
 W = scenario()
 rc, out, T = go(W, _FallTools(W, reenter_ok=False), stop_after='sam')
 check('224：走不回店內 → 照舊 224', rc == 224 and T.reenters == [1009], f'{rc} {T.reenters}')
+
+# ======================================================================================
+# 2026-10-18 dev-daily-speed：final 每人一次面板 / 分批、買後不核對背包、獎勵計數像素字形、提交輪詢
+# ======================================================================================
+def _final_only(W, T=None, cap=None):
+    """先跑到 fish（買完），清空動作紀錄，再只跑 final（cap = final 時 dp.final_batch 的背包種類上限）"""
+    T = T or FakeTools(W)
+    daily.ROLES[:] = W.roles
+    daily.LEADER = W.roles[0]
+    quiet(daily.run, roles=W.roles, confirm_buy=True, stop_after='fish', tools=T, recipes=RECIPES, stores=STORES, where=WHERE)
+    W.log.clear()
+    T.opens, T.sessions, T.bag_checks = [], [], []
+    keep = dp.final_batch.__defaults__
+    if cap is not None:
+        dp.final_batch.__defaults__ = (cap,)
+    try:
+        rc, out = quiet(daily.run, roles=W.roles, confirm_buy=True, stop_after='final', tools=T, recipes=RECIPES, stores=STORES, where=WHERE)
+    finally:
+        dp.final_batch.__defaults__ = keep
+    return rc, out, T
+
+
+fresh_dir()
+W = scenario()
+rc, out, T = _final_only(W)
+per = {r: sum(1 for o in T.opens if o[0] == r) for r in W.roles}
+bags = {r: T.sessions.count(r) for r in W.roles}
+# 標準情境（漁村每人 24 種）：13 種放不下 5 環 → 分批；每批 = 背包面板 1 次 + 委託面板 1 次（舊版每環各一次 = 5 + 5）
+check('final 5 人都 5/5', rc == 0 and all(W.reward[r] == 5 for r in W.roles), f'{rc} {out[-300:]}')
+check('final 每人委託面板次數 = 背包面板次數 = 批數，且 < 5 環（標準情境 3 批）', all(per[r] == bags[r] and 1 <= bags[r] <= 3 for r in W.roles), f'{per} {bags}')
+check('final 沒開背包核對（獎勵計數讀得到 → 不看裝備升級石）', not T.bag_checks, str(T.bag_checks))
+_bad = []
+for r in W.roles:
+    kinds = [a[0] for a in W.log if len(a) > 1 and a[1] == r and a[0] in ('bag_session', 'daily_open', 'craft', 'submit')]
+    blocks = ' '.join(kinds).replace('bag_session daily_open', '|').split('|')
+    if kinds[:2] != ['bag_session', 'daily_open'] or any('bag_session' in b or 'daily_open' in b for b in blocks):
+        _bad.append((r, kinds))
+check('final 每人每批：背包一次 → 面板一次 → 連續合成 / 提交（批內不再開背包 / 面板）', not _bad, str(_bad[:1]))
+fresh_dir()
+W = scenario(bag_cap=60)
+rc, out, T = _final_only(W, cap=40)
+check('背包放得下（上限 40）：final 每人背包 1 次 + 委託面板 1 次、5/5', rc == 0 and all(W.reward[r] == 5 for r in W.roles)
+      and all(T.sessions.count(r) == 1 and sum(1 for o in T.opens if o[0] == r) == 1 for r in W.roles), f'{rc} {T.sessions} {T.opens}')
+check('final 每人同一人第二次以後開面板不等座標穩定（settle=False 只在批 2 起）', all(o[1] for o in T.opens), str(T.opens))
+
+# 背包更小 → 分更多批，仍完成
+fresh_dir()
+W = scenario(items={'DKBO': [list(p) for p in TODAY_ITEMS]}, roles=['DKBO'])
+rc, out, T = _final_only(W, cap=9)
+nb = T.sessions.count('DKBO')
+check('背包上限 9 種：final 分批完成 5/5，批數 2～4（< 5 環）、每批面板開一次、事件寫「第 2 批」', rc == 0 and W.reward['DKBO'] == 5 and 2 <= nb <= 4
+      and sum(1 for o in T.opens if o[0] == 'DKBO') == nb and '第 2 批' in out, f'{rc} {nb} {T.opens} {out[-400:]}')
+check('批 2 起同一人開面板 settle=False', [o[1] for o in T.opens] == [True] + [False] * (nb - 1), str(T.opens))
+
+# dp.final_batch 純函式
+_plan = dp.plan_role([list(p) for p in TODAY_ITEMS], RECIPES, WHERE, STORES)
+_rs = [{'crafted': [False, False], 'submitted': False} for _ in range(5)]
+_mats = collections.Counter()
+for _r in _plan['rings']:
+    for _it in _r['items']:
+        for _n, _q in _it['mats']:
+            _mats[_n] += _q
+_led = dp.Ledger({'personal': dict(_mats)})
+_fb = dp.final_batch(_led, _plan, _rs, _plan['rings'], cap=40)
+check('final_batch：放得下 → 5 環一批、全部從個人倉庫取、不用存倉', _fb and _fb[0] == 5 and not _fb[1] and all(s == 'personal' for _, s in _fb[2]), str(_fb and _fb[:2]))
+_fb = dp.final_batch(_led, _plan, _rs, _plan['rings'], cap=9)
+check('final_batch：上限 9 → 取最長前綴（< 5 環）', _fb and 1 <= _fb[0] < 5, str(_fb and _fb[0]))
+check('final_batch：上限 0 → None（連 1 環都放不下）', dp.final_batch(_led, _plan, _rs, _plan['rings'], cap=0) is None)
+_rs2 = [{'crafted': [True, False], 'submitted': False}] + _rs[1:]
+_nd = dp.final_need(_plan['rings'][:1], _rs2)
+check('final_need：已合成的項要成品（成品鍵）、沒合成的要材料', _nd.get(dp.PRODUCT_PREFIX + _plan['rings'][0]['items'][0]['name']) == 1
+      and all(n in _nd for n, _ in _plan['rings'][0]['items'][1]['mats']), str(_nd))
+check('final_take：背包夠的不取、帳上沒有 → sub None', dp.final_take(dp.Ledger({'bag': {'甲': 2}, 'public': {'乙': 1}}), {'甲': 2, '乙': 1, '丙': 1}) == [('乙', 'public'), ('丙', None)])
+
+# 同名成品在兩環：遊戲計數看背包 → 第 2 環那項會顯示 1/1 綠，不能當已合成
+fresh_dir()
+_it_dup = [list(p) for p in TODAY_ITEMS]
+_it_dup[1][0] = _it_dup[0][0]                                             # 第 1、2 環上項都是厚肉塊串燒
+W = scenario(items={'DKBO': _it_dup}, roles=['DKBO'])
+W.inj['count_bag'] = True
+rc, out, T = go(W)
+check('同名成品兩環：第 2 環那項不因背包有成品而跳過合成 → 5/5、合成 10 項', rc == 0 and W.reward['DKBO'] == 5 and W.crafted_n == 10, f'{rc} {W.crafted_n} {out[-300:]}')
+
+# 買後背包核對：bought 不開背包；zeroish 才核對、只核對那幾樣
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+rc, out, T = go(W, T, stop_after='fish')
+check('買完數量框判 bought → 不開背包核對（0 次 bag_check）', rc == 0 and not getattr(T, 'bag_checks', []), f'{rc} {getattr(T, "bag_checks", None)}')
+fresh_dir()
+W = scenario(items={'DKBO': [list(p) for p in TODAY_ITEMS]}, roles=['DKBO'])
+W.inj['zeroish'] = True
+rc, out, T = go(W, stop_after='sam')
+check('zeroish（歸 0 認不出字）→ 仍開背包核對、只核對這家店買的那幾樣', rc == 0 and T.bag_checks and all(set(n) <= set(W.bag['DKBO']) | {k for k in W.personal['DKBO']} for _, n in T.bag_checks), f'{rc} {T.bag_checks}')
+fresh_dir()
+W = scenario(items={'DKBO': [list(p) for p in TODAY_ITEMS]}, roles=['DKBO'])
+W.inj['zeroish'] = True
+W.inj['bag_hide'] = ('硬的殼',)
+rc, out, T = go(W, stop_after='sam')
+check('zeroish 且背包找不到 → 227、不重買（bought 拿掉）', rc == 227, f'{rc} {out[-200:]}')
+
+# 提交後計數晚一點才 +1 → 輪詢讀到 +1 就過（不 229）
+fresh_dir()
+W = scenario(items={'DKBO': [list(p) for p in TODAY_ITEMS]}, roles=['DKBO'])
+
+
+class _LagTools(FakeTools):
+    lag = 0
+
+    def submit(self):
+        self.lag = 2                                       # 提交後前 2 次讀計數還是舊值
+        return super().submit()
+
+    def reward_count(self):
+        if self.lag:
+            self.lag -= 1
+            return self.W.reward[self.W.cur] - 1
+        return super().reward_count()
+
+
+rc, out, T = go(W, _LagTools(W))
+check('提交後計數慢 2 拍才 +1 → 輪詢過關、5/5', rc == 0 and W.reward['DKBO'] == 5, f'{rc} {out[-300:]}')
+
+# 獎勵計數像素字形（numglyph reward kind；樣本 = tools/.cache 每日面板截圖二值列）
+import numglyph  # noqa: E402
+_rw = json.loads((HERE / 'fixtures' / 'daily_reward_rows.json').read_text(encoding='utf-8'))['samples']
+check('reward 字形：0/5、1/5、2/5、5/5 截圖樣本都讀對（分母 5）', all(numglyph.read_ratio(v['rows'])['text'] == f'{k}/5' and numglyph.read_ratio(v['rows'])['den'] == 5 for k, v in _rw.items()),
+      str({k: numglyph.read_ratio(v['rows'])['text'] for k, v in _rw.items()}))
+check('reward 字形：空白框 → n 0、value None', numglyph.read_ratio(['0' * 110] * 45)['value'] is None)
+_tpl_no1 = {k: dict(v) for k, v in numglyph.load_tpl().items()}
+_tpl_no1['reward'] = {c: g for c, g in _tpl_no1['reward'].items() if c != '1'}
+_r1 = numglyph.read_ratio(_rw['1']['rows'], tpl=_tpl_no1)
+check('reward 字形：分子沒樣板（1 還沒學）→ value None 但 tail（/ 與分母已認出）= True', _r1['value'] is None and _r1['tail'] and _r1['n'] == 3, str(_r1))
+_keep_tpl = numglyph.load_tpl
+numglyph.load_tpl = lambda reload=False: _tpl_no1
+try:
+    _add = numglyph.learn_ratio(_rw['1']['rows'], 1, save=False)
+    _bad = numglyph.learn_ratio(_rw['1']['rows'], 12, save=False)
+finally:
+    numglyph.load_tpl = _keep_tpl
+check('learn_ratio：OCR 分子 1 → 只學分子 1 個字；兩位數不學', _add == 1 and _bad == 0, f'{_add} {_bad}')
+
+_keep_live, _keep_ocr = numglyph.live_rows, uikit.ocr
+_ocr_calls = []
+try:
+    numglyph.live_rows = lambda box, kind: _rw['2']['rows']
+    uikit.ocr = lambda *a, **k: (_ocr_calls.append(a), ['4/5'])[1]
+    _v = daily.Tools().reward_count()
+    check('Tools.reward_count：字形讀得出 → 2，不叫 OCR', _v == 2 and not _ocr_calls, f'{_v} {_ocr_calls}')
+    numglyph.live_rows = lambda box, kind: None
+    _v = daily.Tools().reward_count()
+    check('Tools.reward_count：像素讀不到 → 退回舊 OCR 整框（帶 -Small 1）', _v == 4 and _ocr_calls and '-Small' in _ocr_calls[-1], f'{_v} {_ocr_calls}')
+    _ocr_calls.clear()
+    numglyph.live_rows = lambda box, kind: ['0' * 110] * 45
+    uikit.ocr = lambda *a, **k: (_ocr_calls.append(a), [''])[1]
+    _v = daily.Tools().reward_count()
+    check('Tools.reward_count：框裡沒字、OCR 也讀不出 → None（不猜）', _v is None, str(_v))
+finally:
+    numglyph.live_rows, uikit.ocr = _keep_live, _keep_ocr
+
+# goto_page 頁碼快取：同頁不翻只讀一次；提交 / 開面板清快取
+_T = daily.Tools()
+_reads = []
+_T.page_no = lambda: (_reads.append(1), 3)[1]
+_T.sleep = lambda s: None
+_T._page = 3
+check('goto_page 快取：已確認在第 3 頁 → 只讀 1 次頁碼', _T.goto_page(3) and len(_reads) == 1, str(_reads))
+_reads.clear()
+_T._page = None
+check('goto_page 沒快取 → 讀、等、再讀（2 次）並記快取', _T.goto_page(3) and len(_reads) == 2 and _T._page == 3, str(_reads))
+_osc = uikit.safe_click
+uikit.safe_click = lambda *a, **k: True
+try:
+    _T.submit()
+finally:
+    uikit.safe_click = _osc
+check('submit 後頁碼快取作廢（遊戲提交後跳回第 1 頁）', _T._page is None)
 
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))

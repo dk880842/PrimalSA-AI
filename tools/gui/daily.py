@@ -19,11 +19,11 @@
         （fish 買到一半斷 → 隊伍是散的，重跑 into_shop 先組隊再解散；醫院合成到一半斷 → 隊伍組著，form 不點）
   店內買序（2026-10-17 p1 兩次 227 修）：dailyplan.store_route 與 buy_at 都把店內商品依該店清單 index 由小到大排（只往下捲、不回頭；不再「早環先買」）；
           shopkit.select_item 目標在視野上方時 scroll_top 歸零再找。存倉由 make_room / choose_evict 決定，與買序無關；bought 以名稱記，續跑不重買。
-  買後背包名稱核對不擋（2026-10-17 p1 DKBO5 水分多的香草「多早」OCR 不確定 → 誤 227 + 重買 500 修，離線測試、未實機）：數量框判 bought 當下就記 bought / ledger（本來就是），
-          背包名稱核對找不到只寫 log（不 pop bought、不 227）；只有 zeroish（歸 0 但字認不出）才當硬閘。舊進度檔香草沒記 bought → `daily.py mark-bought DKBO5 水分多的香草 <數量>` 補記再續跑。
+  買後不開背包核對（2026-10-18 dev-daily-speed；前身 2026-10-17 p1 DKBO5 水分多的香草「多早」誤 227 + 重買 500 修「核對不擋」）：數量框判 bought 當下就記 bought / ledger，
+          關店後不再開背包讀名稱；只有 zeroish（歸 0 但字認不出）的那幾樣才開背包核對當硬閘（找不到 → 227、不重買）。舊進度檔香草沒記 bought → `daily.py mark-bought DKBO5 水分多的香草 <數量>` 補記再續跑。
   背包放不下（2026-10-17 p1 DKBO3 fish 227 修，離線測試、未實機）：每家店先 dp.buy_batches 排批——存倉順序 **材料（最晚環才用的先）→ 成品（最晚提交環的先）**；
           存完還放不下（這家店種類太多）→ 分批：買放得下的清單前綴 → 關店存倉（剛買、最晚才用的）→ 再進店買剩下的；連一種都放不下才 227（訊息寫背包帳 / 店種類 / 上限）。
-          成品存倉後 mid 不提交該環（products_away），final fetch_materials 連成品一起從倉庫取回再提交。
+          成品存倉後 mid 不提交該環（products_away），final（fetch_batch / take_items）連成品一起從倉庫取回再提交。
   prep    停練功 / 關遇敵 / 等戰鬥 → 組隊（練功時本來就組著，不點）→ 全隊傳送薩姆吉爾（不解散）
   read    gather_hospital → 輪流 char.switch：點 NPC 開委託面板 → 讀 5 環 × 上 / 下 → daily-<角色>.json
           成品名讀法（2026-10-17 修 225）：名稱框 OCR -Zooms 2,3,4,5 -Dark 0 → dp.vote_lines **逐倍率各自 snap 投票**（舊版把各倍率 join 成一串 →「成弓箭8口成弓箭8」）；
@@ -52,13 +52,23 @@
             修：daily.DAILY_BASE（DAILY_SIG 去掉合成鈕兩點）判開著；daily_close 兩輪關彈窗 + 面板並回是否關掉；Tools.close_panels（switch_to / leader_current 切角色前都呼叫）先用它關
           ② craft_item 點合成後彈窗最晚約 4 秒才浮出（舊版只等 1.6 秒 → 229）：輪詢 POP_WAIT_N = 18 × 0.25 秒，失敗前再等 1 秒重檢
           ③ Tools.walk_to 走出口拋 RuntimeError（卡在中間座標 72,103）但 wait_map(exit_map) 已在目標地圖（2009）→ 算成功（寫 log），不再 224
-  mid / final 每人開頭 sync_greens：還沒記 crafted 的項先看面板計數（STATE_GRID 字區 → dp.count_area），已 1/1 綠 → 記 crafted 不開彈窗；兩項都綠 → 直接提交
+  mid 每人開頭 sync_greens：還沒記 crafted 的項先看面板計數（STATE_GRID 字區 → dp.count_area），已 1/1 綠 → 記 crafted 不開彈窗；兩項都綠 → 直接提交
+        （final 不再開場整輪看：合成前逐項看、倉庫找不到料時才對那批環 sync_greens，見下 final 加速）
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
   （便利店選商品：shopkit.select_item 標題逐倍率比對該店清單投票 title_is，第二輪離線 132/132；標題 OCR 帶 -Small 1〔dev-shop-title 修 2009 長名 227〕、選不到存 ui-log shop-select-fail 並寫各倍率原字）
   sam     into_shop → 5 人輪流沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
   mid     gather_hospital → 5 人輪流（組隊中）：材料齊的項先合成、該環兩項都綠就提交（沒人有事可做就整段跳過）
   fish    into_shop → 5 人輪流買漁村料
-  final   gather_hospital → 5 人輪流（組隊中）：每環先從個人倉庫 / 公倉取料（含已合成但存倉的成品）→ 合成 → 提交，直到 5/5（胡椒從公倉取整疊、用完整疊存回）
+  final   gather_hospital → 5 人輪流（組隊中）：每人分最少批（dp.final_batch 背包放得下的最長前綴）：一個背包面板取這批全部料（含已合成但存倉的成品）→
+          一個委託面板連續翻頁合成 / 提交這批環，直到 5/5（胡椒從公倉取整疊、用完的在下一批背包面板 / 最後整疊存回）
+  final 加速（2026-10-18 dev-daily-speed，依 p1 10-18 實跑 final 20 分 / fish 26.5 分；離線測試、未實機）：
+          ① 舊版每環一圈「開背包 → 取料 → 關 → 點 NPC → 合成 → 提交 → 關」約 40 秒 + 開場翻 1→5 看綠 → final_role：批 = Tools.depot_session（外層 bag.Session，
+            胡椒存回 → evict_many → take_items 都在同一個背包面板）+ 一個委託面板（craft_ring 逐環 goto_page / 合成 / 變綠 / 提交，mid 共用）；標準情境每人 3 批（舊 5 + 1）
+            合成前逐項看計數已 1/1 綠 → mark_green 補記（dup_product：同名成品別環也要 → 不信綠）；倉庫找不到（92 / 帳上無）→ 先開面板 sync_greens 這批環，補完仍要才 228
+          ② 獎勵計數 REWARD_BOX：OCR 實機 25 次全 None → numglyph reward kind 像素字形「n/5」（spixel；/ 與分母認得、分子沒樣板 → OCR 分子 + learn_ratio；
+            切不出 3 字 → 舊 OCR 整框加 -Small 1）；提交後輪詢 SUBMIT_POLL_N × SUBMIT_POLL_S 讀到 n+1；計數讀得到 → verify_complete 不開背包找裝備升級石
+          ③ 等待：點 NPC 700 → 300 + 輪詢 OPEN_POLL_N；合成鈕 700 → 300；彈窗合成 1200 → CRAFT_WAIT_MS 800 + 輪詢變綠 GREEN_POLL_N；提交 1500 + 0.5 → SUBMIT_WAIT_MS 600 + 輪詢計數；
+            goto_page 頁碼快取（翻頁 / 提交 / 開關面板清掉；命中只讀一次頁碼）；同一人再開面板 settle=False（不等 settled_pos）
   finish  組隊（已組著不點）→ grind.go（--no-grind 略）
 順序固定 DKBO2 → DKBO3 → DKBO4 → DKBO5 → DKBO（clients.leader_last；結束時當前角色 = 隊長，不用另外切回）。
 
@@ -86,6 +96,7 @@
 有環被跳過（不支援）不算失敗：該人其他環照做，結束 rc 0；環不用依序提交（遊戲沒規定）。
 """
 import argparse
+import contextlib
 import json
 import sys
 import time
@@ -164,6 +175,12 @@ NAME_MORE_OPTS = ('-Zooms', '6,7,8', '-Dark', '0')
 DAILY_BASE = uikit.Panel('DAILY', None, uikit.DAILY.sig[:-2], uikit.DAILY.close_xy, forbidden=uikit.DAILY.forbidden)
 FORM_RECHECK_RC, FORM_RECHECK_S = (41, 42, 43, 44, 47), 2.0     # team.form 這些碼 → 等 2 秒 team.check 唯讀複查（223 暫時現象）；40 / 45 / 46 / 驗證視窗等不複查
 POP_WAIT_N = 18                                                  # 點合成後等快速合成彈窗：18 × 0.25 秒 + 失敗前再 1 秒重檢
+# 等待（2026-10-18 dev-daily-speed：p1 final 20 分，每環固定等待 + 每次開關面板；能輪詢特徵的就輪詢）
+OPEN_POLL_N = 12                                                 # 點 NPC 後 wait 300 + 最多 12 × 0.2 秒等委託面板特徵（舊 wait 700 + 8 × 0.2）
+CRAFT_WAIT_MS = 800                                              # 彈窗按「合成」後等多久才關彈窗（舊 1200；之後輪詢該項變綠）
+GREEN_POLL_N = 12                                                # 合成後輪詢該項變綠 12 × 0.3 秒（舊 8 次）
+SUBMIT_WAIT_MS = 600                                             # 按提交後固定等（舊 1500 + sleep 0.5）；之後輪詢獎勵計數 +1
+SUBMIT_POLL_N, SUBMIT_POLL_S = 6, 0.4                            # 提交後讀獎勵計數最多 6 次、隔 0.4 秒（讀到 before+1 就停）
 MERGE_XY = [(735, 265), (735, 370)]                              # 兩顆「合成」藍鈕
 STATE_PX = [(390, 291), (390, 396)]                              # 兩項計數「0」紅字像素（舊單點；只留給文件 / 測試對照，判色改用 STATE_GRID）
 # 兩項計數第一個字的字區格點（x 386～402、y 285～299 每 2 點，各 9×8 = 72 點）→ dp.count_area。
@@ -439,16 +456,18 @@ class Tools:
                 uikit.sleep(POS_SETTLE_S)
         return last
 
-    def daily_open(self, may_walk: bool = False) -> bool:
+    def daily_open(self, may_walk: bool = False, settle: bool = True) -> bool:
         """點委託接取 NPC 開面板（2026-10-17 使用者定案：組隊不解散，隊員不走路直接點）。
-        點位 = walk.npc_screen(DAILY_NPC, 讀到的座標)（settled_pos）；讀不到 / 點位落在 UI 上 / 離 NPC > 8 格 →
+        點位 = walk.npc_screen(DAILY_NPC, 讀到的座標)（settle：切角色後 settled_pos 隔 1.5 秒連讀兩次一樣才採用；
+        settle=False = 同一人剛關掉面板 / 背包又要開（沒切角色、沒走路）→ 讀一次座標就好，2026-10-18 dev-daily-speed）；讀不到 / 點位落在 UI 上 / 離 NPC > 8 格 →
         may_walk（隊長）先 step_to 站位 38,40 再點；隊員用 38,47 的 NPC_FALLBACK_XY 651,197（不在醫院 → False，隊員不自己走）。
         點 → 等面板特徵；沒開再點一次（共 2 次；進醫院後右側小框會吃第一下）"""
         import walk
+        self._page = None                                      # 新開的面板：頁碼要重新讀（goto_page 快取作廢）
         for _ in range(2):
             if uikit.is_open(DAILY_BASE):                      # 不看合成鈕：開面板落在已提交環那頁（第 1 環已提交）時沒有藍色合成鈕
                 return True
-            p = self.settled_pos()
+            p = self.settled_pos() if settle else walk.wait_pos(3)
             xy = None
             if p and p[0] == HOSPITAL:
                 at = (p[1], p[2])
@@ -467,8 +486,8 @@ class Tools:
                 xy = walk.npc_screen(DAILY_NPC, HOSP_STAND)
             if xy is None:
                 xy = NPC_FALLBACK_XY
-            uikit.gui('seq', f'click {xy[0]} {xy[1]}; wait 700', note=f'daily 點委託接取 NPC（站 {p}）')
-            for _i in range(8):
+            uikit.gui('seq', f'click {xy[0]} {xy[1]}; wait 300', note=f'daily 點委託接取 NPC（站 {p}）')
+            for _i in range(OPEN_POLL_N):                      # 面板特徵出現就繼續（舊：固定 wait 700 + 8 × 0.2 秒；2026-10-18 改 300 + 12 × 0.2）
                 if uikit.is_open(DAILY_BASE):
                     return True
                 uikit.sleep(0.2)
@@ -481,6 +500,7 @@ class Tools:
     def daily_close(self) -> bool:
         """✕ 關面板（先關快速合成彈窗）；絕不點空白處。用 DAILY_BASE（不看藍色合成鈕）判開著：
         最後一環提交後面板沒有合成鈕，uikit.DAILY 特徵不中 → 以前判「沒開」不關 → 切角色 rc 9（play-p1-daily5）。回是否已全關"""
+        self._page = None
         for _ in range(2):
             if uikit.is_open(uikit.QCRAFT):
                 uikit.safe_click(*uikit.QCRAFT.close_xy, uikit.QCRAFT, note='daily 關快速合成彈窗', wait_ms=500)
@@ -501,7 +521,13 @@ class Tools:
         """翻到第 page 頁且**讀頁碼確認**才回 True（2026-10-17 dev-shop-title 修 mid 229：翻頁 4 → 5 後立刻讀成 5、面板其實停在 4/5 → 點到別環 → 彈窗沒開）。
         讀到 page → 等 0.4 秒再讀一次也是 page 才算到（翻頁動畫 / 漏點）；讀到別頁 → 照差距點上 / 下一頁（每次 wait 600 後重讀）；
         連 2 次讀不出 → 盲翻一次（上一頁 4 次到第 1 頁〔第 1 頁再按假設夾住〕再下一頁 page-1 次）後照樣要讀到頁碼確認。
-        最多 GOTO_PAGE_TRIES 輪仍不確定 → False（呼叫端 229「翻不到第 N 頁」），log 寫各次讀值"""
+        最多 GOTO_PAGE_TRIES 輪仍不確定 → False（呼叫端 229「翻不到第 N 頁」），log 寫各次讀值。
+        頁碼快取（2026-10-18 dev-daily-speed）：上次已確認在 page、之後沒有翻頁 / 提交 / 關開面板（會換頁的動作都會清 _page）→ 只讀一次頁碼對得上就 True
+        （同一環第 2 項合成、提交前不再「讀 → 等 0.4 秒 → 再讀」）；讀到別的 / 讀不出 → 走完整流程"""
+        if getattr(self, '_page', None) == page:
+            if self.page_no() == page:
+                return True
+        self._page = None
         seen, miss, blind = [], 0, False
         for _ in range(GOTO_PAGE_TRIES):
             cur = self.page_no()
@@ -511,6 +537,7 @@ class Tools:
                 again = self.page_no()
                 seen.append(again)
                 if again == page:
+                    self._page = page
                     return True
                 continue
             if cur is None:
@@ -538,6 +565,7 @@ class Tools:
         return False
 
     def next_page(self) -> bool:
+        self._page = None
         return uikit.safe_click(*NEXT_XY, DAILY_BASE, note='daily 下一頁', wait_ms=500)
 
     def read_page(self) -> dict:
@@ -596,11 +624,23 @@ class Tools:
         return pop
 
     def reward_count(self):
-        return dp.parse_reward(''.join(uikit.ocr(REWARD_BOX, '-Zooms', '2,3')))
+        """「完成所有任務額外獎勵」n/5 → n（讀不出 None）。2026-10-18：OCR 實機 25 次全讀 None（p1 01:33～01:54 final）→
+        改 numglyph reward kind 像素字形（spixel 跟截圖同一張縮圖；3 字 = 分子 + / + 分母都被樣板認出才收，分母要是 5）；
+        字形就位但分子沒樣板（3 / 4 還沒學）→ OCR 分子採用並學字；切不出 3 字（被蓋住 / 面板不在）才退回舊 OCR 整框讀"""
+        import numglyph
+        r = numglyph.read_ratio_number('reward', REWARD_BOX, ocr_reads=(self._reward_ocr,), sleep_fn=uikit.sleep, tries=1,
+                                        log=lambda m: event(m) if '學到' in m else None)   # 只記學字，讀不出不洗版（提交後會輪詢）
+        if r['value'] is not None and r.get('den') in (None, dp.RINGS):
+            return r['value']
+        return None if r['ocr'] else self._reward_ocr()
+
+    def _reward_ocr(self):
+        """舊備援：整框 OCR → dp.parse_reward（加 -Small 1：實機先縮成截圖同款 1440 再裁，同彈窗大字 / 便利店標題的修法）"""
+        return dp.parse_reward(''.join(uikit.ocr(REWARD_BOX, '-Zooms', '2,3', '-Small', '1')))
 
     def craft_item(self, k: int, name: str) -> tuple:
         """第 k 項快速合成：開彈窗 → 大字只防點錯項（讀空放行）→ 材料計數不是紅字 → 彈窗「合成」（花 1000 石幣）→ 關彈窗 → 該項變綠。回 (ok, 原因)"""
-        if not uikit.safe_click(*MERGE_XY[k], uikit.DAILY, note=f'daily 開第 {k + 1} 項快速合成「{name}」', wait_ms=700):
+        if not uikit.safe_click(*MERGE_XY[k], uikit.DAILY, note=f'daily 開第 {k + 1} 項快速合成「{name}」', wait_ms=300):   # 後面輪詢彈窗特徵（舊固定 700）
             return False, '委託面板不在，沒點'
         for _ in range(POP_WAIT_N):                            # 彈窗有時 4 秒才浮出（play-p1-daily5 DKBO3 第 2 環 229）→ 輪詢到約 4.5 秒
             if uikit.is_open(uikit.QCRAFT):
@@ -627,17 +667,19 @@ class Tools:
         if dp.popup_short(uikit.px(POP_COUNT_PX)):
             close_pop()
             return False, '彈窗材料計數有紅字（材料不足，沒合成）'
-        if not uikit.safe_click(*POP_CRAFT_XY, uikit.QCRAFT, note=f'daily 合成「{name}」（1000 石幣）', allow=('craft',), wait_ms=1200):
+        if not uikit.safe_click(*POP_CRAFT_XY, uikit.QCRAFT, note=f'daily 合成「{name}」（1000 石幣）', allow=('craft',), wait_ms=CRAFT_WAIT_MS):
             return False, '彈窗特徵不在，沒按合成'
         close_pop()
-        for _ in range(8):
+        for _ in range(GREEN_POLL_N):                          # 該項變綠就繼續（等待縮短的補償：輪詢拉長到約 3.6 秒）
             if uikit.is_open(uikit.DAILY) and self.item_states()[k] == 'green':
                 return True, ''
             uikit.sleep(0.3)
         return False, '合成後該項沒變綠'
 
     def submit(self) -> bool:
-        return uikit.safe_click(*SUBMIT_XY, uikit.DAILY, note='daily 提交委託', allow=('submit',), wait_ms=1500)
+        """點提交委託（之後面板跳回第 1 頁 → 頁碼快取作廢）；等待改由呼叫端輪詢獎勵計數 +1（舊：固定 1.5 + 0.5 秒）"""
+        self._page = None
+        return uikit.safe_click(*SUBMIT_XY, uikit.DAILY, note='daily 提交委託', allow=('submit',), wait_ms=SUBMIT_WAIT_MS)
 
     def item_states(self) -> list:
         """兩項計數 → ['red'|'green'|'?' ×2]：字區格點（STATE_GRID）一次取色、dp.count_area 判"""
@@ -708,6 +750,14 @@ class Tools:
         import bag
         return bag.depot_take_items(role, items, on_item=on_item)
 
+    @contextlib.contextmanager
+    def depot_session(self, role):
+        """final 一批的存倉 + 取料 + 胡椒存回包在同一個背包面板裡（2026-10-18 dev-daily-speed）：外層 bag.Session + 選一次角色，
+        裡面的 depot_store / depot_take / 批次函式都是巢狀 Session（不再開關面板、頭像已選不再點）；離開才關面板。yield rc（0 = 開好）"""
+        import bag
+        with bag.Session() as s:
+            yield s.rc or bag.select_role(role)
+
     # ---- 收尾 ----
     def cleanup(self) -> None:
         """失敗收尾：關快速合成 / 委託面板 / 便利店（都用 ✕）；不認得的畫面不碰"""
@@ -745,6 +795,7 @@ class Daily:
         self.info = {}
         self.team = {}
         self.st = {}                                           # role → 進度 dict
+        self.settled = None                                    # 已讀穩座標的角色（同一人再開面板不用 settled_pos 等 1.5 秒；切角色清掉）
 
     # ---- 共用 ----
     def fail(self, rc, msg, **kw):
@@ -778,6 +829,7 @@ class Daily:
         return all(st['rings'][r['ring'] - 1].get('submitted') for r in plan['rings'] if r['supported']) and bool(plan['supported_rings'])
 
     def switch_to(self, role):
+        self.settled = None
         self.T.close_panels()                                  # 切角色前一定先關面板（2026-10-17 使用者；char.switch 內也會再關一次）
         rc = self.T.switch(role)
         if rc:
@@ -785,6 +837,7 @@ class Daily:
 
     # ---- 搬移（組隊帶隊走）----
     def leader_current(self):
+        self.settled = None
         self.T.close_panels()
         rc = self.T.ensure(self.leader)
         if rc:
@@ -840,9 +893,13 @@ class Daily:
         self.form_team('' if self.o.get('regroup') == 'gather' else '；隊員在別張地圖拉不過來時改用 --regroup gather（先在店內組隊再帶隊走）')
 
     def open_daily(self, role):
-        """（組隊、當前 = role）不走路直接點委託 NPC 開面板（隊長讀不到可點的點位時才走回 38,40）；打不開 → 224"""
-        if not self.T.daily_open(may_walk=(role == self.leader)):
+        """（組隊、當前 = role）不走路直接點委託 NPC 開面板（隊長讀不到可點的點位時才走回 38,40）；打不開 → 224。
+        已開著就不再點；同一人第二次開起（沒切角色）不再等座標穩定（settle=False）"""
+        if self.T.panel_open():
+            return
+        if not self.T.daily_open(may_walk=(role == self.leader), settle=(self.settled != role)):
             self.fail(EXIT_WALK, f'{role} 委託面板打不開（目前 {self.T.pos()}）', role=role)
+        self.settled = role
 
     # ---- 階段 ----
     def stage_prep(self):
@@ -1090,17 +1147,14 @@ class Daily:
         finally:
             T.shop_close()
         led_now = dp.Ledger(st['ledger'])
-        check_names = [n for n in done if led_now.bag.get(n, 0) > 0]          # 買完又被存倉的（反應式存倉）不核對背包
+        # 買後背包核對（2026-10-18 dev-daily-speed）：數量框判 bought（買前 → 買後歸 0）= 已證明買到 → **不開背包核對**（舊版開背包讀名稱、找不到也只記 log，白花一次開關面板）；
+        # 只有 zeroish（歸 0 但字認不出、沒有證據）的種類才開背包核對當硬閘（2026-10-17 p1 DKBO5 水分多的香草「多早」→ 誤 227 + 重買修，維持不重買）。買完又被存倉的不核對
+        check_names = [n for n in done if (role, n) in self.zeroish and led_now.bag.get(n, 0) > 0]
         missing, unread = T.bag_check(role, check_names) if check_names else ([], 0)
         if missing:
             if unread < 0:
                 self.tool_fail(-unread, EXIT_BUY, f'{role} 買完核對背包失敗（bag rc {-unread}）', role=role)
-            # 數量框判 bought（買前 → 買後歸 0）= 已證明買到（bought / ledger 買的當下已寫進度檔，不 pop、不重買）→ 背包名稱 OCR 找不到只記 log；
-            # 只有 zeroish（歸 0 但字認不出、沒有證據）才把背包核對當硬閘（2026-10-17 p1 DKBO5 水分多的香草「多早」OCR 不確定 → 誤 227 + 重買修）
-            weak = [n for n in missing if (role, n) in self.zeroish]
-            soft = [n for n in missing if n not in weak]
-            if soft:
-                event(f'{role} 背包名稱核對：{"、".join(soft)} 沒認出（有 {unread} 格沒讀出名字；數量框已判買到 → 視為已買，不 227、bought 保留）')
+            weak = list(missing)
             if weak and len(weak) > unread:                     # zeroish 且比「沒認出名字的格」還多 → 確定缺
                 led = dp.Ledger(st['ledger'])
                 for n in weak:
@@ -1198,15 +1252,20 @@ class Daily:
         for role in who:
             self.check_day()
             self.switch_to(role)
-            self.craft_role(role, final)
+            if final:
+                self.final_role(role)
+            else:
+                self.craft_role(role)
             self.st[role]['stages'][stage] = True
             self.save_role(role)
 
-    def sync_greens(self, role, plan, final: bool) -> bool:
+    def sync_greens(self, role, plan, final: bool, rings=None) -> bool:
         """開每環前先看面板：還沒記 crafted 的項，面板已 1/1 綠（例：上次手動補合成、進度檔沒記）→ 記 crafted、不開彈窗。
-        只看有這種項的環；開了面板回 True（呼叫端接著用、最後關）。兩項都綠 → 後面 ring_ready 直接提交"""
+        只看有這種項的環（rings 給了就只看這些環）；開了面板回 True（呼叫端接著用、最後關）。兩項都綠 → 後面 ring_ready 直接提交"""
         T, st = self.T, self.st[role]
+        want = None if rings is None else {r['ring'] for r in rings}
         rings = [(r, rs) for r, rs in zip(plan['rings'], st['rings']) if r['supported'] and not rs.get('submitted')
+                 and (want is None or r['ring'] in want)
                  and any(not it['done'] and not rs['crafted'][k] for k, it in enumerate(r['items']))]
         if not rings:
             return False
@@ -1216,96 +1275,154 @@ class Daily:
                 self.fail(EXIT_CRAFT, f'{role} 翻不到第 {r["ring"]} 頁', role=role)
             states = T.item_states()
             for k, it in enumerate(r['items']):
-                if not it['done'] and not rs['crafted'][k] and states[k] == 'green':
-                    msg = dp.mark_item(st, r, k, 'crafted')
-                    self.save_role(role)
-                    event(f'{stage_name(final)} {role} 第 {r["ring"]} 環{"上下"[k]}項面板已 1/1 綠 → 跳過不開彈窗（{msg}）')
+                if not it['done'] and not rs['crafted'][k] and states[k] == 'green' and not self.dup_product(role, plan, r, k):
+                    self.mark_green(role, r, k, final)
         return True
 
-    def craft_role(self, role, final: bool):
+    def dup_product(self, role, plan, r, k) -> bool:
+        """第 r 環第 k 項的成品名，在別的未提交環 / 同環另一項也要 → 面板 1/1 綠可能是那一項的成品在背包（遊戲計數看背包），不能當「已合成」"""
+        st = self.st[role]
+        name = r['items'][k]['name']
+        return any(it['name'] == name and not it['done'] and (r2['ring'], kk) != (r['ring'], k)
+                   for r2 in plan['rings'] if r2['supported'] and not st['rings'][r2['ring'] - 1].get('submitted')
+                   for kk, it in enumerate(r2['items']))
+
+    def mark_green(self, role, r, k, final: bool):
+        """面板該項已 1/1 綠、進度檔沒記 → 補記 crafted（帳上照合成扣料 / 加成品），不開彈窗"""
+        msg = dp.mark_item(self.st[role], r, k, 'crafted')
+        self.save_role(role)
+        event(f'{stage_name(final)} {role} 第 {r["ring"]} 環{"上下"[k]}項面板已 1/1 綠 → 跳過不開彈窗（{msg}）')
+
+    def craft_ring(self, role, r, rs, todo, final: bool):
+        """（委託面板開著）第 r 環：todo 的項逐項 goto_page 確認 → 合成 → 該項變綠；兩項都好（final 或成品都在背包）→ 提交前 goto_page 確認 → submit_ring。
+        final 每項合成前先看面板：已 1/1 綠（進度檔沒記）→ 補記不合成（舊版 final 開場先翻 1→5 看一遍，2026-10-18 改成在這裡順手看）"""
+        T, st = self.T, self.st[role]
+        ri = r['ring']
+        for k in todo:
+            if not T.goto_page(ri):                     # 每項合成前都讀頁碼確認在第 ri 頁（2026-10-17 停在 4/5 點第 5 環 → 229）
+                self.fail(EXIT_CRAFT, f'{role} 翻不到第 {ri} 頁', role=role)
+            it = r['items'][k]
+            if final and not self.dup_product(role, self.plan_of(role), r, k) and T.item_states()[k] == 'green':
+                self.mark_green(role, r, k, final)
+                continue
+            ok, why = T.craft_item(k, it['name'])
+            if not ok:
+                self.fail(EXIT_CRAFT, f'{role} 第 {ri} 環「{it["name"]}」合成失敗：{why}', role=role, ring=ri)
+            led = dp.Ledger(st['ledger'])
+            led.craft(it['mats'], it['name'])
+            st['ledger'] = led.to_dict()
+            rs['crafted'][k] = True
+            self.save_role(role)
+            event(f'{stage_name(final)} {role} 第 {ri} 環「{it["name"]}」合成完成')
+        if dp.ring_ready(rs, r['items']) and (final or not dp.products_away(r, rs, dp.Ledger(st['ledger']))):
+            if not T.goto_page(ri):                     # 提交前也確認頁碼（提交的是目前頁那環）
+                self.fail(EXIT_CRAFT, f'{role} 提交前翻不到第 {ri} 頁', role=role)
+            self.submit_ring(role, r, rs)
+
+    def craft_role(self, role):
+        """mid：背包材料齊的項先合成、該環兩項都好且成品都在背包就提交（不取倉、不提交成品在倉庫的環）"""
         T, st = self.T, self.st[role]
         plan = self.plan_of(role)
         opened = False
         try:
-            opened = self.sync_greens(role, plan, final)
+            opened = self.sync_greens(role, plan, False)
             for r, rs in zip(plan['rings'], st['rings']):
                 if not r['supported'] or rs.get('submitted'):
                     continue
-                ri = r['ring']
                 led = dp.Ledger(st['ledger'])
-                todo = [k for k, it in enumerate(r['items']) if not it['done'] and not rs['crafted'][k]
-                        and (final or dp.craftable(it, led, bag_only=True))]
-                away = dp.products_away(r, rs, led)             # 已合成但存倉的成品（背包放不下時存的；提交要在背包）
+                todo = [k for k, it in enumerate(r['items']) if not it['done'] and not rs['crafted'][k] and dp.craftable(it, led, bag_only=True)]
                 if not todo and not dp.ring_ready(rs, r['items']):
                     continue
-                if not final and away and not todo:             # mid：成品在倉庫 → 這環留給 final 取回再提交
+                if dp.products_away(r, rs, led) and not todo:   # 成品在倉庫 → 這環留給 final 取回再提交
                     continue
-                if final and (todo or away):
-                    if opened:
-                        T.daily_close()
-                        opened = False
-                    self.fetch_materials(role, plan, r, todo)
                 if not opened:
                     self.open_daily(role)
                     opened = True
-                for k in todo:
-                    if not T.goto_page(ri):                     # 每項合成前都讀頁碼確認在第 ri 頁（2026-10-17 停在 4/5 點第 5 環 → 229）
-                        self.fail(EXIT_CRAFT, f'{role} 翻不到第 {ri} 頁', role=role)
-                    it = r['items'][k]
-                    ok, why = T.craft_item(k, it['name'])
-                    if not ok:
-                        self.fail(EXIT_CRAFT, f'{role} 第 {ri} 環「{it["name"]}」合成失敗：{why}', role=role, ring=ri)
-                    led = dp.Ledger(st['ledger'])
-                    led.craft(it['mats'], it['name'])
-                    st['ledger'] = led.to_dict()
-                    rs['crafted'][k] = True
-                    self.save_role(role)
-                    event(f'{stage_name(final)} {role} 第 {ri} 環「{it["name"]}」合成完成')
-                if dp.ring_ready(rs, r['items']) and (final or not dp.products_away(r, rs, dp.Ledger(st['ledger']))):
-                    if not T.goto_page(ri):                     # 提交前也確認頁碼（提交的是目前頁那環）
-                        self.fail(EXIT_CRAFT, f'{role} 提交前翻不到第 {ri} 頁', role=role)
-                    self.submit_ring(role, r, rs)
-                    peppers = [n for n, _ in sum((it['mats'] for it in r['items']), []) if n in dp.PEPPERS]
-                    if peppers and final:
-                        T.daily_close()
-                        opened = False
-                        self.return_peppers(role, sorted(set(peppers)))
+                self.craft_ring(role, r, rs, todo, False)
         finally:
             if opened:
                 T.daily_close()
-        if final:
-            self.verify_complete(role, plan)
 
-    def fetch_materials(self, role, plan, ring, todo):
-        """final：這環要合成的項的材料、以及已合成但存倉的成品（提交要在背包）先到背包（個人倉庫 / in_public 的公倉 / 胡椒的公倉）。
-        panel 已關。背包放不下 → 先存最晚環的材料（成品次之；這環要的都受保護）"""
+    def final_role(self, role):
+        """final（2026-10-18 dev-daily-speed：舊版每環一圈「開背包 → 取料 → 關 → 點 NPC → 合成 → 提交 → 關」約 40 秒、20 分鐘）：
+        每人**一次**把未提交環所需的材料 + 存倉的成品取到背包，開一次委託面板連續翻頁合成 / 提交。
+        背包種類上限（dp.BAG_KINDS_MAX）放不下 → dp.final_batch 分最少批（取最長前綴）：一批 = 一個背包面板（存倉 + 胡椒存回 + 取料）→ 一個委託面板。
+        不再開場翻 1→5 看綠（sync_greens）：合成前逐項看面板，已 1/1 綠就補記；倉庫帳上有、實際找不到（92 / 帳上全無）的料 →
+        先開面板看這批環有沒有已綠（手動合成過）補記，補完還要那樣料才 228。合成 / 提交照舊逐環驗證（goto_page、變綠、提交後計數 +1）"""
         T, st = self.T, self.st[role]
-        led = dp.Ledger(st['ledger'])
-        rs = st['rings'][ring['ring'] - 1]
-        need = {}
-        for k in todo:
-            for n, q in ring['items'][k]['mats']:
-                need[n] = need.get(n, 0) + q
-        for k, it in enumerate(ring['items']):
-            if not it['done'] and rs['crafted'][k]:
-                key = dp.PRODUCT_PREFIX + it['name']
-                need[key] = need.get(key, 0) + 1
-        take = []
-        for n, q in need.items():
-            if n in dp.PEPPERS:
-                if led.bag.get(n, 0) <= 0:
-                    take.append((n, 'public'))
-            elif led.bag.get(n, 0) < q:
-                sub = 'personal' if led.personal.get(n, 0) > 0 else ('public' if led.public.get(n, 0) > 0 else None)
-                if sub is None:
-                    self.fail(EXIT_DEPOT, f'{role} 第 {ring["ring"]} 環要「{n}」×{q}，背包只有 {led.bag.get(n, 0)}、倉庫帳上也沒有', role=role, item=n)
-                take.append((n, sub))
+        plan = self.plan_of(role)
+        opened = False
+        rounds = 0
+        try:
+            while True:
+                pending = [r for r in plan['rings'] if r['supported'] and not st['rings'][r['ring'] - 1].get('submitted')]
+                if not pending:
+                    break
+                rounds += 1
+                if rounds > dp.RINGS + 1:
+                    self.fail(EXIT_CRAFT, f'{role} final 分批沒進展（還有第 {[r["ring"] for r in pending]} 環沒提交）', role=role)
+                led = dp.Ledger(st['ledger'])
+                fb = dp.final_batch(led, plan, st['rings'], pending)
+                if fb is None:
+                    self.fail(EXIT_BUY, f'{role} 背包放不下第 {pending[0]["ring"]} 環的材料，又沒有可存倉的材料', role=role)
+                k, room, take, need = fb
+                batch = pending[:k]
+                later = {n for n in dp.final_need(pending[k:], st['rings'])}
+                back = sorted(n for n in dp.PEPPERS if led.bag.get(n, 0) > 0 and n not in need and n not in later)
+                if k < len(pending) or rounds > 1:
+                    event(f'final {role} 第 {rounds} 批：第 {"、".join(str(r["ring"]) for r in batch)} 環（存倉 {room or "無"}、取 {len(take)} 樣）'
+                          + (f'；還有 {len(pending) - k} 環下一批' if k < len(pending) else ''))
+                lost = [n for n, sub in take if sub is None]
+                fetch = [(n, sub) for n, sub in take if sub is not None]
+                if room or fetch or back:
+                    if opened:
+                        T.daily_close()
+                        opened = False
+                    lost += self.fetch_batch(role, plan, room, fetch, need, back)
+                self.open_daily(role)
+                opened = True
+                if lost:
+                    self.sync_greens(role, plan, True, rings=batch)
+                    led = dp.Ledger(st['ledger'])
+                    need2 = dp.final_need(batch, st['rings'])
+                    still = [n for n in lost if n in need2 and led.bag.get(n, 0) < need2[n]]
+                    if still:
+                        self.fail(EXIT_DEPOT, f'{role} 第 {"、".join(str(r["ring"]) for r in batch)} 環要「{"、".join(still)}」：背包帳上不夠、倉庫找不到（帳上沒有 / bag 92），面板也不是 1/1 綠', role=role, item=still[0])
+                for r in batch:
+                    rs = st['rings'][r['ring'] - 1]
+                    if rs.get('submitted'):
+                        continue
+                    todo = [kk for kk, it in enumerate(r['items']) if not it['done'] and not rs['crafted'][kk]]
+                    self.craft_ring(role, r, rs, todo, True)
+            left = sorted(n for n in dp.PEPPERS if dp.Ledger(st['ledger']).bag.get(n, 0) > 0)
+            if left:                                            # 胡椒用完整疊存回公共倉庫（借出的道具要還）
+                if opened:
+                    T.daily_close()
+                    opened = False
+                self.return_peppers(role, left)
+        finally:
+            if opened:
+                T.daily_close()
+        self.verify_complete(role, plan)
+
+    def fetch_batch(self, role, plan, room, take, need, back=()) -> list:
+        """（委託面板已關）一個背包面板內：胡椒用完的存回公倉 → 存倉騰位（room）→ 批次取料（take）。
+        回「倉庫找不到」（bag 92）的名稱 list（呼叫端開面板看已綠再決定 228）；其他失敗照舊（胡椒 222、倉庫 228、8 / 9 / 10 原碼）"""
+        with self.T.depot_session(role) as rc:
+            if rc:
+                self.tool_fail(rc, EXIT_DEPOT, f'{role} 背包面板 / 選角色失敗（bag rc {rc}）', role=role, bag_rc=rc)
+            if back:
+                self.return_peppers(role, list(back))
+            self.evict_many(role, room)
+            return self.take_items(role, plan, take, need)
+
+    def take_items(self, role, plan, take, need) -> list:
+        """final 取料：批次 take_many → 沒取到的逐樣 depot_take（94 背包滿 → 多存一種不需要的再取，最多 3 次）。
+        找不到（92，非胡椒）→ 收進回傳 list 不當場停；胡椒取不到 222；其他 228"""
+        T, st = self.T, self.st[role]
+        lost = []
         if not take:
-            return
-        room = dp.make_room(led, plan, st['rings'], [n for n, _ in take], protect=set(need))
-        if room is None:
-            self.fail(EXIT_BUY, f'{role} 背包放不下第 {ring["ring"]} 環的材料，又沒有可存倉的材料', role=role)
-        self.evict_many(role, room)
+            return lost
         batch_rc = self.take_many(role, take)
         for n, sub in take:
             game = n[len(dp.PRODUCT_PREFIX):] if n.startswith(dp.PRODUCT_PREFIX) else n
@@ -1322,6 +1439,10 @@ class Daily:
                 event(f'{role} 取「{n}」時背包滿（bag rc 94）→ 先把「{m}」存倉再取')
                 self.evict(role, m)
                 rc = T.depot_take(role, game, sub)
+            if rc == 92 and n not in dp.PEPPERS:
+                event(f'final {role} {sub}倉庫找不到「{game}」（帳上有）→ 先看面板是不是已手動合成')
+                lost.append(n)
+                continue
             if rc:
                 if n in dp.PEPPERS:
                     self.fail(EXIT_PEPPER if rc not in PASS else rc, f'{role} 公共倉庫取不到「{n}」（bag rc {rc}；胡椒要使用者先放公倉，腳本不買）', role=role, item=n, bag_rc=rc)
@@ -1337,6 +1458,7 @@ class Daily:
             st['ledger'] = led.to_dict()
             self.save_role(role)
             event(f'final {role} 取回「{game}」（{"個人" if sub == "personal" else "公共"}倉庫 → 背包）')
+        return lost
 
     def take_many(self, role, take) -> dict:
         """final 取料批次（2026-10-17）：take = [(帳上名, sub)]，一個 Session、倉庫分頁各切一次、每樣不切回背包頁；
@@ -1394,8 +1516,13 @@ class Daily:
         before = T.reward_count()
         if not T.submit():
             self.fail(EXIT_CRAFT, f'{role} 提交委託點不到（面板特徵不在）', role=role)
-        T.sleep(0.5)
-        after = T.reward_count()
+        after = None
+        for i in range(SUBMIT_POLL_N):                         # 計數變成 before+1 就繼續（舊：固定 1.5 + 0.5 秒後讀一次）
+            if i:
+                T.sleep(SUBMIT_POLL_S)
+            after = T.reward_count()
+            if before is None or after == before + 1:
+                break
         ok = (after == before + 1) if (before is not None and after is not None) else (T.item_states() != ['green', 'green'])
         if not ok:
             self.fail(EXIT_CRAFT, f'{role} 第 {ring["ring"]} 環提交後計數 {before} → {after}（應 +1）', role=role, ring=ring['ring'])

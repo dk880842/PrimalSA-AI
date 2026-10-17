@@ -643,6 +643,49 @@ def buy_batches(ledger: Ledger, plan: dict, rings_state: list, mats, cap: int = 
     return out
 
 
+def final_need(ring_plans, rings_state) -> dict:
+    """final 一批環（ring_plans = plan['rings'] 的子集，未提交）在背包要有的東西 {名稱: 量}：
+    還沒合成的項（not done、not crafted）的材料 + 已合成未提交的成品（PRODUCT_PREFIX 鍵，提交要在背包）"""
+    out = collections.Counter()
+    for r in ring_plans:
+        rs = rings_state[r['ring'] - 1]
+        for k, it in enumerate(r['items']):
+            if it['done']:
+                continue
+            if rs['crafted'][k]:
+                out[PRODUCT_PREFIX + it['name']] += 1
+            else:
+                for n, q in it['mats']:
+                    out[n] += q
+    return dict(out)
+
+
+def final_take(ledger: Ledger, need: dict) -> list:
+    """need 裡背包帳上不夠的 → [(名稱, 'personal' | 'public' | None)]（None = 倉庫帳上也沒有；胡椒背包沒有就取公倉整疊）"""
+    out = []
+    for n, q in need.items():
+        if n in PEPPERS:
+            if ledger.bag.get(n, 0) <= 0:
+                out.append((n, 'public'))
+        elif ledger.bag.get(n, 0) < q:
+            out.append((n, 'personal' if ledger.personal.get(n, 0) > 0 else ('public' if ledger.public.get(n, 0) > 0 else None)))
+    return out
+
+
+def final_batch(ledger: Ledger, plan: dict, rings_state: list, pending, cap: int = BAG_KINDS_MAX):
+    """final 分批（2026-10-18 每人只開一次面板）：pending = 未提交的支援環（依環序）→ 取「背包放得下的最長前綴」
+    → (k 環, 要先存倉的 list, 要取的 [(名稱, sub)], need)；連 1 環都放不下 → None。
+    放得下 = make_room(incoming = 要取的名稱, protect = 這批要的全部) 有解（成品保留 2 格同 BAG_KINDS_MAX 假設；合成扣材料只會讓格子變少，不另算）。**不改 ledger**"""
+    pending = list(pending)
+    for k in range(len(pending), 0, -1):
+        need = final_need(pending[:k], rings_state)
+        take = final_take(ledger, need)
+        room = make_room(ledger, plan, rings_state, [n for n, _ in take], cap, protect=set(need))
+        if room is not None:
+            return k, room, take, need
+    return None
+
+
 def products_away(ring_plan: dict, rs: dict, ledger: Ledger) -> list:
     """該環已合成（未提交）的成品有哪些不在背包帳上 → [(成品鍵, 倉庫 'personal' / 'public')]（提交要成品在背包；final 取回、mid 先不提交）"""
     want = collections.Counter(PRODUCT_PREFIX + it['name'] for k, it in enumerate(ring_plan['items'])
