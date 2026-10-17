@@ -5,6 +5,7 @@
   知識庫   load_recipes（item-book.md → 配方）、load_stores（npc-shops.md 1009 / 2009 → 店 / 材料歸屬 / 商品順序）
   名稱     norm / snap_item（OCR 讀到的成品名 → 配方表裡的名字；ocrfix 修正 + 相似度，歧義不猜）、vote_lines（多倍率逐倍率 snap 投票）、
            resolve_name / match_mats / snap_mats / digit_family（名稱不確定 → 快速合成彈窗大字 + 材料列核對；同族數字不互認）
+           pop_rows / pop_mats / mats_fit / pop_check / arrow_on（快速合成彈窗第二輪：材料列整欄分列、▼ 捲動合併、依序比對配方、要有大字證據）
   計畫     plan_role（每人 10 項 → 每環是否支援、薩村 / 漁村 / 胡椒購買清單、石幣估算）、store_route（店順序 = 店員 y 由小到大）
   背包模型 Ledger（背包 / 個人倉庫 / 公倉的材料種類與數量；**不讀背包 / 倉庫格數**，改用「背包材料種類上限 BAG_KINDS_MAX」模型決定何時存倉）、
            choose_evict / make_room（放不下時存最晚環才用到的種類）、craftable / ring_ready（可合成 / 可提交判斷）
@@ -40,7 +41,8 @@ EXIT_NAMES = {
 STAGES = ('prep', 'read', 'plan', 'sam', 'mid', 'fish', 'final', 'finish')
 SAM_MAP, FISH_MAP = 1009, 2009
 MAP_STAGE = {SAM_MAP: 'sam', FISH_MAP: 'fish'}
-PEPPERS = ('普通的胡椒', '黑胡椒', '香味濃厚的胡椒')     # 不在 1009 / 2009 店賣；使用者先放公共倉庫，腳本只取用、用剩存回，絕不買
+PEPPERS = ('普通的胡椒', '黑胡椒', '香味濃厚的胡椒')     # 胡椒 1～3（12174～12176）不在 1009 / 2009 店賣；使用者先放公共倉庫，腳本只取用、用剩存回，絕不買。
+                                                        # 塔姆塔姆產的胡椒（12177，胡椒 4）2825 地方特產品販賣員有賣 → 不在這裡，load_stores 當一般材料照買
 BAG_KINDS_MAX = 13                                      # 背包同時放的材料 / 成品種類上限（背包可見 15 格，留 2 格給合成成品；fork 同值）
 MAT_PRICE, CRAFT_PRICE = 500, 1000
 RINGS = 5
@@ -181,36 +183,124 @@ def snap_mats(texts, recipes: dict) -> list:
     return out
 
 
-POP_MAT_ROWS = 4          # 快速合成彈窗材料列可見列數（含最後一列「石幣」；探路 12-craft.png：2 材料 + 石幣 = 3 列）
+# 快速合成彈窗材料列（2026-10-17 第二輪，p1 樣本 99 張：5 人 × 10 項 + 捲動版）：
+#   版面：列表視野 y 228～630，列距 92；最多 4 列完整 + 半列；材料依 item-book 配方順序排，最後一列「石幣 1000」（綠字）。
+#   超過 4 列 → 下緣黃色 ▼（(820,626) 一帶）；捲動後上緣出現黃色 ▲（(820,242) 一帶）。**短清單被拖過也會冒 ▲、而且蓋住第 1 列右半**
+#   （「有光澤的地瓜」只剩「有光澤的」→ 會 snap 成「有光澤的皮」），所以 ▲ 亮時 y < POP_ARROW_TOP 的行一律不收。
+#   紅字計數「0/1」Windows OCR 讀不到（不二值化 / -Dark / -Light 都不行）→ 數量不從畫面核對（每日成品配方的材料幾乎都 ×1；配方吻合 = 名稱與順序都對）。
+POP_MAT_ROWS = 4                  # 一眼看得到的完整材料列數（含「石幣」列；5 種材料 + 石幣要捲動）
+POP_LIST_BAND = (240, 600)        # 材料名行中心 y 的有效範圍（下緣半列 y≈620 不收）
+POP_ARROW_TOP = 275               # ▲ 亮時，y 小於這個的行（被 ▲ 蓋住的第 1 列）不收
+COIN = '石幣'
 
 
-def match_mats(cands, mats, recipes: dict) -> list:
-    """候選成品裡「材料列和配方吻合」的那些。材料 < POP_MAT_ROWS 種要完全相等；更多種（後面捲出去看不到）→ 讀到的是配方子集且至少 POP_MAT_ROWS 種"""
-    got = set(mats or [])
-    if not got:
-        return []
+def arrow_on(colors) -> bool:
+    """▼ / ▲ 取樣點（黃 251,228,20 一帶）任一亮 → True。colors = [(r, g, b)...]；None / 空 → False"""
+    return any(c and c[0] > 200 and c[1] > 150 and c[2] < 100 for c in (colors or []))
+
+
+def _has_cjk(t) -> bool:
+    return any('一' <= ch <= '鿿' for ch in str(t or ''))
+
+
+def pop_rows(lines, recipes: dict, up: bool = False) -> list:
+    """彈窗材料列「高框一次讀」的 OCR 原始行（每行帶 y / zoom）→ 由上到下的列名（材料名或「石幣」）。
+    同一列（各倍率 y 差 ≤ 20）合併後逐倍率投票（vote_lines）；只有數字的行（「1000」）、讀不出的列略過；up = ▲ 亮 → 第 1 列被蓋住的行不收"""
+    known = mat_names(recipes) + [COIN]
+    top = max(POP_LIST_BAND[0], POP_ARROW_TOP if up else 0)
+    ls = sorted((ln for ln in (lines or []) if isinstance(ln, dict) and _has_cjk(ln.get('text'))
+                 and top <= (ln.get('y') or 0) <= POP_LIST_BAND[1]), key=lambda ln: ln.get('y') or 0)
+    groups = []
+    for ln in ls:
+        if groups and abs((ln.get('y') or 0) - (groups[-1][-1].get('y') or 0)) <= 20:
+            groups[-1].append(ln)
+        else:
+            groups.append([ln])
     out = []
-    for c in cands:
-        for rec in recipes.get(norm(c), []):
-            names = {n for n, _ in rec}
-            if (len(names) < POP_MAT_ROWS and got == names) or (len(names) >= POP_MAT_ROWS and got <= names and len(got) >= POP_MAT_ROWS):
-                out.append(norm(c))
-                break
+    for g in groups:
+        nm = vote_lines(g, known)['name']
+        if nm and nm not in out:
+            out.append(nm)
     return out
 
 
+def pop_mats(pop: dict, recipes: dict) -> dict:
+    """彈窗讀值 → {'seq': [材料名（由上到下）], 'complete': 看到整張清單（從第 1 列到「石幣」）}。
+    pop 鍵：list（材料列高框 OCR 原始行）、up（▲ 亮）、down（▼ 亮）；捲一次後再讀的 list2 / up2（可無）。
+    舊格式 mats = [每列 OCR 原始行或字串]（離線測試 / 舊 fixture）也收：有讀到「石幣」列 = complete。
+    第一張（剛開彈窗、▲ 不亮）看到石幣 → complete；▼ 亮 = 還有更多 → 有 list2（捲到底、看到石幣）就把兩張依序合併（重疊的列只算一次）"""
+    pop = pop or {}
+    if pop.get('list') is None and pop.get('mats') is not None:
+        known = mat_names(recipes) + [COIN]
+        rows = []
+        for t in pop.get('mats') or []:
+            nm = vote_lines(t, known)['name']
+            if nm and nm not in rows:
+                rows.append(nm)
+        return {'seq': [r for r in rows if r != COIN], 'complete': COIN in rows}
+    up = bool(pop.get('up'))
+    rows = pop_rows(pop.get('list'), recipes, up)
+    seq = [r for r in rows if r != COIN]
+    complete = COIN in rows and not up
+    if not complete and not up and pop.get('list2') is not None:
+        rows2 = pop_rows(pop.get('list2'), recipes, bool(pop.get('up2')))
+        if COIN in rows2:
+            seq = seq + [r for r in rows2 if r != COIN and r not in seq]
+            complete = True
+    return {'seq': seq, 'complete': complete}
+
+
+def _as_info(mats) -> dict:
+    """match_mats / resolve_name 的材料參數：pop_mats 的 dict，或舊的材料名 list（有「石幣」= 看到整張）"""
+    if isinstance(mats, dict):
+        return mats
+    mats = [m for m in (mats or []) if m]
+    return {'seq': [m for m in mats if m != COIN], 'complete': COIN in mats}
+
+
+def _subseq(a, b) -> bool:
+    """a 是 b 的「依序子序列」（中間可略過讀不出的列，但順序不能亂）"""
+    it = iter(b)
+    return all(x in it for x in a)
+
+
+def mats_fit(name, mats, recipes: dict):
+    """材料列和 name 的配方比：'full'（看到整張且名稱、順序完全相同）/ 'partial'（沒看全：讀到的都在配方裡且順序對）/
+    False（矛盾：有配方外的材料、順序不對，或看到整張卻和配方不同 —— 列讀漏也算，寧可停手）/ None（沒讀到任何材料列）。
+    同名多組配方取最好的那組。數量不比：item-book 裡「材料名單相同、數量不同」的配方 0 組（2026-10-17 查），名單吻合 = 數量也吻合"""
+    info = _as_info(mats)
+    seq = list(info.get('seq') or [])
+    if not seq:
+        return None
+    best = False
+    for rec in recipes.get(norm(name), []):
+        names = [n for n, _ in rec]
+        if seq == names and info.get('complete'):
+            return 'full'
+        if not info.get('complete') and _subseq(seq, names):
+            best = 'partial'
+    return best
+
+
+def match_mats(cands, mats, recipes: dict) -> list:
+    """候選成品裡材料列吻合的那些：有 'full' 的只回 full 的；沒有才回 'partial' 的（mats = pop_mats 結果或材料名 list）"""
+    fits = {norm(c): mats_fit(c, mats, recipes) for c in cands}
+    full = [c for c, f in fits.items() if f == 'full']
+    return full or [c for c, f in fits.items() if f == 'partial']
+
+
 def resolve_name(panel: dict, pop: dict, mats, recipes: dict):
-    """面板名稱不確定時的第二層（快速合成彈窗）：panel / pop = vote_lines 結果，mats = snap_mats 結果。
+    """面板名稱不確定時的第二層（快速合成彈窗）：panel / pop = vote_lines 結果，mats = pop_mats 結果（或材料名 list）。
     有讀到材料列 → 候選（兩邊得票名 + 同族只差數字的名）裡材料吻合的**唯一**一個；材料列讀不到 → 只在面板與彈窗大字同名、
     或彈窗大字 sure 且面板沒投給別的名字時才接受。其他一律 None（呼叫端 225，不猜）"""
     names = set(panel.get('votes') or {}) | set(pop.get('votes') or {})
     pool = sorted({f for n in names for f in digit_family(n, recipes)})
     ok = set(pool)
-    if mats:
+    if _as_info(mats).get('seq'):
         m = match_mats(pool, mats, recipes)
         if len(m) == 1:
             return m[0]
-        ok = {c for c in pool if _mats_consistent(c, mats, recipes)}      # 材料列漏讀一列：至少不能和配方矛盾
+        ok = {c for c in pool if mats_fit(c, mats, recipes)}      # 材料列漏讀 / 沒看全：至少不能和配方矛盾
     nm = pop.get('name')
     if nm not in ok:
         return None
@@ -221,25 +311,36 @@ def resolve_name(panel: dict, pop: dict, mats, recipes: dict):
     return None
 
 
-def _mats_consistent(name, mats, recipes: dict) -> bool:
-    """讀到的材料列都在 name 的某組配方裡（漏讀列不算矛盾）"""
-    got = set(mats or [])
-    return any(got <= {n for n, _ in rec} for rec in recipes.get(norm(name), []))
+def pop_check(name, pop: dict, recipes: dict):
+    """合成前核對快速合成彈窗是不是 name → True / False / None（看不全 / 大字讀不到、還不能確定 → 呼叫端 ▼ 亮就捲一次再讀，仍 None 就不合成）。
+    pop = {'name': 大字原始行, 'list' / 'up' / 'down' / 'list2' / 'up2'（見 pop_mats）}（舊格式 'mats' 也收）。
+    **一定要有大字證據**：item-book 有 38 組「材料完全相同」的不同成品（厚肉塊串燒 / 鹽味獸肉串燒、葉子烤蕃薯 / 半熟的芋頭、
+    合成投擲斧頭 N / 合成斧頭 N、合成石 N / 合成迴旋標 N、合成兜 N / 合成鎧 N…），只看材料會互認。
+      大字有倍率投給 name 同族（只差數字）以外的成品 → False；材料列和配方矛盾 → False
+      大字沒有任何倍率讀到同族名 → None
+      同族數字（合成爪 1～10）：材料列在同族裡唯一吻合 name → True（大字數字讀錯以材料為準）
+      無數字名：大字得票 = name 且材料 full / partial → True；沒讀到材料列 → 大字 sure 才 True"""
+    n = norm(name)
+    fam = digit_family(n, recipes)
+    gv = vote_lines((pop or {}).get('name'), recipes)
+    if any(v not in fam for v in gv['votes']):
+        return False
+    info = pop_mats(pop, recipes)
+    fit = mats_fit(n, info, recipes)
+    if fit is False:
+        return False
+    if not gv['votes']:
+        return None
+    if fit is None:
+        return True if (gv['name'] == n and gv['sure']) else None
+    if len(fam) > 1:
+        return True if match_mats(fam, info, recipes) == [n] else None
+    return True
 
 
 def pop_is(name, pop: dict, recipes: dict) -> bool:
-    """合成前核對快速合成彈窗是不是 name（pop = {'name': 大字原始行, 'mats': [材料列原始行]}）。
-    材料列有讀到：和 name 配方矛盾 → False；同族（只差數字）裡唯一吻合 name → True。其餘看大字：同族候選逐倍率投票唯一 = name 且 sure"""
-    n = norm(name)
-    fam = digit_family(n, recipes)
-    mats = snap_mats(pop.get('mats'), recipes)
-    if mats:
-        if not _mats_consistent(n, mats, recipes):
-            return False
-        if match_mats(fam, mats, recipes) == [n]:
-            return True
-    v = vote_lines(pop.get('name'), fam)
-    return v['name'] == n and v['sure']
+    """pop_check 為 True 才算（False / None 都不合成）"""
+    return pop_check(name, pop, recipes) is True
 
 
 # ---------------- 計畫 ----------------

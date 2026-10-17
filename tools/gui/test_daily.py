@@ -114,6 +114,56 @@ check('pop_is：沒材料列 → 大字 2 倍率同意才算', dp.pop_is('合成
       and not dp.pop_is('合成爪 7', {'name': L('合成爪7', '合成爪1'), 'mats': []}, RECIPES))
 check('pop_is：真截圖貝類飯 → True；當成大補飯團 → False', dp.pop_is('貝類飯', P, RECIPES) and not dp.pop_is('大補飯團', P, RECIPES))
 
+# ---------------- 快速合成彈窗第二輪（fixtures/daily_pop_ocr.json = p1 2026-10-17 樣本 50 項 + ▼ 項的捲動版；成品名框 380,398,204,50、材料列整欄 686,228,234,402）----------------
+PX = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_pop_ocr.json').read_text(encoding='utf-8'))
+TRUTHS = sorted({dp.norm(c['truth']) for c in PX['cases']})
+bad, wrong, partial_first = [], [], 0
+for c in PX['cases']:
+    t = dp.norm(c['truth'])
+    first = {k: c[k] for k in ('name', 'list', 'down', 'up')}
+    info = dp.pop_mats(first, RECIPES)
+    partial_first += dp.mats_fit(t, info, RECIPES) == 'partial'
+    if dp.resolve_name(dp.vote_lines([], RECIPES), dp.vote_lines(c['name'], RECIPES), info, RECIPES) != t or dp.pop_check(t, first, RECIPES) is not True:
+        bad.append((c['img'], t))
+    wrong += [(c['img'], o) for o in TRUTHS if o != t and dp.pop_check(o, first, RECIPES) is True]
+check(f'彈窗 50 項（第一眼不捲）：resolve_name / pop_check 全對（{len(PX["cases"])} 項）', len(PX['cases']) == 50 and not bad, str(bad[:3]))
+check('彈窗 50 項：拿其他 39 個成品名去核對一律不是（0 誤認，含材料相同的厚肉塊串燒 / 鹽味獸肉串燒、葉子烤蕃薯 / 半熟的芋頭）', not wrong, str(wrong[:3]))
+check('彈窗：▼ 亮 ⇔ 第一眼看不到石幣列（材料 4 種以上）；第一眼只看到前 4 列 → partial', all(c['down'] == (dp.COIN not in dp.pop_rows(c['list'], RECIPES)) for c in PX['cases'])
+      and partial_first == sum(c['down'] for c in PX['cases']) == 16, str(partial_first))
+sc = [c for c in PX['cases'] if 'list2' in c]
+full2 = [c for c in sc if dp.mats_fit(c['truth'], dp.pop_mats(c, RECIPES), RECIPES) == 'full' and dp.pop_check(c['truth'], c, RECIPES) is True]
+check(f'彈窗：▼ 項捲一次後兩張依序合併 → 材料列完整且吻合配方（{len(sc)} 項）', len(sc) == 15 and len(full2) == len(sc), f'{len(full2)}/{len(sc)}')
+check('彈窗：大字讀不到 → pop_check 一律不是 True（材料相同的不同成品不能只靠材料認）',
+      all(dp.pop_check(o, dict(c, name=[]), RECIPES) is not True for c in PX['cases'] for o in TRUTHS))
+T = PX['trap_up_overlap']
+check('彈窗：▲ 蓋住第 1 列（「有光澤的地瓜」只剩「有光澤的」）→ up=True 時不收該行，不會變成「有光澤的皮」',
+      '有光澤的皮' not in dp.pop_rows(T['list'], RECIPES, up=T['up']) and '有光澤的皮' in dp.pop_rows(T['list'], RECIPES, up=False) and T['up'])
+c0 = next(c for c in PX['cases'] if dp.norm(c['truth']) == '厚肉塊串燒')
+check('pop_check：材料相同的鹽味獸肉串燒 → False（大字投給厚肉塊串燒）', dp.pop_check('鹽味獸肉串燒', c0, RECIPES) is False and dp.pop_check('厚肉塊串燒', c0, RECIPES) is True)
+check('mats_fit：看到整張卻少一列 → False（不當 partial）', dp.mats_fit('特製2倍厚肉片', {'seq': ['幹燥肉', '粗鹽', '燃燒完全的炭'], 'complete': True}, RECIPES) is False
+      and dp.mats_fit('特製2倍厚肉片', {'seq': ['幹燥肉', '大的大蒜'], 'complete': False}, RECIPES) == 'partial'
+      and dp.mats_fit('特製2倍厚肉片', {'seq': ['大的大蒜', '幹燥肉'], 'complete': False}, RECIPES) is False)
+check('arrow_on：黃 → True；米色 / None → False', dp.arrow_on([(251, 228, 20)]) and not dp.arrow_on([(255, 221, 188)]) and not dp.arrow_on(None))
+
+# ---------------- 便利店標題（fixtures/daily_shop_titles.json = p1 2026-10-17 11 間店 × 12 張）----------------
+SX = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_shop_titles.json').read_text(encoding='utf-8'))
+STORES, _ = dp.load_stores()
+bad, wrong = [], []
+for c in SX['cases']:
+    order = STORES[c['npc']].items
+    v = shopkit.title_vote(c['lines'], order)
+    if v['name'] != dp.norm(c['truth']) or not shopkit.title_is(c['lines'], c['truth'], order):
+        bad.append((c['img'], c['truth'], v['texts']))
+    wrong += [(c['img'], o) for o in order if o != dp.norm(c['truth']) and shopkit.title_is(c['lines'], o, order)]
+check(f'便利店標題 132 張逐倍率比對該店清單投票全對（{len(SX["cases"])} 張，含霍特爾產的馬鈴薯）', len(SX['cases']) == 132 and not bad, str(bad[:3]))
+check('便利店標題：拿同店其他商品去核對一律不是（0 誤認）', not wrong, str(wrong[:3]))
+check('便利店標題：舊讀法（各倍率 join 一串再 title_match）在同一批樣本會失敗', sum(shopkit.title_match(''.join(ln['text'] for ln in c['lines'] if isinstance(ln['zoom'], int)), c['truth']) for c in SX['cases']) < 132)
+LZ = lambda *ts: [{'text': t, 'x': 990, 'zoom': z} for z, t in enumerate(ts, 2)]  # noqa: E731
+ORD = ['普通的青椒', '大的青椒', '有光澤的青椒']
+check('title_vote：4 票對 1 票 → 多數決收；1 對 1 → None', shopkit.title_vote(LZ('普通的青椒', '普通的青椒', '大的青椒', '普通的青椒', '普通的青椒'), ORD)['name'] == '普通的青椒'
+      and shopkit.title_vote(LZ('普通的青椒', '大的青椒'), ORD)['name'] is None)
+check('title_is：字串（舊介面）走 title_match；清單沒給只比 want', shopkit.title_is('硬的 殼', '硬的殼') and shopkit.title_is(LZ('溫蒂妮Lv5的金幣'), '溫蒂妮Lv5的金幣') and not shopkit.title_is(None, '硬的殼'))
+
 # ---------------- 純函式：畫面讀值 ----------------
 check('count_state 紅 / 綠 / 其他', dp.count_state((255, 0, 0)) == 'red' and dp.count_state((135, 255, 91)) == 'green' and dp.count_state((90, 62, 41)) == '?' and dp.count_state(None) == '?')
 check('popup_short：任一紅 → 不足', dp.popup_short([(255, 0, 0), (255, 255, 255)]) and not dp.popup_short([(135, 255, 91), (255, 255, 255)]) and not dp.popup_short(None))
@@ -399,7 +449,7 @@ class FakeTools:
             names[1] = [{'text': '？？？', 'x': 400, 'zoom': 2}]          # 名稱 OCR 壞掉 → 要走 peek
         return {'names': names, 'states': ['green' if g else 'red' for g in self.W.green[r][pg]]}
 
-    def peek_item(self, k):
+    def peek_item(self, k, panel=None):
         self.L('peek', self.W.cur, self.W.page, k)
         if self.inj.get('peek_fail'):
             return {'name': [], 'mats': []}

@@ -2,10 +2,11 @@
 """便利店 / NPC 商店共用動作（從 buywendy.py 抽出，2026-10-17；buywendy 改 import、行為不變；daily.py 也用）。只用標準函式庫。
 
 內容：
-  純函式   parse_coin / coin_delta_ok（buywendy 沿用）、title_match（商品標題名稱模糊比對）、visible_candidates（清單定位候選列）、
-           qty_digit_xy（數字鍵盤鍵位）
+  純函式   parse_coin / coin_delta_ok（buywendy 沿用）、title_vote / title_is（商品標題**逐倍率各自比對該店商品清單投票**，2026-10-17 第二輪：
+           舊版各倍率 join 成一串；p1 樣本 11 間店 132 張 → 主讀法 130 對、備援補讀後 132 對、0 誤認）、title_match（字串模糊比對，舊介面 / 無清單時）、
+           visible_candidates（清單定位候選列）、qty_digit_xy（數字鍵盤鍵位）
   座標     商店面板固定座標（ui/shop.md、notes/daily-probe.md M11～M13；截圖 1440×830、鏡頭最左）
-  動作     shop_open（✕ 紅圓像素）、read_title、select_item（名稱定位 + 捲動）、set_qty（數字鍵盤）、buy_once（購買 → 提示確定）、
+  動作     shop_open（✕ 紅圓像素）、read_title（回 OCR 原始行；主讀法投不出就 TITLE_FALLBACK 補讀）、select_item（名稱定位 + 捲動）、set_qty（數字鍵盤）、buy_once（購買 → 提示確定）、
            qty_now（讀數量框）、close_shop（✕ 1207,107；買完還疊提示窗再補）
 鐵則 3：本模組不讀石幣 / 鑽石（buywendy 自己用 parse_coin 讀石幣；daily 不讀）；只在呼叫端明確要買時才按「購買」。
 **未實機**（select_item / set_qty 的座標取自 daily-probe 探路量測，2026-10-17；shop_open / 購買 / 確定 = 既有實測值）。
@@ -16,6 +17,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import dailyplan  # noqa: E402  （vote_lines / norm：標題逐倍率投票）
 import uikit  # noqa: E402
 
 # ---- 座標（截圖 1440×830）----
@@ -23,8 +25,10 @@ SHOP_BTN = (948, 461)                            # NPC 對話框「道具商店�
 SHOP_CLOSE = (1207, 107)                         # 便利店右上 ✕（紅圓 190,74,49）
 BUY_BTN, CONFIRM_BTN = (995, 592), (615, 557)    # 購買 / 提示「確定」（同 shopbuy）
 COIN_BOX = (285, 8, 130, 30)                     # 頂端資源列石幣（buywendy 專用；daily 不讀）
-TITLE_BOX = (880, 185, 230, 45)                  # 右側標題（選中的商品名；紅底米白 / 黃字）
-TITLE_OPTS = ('-Zooms', '2,3', '-Dark', '0')     # 淺字紅底：不二值化（fork ocrbench 2026-10-15：24/24；舊讀法 9/24）
+TITLE_BOX = (870, 180, 254, 54)                  # 右側標題（選中的商品名；紅底黃字 255,255,106，字 x 889～1104 × y 194～217，9 字店名都容得下）
+TITLE_OPTS = ('-Zooms', '2,3,4,5,6', '-Dark', '0')   # 不二值化、5 倍率**逐倍率各自比對該店商品清單投票**（title_vote；p1 2026-10-17 132 張 130 對 0 誤認，2 張全倍率讀空 → 備援）
+TITLE_FALLBACK = (((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Dark', '0')),   # 主讀法投不出名字才依序補讀（倍率鍵加前綴、各自投票）
+                  ((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Light', '92')))
 QTY_XY = (995, 465)                              # 數量框：點它跳出數字鍵盤
 QTY_BOX = (968, 450, 56, 32)                     # 數量白字 bbox 989～1002 × 455～477
 KEY_CLEAR, KEY_ENTER = (910, 455), (910, 572)    # 鍵盤 ✕（清除）/ ↵（確定）
@@ -81,6 +85,26 @@ def title_match(text, want: str, cutoff: float = 0.8) -> bool:
     return difflib.SequenceMatcher(None, a, b).ratio() >= cutoff
 
 
+def title_vote(lines, order) -> dict:
+    """標題 OCR 原始行（uikit.ocr_lines，多倍率每行帶 zoom）→ **逐倍率各自比對 order（該店商品清單）投票**（dailyplan.vote_lines，同上一輪成品名讀法）。
+    舊讀法把各倍率 ''.join 成一串（「香味濃厚的油香味濃厚的油」/ 一個倍率掉字就整串不像）。
+    多倍率投給不同商品（例：「的青椒」被 snap 成「大的青椒」1 票 vs「普通的青椒」4 票）→ 多數決：最高票 ≥ 2 且多於其他票總和才收；平手 / 只有 1 票對 1 票 → None。
+    回 dailyplan.vote_lines 的 dict（name / votes / conflict / sure / texts）"""
+    v = dailyplan.vote_lines(lines, order)
+    if v['name'] is None and v['votes']:
+        (top, n), *rest = sorted(v['votes'].items(), key=lambda kv: -kv[1])
+        if n >= 2 and n > sum(c for _, c in rest):
+            v = dict(v, name=top)
+    return v
+
+
+def title_is(read, want: str, order=None) -> bool:
+    """標題讀值是不是 want：read = ocr_lines 原始行（逐倍率投票，order 給該店清單；沒給就只比 want）或字串（舊介面 → title_match）"""
+    if read is None or isinstance(read, str):
+        return title_match(read, want)
+    return title_vote(read, list(order or [want]))['name'] == dailyplan.norm(want)
+
+
 def card_xy(row_pos: int, col: int) -> tuple:
     """目前視野第 row_pos 列（0 起算）、第 col 欄（0 / 1）的卡片中心"""
     return COL_X[col], ROW_Y0 + ROW_PITCH * row_pos
@@ -118,10 +142,15 @@ def shop_open() -> bool:
     return bool(px) and px[0][0] > 180 and px[0][1] < 100
 
 
-def read_title() -> str:
-    """右側標題文字：先 -Dark 0，沒字再用舊讀法"""
-    t = ''.join(uikit.ocr(TITLE_BOX, *TITLE_OPTS))
-    return t if t.strip() else ''.join(uikit.ocr(TITLE_BOX, '-Zooms', '2,3'))
+def read_title(order=None) -> list:
+    """右側標題 OCR 原始行（多倍率，呼叫端 title_vote / title_is 逐倍率投票）。主讀法投不出 order 裡的名字 → 依 TITLE_FALLBACK 補讀
+    （倍率鍵加前綴 f1-2…，不和主讀法同倍率拼在一起）；order 沒給 = 不補讀"""
+    lines = uikit.ocr_lines(TITLE_BOX, *TITLE_OPTS)
+    for i, (box, opts) in enumerate(TITLE_FALLBACK if order else (), 1):
+        if title_vote(lines, order)['name']:
+            break
+        lines = lines + [dict(ln, zoom=f'f{i}-{ln.get("zoom")}') for ln in uikit.ocr_lines(box, *opts)]
+    return lines
 
 
 def qty_now() -> int | None:
@@ -137,10 +166,10 @@ def scroll_top(rows: int) -> None:
 
 def select_item(want: str, order: list, state: dict | None = None, reader=None) -> bool:
     """在商店清單選 want（order = 該店商品順序 = 遊戲清單順序，2 欄先左後右；來自 npc-shops.md）。
-    靠標題名稱核對定位（不算位移）：預測列優先、不對再試鄰近列、視野外就往下拖一次；最多拖 len(order)//4+2 次。
+    靠標題名稱核對定位（不算位移；標題逐倍率比對本店清單投票 title_is）：預測列優先、不對再試鄰近列、視野外就往下拖一次；最多拖 len(order)//4+2 次。
     state = {'drags': n} 跟蹤已拖次數（呼叫端開店時給 {'drags': 0}）；回傳 True = 標題已是 want（已選中）。
     開店時第 1 項自動選中；清單 ≤ 8 項（≤4 列）不用捲。reader 可換（測試）"""
-    reader = reader or read_title
+    reader = reader or (lambda: read_title(order))
     st = state if state is not None else {'drags': 0}
     if want not in order:
         return False
@@ -150,7 +179,7 @@ def select_item(want: str, order: list, state: dict | None = None, reader=None) 
         for r in visible_candidates(idx, st['drags']):
             x, y = card_xy(r, col)
             uikit.gui('seq', f'click {x} {y}; wait 450', note=f'shopkit 選商品「{want}」（第 {idx + 1} 項，視野列 {r}）')
-            if title_match(reader(), want):
+            if title_is(reader(), want, order):
                 return True
         if st['drags'] * ROWS_PER_DRAG > idx // 2 + 2:
             break

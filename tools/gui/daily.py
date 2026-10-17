@@ -6,7 +6,10 @@
   read    DKBO2 → DKBO3 → DKBO4 → DKBO5 → DKBO 輪流 char.switch：點 NPC 開委託面板 → 讀 5 環 × 上 / 下 → daily-<角色>.json
           成品名讀法（2026-10-17 修 225）：名稱框 OCR -Zooms 2,3,4,5 -Dark 0 → dp.vote_lines **逐倍率各自 snap 投票**（舊版把各倍率 join 成一串 →「成弓箭8口成弓箭8」）；
           數字尾碼（合成爪 7 / 3）要 ≥2 倍率同意才確定，否則開快速合成彈窗讀大字 + 材料列 → dp.resolve_name（同族只差數字的用材料列分）；仍不確定 → 225 不猜
+          快速合成彈窗（第二輪，p1 樣本 99 張）：大字框 380,398,204,50；材料列整欄一次讀（dp.pop_rows 依 y 分列）；▼ 亮（材料 4 種以上）且還分不出 → 材料列內拖一次再讀（pop_scroll）；
+          合成前 dp.pop_check：材料列依序比對配方 + 一定要有大字證據（item-book 有 38 組材料完全相同的不同成品）；None 且 ▼ → 捲一次再核對、捲回頂端
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
+  （便利店選商品：shopkit.select_item 標題逐倍率比對該店清單投票 title_is，第二輪離線 132/132）
   sam     組隊 → 傳送薩姆吉爾 → 解散 → 5 人輪流（各自 go_spot 走進 1009）沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
   mid     組隊 → 傳送薩姆吉爾 → 解散 → 5 人輪流（各自 go_spot 走到醫院 38,48）：材料齊的項先合成、該環兩項都綠就提交（沒人有事可做就整段跳過）
   fish    組隊 → 傳送瑪麗娜絲 → 解散 → 5 人輪流（各自 go_spot 走進 2009）買漁村料
@@ -26,7 +29,7 @@ go_spot：醫院 = daily.hosp_route 依目前位置接著走 waypoint（不回�
     --dry-run      同 plan（不碰遊戲）
   可 import：daily.run(roles=None, confirm_buy=False, from_stage=None, fresh=False, dry_run=False, grind=True, tools=None) → 退出碼；結果 dict 在 daily.LAST
 
-鐵則：3（每日任務例外，使用者 2026-10-17）**不讀石幣、不讀鑽石**：買到沒看數量框歸 0 + 背包名稱；不拆疊、不丟東西、不碰寵物、不買胡椒。
+鐵則：3（每日任務例外，使用者 2026-10-17）**不讀石幣、不讀鑽石**：買到沒看數量框歸 0 + 背包名稱；不拆疊、不丟東西、不碰寵物、不買胡椒 1～3（dp.PEPPERS；塔姆塔姆產的胡椒 2825 有賣，當一般材料照買）。
       5 答題介面 → uikit.preflight 正面命中即停；不 clear 旗標。委託面板 / 快速合成 / 便利店內只用 uikit.safe_click（禁區：提交委託 / 彈窗合成 / 獎勵箭頭，動作內 allow 放行）。
       不認得的畫面 / 面板打不開 → 停手，不亂點；絕不點空白處（倉庫左下擴容 = 鑽石提示）。
 退出碼：0 / 1 / 2 / 8 / 9 / 10 共用（uikit，原碼回傳）；本檔 220～229（dailyplan.EXIT_NAMES）：
@@ -75,9 +78,14 @@ PAGE_BOX = (520, 672, 70, 45)                                    # 頁碼「n/5�
 PREV_XY, NEXT_XY = (363, 692), (745, 692)
 SUBMIT_XY = (1015, 685)
 REWARD_BOX = (960, 350, 110, 45)                                 # 「完成所有任務額外獎勵」計數 n/5（綠字 986～1044 × 358～387）
-POP_NAME_BOX = (392, 404, 180, 38)                               # 彈窗成品名（黃字置中 x≈481；「貝類飯」454～508 × 415～431，長名字更寬）
-POP_MAT_BOXES = [(686, 240 + 92 * i, 230, 36) for i in range(dp.POP_MAT_ROWS)]   # 彈窗材料列名稱（列距 92；材料後面一列是「石幣」）
-POP_COUNT_PX = [(695, 287), (695, 378), (695, 470)]              # 彈窗材料列計數（紅 = 不足）
+POP_NAME_BOX = (380, 398, 204, 50)                               # 彈窗成品名黃字（置中 x≈481、y 415～431；8 字「精心燉煮過的肉丸」404～557，框容得下 item-book 最長 10 字名；
+                                                                 #   離線 99 張 0 誤認：舊框 392,404,180,38 97/99、加寬但不加高的框掉到 83～89，2026-10-17 第二輪）
+POP_LIST_BOX = (686, 228, 234, 402)                              # 彈窗材料列整欄一次讀（每行帶 y → dp.pop_rows 分列；視野 y 228～630、列距 92；99 張 0 誤認）
+POP_DOWN_PX = [(812, 626), (820, 626), (828, 626)]               # 材料列下緣黃 ▼（還有更多列；5 種材料 + 石幣要捲）
+POP_UP_PX = [(812, 242), (820, 242), (828, 242)]                 # 材料列上緣黃 ▲（拖過後才出現；短清單也會冒、會蓋住第 1 列右半）
+POP_SCROLL = (820, 520, 820, 280)                                # 材料列內往上拖一次 → 捲到底（play p1 2026-10-17 樣本手勢）
+POP_SCROLL_MS = 1800                                             # 拖完等慣性停（樣本等 1.8 秒）
+POP_COUNT_PX = [(695, 287), (695, 378), (695, 470), (695, 562)]  # 彈窗前 4 列計數（紅 0/1 = 不足；石幣列是綠 1000；第 5 列材料要捲才看得到，不檢查）
 POP_CRAFT_XY = (480, 552)
 STONE = '裝備升級石'                                              # 5/5 獎勵（Item 93016）
 SHOP_STAND_DX = -2                                               # 店員 (27, y) 前 2 格站 (25, y)；點 NPC 會自己走近
@@ -314,15 +322,19 @@ class Tools:
         cols = uikit.px(STATE_PX) or [None, None]
         return {'names': names, 'states': [dp.count_state(c) for c in cols]}
 
-    def peek_item(self, k: int) -> str:
+    def peek_item(self, k: int, panel: dict | None = None) -> dict:
         """名稱不確定時：開該項快速合成彈窗讀成品名大字 + 材料列（不按彈窗合成）→ 關彈窗。
-        回 {'name': 原始行, 'mats': [每列原始行]}（呼叫端 dp.resolve_name）；彈窗沒開 → 兩個都空"""
-        out = {'name': [], 'mats': []}
+        ▼ 亮（材料 4 種以上、第一眼看不全）且第一眼還分不出（dp.resolve_name None）→ 材料列內捲一次再讀（pop_scroll）。
+        panel = 面板名稱的 dp.vote_lines 結果（判斷要不要捲）。回 pop dict（呼叫端 dp.resolve_name + dp.pop_mats）；彈窗沒開 → {'name': [], 'list': []}"""
+        out = {'name': [], 'list': []}
         if not uikit.safe_click(*MERGE_XY[k], uikit.DAILY, note=f'daily 開第 {k + 1} 項快速合成（讀名稱）', wait_ms=700):
             return out
         for _ in range(6):
             if uikit.is_open(uikit.QCRAFT):
                 out = self.pop_read()
+                rc = _recipes()
+                if out.get('down') and dp.resolve_name(panel or dp.vote_lines([], rc), dp.vote_lines(out['name'], rc), dp.pop_mats(out, rc), rc) is None:
+                    self.pop_scroll(out)
                 break
             uikit.sleep(0.2)
         if uikit.is_open(uikit.QCRAFT):
@@ -330,8 +342,20 @@ class Tools:
         return out
 
     def pop_read(self) -> dict:
-        """（快速合成彈窗開著）成品名大字 + 材料列的 OCR 原始行"""
-        return {'name': uikit.ocr_lines(POP_NAME_BOX, *NAME_OPTS), 'mats': [uikit.ocr_lines(b, *NAME_OPTS) for b in POP_MAT_BOXES]}
+        """（快速合成彈窗開著，剛開、還沒捲）成品名大字 + 材料列整欄的 OCR 原始行 + ▼ / ▲（dp.pop_mats / pop_check 吃這個 dict）"""
+        cols = uikit.px(POP_DOWN_PX + POP_UP_PX) or []
+        n = len(POP_DOWN_PX)
+        return {'name': uikit.ocr_lines(POP_NAME_BOX, *NAME_OPTS), 'list': uikit.ocr_lines(POP_LIST_BOX, *NAME_OPTS),
+                'down': dp.arrow_on(cols[:n]), 'up': dp.arrow_on(cols[n:])}
+
+    def pop_scroll(self, pop: dict) -> dict:
+        """材料列內往上拖一次（捲到底）→ 等 1.8 秒 → 再讀材料列，存進 pop['list2'] / pop['up2']（dp.pop_mats 依序合併兩張）。彈窗不在就不拖"""
+        if not uikit.is_open(uikit.QCRAFT):
+            return pop
+        uikit.gui('seq', 'drag {} {} {} {}; wait {}'.format(*POP_SCROLL, POP_SCROLL_MS), note='daily 快速合成材料列捲一次')
+        pop['list2'] = uikit.ocr_lines(POP_LIST_BOX, *NAME_OPTS)
+        pop['up2'] = dp.arrow_on(uikit.px(POP_UP_PX))
+        return pop
 
     def reward_count(self):
         return dp.parse_reward(''.join(uikit.ocr(REWARD_BOX, '-Zooms', '2,3')))
@@ -350,9 +374,15 @@ class Tools:
         def close_pop():
             uikit.safe_click(*uikit.QCRAFT.close_xy, uikit.QCRAFT, note='daily 關快速合成彈窗', wait_ms=500)
         pop = self.pop_read()
-        if not dp.pop_is(name, pop, _recipes()):
+        ok = dp.pop_check(name, pop, _recipes())
+        if ok is None and pop.get('down'):                        # 看不全（材料 4 種以上）→ 捲一次再核對；捲過後計數像素位置已變，先捲回去
+            self.pop_scroll(pop)
+            ok = dp.pop_check(name, pop, _recipes())
+            uikit.gui('seq', 'drag {2} {3} {0} {1}; wait {4}'.format(*POP_SCROLL, POP_SCROLL_MS), note='daily 快速合成材料列捲回頂端')
+        if ok is not True:
             close_pop()
-            return False, f'彈窗成品名 / 材料列對不上「{name}」（成品名 OCR 各倍率 {dp.vote_lines(pop["name"], [])["texts"]}，沒合成）'
+            return False, (f'彈窗成品名 / 材料列對不上「{name}」（成品名 OCR 各倍率 {dp.vote_lines(pop["name"], [])["texts"]}、'
+                           f'材料列 {dp.pop_mats(pop, _recipes())["seq"]}，沒合成）')
         if dp.popup_short(uikit.px(POP_COUNT_PX)):
             close_pop()
             return False, '彈窗材料計數有紅字（材料不足，沒合成）'
@@ -614,8 +644,8 @@ class Daily:
                     v = dp.vote_lines(pg['names'][k], self.recipes)
                     nm = v['name'] if v['sure'] else None       # 單票的數字尾碼（合成爪 7 / 3）不算確定 → 開彈窗核對大字 + 材料列
                     if nm is None:
-                        pk = T.peek_item(k) or {}
-                        nm = dp.resolve_name(v, dp.vote_lines(pk.get('name'), self.recipes), dp.snap_mats(pk.get('mats'), self.recipes), self.recipes)
+                        pk = T.peek_item(k, v) or {}
+                        nm = dp.resolve_name(v, dp.vote_lines(pk.get('name'), self.recipes), dp.pop_mats(pk, self.recipes), self.recipes)
                     if nm is None:
                         self.fail(EXIT_READ, f'{role} 第 {page} 環第 {k + 1} 項讀不出成品名（OCR 各倍率 {v["texts"]!r} 票 {v["votes"]}，彈窗也不行）', read_page=page)
                     pair.append(nm)
