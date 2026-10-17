@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """每日任務（委託接取）腳本：薩姆吉爾醫院 1005 的「委託接取」NPC，5 環 × 2 項成品，各項「快速合成」→ 兩項 1/1 綠 →「提交委託」→ 5/5 領裝備升級石。只用標準函式庫。
 
+倉庫批次（2026-10-17 使用者：取一個就切回背包又關面板太冗餘，未實機）：同一人的存倉 / 取料一次做完——`evict_many`（room 清單先批次存個人、個人滿 95 的再批次存公倉並記 in_public）、
+`take_many`（final 取料）→ `Tools.depot_store_many / depot_take_many` = `bag.depot_store_many / depot_take_items`：面板只開 1 次、倉庫子分頁各只切 1 次、每樣不切回背包頁，整批後核對 1 次；
+每樣成功後立刻更新 ledger / 進度檔；批次沒取 / 存到的（找不到 92 / 失敗 / 沒處理）退回單樣流程（含 94 背包滿重試、胡椒原本錯誤語意）。
+
 設計（notes/plan-daily.md v3 §4，使用者 2026-10-17 定案；**全程未實機**，只有離線測試）：各買各的、各合成各的，不經公倉轉手（胡椒除外）。
 移動 / 組隊（使用者 2026-10-17 新定案，取代「解散後各自走到醫院」；play-p1-daily2 實測：組隊不退隊、不走路也點得開委託 NPC）：
   醫院段（read / mid / final）開頭 gather_hospital：隊長 DKBO **一人**走到 1005:38,40（hosp_solo：傳送落點 92,99 → 一個 seq 固定點擊
@@ -649,6 +653,16 @@ class Tools:
         import bag
         return bag.depot_take(role, name, depot=sub)
 
+    def depot_store_many(self, role, items, on_item=None) -> tuple:
+        """批次存倉（一個 Session、分頁只切一次）：items = [(遊戲名, sub)] → (rc, {名: rc})"""
+        import bag
+        return bag.depot_store_many(role, items, on_item=on_item)
+
+    def depot_take_many(self, role, items, on_item=None) -> tuple:
+        """批次取倉：items = [(遊戲名, sub)] → (rc, {名: rc})"""
+        import bag
+        return bag.depot_take_items(role, items, on_item=on_item)
+
     # ---- 收尾 ----
     def cleanup(self) -> None:
         """失敗收尾：關快速合成 / 委託面板 / 便利店（都用 ✕）；不認得的畫面不碰"""
@@ -926,6 +940,48 @@ class Daily:
         self.save_role(role)
         event(f'{role} 背包「{mat}」→ {"個人" if sub == "personal" else "公共"}倉庫')
 
+    def evict_many(self, role, mats):
+        """批次存倉（2026-10-17：一次開面板、倉庫分頁只切一次）：mats 全部先試個人倉庫，個人滿（95）的再批次改存公倉並記 in_public；
+        每樣成功後立刻更新 ledger / 進度檔。失敗語意同 evict（PASS 類 rc 直接停、其餘 EXIT_DEPOT）；批次沒處理到的樣退回單樣 evict"""
+        mats = list(mats)
+        if len(mats) <= 1:
+            for m in mats:
+                self.evict(role, m)
+            return
+        st = self.st[role]
+        game_of = {m: (m[len(dp.PRODUCT_PREFIX):] if m.startswith(dp.PRODUCT_PREFIX) else m) for m in mats}
+        mat_of = {g: m for m, g in game_of.items()}
+        done = set()
+
+        def record(game, sub, rc):
+            if rc:
+                return
+            mat = mat_of[game]
+            led = dp.Ledger(st['ledger'])
+            led.evict(mat, sub)
+            key = 'in_personal' if sub == 'personal' else 'in_public'
+            if mat not in st[key]:
+                st[key].append(mat)
+            st['ledger'] = led.to_dict()
+            self.save_role(role)
+            done.add(mat)
+            event(f'{role} 背包「{mat}」→ {"個人" if sub == "personal" else "公共"}倉庫')
+
+        rc, res = self.T.depot_store_many(role, [(game_of[m], 'personal') for m in mats], on_item=record)
+        if rc and rc in PASS:
+            self.fail(rc, f'存倉遇到 rc {rc}', bag_rc=rc)
+        todo = [m for m in mats if m not in done]
+        if todo:
+            pub = [m for m in todo if res.get(game_of[m]) in (None, 95)]      # 個人滿 / 沒處理到 → 公倉批次
+            if pub:
+                event(f'{role} 個人倉庫存不進（bag rc {rc}）→ 「{"、".join(pub)}」改存公共倉庫')
+                rc2, res2 = self.T.depot_store_many(role, [(game_of[m], 'public') for m in pub], on_item=record)
+                if rc2 and rc2 in PASS:
+                    self.fail(rc2, f'存倉遇到 rc {rc2}', bag_rc=rc2)
+        for m in mats:                                       # 還沒成功的（92 沒有 / 批次中斷）→ 單樣流程，語意同舊版
+            if m not in done:
+                self.evict(role, m)
+
     def buy_role(self, role, stage):
         T, st = self.T, self.st[role]
         plan = self.plan_of(role)
@@ -952,8 +1008,7 @@ class Daily:
                         self.fail(EXIT_BUY, f'{role}「{store.name}」第 {i + 1} 批 {len(bmats)} 種放不下（背包帳上 {led.kinds()} 種、上限 {dp.BAG_KINDS_MAX}）', role=role)
                 else:
                     room = batches[0][0]
-                for m in room:
-                    self.evict(role, m)
+                self.evict_many(role, room)
                 self.buy_at(role, plan, store, bmats)
 
     def buy_at(self, role, plan, store, mats):
@@ -1191,10 +1246,12 @@ class Daily:
         room = dp.make_room(led, plan, st['rings'], [n for n, _ in take], protect=set(need))
         if room is None:
             self.fail(EXIT_BUY, f'{role} 背包放不下第 {ring["ring"]} 環的材料，又沒有可存倉的材料', role=role)
-        for m in room:
-            self.evict(role, m)
+        self.evict_many(role, room)
+        batch_rc = self.take_many(role, take)
         for n, sub in take:
             game = n[len(dp.PRODUCT_PREFIX):] if n.startswith(dp.PRODUCT_PREFIX) else n
+            if n in batch_rc.get('done', ()):
+                continue                                         # 批次已取到、ledger 已更新
             rc = T.depot_take(role, game, sub)
             for _ in range(3):                                   # 94 = 背包滿（模型比實際寬鬆，例：背包原本就有雜物）→ 多存一種不需要的再取
                 if rc != 94:
@@ -1221,6 +1278,38 @@ class Daily:
             st['ledger'] = led.to_dict()
             self.save_role(role)
             event(f'final {role} 取回「{game}」（{"個人" if sub == "personal" else "公共"}倉庫 → 背包）')
+
+    def take_many(self, role, take) -> dict:
+        """final 取料批次（2026-10-17）：take = [(帳上名, sub)]，一個 Session、倉庫分頁各切一次、每樣不切回背包頁；
+        每樣成功後立刻更新 ledger / 進度檔，回 {'done': {帳上名}}。批次沒取到的（找不到 / 失敗 / 沒處理）交回呼叫端走單樣流程（含 94 背包滿重試、胡椒 / 倉庫失敗的原本錯誤語意）"""
+        st = self.st[role]
+        if len(take) <= 1:
+            return {'done': set()}
+        game_of = {n: (n[len(dp.PRODUCT_PREFIX):] if n.startswith(dp.PRODUCT_PREFIX) else n) for n, _ in take}
+        name_of = {g: n for n, g in game_of.items()}
+        done = set()
+
+        def record(game, sub, rc):
+            if rc:
+                return
+            n = name_of[game]
+            led = dp.Ledger(st['ledger'])
+            if n in dp.PEPPERS:
+                led.bag[n] = max(1, led.bag.get(n, 0))           # 整疊取出，量未知；帳上記 1 當「在背包」旗標
+            else:
+                led.take(n, sub)
+                key = 'in_personal' if sub == 'personal' else 'in_public'
+                if n in st[key]:
+                    st[key].remove(n)
+            st['ledger'] = led.to_dict()
+            self.save_role(role)
+            done.add(n)
+            event(f'final {role} 取回「{game}」（{"個人" if sub == "personal" else "公共"}倉庫 → 背包）')
+
+        rc, _ = self.T.depot_take_many(role, [(game_of[n], sub) for n, sub in take], on_item=record)
+        if rc and rc in PASS:
+            self.fail(rc, f'取倉遇到 rc {rc}', bag_rc=rc)
+        return {'done': done}
 
     def return_peppers(self, role, peppers):
         """胡椒用完整疊存回公共倉庫（借出的道具要還）"""

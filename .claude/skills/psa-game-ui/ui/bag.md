@@ -23,6 +23,8 @@
 ## 倉庫（2026-10-09 實測）
 **分階段批次（2026-10-17，未實機）**：多人開禮盒 + 存倉不逐人來回切分頁——rebirth_pets boxes：倉庫（個人）取 5 人 → 背包使用 5 人 → 倉庫公共存 5 人 → 倉庫個人存 5 人；newchar boxes 結尾接存倉：公共輪 5 人 → 個人輪 5 人（`newchar.Tools.store_items`，`bag.depot_store_items` 仍是逐人版給 CLI `store-items`）。
 
+**同一人多樣批次（2026-10-17，daily 倉庫批次化，離線測試 test_bag_batch.py，未實機）**：`bag.depot_take_items(role, [(名稱, 'personal'|'public')], on_item=)` / `bag.depot_store_many(role, items, on_item=)`。一個 Session、選一次角色；依倉庫分頁分組（取：照先出現順序；存：公共先、個人後），每個分頁只切一次；逐樣用低階 `take_slot(dclick=True)`（雙擊取出，新增 `_dclick_take_stay`：只看倉庫該格變空 + 倉庫頁右半背包格新出現，不切背包頁）/ `store_slot`（雙擊存入），**每樣不切回背包頁**；整批結束 `goto_page('bag')` 一次，取出的樣用 `find_item` 核對（一次讀不到記 95、不重做）。找不到的樣記 92 繼續；其他失敗（95 倉庫滿 / 名稱不符…）立即停，沒處理的不在結果裡，呼叫端退回單樣 API（簽名 / 行為不變）。
+
 **多人批次（2026-10-12）**：`bag.py store|take all|DKBO2,DKBO3 名稱 --depot public [--skip-missing]`（`bag.depot_many`）：外層 `bag.Session` 開一次，逐人點左欄頭像 → 存 / 取 → 下一人；內層 Session 巢狀時不重開不關。pet_catch 取誘餌（取整疊 → 拆分 → 存回）也包在同一個 Session。
 
 **雙擊存取（2026-10-15 使用者指示，未實機）**：`bag.depot_store` / `depot_take` 先 `_dclick_move`（`uikit.safe_dclick` → gui.ps1 `dclick`）直接雙擊道具格整疊搬運，不開彈窗；雙擊前讀該格名稱核對、多疊同名照下面的選格規則選對那疊；雙擊後驗證（取出：倉庫格名稱不再吻合 + 背包讀得到；存入：背包該格像素變空），彈出彈窗 / 驗證不到 → 關彈窗、回倉庫頁、退回原「彈窗 + 存入 / 取出」流程。要拆分的情境仍走拆分。`PSA_DEPOT_DCLICK=0` 關閉。離線 test_bait_stacks.py。

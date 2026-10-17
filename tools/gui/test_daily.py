@@ -941,6 +941,30 @@ class FakeTools:
         self.L('take', role, name, sub)
         return 0
 
+    # 批次：一次 Session（面板開 1 次）、每個倉庫分頁只切 1 次；逐樣用單樣假實作的邏輯，rc 非 0 → 停（同 bag 端語意）
+    def _batch(self, kind, role, items, on_item):
+        self.panel_opens = getattr(self, 'panel_opens', 0) + 1
+        self.sub_switches = getattr(self, 'sub_switches', 0) + len(dict.fromkeys(s for _, s in items))
+        res = {}
+        one = self.depot_store if kind == 'store' else self.depot_take
+        for sub in dict.fromkeys(s for _, s in items):
+            for nm, d in items:
+                if d != sub:
+                    continue
+                rc = one(role, nm, sub)
+                res[nm] = rc
+                if on_item:
+                    on_item(nm, sub, rc)
+                if rc not in (0, 92):
+                    return rc, res
+        return 0, res
+
+    def depot_store_many(self, role, items, on_item=None):
+        return self._batch('store', role, items, on_item)
+
+    def depot_take_many(self, role, items, on_item=None):
+        return self._batch('take', role, items, on_item)
+
     def cleanup(self):
         self.cleanups += 1
         self.W.panel = False
@@ -1744,6 +1768,52 @@ check('walk_to：拋 RuntimeError 且仍在 2000 → False（照舊）', ok is F
 with _RaiseGeo((2000, 72, 103)) as g:
     ok = GeoTools(g).walk_to(2000, 73, 103)
 check('walk_to：沒給 exit_map 拋錯 → False（不以地圖判）', ok is False, f'{ok} {g.log}')
+
+# ---------------- 倉庫批次（2026-10-17）：取 5 樣（3 個人 + 2 公共）→ 面板 1 次、分頁各 1 次 ----------------
+def _batch_world():
+    fresh_dir()
+    W = scenario()
+    r = 'DKBO3'
+    W.personal[r].update({'材A': 3, '材B': 2, '成品:合成石2': 1})
+    W.public.update({'材C': 5, '材D': 1})
+    return W, r
+
+
+def _mk_daily(W, T, role):
+    d = daily.Daily(T, {}, W.roles, recipes=RECIPES, stores=STORES, where=WHERE)
+    led = dp.Ledger()
+    d.st = {role: {'ledger': led.to_dict(), 'in_personal': ['材A', '材B', dp.PRODUCT_PREFIX + '合成石2'], 'in_public': ['材C', '材D']}}
+    d.save_role = lambda r_: None
+    return d, led
+
+
+W, role = _batch_world()
+T = FakeTools(W)
+d, led = _mk_daily(W, T, role)
+led.personal.update({'材A': 3, '材B': 2, dp.PRODUCT_PREFIX + '合成石2': 1})
+led.public.update({'材C': 5, '材D': 1})
+d.st[role]['ledger'] = led.to_dict()
+res = d.take_many(role, [('材A', 'personal'), ('材C', 'public'), ('材B', 'personal'), (dp.PRODUCT_PREFIX + '合成石2', 'personal'), ('材D', 'public')])
+check('批次取 5 樣（3 個人 + 2 公共）：5 樣都成功、面板只開 1 次', res['done'] == {'材A', '材B', dp.PRODUCT_PREFIX + '合成石2', '材C', '材D'} and T.panel_opens == 1, f'{res} {T.panel_opens}')
+check('批次取：倉庫分頁各只切 1 次（共 2 次：personal + public），不是每樣切', T.sub_switches == 2, str(T.sub_switches))
+check('批次取：背包真的有 5 樣、ledger 的 in_personal / in_public 清空', all(W.bag[role].get(n, 0) > 0 for n in ('材A', '材B', '材C', '材D', '成品:合成石2')) and not d.st[role]['in_personal'] and not d.st[role]['in_public'], str(d.st[role]))
+
+W, role = _batch_world()
+T = FakeTools(W)
+d, led = _mk_daily(W, T, role)
+W.bag[role].update({'材A': 1, '材B': 1, '材E': 1})
+d.st[role]['ledger'] = dp.Ledger().to_dict()
+d.st[role].update(in_personal=[], in_public=[])
+d.evict_many(role, ['材A', '材B', '材E'])
+check('批次存 3 樣：面板只開 1 次、分頁只切 1 次、都進個人倉庫並記帳', T.panel_opens == 1 and T.sub_switches == 1 and set(W.personal[role]) >= {'材A', '材B', '材E'} and d.st[role]['in_personal'] == ['材A', '材B', '材E'], f'{T.panel_opens} {T.sub_switches} {d.st[role]}')
+W, role = _batch_world()
+T = FakeTools(W)
+d, led = _mk_daily(W, T, role)
+W.bag[role].update({'材A': 1, '材B': 1})
+d.st[role].update(in_personal=[], in_public=[])
+T.inj['personal_full'] = True
+d.evict_many(role, ['材A', '材B'])
+check('批次存：個人倉庫滿（95）→ 兩樣改批次存公倉並記 in_public', set(d.st[role]['in_public']) == {'材A', '材B'} and {'材A', '材B'} <= set(W.public) and T.panel_opens == 2, f'{d.st[role]} {T.panel_opens}')
 
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))

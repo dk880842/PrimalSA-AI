@@ -24,7 +24,7 @@ ui/bag.md 的實測記錄與既有截圖（背包外框特徵由 tools/.cache �
   uv run --no-project python tools/gui/bag.py store all 千年龜的殼 --depot public --all-copies --skip-missing   # 同名多格（不疊加）全部存
   uv run --no-project python tools/gui/bag.py wear all 新手棍棒 新手鎧甲 新手頭盔 [--strict]          # 多人穿裝備（面板開一次逐人；背包沒有 = 已穿上，預設略過；2026-10-15，實機未驗證）
   uv run --no-project python tools/gui/bag.py store-items all --public 寵物誘餌,離線水晶 --personal 1轉新手禮盒 [--strict]   # 多人存多樣（面板開一次、每人一次存完；沒有的略過；實機未驗證）
-最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / wear_item / wear_many / swap_weapon / depot_take / depot_store / depot_store_items / drop_item。
+最後一行 JSON {"ok","rc",...}；給其他腳本 import：bag.levels / hps / team_hp_pct / team_read（等級 + 有沒有某道具，開一次）/ find_items / list_all / purge / use_item / wear_item / wear_many / swap_weapon / depot_take / depot_store / depot_store_items / drop_item；批次（2026-10-17，未實機）depot_take_items（同一人多樣取出：面板 1 次、分頁各切 1 次、每樣不切回背包頁）/ depot_store_many（同一人多樣存入）。
 背包面板一律用 Session 開：自己開的那層在 with 結束（含任何失敗出口）時 close_leftover —— 道具彈窗 ESC → NPC 對話框蓋住背包 ESC（不回答）→ 點 ✕ 關背包（2026-10-13）。
 AUTO_PURGE：背包滿時 questrun 可以不問人自動刪的名單（ui/bag.md 白名單去掉有條件的一項；2026-10-17 加千年龜的殼：同名多格全勾、「未知的殼」同圖不誤刪）。
 道具辨識以名字為主（2026-10-14）：find / find_items / team_read / list / item_slots / find_item 一次截圖 →
@@ -2444,12 +2444,45 @@ def popup_read(i: int, depot: bool = False) -> str | None:
     return nm
 
 
-def take_slot(i: int, want: str, sub: str = 'personal', kind: str = 'consumable') -> tuple:
+def _dclick_take_stay(i: int, want: str) -> list | None:
+    """**低階**：目前在倉庫頁，雙擊倉庫第 i 格取出（不切回背包頁、不 find_item）→ 背包新出現的格 list；沒成功 → None（呼叫端退回彈窗）。
+    雙擊前讀該格名稱核對 = want；驗證 = 倉庫該格變空 / 名字不再吻合 + 倉庫頁右半（背包格）像素多出新格。彈出彈窗 → 關掉回 None"""
+    if not DCLICK:
+        return None
+    nm = read_slot_name(i, True)
+    if not (nm and name_match(nm, want)):
+        return None
+    before = slot_occupancy()                      # 倉庫頁右半 = 背包格；開彈窗前讀
+    x, y = depot_xy(i)
+    _SHOT.clear()
+    if not uikit.safe_dclick(x, y, DEPOT, f'bag 雙擊取出「{want}」第 {i + 1} 格（批次，不切回背包頁）', wait_ms=900):
+        return None
+    if popup_open():
+        close_popup()
+        return None
+    if not _wait(lambda: _depot_slot_left(i, want), 3.0):
+        return None
+    got = []
+
+    def gained():
+        got[:] = new_slots(before, slot_occupancy())
+        return bool(got)
+    return list(got) if _wait(gained, 3.0) else None
+
+
+def take_slot(i: int, want: str, sub: str = 'personal', kind: str = 'consumable', dclick: bool = False) -> tuple:
     """**低階**：倉庫 sub 分頁第 i 格 → 彈窗名稱核對一次（含數字）→ 取出 → 停在倉庫頁 → (rc, 背包新出現的格 list)。
     驗證 = 倉庫頁右半（背包格）像素出現新格（最多 3 秒），不切背包頁、不 find_item。空格 92 / 名稱不符 96（都沒點取出）"""
     rc = open_depot(sub)
     if rc:
         return rc, []
+    if dclick:                                      # 批次取出：雙擊為主（不彈窗、不切頁），驗證不到才走彈窗
+        got = _dclick_take_stay(i, want)
+        if got is not None:
+            return 0, got
+        rc = open_depot(sub)
+        if rc:
+            return rc, []
     rc, before = _popup_take_click(i, want, kind, strict_digits=True)
     if rc:
         return rc, []
@@ -2543,6 +2576,95 @@ def depot_store_items(roles, items, skip_missing: bool = True) -> tuple:
                 if rc:
                     return rc, out
     return 0, out
+
+
+def depot_take_items(role: str, items, kind: str = 'consumable', on_item=None) -> tuple:
+    """**批次取出（2026-10-17 daily 取料太冗餘）**：同一人多樣道具一次取完。items = [(名稱, 'personal' | 'public')]。
+    背包面板只開一次（Session）、只選一次角色；依倉庫分頁分組（照 items 先出現的順序），每個分頁只切一次；
+    **每樣取完不切回背包頁**（只看倉庫該格變空 + 倉庫頁右半背包格新出現），整批做完才 goto_page('bag') 一次，用 find_item 核對每樣。
+    某樣倉庫找不到 → 該樣記 92 繼續下一樣；其他失敗（取不出 / 名稱不符 / 驗證 95…）→ 立即停，其餘沒處理的不在結果裡（呼叫端自行退回單樣流程）。
+    on_item(名稱, 分頁, rc) 每樣完成（含失敗）立刻呼叫，給呼叫端存進度。
+    整批結束後核對：結果 0 的樣在背包讀不到 → 改 95（一次讀不到不重做，最少動作）。→ (rc, {名稱: rc})"""
+    LAST.clear()
+    res: dict = {}
+    subs = list(dict.fromkeys(sub for _, sub in items))
+    with Session() as s:
+        if s.rc:
+            return s.rc, res
+        rc = select_role(role)
+        if rc:
+            return rc, res
+        for sub in subs:
+            rc = open_depot(sub)
+            if rc:
+                return rc, res
+            for nm, d in items:
+                if d != sub:
+                    continue
+                i = find_item(nm, depot=True)
+                if i is None:
+                    res[nm] = EXIT_ITEM
+                    log(f'{role} {sub} 倉庫找不到「{nm}」（批次取出）')
+                else:
+                    rc, _ = take_slot(i, nm, sub, kind, dclick=True)
+                    res[nm] = rc
+                if on_item:
+                    on_item(nm, sub, res[nm])
+                if res[nm] not in (0, EXIT_ITEM):
+                    return res[nm], res
+        rc = goto_page('bag')                         # 整批結束才切回背包頁一次
+        if rc:
+            return rc, res
+        for nm, _ in items:
+            if res.get(nm) == 0 and find_item(nm) is None:
+                log(f'{role} 批次取出後背包讀不到「{nm}」（一次讀不到，不重做）')
+                res[nm] = EXIT_VERIFY
+    bad = [v for v in res.values() if v not in (0, EXIT_ITEM)]
+    return (bad[0] if bad else 0), res
+
+
+def depot_store_many(role: str, items, on_item=None) -> tuple:
+    """**批次存入（2026-10-17）**：同一人多樣道具一次存完。items = [(名稱, 'personal' | 'public')]。
+    先在背包頁把每樣的格位找齊（Session 內一次），再依倉庫分頁分組（公共先、個人後）：每個分頁只切一次，
+    用低階 store_slot 逐格存（雙擊為主、停在倉庫頁），**每樣不切回背包頁**；整批結束 goto_page('bag') 一次。
+    背包找不到 → 該樣 92 繼續；store_slot 失敗（95 倉庫滿等）→ 該樣記 rc、停手（其餘沒處理的不在結果裡，呼叫端退回單樣 / 改存別的倉庫）。
+    protected 名稱 → 93 不存。on_item(名稱, 分頁, rc) 每樣完成立刻呼叫。→ (rc, {名稱: rc})"""
+    LAST.clear()
+    res: dict = {}
+    with Session() as s:
+        if s.rc:
+            return s.rc, res
+        rc = select_role(role)
+        if rc:
+            return rc, res
+        slot_of = {}
+        for nm, sub in items:
+            if protected(nm):
+                res[nm] = EXIT_GUARD
+                continue
+            i = find_item(nm)
+            if i is None:
+                res[nm] = EXIT_ITEM
+                log(f'{role} 背包找不到「{nm}」（批次存入）')
+            else:
+                slot_of[nm] = i
+        for sub in sorted(dict.fromkeys(d for _, d in items), key=lambda d: d != 'public'):
+            for nm, d in items:
+                if d != sub or nm not in slot_of:
+                    continue
+                res[nm] = store_slot(slot_of[nm], nm, sub)
+                if on_item:
+                    on_item(nm, sub, res[nm])
+                if res[nm]:
+                    goto_page('bag')
+                    return res[nm], res
+        for nm, d in items:
+            if res.get(nm) in (EXIT_ITEM, EXIT_GUARD) and on_item:
+                on_item(nm, d, res[nm])
+        rc = goto_page('bag')
+        if rc:
+            return rc, res
+    return 0, res
 
 
 # ---- CLI ----

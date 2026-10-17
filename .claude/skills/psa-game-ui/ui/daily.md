@@ -102,3 +102,10 @@
 - **5 環全提交後的面板沒有兩顆藍色「合成」鈕**（兩項顯示下一環 0/1 紅、無按鈕）：`screen_sigs.DAILY_SIG` 最後兩點（藍鈕）不中 → `uikit.is_open(uikit.DAILY)` 為 False，`char.clear_panels` 也認不得 → 面板留著、切角色 preflight 不認得 → char rc 9。daily.py 用 `DAILY_BASE`（DAILY_SIG 去掉末兩點，標題板 + ✕ + 邊框點）判「開著」，`daily_close` 先關快速合成彈窗再關面板（兩輪、回是否全關），`Tools.close_panels`（切角色前必呼叫）先關它。現場圖 `tools/.cache/ui-log/play-p1-daily5-panel-left-open.png`。
 - **點「合成」後快速合成彈窗最晚約 4 秒才出現**：`craft_item` 輪詢 18 × 0.25 秒 + 失敗前再等 1 秒重檢（舊 8 × 0.2 秒 → DKBO3 第 2 環 229「彈窗沒開」）。
 - **fish 走 2000:73,103（進 2009 的出口）walk 回報卡 72,103 但其實已進 2009:21,35**：`Tools.walk_to` 拋 RuntimeError 時，有 exit_map 且 `wait_map(exit_map, 3)` 已在目標地圖 → 算成功。
+
+## 倉庫批次（2026-10-17 使用者：取一個就切回背包又關面板，太冗餘；離線測試、未實機）
+舊版每取 / 存 1 樣 = 開背包面板 → 切倉庫頁 →（公共再切子分頁）→ 雙擊 → 切回背包頁 → 關面板，約 10 秒 / 樣。現在同一人一次做完：
+- `Daily.evict_many(role, mats)`（make_room 的 room 清單、買前存倉）：先整批存個人倉庫；個人滿（95）的再整批存公倉並記 in_public；每樣成功後立刻更新 ledger / 進度檔；批次沒存到的（92 / 中斷）走單樣 `evict`（語意不變）。
+- `Daily.take_many(role, take)`（final fetch_materials）：整批取出（個人 / 公共分頁各切一次），每樣成功後更新 ledger；沒取到的退回單樣 `T.depot_take`（94 背包滿 → 再存一種重試、胡椒取不到 → EXIT_PEPPER 語意不變）。
+- 底層 `bag.depot_take_items / depot_store_many`（見 ui/bag.md）：面板開 1 次、倉庫頁各分頁切 1 次、每樣不切回背包頁、整批後切回 1 次核對。單一樣（len ≤ 1）仍走原單樣 API。
+- 離線測試 test_daily.py（取 5 樣 = 3 個人 + 2 公共 → panel_opens 1、sub_switches 2；存 3 樣 1 次；個人滿 95 → 公倉批次）、test_bag_batch.py。
