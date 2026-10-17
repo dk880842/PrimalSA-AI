@@ -42,6 +42,7 @@ LAYOUT = '2880x1659'
 
 UNKNOWN_N = 3                    # 連幾次 unknown 才算
 UNKNOWN_GAP_S = 5.0              # 兩次讀之間至少間隔（避開轉場一瞬間）
+PREFLIGHT_CLOSE_MAX = 2            # preflight 最多替別的工具關幾次已知面板殘留（背包 / 寵物 / 倉庫…；close_known_panel）
 
 sleep = time.sleep               # 測試時可替換
 clock = time.time
@@ -266,7 +267,9 @@ def preflight(src: str, fast: bool = True) -> int:
     fast=True 且 watch 狀態夠新時（watch_preflight_ok）省掉 layout / netwatch / 畫面連讀（約 0.36 s → 約 0.02 s）；battle.lock 一律檢查。
     本視窗驗證停手旗標（verifyhalt.py）存在 → 9；但 watch 沒在跑時先現場連讀約 5 秒（verify_autoclear_now），已知正常畫面穩定 → 自動清掉照常往下
     （watch 在跑就交給 watch 清，這裡不讀畫面）。答題 / 驗證介面正面命中 → 立刻 9 + 設本視窗旗標（多視窗）；
-    連 3 次不認得回 9 但**不設旗標**（2026-10-16 使用者定案：設旗標只限答題介面正面命中或 watch 的 3 分鐘沒有進度兜底；trip_verify 會再現場確認一次）"""
+    連 3 次不認得回 9 但**不設旗標**（2026-10-16 使用者定案：設旗標只限答題介面正面命中或 watch 的 3 分鐘沒有進度兜底；trip_verify 會再現場確認一次）
+    不認得但其實是已知面板殘留（close_known_panel：標題板字 + ✕ 都命中，背包另要外框兩顆鈕）→ 點 ✕ 關掉、不計次（最多 PREFLIGHT_CLOSE_MAX 次；
+    答題介面 / 面板上疊已知彈窗先判，不會去關答題介面底下的面板）"""
     import battleguard
     vh = verify_halted()
     if vh and watch_state() is None and verify_autoclear_now(vh, src):
@@ -290,7 +293,7 @@ def preflight(src: str, fast: bool = True) -> int:
     if fast_ok:
         mark('preflight(watch)')
         return EXIT_OK
-    i, t_trans = 0, None
+    i, t_trans, closed = 0, None, 0
     while i < UNKNOWN_N:
         st = screen().get('state')
         if st not in ('unknown', 'error'):
@@ -313,6 +316,13 @@ def preflight(src: str, fast: bool = True) -> int:
             if kp:
                 mark(f'preflight({kp})')
                 return EXIT_OK
+        if st == 'unknown' and closed < PREFLIGHT_CLOSE_MAX:
+            name = close_known_panel()                    # 別的工具 / 手動留下的已知面板（背包 / 寵物 / 倉庫…，標題板字 + ✕ 都命中）→ 點 ✕ 關掉，不計次
+            if name:                                      # 2026-10-15 PrimalSA2：bag.py 留下背包面板 → pet.py list 連 3 次不認得 → verify-halt
+                closed += 1
+                print(f'{src}：畫面停在「{screen_sigs.PANEL_NAMES.get(name, name)}」面板（別的工具留下）→ 點 ✕ 關掉再檢查', file=sys.stderr)
+                mark(f'preflight close {name}')
+                continue
         i += 1
         if i < UNKNOWN_N:
             sleep(UNKNOWN_GAP_S)

@@ -17,6 +17,8 @@
 樣板是學出來的（沒有預建檔）：tools/.cache/item-name-tpl/<版面>.json = {'bag': {名稱: [hex…]}, 'depot': {…}}。
 學法保守（learn）：呼叫端只在「彈窗 / 提示窗核對過名稱」或「格名稱 OCR 精確命中 Item 表」時給標籤；
 那格要有道具、沒被蓋住、名字白點夠；與既有「別的名稱」樣板 IoU ≥ HIT_MIN → 標籤可疑，不學；同名最多 MAX_VARIANTS 個變體（新道具紅標 / 選取框）。
+名稱含數字：比對門檻 DIGIT_HIT_MIN、同族兄弟另比 SIB_MARGIN、紅角標格不認（state 'uncertain'、digit_guess；read_page 'near' = {格: digit_guess}）；
+學習時只差數字的同族名稱可以並存，與兄弟逐點相同 = 標籤矛盾 → 刪兄弟變體、不學（2026-10-15）。學到 / 刪除都寫 actlog（類別 itemname）。
 離線測試（testenv：PSA_LOG_DIR 含 psatest-）一律改用暫存資料夾的樣板，不讀寫真正的 tools/.cache。
 
 用法（專案根目錄；唯讀、不碰遊戲）：
@@ -63,6 +65,10 @@ MAX_VARIANTS = 8         # 同名變體上限：5 欄各自的半像素相位 + 
 DUP_IOU = 0.98           # 與既有變體這麼像就不重複存
 PRUNE = 0.5              # 白點數比例 < 這個（IoU 上限）就不比
 DIGIT_HIT_MIN = 0.98     # 名稱含數字（1～5轉新手禮盒）的命中門檻：只差一個數字的不同道具 IoU 0.94～0.965（2026-10-17 p1 實圖），同欄同名 = 1.0
+# 學習時「只差數字」的同族名稱（bag.digit_siblings：1轉 ↔ 2～5轉新手禮盒、石幣2萬 ↔ 3萬…）IoU 本來就 ≥ HIT_MIN → 允許並存（不然 2轉學過後 1轉永遠學不進來，2026-10-15）；
+# 但跟兄弟某個變體 ≥ DIGIT_HIT_MIN（幾乎逐點相同）= 兩個標籤互相矛盾（其中一個學錯）→ 刪那些兄弟變體、這次不學（learn_rows）。
+# 比對（decide）時兄弟不算「別的名稱」（不然 1轉 / 2轉都學過後互相差不到 MARGIN、兩個都認不出），改要：最佳 ≥ DIGIT_HIT_MIN 且贏最像的兄弟 ≥ SIB_MARGIN。
+SIB_MARGIN = 0.03        # 同欄同名 1.0 vs 只差數字 ≤ 0.965（2026-10-17 p1 實圖）
 
 
 def _pred(c) -> bool:
@@ -233,16 +239,57 @@ def match_rows(rows, kind: str, tpl: dict | None = None, new: bool = False) -> d
         return {'name': None, 'score': 0.0, 'second': 0.0, 'ink': ink}
     if new:
         rows, tpl = mask_rows(rows, kind), _masked_tpl(tpl, kind)
-    name, best, second = namematch.decide(scores(petmatch.pack(rows), kind, tpl), HIT_MIN, MARGIN)
+    name, best, second, guess = decide(scores(petmatch.pack(rows), kind, tpl), tpl.get(kind))
     out = {'name': name, 'score': round(best, 3), 'second': round(second, 3), 'ink': ink, 'new': new}
-    if name and has_digit(name) and (new or best < DIGIT_HIT_MIN):
-        out['name'], out['digit_guess'] = None, name   # 數字被紅角標蓋住 / 分數不夠分辨數字 → 不認（呼叫端走縮圖 / 彈窗核對）
+    if name and has_digit(name) and new:
+        name, guess = None, name                       # 數字被紅角標蓋住 → 不認
+    if guess:
+        out['name'], out['digit_guess'] = None, guess  # 分數不夠分辨數字 / 數字被蓋住 → 不認（呼叫端走縮圖 / 彈窗核對）
     return out
+
+
+def decide(sc: dict, book: dict | None = None):
+    """{名稱: 分數} → (名稱或 None, 最佳, 次佳, digit_guess)。沒有數字的名稱 = namematch.decide（≥ HIT_MIN 且贏次佳別名 ≥ MARGIN）。
+    最佳名稱含數字：只差數字的同族（siblings）不算別名（MARGIN 只比非同族），另要 ≥ DIGIT_HIT_MIN 且贏最像的兄弟 ≥ SIB_MARGIN，
+    否則 (None, …, digit_guess = 最佳名稱)"""
+    if not sc:
+        return None, 0.0, 0.0, None
+    rk = sorted(sc.items(), key=lambda kv: -kv[1])
+    top, best = rk[0]
+    second = rk[1][1] if len(rk) > 1 else 0.0
+    if not has_digit(top):
+        name, best, second = namematch.decide(sc, HIT_MIN, MARGIN)
+        return name, best, second, None
+    sibs = siblings(top, book)
+    other = max((v for n, v in rk[1:] if _norm(n) not in sibs), default=0.0)
+    if best < HIT_MIN or best - other < MARGIN:
+        return None, best, second, None
+    sib_best = max((v for n, v in rk[1:] if _norm(n) in sibs), default=0.0)
+    if best < DIGIT_HIT_MIN or best - sib_best < SIB_MARGIN:
+        return None, best, second, top
+    return top, best, second, None
 
 
 def has_digit(name) -> bool:
     """名稱含阿拉伯數字（1～5轉新手禮盒、2倍智慧果…）：只差數字的道具樣板分不太開，比對 / 學習都要更保守"""
     return any(ch.isdigit() for ch in str(name or ''))
+
+
+def _norm(n) -> str:
+    import bag
+    return bag.norm_name(n)
+
+
+def siblings(name, book=None) -> set:
+    """name 的同族名稱（只差數字；norm_name 後）：Item 表（bag.digit_siblings）+ 樣板本裡同族的名稱（Item 表讀不到也擋得住）。學習時用"""
+    import bag
+    k = bag.digit_family(name)
+    if not k:
+        return set()
+    me = _norm(name)
+    out = set(bag.digit_siblings(name))
+    out |= {_norm(n) for n in (book or {}) if bag.digit_family(n) == k and _norm(n) != me}
+    return out
 
 
 def _cell_state(get, kind: str, slot: int):
@@ -252,8 +299,9 @@ def _cell_state(get, kind: str, slot: int):
 
 
 def read_cell(img, kind: str, slot: int, tpl: dict | None = None, state=...) -> dict:
-    """一格 → {'slot', 'state': 'empty'|'occluded'|'noname'|'name'|'unknown', 'name', 'score', 'second', 'ink'}。
-    noname = 有道具但白點不足（「顯示道具名」關著 / 名字被別的東西蓋掉）；unknown = 有名字但樣板認不出（沒學過 / 太近）"""
+    """一格 → {'slot', 'state': 'empty'|'occluded'|'noname'|'name'|'uncertain'|'unknown', 'name', 'score', 'second', 'ink'[, 'new', 'digit_guess']}。
+    noname = 有道具但白點不足（「顯示道具名」關著 / 名字被別的東西蓋掉）；unknown = 有名字但樣板認不出（沒學過 / 太近）；
+    uncertain = 最像某個含數字的名稱（digit_guess），但分數 < DIGIT_HIT_MIN 或數字被紅角標蓋住，分不清是哪一個"""
     get = imgmatch.as_getter(img)
     st = _cell_state(get, kind, slot) if state is ... else state
     if st is None:
@@ -262,12 +310,12 @@ def read_cell(img, kind: str, slot: int, tpl: dict | None = None, state=...) -> 
         return {'slot': slot, 'state': 'empty', 'name': None, 'score': 0.0, 'second': 0.0, 'ink': 0}
     r = match_rows(rows_at(get, kind, slot), kind, tpl, new_tag(get, kind, slot))
     r['slot'] = slot
-    r['state'] = 'noname' if r['ink'] < NAME_INK_MIN else ('name' if r['name'] else 'unknown')
+    r['state'] = 'noname' if r['ink'] < NAME_INK_MIN else ('name' if r['name'] else ('uncertain' if r.get('digit_guess') else 'unknown'))
     return r
 
 
 def read_page(img, kind: str, tpl: dict | None = None, slots=None) -> dict:
-    """整頁 → {'cells': {格: read_cell 結果（空格不列）}, 'occ': [True/False/None], 'names': {格: 名稱}, 'hidden': bool, 'ms'}。
+    """整頁 → {'cells': {格: read_cell 結果（空格不列）}, 'occ': [True/False/None], 'names': {格: 名稱}, 'near': {格: 分不清的同族名稱}, 'hidden': bool, 'ms'}。
     hidden = 有道具且沒被蓋住的格至少 1 格、而且全部白點不足 →「顯示道具名」關著"""
     t0 = time.time()
     get = imgmatch.as_getter(img)
@@ -282,6 +330,7 @@ def read_page(img, kind: str, tpl: dict | None = None, slots=None) -> dict:
             cells[i] = read_cell(get, kind, i, tpl, state=st)
     vis = [c for c in cells.values() if c['state'] != 'occluded']
     return {'cells': cells, 'occ': occ, 'names': {i: c['name'] for i, c in cells.items() if c['name']},
+            'near': {i: c['digit_guess'] for i, c in cells.items() if c.get('digit_guess')},
             'hidden': bool(vis) and all(c['state'] == 'noname' for c in vis), 'ms': int((time.time() - t0) * 1000)}
 
 
@@ -292,7 +341,9 @@ def names_hidden(page: dict) -> bool:
 # ---- 學習 ----
 def learn_rows(rows, kind: str, name: str, tpl: dict, log=None, new: bool = False) -> bool:
     """純函式：名字圖加進 tpl（不存檔）。白點不足 / 與既有「別的名稱」IoU ≥ HIT_MIN（標籤可疑）/ 已有幾乎相同變體 / 變體已滿 → False。
-    new = 這格有「新」紅標：名稱含數字就不學（數字在紅標底下，學了會跟只差數字的道具混在一起，2026-10-17）"""
+    new = 這格有「新」紅標：名稱含數字就不學（數字在紅標底下，學了會跟只差數字的道具混在一起，2026-10-17）。
+    例外（2026-10-15）：「只差數字」的同族名稱（1轉 / 2轉新手禮盒）本來就長得像 → IoU ≥ HIT_MIN 仍可學；
+    但跟兄弟的某個變體 ≥ DIGIT_HIT_MIN（幾乎逐點相同）= 兩個標籤互相矛盾 → 刪掉那些兄弟變體、這次也不學（下次彈窗核對再學）"""
     if not name or petmatch.ink(rows) < NAME_INK_MIN:
         return False
     if new and has_digit(name):
@@ -302,11 +353,31 @@ def learn_rows(rows, kind: str, name: str, tpl: dict, log=None, new: bool = Fals
     img = petmatch.pack(rows)
     book = tpl.setdefault(kind, {})
     key = next((k for k in book if same_name(k, name)), name)
-    for other, vs in book.items():
-        if other != key and any(iou(img, int(h, 16), kind) >= HIT_MIN for h in vs):
+    sibs = siblings(name, book)
+    clash = False
+    for other in list(book):
+        if other == key:
+            continue
+        vs = book[other]
+        na = img.bit_count()
+        sc = [iou(img, v, kind) if min(na, v.bit_count()) / max(na, v.bit_count(), 1) >= HIT_MIN else 0.0   # IoU ≤ 白點數比例：不可能到門檻的不比
+              for v in (int(h, 16) for h in vs)]
+        if _norm(other) in sibs:
+            bad = [h for h, v in zip(vs, sc) if v >= DIGIT_HIT_MIN]
+            if bad:
+                book[other] = [h for h in vs if h not in bad]
+                if not book[other]:
+                    book.pop(other)
+                clash = True
+                if log:
+                    log(f'itemname：{kind} 標籤 {name!r} 與同族 {other!r} 的 {len(bad)} 個變體幾乎相同（IoU ≥ {DIGIT_HIT_MIN}）→ 矛盾，刪掉那些變體、這次不學')
+            continue
+        if any(v >= HIT_MIN for v in sc):
             if log:
                 log(f'itemname：{kind} 標籤 {name!r} 但與既有 {other!r} 樣板 IoU ≥ {HIT_MIN}，標籤可疑，不學')
             return False
+    if clash:
+        return False
     vs = book.setdefault(key, [])
     if len(vs) >= MAX_VARIANTS or any(iou(img, int(h, 16), kind) >= DUP_IOU for h in vs):
         if not vs:
@@ -316,20 +387,34 @@ def learn_rows(rows, kind: str, name: str, tpl: dict, log=None, new: bool = Fals
     return True
 
 
-def learn(img, kind: str, slot: int, name: str, save: bool = True, log=None) -> bool:
+def learn(img, kind: str, slot: int, name: str, save: bool = True, log=None, note: str = '') -> bool:
     """可信標籤（彈窗 / 提示窗核對過、或 OCR 精確命中 Item 表）→ 學這格的名字圖。那格要有道具、沒被蓋住。回是否新增"""
     get = imgmatch.as_getter(img)
     if _cell_state(get, kind, slot) is not True:
         return False
     tpl = load_tpl()
     tpl = {k: {n: list(v) for n, v in b.items()} for k, b in tpl.items()}      # 複本：不汙染快取
-    if not learn_rows(rows_at(get, kind, slot), kind, name, tpl, log, new=new_tag(get, kind, slot)):
+    before = n_templates(tpl)
+    ok = learn_rows(rows_at(get, kind, slot), kind, name, tpl, log, new=new_tag(get, kind, slot))
+    if not ok:
+        if save and n_templates(tpl) < before:          # 同族矛盾刪了變體：刪除要存檔
+            save_tpl(tpl)
+            _actlog(f'{kind} 格 {slot} 標籤「{name}」與同族樣板矛盾 → 刪 {before - n_templates(tpl)} 個變體{note}')
         return False
     if save:
         save_tpl(tpl)
+    _actlog(f'學到 {kind} 格 {slot}「{name}」{note}')     # 2026-10-15：學習留紀錄（之前只印 stderr，錯樣板查不到來源）
     if log:
         log(f'itemname：學到 {kind} 格 {slot} 「{name}」（{kind} 本 {len(tpl[kind])} 種名稱）')
     return True
+
+
+def _actlog(msg: str) -> None:
+    try:
+        import actlog
+        actlog.add('itemname', msg)
+    except Exception:
+        pass
 
 
 # ---- 樣本檔（fixtures/itemname_samples.json）----
@@ -383,6 +468,7 @@ def seed(path=None, log=print) -> int:
     n = sum(learn_rows(im['rows'], im['kind'], im['label'], tpl, log) for im in sorted(d['images'], key=lambda im: -im.get('n', 1)))
     if n:
         save_tpl(tpl)
+        _actlog(f'seed：從 {Path(path or SAMPLES_FILE).name} 新增 {n} 個變體（人工標籤樣本）')
     log(f'itemname seed：新增 {n} 個變體；樣板共 {n_templates(tpl)} 個（{tpl_path()}）')
     return n
 
@@ -439,7 +525,7 @@ def main(argv=None) -> int:
     if a.cmd == 'learn-shot':
         n = 0
         for slot, name in _parse_labels(a.labels).items():
-            ok = learn(get, a.kind, slot, name, log=print)
+            ok = learn(get, a.kind, slot, name, log=print, note='（learn-shot 人工標籤）')
             n += ok
             if not ok:
                 print(f'格 {slot}「{name}」沒學（空格 / 被蓋住 / 白點不足 / 已有 / 標籤可疑）')

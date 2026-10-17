@@ -74,10 +74,13 @@ def make_fixtures() -> int:
 
 # ---- 1. 準確率 ----
 def _decide(scores: dict):
-    return namematch.decide(scores, N.HIT_MIN, N.MARGIN)
+    """照 itemname_match.decide（含只差數字的同族規則）；樣板本 = 這次比對的名稱"""
+    nm, b, sec, _ = N.decide(scores, {lb: [] for lb in scores})
+    return nm, b, sec
 
 
 def test_accuracy(d) -> dict:
+    import bag
     imgs = d['images']
     for im in imgs:
         im['v'] = petmatch.pack(im['rows'])
@@ -99,7 +102,7 @@ def test_accuracy(d) -> dict:
     out = {}
 
     def run(name, pool_of):
-        res = {'bag': [0, 0, 0], 'depot': [0, 0, 0]}          # 對 / 錯 / 判不出（加權：格數）
+        res = {'bag': [0, 0, 0], 'depot': [0, 0, 0], 'family': [0, 0, 0]}   # 對 / 錯 / 判不出（加權：格數）；family = 只差數字的同族名稱（另計）
         wrong = []
         for s in d['samples']:
             i = s['img']
@@ -109,7 +112,7 @@ def test_accuracy(d) -> dict:
                 lb = imgs[j]['label']
                 sc[lb] = max(sc.get(lb, 0.0), v)
             nm, b, sec = _decide(sc)
-            r = res[s['kind']]
+            r = res['family' if bag.digit_siblings(s['label']) else s['kind']]
             if nm is None:
                 r[2] += 1
             elif nm == s['label']:
@@ -119,18 +122,20 @@ def test_accuracy(d) -> dict:
                 wrong.append((s['rel'], s['slot'], s['label'], nm, round(b, 3)))
         out[name] = res
         print(f'  {name}：背包 對 {res["bag"][0]} / 錯 {res["bag"][1]} / 判不出 {res["bag"][2]}；'
-              f'倉庫 對 {res["depot"][0]} / 錯 {res["depot"][1]} / 判不出 {res["depot"][2]}', wrong[:3])
+              f'倉庫 對 {res["depot"][0]} / 錯 {res["depot"][1]} / 判不出 {res["depot"][2]}；'
+              f'同族名稱（N轉新手禮盒，< DIGIT_HIT_MIN 或輸兄弟 < SIB_MARGIN 判不出）對 {res["family"][0]} / 錯 {res["family"][1]} / 判不出 {res["family"][2]}', wrong[:3])
         return res
     same_kind = {k: [j for j, im in enumerate(imgs) if im['kind'] == k] for k in ('bag', 'depot')}
     print(f'  名字圖 {len(imgs)} 張、樣本 {len(d["samples"])} 格；兩兩 IoU {len(M) // 2} 組 {ms} ms')
     # LOSO：樣板 = 出現在其他截圖的名字圖（同點陣只要別張截圖也有就算）
     r = run('留一張截圖（LOSO）', lambda s: [j for j in same_kind[s['kind']] if shots_of[j] - {s['rel']}])
-    check('LOSO：0 誤認、背包 / 倉庫各至少 95% 認對', r['bag'][1] == 0 and r['depot'][1] == 0
+    check('LOSO：0 誤認（含同族名稱）、背包 / 倉庫（同族名稱另計）各至少 95% 認對', r['bag'][1] == 0 and r['depot'][1] == 0 and r['family'][1] == 0
           and r['bag'][0] >= 0.95 * sum(r['bag']) and r['depot'][0] >= 0.95 * sum(r['depot']), r)
     r = run('留一張名字圖（同點陣全拿掉）', lambda s: [j for j in same_kind[s['kind']] if j != s['img']])
-    check('留一張名字圖：0 誤認', r['bag'][1] == 0 and r['depot'][1] == 0, r)
+    check('留一張名字圖：0 誤認', r['bag'][1] == 0 and r['depot'][1] == 0 and r['family'][1] == 0, r)
     r = run('開集（整個名稱拿掉）', lambda s: [j for j in same_kind[s['kind']] if imgs[j]['label'] != s['label']])
-    check('開集：名稱不在樣板 → 全部判不出（0 誤認）', r['bag'][0] == 0 and r['bag'][1] == 0 and r['depot'][1] == 0 and r['depot'][0] == 0, r)
+    check('開集：名稱不在樣板 → 全部判不出（0 誤認）', r['bag'][0] == 0 and r['bag'][1] == 0 and r['depot'][1] == 0 and r['depot'][0] == 0
+          and r['family'][0] == 0 and r['family'][1] == 0, r)
     # 不同名最高分（安全距離）
     worst = max((v for (i, j), v in M.items() if imgs[i]['label'] != imgs[j]['label']), default=0)
     check(f'不同名最高 IoU {worst:.3f} < HIT_MIN {N.HIT_MIN} - 0.1', worst < N.HIT_MIN - 0.1, worst)
@@ -273,6 +278,83 @@ def test_new_tag(d):
     check('沒有紅標的格 new_tag = False（不遮罩）', not N.new_tag(get, 'bag', 0) and N.read_cell(get, 'bag', 0, state=True).get('new') is False)
     clear_tpl()
 
+# ---- 3b. 只差數字的同族名稱（2026-10-15 PrimalSA2：1轉新手禮盒被共用樣板「2轉新手禮盒」認走）----
+FAMILY_FILE = HERE / 'fixtures' / 'itemname_digit_family.json'
+
+
+def test_digit_family(d):
+    import json
+    import bag
+    fam = json.loads(FAMILY_FILE.read_text(encoding='utf-8'))
+    one = N.rows_decode(fam['images'][0]['b64'], 'bag')
+    two = next(im['rows'] for im in d['images'] if im['label'] == '2轉新手禮盒' and im['kind'] == 'bag')
+    three = next(im['rows'] for im in d['images'] if im['label'] == '3轉新手禮盒' and im['kind'] == 'bag')
+    hx = lambda rows: format(petmatch.pack(rows), 'x')   # noqa: E731
+
+    # bag：同族判定 + name_match 數字嚴格
+    sib = bag.digit_siblings('1轉新手禮盒')
+    check('digit_siblings：1轉新手禮盒 → 2～5轉新手禮盒（Item 表）', {'2轉新手禮盒', '3轉新手禮盒', '4轉新手禮盒', '5轉新手禮盒'} <= set(sib) and '1轉新手禮盒' not in sib, sib)
+    check('digit_siblings：迎新助力禮盒 / 龍王的守護（沒有數字）→ []', bag.digit_siblings('迎新助力禮盒') == [] and bag.digit_siblings('龍王的守護') == [])
+    check('digit_siblings：石幣2萬 → 含石幣3萬', '石幣3萬' in bag.digit_siblings('石幣2萬'))
+    check('name_match：彈窗「1轉新手禮盒」≠ 要的「2轉新手禮盒」（舊版相似度 0.83 → 誤判吻合）',
+          not bag.name_match('1轉新手禮盒', '2轉新手禮盒') and not bag.name_match('2轉新手禮盒', '1轉新手禮盒'))
+    check('name_match：同族名稱 OCR 漏掉數字（「轉新手禮盒」）→ 名字吻合但 digit_unsure（要彈窗核對）',
+          bag.name_match('轉新手禮盒', '2轉新手禮盒') and bag.digit_unsure('轉新手禮盒', '2轉新手禮盒'))
+    check('name_match：同族名稱數字對、其他字錯一個 → 吻合', bag.name_match('2轉新手禮 盒', '2轉新手禮盒') and bag.name_match('2轉新乎禮盒', '2轉新手禮盒'))
+    check('name_match：沒有同族的名稱照舊寬鬆（「倍智慧果」吻合 2倍智慧果、首 / 百混淆）',
+          bag.name_match('倍智慧果', '2倍智慧果') and bag.name_match('薩姆百爾的百飾', '薩姆吉爾的首飾'))
+
+    # 名字樣板：舊版判法會認成 2轉（重現）；新版 → 不確定
+    iou12 = N.iou(petmatch.pack(one), petmatch.pack(two), 'bag')
+    check(f'重現：1轉 vs 2轉樣板 IoU {iou12:.3f} > HIT_MIN（一個數字的差別整名 IoU 分不出）', iou12 > N.HIT_MIN, iou12)
+    tpl = {'bag': {'2轉新手禮盒': [hx(two)], '3轉新手禮盒': [hx(three)]}, 'depot': {}}
+    old = namematch.decide(N.scores(petmatch.pack(one), 'bag', tpl), N.HIT_MIN, N.MARGIN)[0]
+    check('重現：舊判法（namematch.decide）把 1轉認成 2轉新手禮盒', old == '2轉新手禮盒', old)
+    r = N.match_rows(one, 'bag', tpl)
+    check('新判法：1轉（對 2轉 IoU < DIGIT_HIT_MIN）→ name None、digit_guess 2轉新手禮盒（不確定，交給縮圖 / OCR / 彈窗）', r['name'] is None and r.get('digit_guess') == '2轉新手禮盒', r)
+    r = N.match_rows(two, 'bag', tpl)
+    check('新判法：2轉自己（IoU 1.0 ≥ DIGIT_HIT_MIN）→ 認得 2轉新手禮盒（沒學過的兄弟最多 0.965，到不了門檻）', r['name'] == '2轉新手禮盒', r)
+    full = {'bag': {f'{k}轉新手禮盒': [hx(v)] for k, v in ((1, one), (2, two), (3, three))}, 'depot': {}}
+    for k in (4, 5):                                       # 4 / 5轉沒有實樣：用 3轉點陣去掉一半當代用（只要「學過」且不像）
+        full['bag'][f'{k}轉新手禮盒'] = [hx([row[:52] + '0' * 52 if j % k else row for j, row in enumerate(three)])]
+    for n in bag.digit_siblings('1轉新手禮盒'):
+        full['bag'].setdefault(n, [hx(['0' * 104] * 52)])   # 其他同族（若 Item 表有）：空圖佔位 = 學過但完全不像
+    r1, r2 = N.match_rows(one, 'bag', full), N.match_rows(two, 'bag', full)
+    check('同族全學過：1轉 → 1轉新手禮盒、2轉 → 2轉新手禮盒（≥ DIGIT_HIT_MIN 且贏兄弟 ≥ SIB_MARGIN；兄弟不算 MARGIN 的別名）',
+          r1['name'] == '1轉新手禮盒' and r2['name'] == '2轉新手禮盒', (r1, r2))
+    near = [('0' * 30 + r[30:]) if j % 2 == 0 else r for j, r in enumerate(one)]   # 左半（數字那段）掉一半的點 → 不是逐點相同
+    v = N.iou(petmatch.pack(near), petmatch.pack(one), 'bag')
+    r = N.match_rows(near, 'bag', full)
+    check(f'同族全學過但不夠像（IoU {v:.3f} < DIGIT_HIT_MIN）→ 不確定', v < N.DIGIT_HIT_MIN and r['name'] is None, (v, r))
+    r = N.match_rows(one, 'bag', {'bag': {'迎新助力禮盒': [hx(one)]}, 'depot': {}})
+    check('沒有數字的名稱照舊（樣板名不屬同族）→ 認得', r['name'] == '迎新助力禮盒', r)
+
+    # learn_rows：同族可以並存；逐點相同 = 標籤矛盾 → 刪兄弟變體、不學
+    t = {'bag': {'2轉新手禮盒': [hx(two)]}, 'depot': {}}
+    check('learn_rows：1轉（與 2轉樣板 IoU 0.89 ≥ HIT_MIN）是同族 → 可以學（舊版判「標籤可疑」永遠學不進來）',
+          N.learn_rows(one, 'bag', '1轉新手禮盒', t) and set(t['bag']) == {'1轉新手禮盒', '2轉新手禮盒'}, list(t['bag']))
+    t = {'bag': {'2轉新手禮盒': [hx(two)], '風的鎖': [hx(three)]}, 'depot': {}}
+    msgs = []
+    check('learn_rows：2轉的點陣標成「1轉」（與 2轉樣板逐點相同）→ 不學、刪掉 2轉那個變體（兩個標籤必有一個錯）',
+          not N.learn_rows(two, 'bag', '1轉新手禮盒', t, log=msgs.append) and '2轉新手禮盒' not in t['bag'] and '1轉新手禮盒' not in t['bag']
+          and '風的鎖' in t['bag'] and msgs, (list(t['bag']), msgs))
+
+    # read_page：uncertain 狀態 + near（= {格: digit_guess}）
+    clear_tpl()
+    N.save_tpl({'bag': {'2轉新手禮盒': [hx(two)], '3轉新手禮盒': [hx(three)]}, 'depot': {}})
+    get = synth({('bag', 5): one})
+    pg = N.read_page(get, 'bag')
+    check('read_page：1轉格 → state uncertain、names 不列、near 2轉新手禮盒', pg['cells'][5]['state'] == 'uncertain' and 5 not in pg['names']
+          and pg['near'] == {5: '2轉新手禮盒'}, (pg['cells'].get(5), pg['near']))
+    clear_tpl()
+
+    # icon_label：同圖多名一定標「(同圖)」，工作集的名稱排前面
+    c = {'name': None, 'names': ['不明禮盒A', '迎新助力禮盒', '1轉新手禮盒', '2轉新手禮盒'], 'ambiguous': True}
+    lb = bag.icon_label(c, ['迎新助力禮盒', '1轉新手禮盒', '2轉新手禮盒'])
+    check('icon_label：工作集多個同圖名 → 「迎新助力禮盒/1轉新手禮盒/2轉新手禮盒…(同圖)」', lb == '迎新助力禮盒/1轉新手禮盒/2轉新手禮盒…(同圖)', lb)
+    check('item_pool：迎新助力禮盒、1轉 / 2轉新手禮盒都在（同圖 50055，工作集只有 2轉時迎新被標成 2轉）',
+          {'迎新助力禮盒', '1轉新手禮盒', '2轉新手禮盒'} <= set(bag.item_pool()))
+
 
 # ---- 4. bag.py 接線 ----
 def test_bag(d):
@@ -350,6 +432,31 @@ def test_bag(d):
     check('空格 → 不學', not bag._learn_verified('bag', 14, '巴巴洛的許可證'))
     check('核對過的格 → 學', bag._learn_verified('bag', sa, '巴巴洛的許可證'))
     check('同點陣標成別的名稱 → 不學（標籤可疑）', not bag._learn_verified('bag', sa, '風的鎖'))
+    # 只差數字的同族名稱（2026-10-15）：格名 OCR 的數字不可靠 → OCR 來源不學；彈窗核對過才學
+    import json
+    one = N.rows_decode(json.loads(FAMILY_FILE.read_text(encoding='utf-8'))['images'][0]['b64'], 'bag')
+    clear_tpl()
+    bag._CUR.clear(), bag._SHOT.clear()
+    TB.install(synth({('bag', sa): one}))
+    bag.icon_read('bag', ['1轉新手禮盒'], pool=[])
+    check('同族名稱：格名 OCR 精確命中（「1轉新手禮盒」）→ 不學（OCR 常把 1 / 2 讀錯）', not bag._learn_verified('bag', sa, '1轉新手禮盒', 'OCR '))
+    check('同族名稱：彈窗核對過 → 學', bag._learn_verified('bag', sa, '1轉新手禮盒'))
+    import actlog
+    check('學到名字樣板 → 寫操作 log（itemname 類，帶角色 / 來源；之前只印 stderr，錯樣板查不到來源）',
+          any('itemname' in ln and '1轉新手禮盒' in ln and '彈窗核對' in ln for ln in actlog.LOG.read_text(encoding='utf-8').splitlines()))
+    # list：名字樣板分不清的同族格標成不確定
+    clear_tpl()
+    N.save_tpl({'bag': {'2轉新手禮盒': [format(petmatch.pack(pick(d, '2轉新手禮盒')[1]), 'x')]}, 'depot': {}})
+    bag._CUR.clear(), bag._SHOT.clear()
+    bag.ITEM_MATCH = 'name'
+    TB.install(synth({('bag', sa): one}))
+    d4 = bag.read_bag_items()
+    check('list（name 模式）：1轉格不被認成 2轉、列在 uncertain（near 2轉新手禮盒）', sa not in d4['slots'] and sa in d4['uncertain'] and sa in d4['unread'], d4)
+    r = bag._names_in_bag(['2轉新手禮盒'])
+    check('find（name 模式）：要找 2轉、背包只有 1轉 → 找不到（舊版：名字樣板 IoU 0.89 → 回 1轉那格）', r['found'] == {'2轉新手禮盒': None}, r)
+    bag.ITEM_MATCH = 'auto'
+    clear_tpl()
+
     bag.ITEM_MATCH = 'iconocr'
     check('iconocr 模式：不學', not bag._learn_verified('bag', sk, '風的鎖'))
 
@@ -417,7 +524,7 @@ def test_box5():
     use_tpl(fx['polluted'])
     r0 = N.read_cell(get, 'depot', 0)
     check('實圖：倉庫第 1 格（5轉禮盒、紅角標）不再被汙染樣板認成 3轉（digit_guess 留底）', r0['name'] is None and r0.get('digit_guess') == '3轉新手禮盒'
-          and r0['new'] and r0['state'] == 'unknown', r0)
+          and r0['new'] and r0['state'] == 'uncertain', r0)
     pg = N.read_page(get, 'depot')
     check('實圖：第 2、3 格照舊認得（英雄的祝福 / 老爺爺的護身符）', pg['names'] == {1: '英雄的祝福', 2: '老爺爺的護身符'}, pg['names'])
     # 汙染樣板：「3轉新手禮盒」4 個變體互相差一個數字 → forget 只留真正的 3（序號 2）
@@ -476,6 +583,7 @@ def main(argv=None) -> int:
     test_read_page(d)
     test_new_tag(d)
     test_digits()
+    test_digit_family(d)
     try:
         import itemimg_match
         itemimg_match.index()

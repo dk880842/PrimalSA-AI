@@ -148,8 +148,26 @@ def _ensure(d: Path, n) -> Path:
     return d
 
 
+def test_state_dir() -> Path | None:
+    """離線測試（testenv：PSA_LOG_DIR 含 psatest-）→ 每視窗狀態檔的暫存根目錄 <PSA_LOG_DIR>/state；不是測試 → None。
+    2026-10-15 根因：主工作樹跑 test_roster 時 PSA_CLIENT=PrimalSA2 的 cache_dir 指到真的 tools/.cache/clients/PrimalSA2，
+    裡面 grind.lock 的 pid 是正在掛機的 grind.py follow（還活著）→ pet.Session 的 grind._other_running() 判「grind 在跑」→ rc 8；
+    乾淨 worktree 沒有那個鎖檔所以全過。測試一律不讀真實執行中的鎖 / pid / state.json"""
+    d = os.environ.get('PSA_LOG_DIR', '')
+    return Path(d) / 'state' if 'psatest-' in d else None
+
+
 def cache_dir(n: str | None = None) -> Path:
-    """這個視窗的狀態資料夾：主視窗 = tools/.cache（與改版前相同）；其他 = tools/.cache/clients/<程序名>（自己的會先建好）"""
+    """這個視窗的狀態資料夾：主視窗 = tools/.cache（與改版前相同）；其他 = tools/.cache/clients/<程序名>（自己的會先建好）。
+    離線測試（test_state_dir）：主視窗 = <PSA_LOG_DIR>/state、其他 = <PSA_LOG_DIR>/state/clients/<程序名>（共用的樣板 / 圖庫照舊在 SHARED_CACHE）"""
+    t = test_state_dir()
+    if t is not None:
+        d = t if is_default(n) else t / 'clients' / dir_name(n)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        return d
     return SHARED_CACHE if is_default(n) else _ensure(SHARED_CACHE / 'clients' / dir_name(n), n)
 
 

@@ -238,8 +238,8 @@ verifyhalt.trip = lambda reason, src='', **kw: _TRIPS.append((reason, src)) or T
 g = install(Game(unknown=True))
 g.painted[screen_sigs.BLACK_PTS[0]] = (90, 90, 90)          # 假畫面其餘點是黑色 = 會被當全黑轉場；點亮一點 = 真的不認得
 rc = uikit.preflight('t')
-check('preflight unknown 連 3 次 → 9（每次多讀轉場特徵 + 已知彈窗各一次，最後 trip_verify 再現場確認一次答題介面）',
-      rc == 9 and g.reads == 10 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
+check('preflight unknown 連 3 次 → 9（每次多讀轉場特徵 + 已知彈窗 + 已知面板殘留各一次，最後 trip_verify 再現場確認一次答題介面）',
+      rc == 9 and g.reads == 13 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
 check('preflight unknown 時 0 點擊', g.clicks == [])
 check('preflight unknown 連 3 次但沒認出答題介面 → 不設驗證停手旗標（2026-10-16：交給 watch 3 分鐘兜底）', _TRIPS == [], str(_TRIPS))
 # 答題介面（合成模擬圖，fixtures/verify_px.json）：preflight 第一次 unknown 就 9 + 設旗標，不等 3 次
@@ -533,6 +533,40 @@ _shop_cols[screen_sigs.SHOP_X[:2]] = screen_sigs.SHOP_X[2:5]
 uikit.px = lambda pts: [_shop_cols.get(pt, (70, 70, 70)) for pt in pts]
 _closed.clear()
 check('close_known_panel：NPC 商店 → 點 ✕ 1207,107（只關、不碰購買鈕）', uikit.known_panel() == 'shop' and uikit.close_known_panel() == 'shop' and _closed == [('SHOP', (1207, 107))], str(_closed))
+
+# preflight 遇到已知面板殘留 → 關掉再檢查、不計次（2026-10-15 PrimalSA2：bag.py 留下背包面板 → pet.py list 連 3 次不認得 → verify-halt）
+_keep_pf = (uikit.screen, uikit.transition_now, uikit.sleep, uikit.trip_verify)
+_pf = {'open': True, 'trip': []}
+uikit.screen = lambda: {'state': 'unknown' if _pf['open'] else 'idle'}
+uikit.transition_now = lambda: False
+uikit.sleep = lambda s: None
+uikit.trip_verify = lambda msg, src: _pf['trip'].append(msg)
+_closed.clear()
+
+
+def _close_stray(p, known_open=False):
+    _closed.append((p.name, p.close_xy))
+    _pf['open'] = False
+    uikit.px = lambda pts: None                     # 關掉後面板特徵消失
+    return True
+
+
+uikit.close_panel = _close_stray
+_use('quest-log/080443-UNKNOWN.png')
+rc = uikit.preflight('t')
+check('preflight：背包面板殘留（不認得）→ 點 ✕ 關掉後 0，不設驗證停手', rc == 0 and _closed == [('BAGANY', (1280, 113))] and not _pf['trip'], f'rc={rc} {_closed} {_pf}')
+_closed.clear()
+_pf.update(open=True, trip=[])
+uikit.close_panel = lambda p, known_open=False: (_closed.append(p.name), True)[1]   # ✕ 點了但畫面還是一樣（關不掉）
+_use('quest-log/080443-UNKNOWN.png')
+rc = uikit.preflight('t')
+check(f'preflight：已知面板關不掉 → 最多關 {uikit.PREFLIGHT_CLOSE_MAX} 次，之後照舊連 3 次 → 9', rc == 9 and len(_closed) == uikit.PREFLIGHT_CLOSE_MAX and _pf['trip'], f'rc={rc} {_closed}')
+_closed.clear()
+_pf.update(open=True, trip=[])
+_use('quest-log/060801-UNKNOWN.png')                # 不是已知面板（可能是驗證視窗）→ 不碰
+rc = uikit.preflight('t')
+check('preflight：不認得且不是已知面板 → 不點、照舊 9', rc == 9 and not _closed, f'rc={rc} {_closed}')
+(uikit.screen, uikit.transition_now, uikit.sleep, uikit.trip_verify) = _keep_pf
 uikit.px, uikit.close_panel = _keep_px, _keep_close
 
 print('失敗', fails)
