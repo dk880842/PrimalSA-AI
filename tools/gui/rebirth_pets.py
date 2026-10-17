@@ -37,11 +37,15 @@
 
 階段：
   preflight   當前角色 = DKBO（不是就 char.ensure）→ team.disband（沒隊伍 = 不點）→ 外掛鎖定騎寵 / 戰寵 5 人先取消 → 讀 5 人寵物欄（舊寵物清單）
-  boxes       （2026-10-17 重寫：檢查只做一次，離線測試 test_rebirth_pets.py，**未實機**）先 quiet（postrebirth.Tools.quiet：停 follow → 關原地遇敵並驗證 → 等戰鬥結束）→
-              **背包面板整段只開 1 次**，左欄頭像切人；每人固定動作：個人倉庫第 1 格取「N轉新手禮盒」（bag.take_slot：彈窗核對名稱一次、含數字）→ 背包使用（bag.use_slot）→
-              一次截圖（bag.icon_read 名字樣板 / 縮圖）認內容物 → 公共存（bag.store_slot）→ 個人存開出的禮盒。內容清單從 Item.jsonl 禮盒 arg 讀（box_spec；5轉 90332 =
-              寵物誘餌 / 2倍智慧果（綁定）/ 同名 5轉新手禮盒 140 版 90333）；禮盒（含五轉同名 140 版）只認開箱前後新出現的格，不靠名字區分；新格沒認出的才開彈窗一次，
-              禁止逐格掃。第 1 格不是禮盒 → 只核對一次截圖命中的格（背包先、再個人倉庫），都沒有 = skipped。每人每步（taken / used / done）記進度檔 data.box_roles，續跑接著做（--no-boxes 跳過）
+  boxes       （2026-10-17 重寫、同日再改成**分階段批次**；離線測試 test_rebirth_pets.py，**未實機**）先 quiet（postrebirth.Tools.quiet：停 follow → 關原地遇敵並驗證 → 等戰鬥結束）→
+              **背包面板整段只開 1 次、最後關 1 次**，左欄頭像切人；不逐人來回切分頁：
+                階段 1（倉庫頁・個人分頁切一次）5 人依序個人倉庫第 1 格取「N轉新手禮盒」（bag.take_slot：彈窗核對名稱一次、含數字）→ step taken
+                階段 2（背包頁・切一次）5 人依序背包使用（bag.use_slot）→ 一次截圖（bag.icon_read 名字樣板 / 縮圖）認內容物 → step planned（plan = 背包格 → 公共 / 個人）
+                階段 3（倉庫頁）公共分頁切一次 → 5 人依序存公共（bag.store_slot）→ 個人分頁切一次 → 5 人依序存開出的下一轉禮盒 → step done
+              頭像切換後頁籤 / 子分頁是否保持**沒有實機證據**（ui/bag.md 兩處說法相反）→ 每切一次頭像仍由 goto_page / open_depot 驗一次分頁亮色，不對才補點（**待實機確認**）。
+              內容清單從 Item.jsonl 禮盒 arg 讀（box_spec；5轉 90332 = 寵物誘餌 / 2倍智慧果（綁定）/ 同名 5轉新手禮盒 140 版 90333）；禮盒（含五轉同名 140 版）只認開箱前後新出現的格，
+              不靠名字區分；新格沒認出的才開彈窗一次，禁止逐格掃。第 1 格不是禮盒 → 只核對一次截圖命中的格（背包先、再個人倉庫），都沒有 = skipped。
+              每人每階段（taken / used / planned / done + stored）記進度檔 data.box_roles，續跑從中斷的階段 / 人接（舊進度檔 step used 沒有 plan → 階段 2 補認內容物；--no-boxes 跳過）
   catch       catcher 從公共取誘餌（拆分只留 1）→ 外掛捉寵設置（系別 → 物種 → 可抓捕數 = 1）→ 勾自動存倉庫 / 自動抓寵 → 等抓完 →
               → pet.reset_soft(catcher) 還原名字（成長字串 → 物種名）→ 確認多 1 隻新寵物、名字 = 物種 → 再留 N-1 個誘餌重複 → 還原名字 → 確認共 N 隻
               名字為主（2026-10-14 晚，離線測試；reset-name 本身實機驗過 8 隻布拉奇多斯）：learn-species（登錄縮圖 / 成長字串）只在還原失敗、
@@ -580,58 +584,87 @@ class Tools:
         return postrebirth.Tools().quiet()
 
     def boxes_many(self, roles, trans, states, save):
-        """5 人開禮盒（2026-10-17 重寫，使用者「檢查的動作真的太白吃了」）：**背包面板整段只開一次**，左欄頭像切人連續做完才關。
+        """5 人開禮盒（2026-10-17 再改：**分階段批次**，使用者「全程只需開一次物品窗口在背包跟倉庫間切換」）：背包面板整段只開一次，最後關一次。
         states = {角色: 進度}（就地更新，每步後 save() 寫進度檔，續跑從那一步接）。→ (rc, 出錯的角色或 None)。
-        每人固定動作（Tools._box_role）：個人倉庫第 1 格取禮盒（彈窗核對名稱一次、含數字）→ 背包使用 → 一次截圖認內容物 → 公共存 → 個人存禮盒"""
+        階段 1（倉庫頁・個人分頁切一次）：左欄頭像依序切 5 人，各從個人倉庫第 1 格取禮盒（彈窗核對名稱一次、含數字）→ step taken
+        階段 2（背包頁・切一次）：依序切 5 人，各使用禮盒 → 一次截圖認內容物（名字樣板 / 縮圖；新格沒認出的才開彈窗）→ step planned（plan = 背包格 → 公共 / 個人）
+        階段 3（倉庫頁）：公共分頁切一次 → 5 人依序存公共；個人分頁切一次 → 5 人依序存個人（開出的下一轉禮盒）→ step done
+        頭像切換後頁籤 / 子分頁是否保持沒有實機證據（ui/bag.md 兩處說法相反）→ 每次切頭像後仍由 goto_page / open_depot 驗一次分頁（亮色不對才補點，不盲點）"""
         import bag
         spec = box_spec(trans)
+
+        def step(r):
+            return states.setdefault(r, {}).get('step')
+
+        def fail(rc, r):
+            states[r]['rc'] = rc
+            save()
+            return rc, r
         with bag.Session() as s:
             if s.rc:
                 return s.rc, roles[0] if roles else None
-            for r in roles:
-                st = states.setdefault(r, {})
-                if st.get('step') == 'done':
-                    continue
-                rc = self._box_role(r, spec, st, save)
+            # 階段 1：倉庫頁（個人分頁）逐人取出
+            for r in [r for r in roles if step(r) is None or (step(r) == 'taken' and states[r].get('slot') is None)]:
+                rc = self._box_take(r, spec, states[r], save)
                 if rc:
-                    st['rc'] = rc
-                    save()
-                    return rc, r
+                    return fail(rc, r)
+            # 階段 2：背包頁逐人使用 + 認內容物
+            for r in [r for r in roles if step(r) in ('taken', 'used')]:
+                rc = self._box_use(r, spec, states[r], save)
+                if rc:
+                    return fail(rc, r)
+            # 階段 3：倉庫頁，公共分頁一輪、個人分頁一輪
+            for depot in ('public', 'personal'):
+                for r in [r for r in roles if step(r) == 'planned']:
+                    rc = self._box_put(r, states[r], depot, save)
+                    if rc:
+                        return fail(rc, r)
+            for r in [r for r in roles if step(r) == 'planned']:
+                states[r]['step'] = 'done'
+            save()
         return 0, None
 
-    def _box_role(self, role, spec, st, save):
-        """一人：step 無 → taken（slot = 背包格）→ used（before = 開箱前占用）→ done。每步記進度"""
+    def _box_take(self, role, spec, st, save):
+        """階段 1 一人：個人倉庫第 1 格取禮盒 → step taken（slot = 背包新格）；沒有禮盒 → step done + skipped"""
         import bag
         box = spec['box']
         rc = bag.select_role(role)
         if rc:
             return rc
-        if st.get('step') in (None, 'taken') and st.get('slot') is None:
-            rc, new = bag.take_slot(0, box, 'personal')        # 禮盒平常在個人倉庫第 1 格（上一轉開完存個人）
-            if rc in (bag.EXIT_ITEM, bag.EXIT_NAME):          # 第 1 格空 / 不是禮盒 → 只看名字樣板 / 縮圖命中的格（背包先、再個人倉庫），不逐格掃
-                rc, where = self._box_find(box)
-                if rc:
-                    return rc
-                if where is None:
-                    st.update(step='done', skipped=f'背包 / 個人倉庫都沒有 {box}')
-                    save()
-                    print(f'rebirth_pets：{role} 背包 / 個人倉庫都沒有 {box} → 已開過，跳過', flush=True)
-                    return 0
-                kind, i = where
-                if kind == 'depot':
-                    rc, new = bag.take_slot(i, box, 'personal')
-                else:
-                    rc, new = 0, [i]
+        rc, new = bag.take_slot(0, box, 'personal')            # 禮盒平常在個人倉庫第 1 格（上一轉開完存個人）
+        if rc in (bag.EXIT_ITEM, bag.EXIT_NAME):              # 第 1 格空 / 不是禮盒 → 只看名字樣板 / 縮圖命中的格（背包先、再個人倉庫），不逐格掃
+            rc, where = self._box_find(box)
             if rc:
                 return rc
-            if len(new) != 1:
-                return uikit.fail(SRC, bag.EXIT_VERIFY, f'{role} 取出 {box} 後新出現 {len(new)} 格（{new}），不猜是哪格')
-            st.update(step='taken', slot=new[0])
-            save()
+            if where is None:
+                st.update(step='done', skipped=f'背包 / 個人倉庫都沒有 {box}')
+                save()
+                print(f'rebirth_pets：{role} 背包 / 個人倉庫都沒有 {box} → 已開過，跳過', flush=True)
+                return 0
+            kind, i = where
+            if kind == 'depot':
+                rc, new = bag.take_slot(i, box, 'personal')
+            else:
+                rc, new = 0, [i]
+        if rc:
+            return rc
+        if len(new) != 1:
+            return uikit.fail(SRC, bag.EXIT_VERIFY, f'{role} 取出 {box} 後新出現 {len(new)} 格（{new}），不猜是哪格')
+        st.update(step='taken', slot=new[0])
+        save()
+        return 0
+
+    def _box_use(self, role, spec, st, save):
+        """階段 2 一人（背包頁）：step taken → 使用禮盒 → used（before = 開箱前占用）；step used（含舊進度檔）→ 認內容物 → planned"""
+        import bag
+        box = spec['box']
+        rc = bag.select_role(role)
+        if rc:
+            return rc
+        rc = bag.goto_page('bag')                              # 已在背包頁 = 只驗亮色、不點；頭像切換後頁籤掉了才補點
+        if rc:
+            return rc
         if st.get('step') == 'taken':
-            rc = bag.goto_page('bag')
-            if rc:
-                return rc
             slot = st['slot']
             before = bag.slot_occupancy()
             rc = bag.use_slot(slot, box, strict_digits=True)
@@ -646,10 +679,10 @@ class Tools:
             st.update(step='used', before=before)
             save()
         if st.get('step') == 'used':
-            rc = self._box_store(role, spec, st)
+            rc = self._box_identify(role, spec, st)
             if rc:
                 return rc
-            st['step'] = 'done'
+            st['step'] = 'planned'
             save()
         return 0
 
@@ -668,13 +701,10 @@ class Tools:
                     return 0, (kind, i)
         return 0, None
 
-    def _box_store(self, role, spec, st):
-        """開箱後：背包頁一次截圖（名字樣板 / 縮圖）→ 認出的格直接存；只有「新出現、沒認出」的格開彈窗認一次。
-        存的順序：公共一次切過去存完 → 個人存禮盒（同一人不重複切分頁）。清單外的道具不碰；清單裡沒找到的只記 missing"""
+    def _box_identify(self, role, spec, st):
+        """開箱後（背包頁、已選角）：一次截圖（名字樣板 / 縮圖）→ 認出的格記進 st['plan']；只有「新出現、沒認出」的格開彈窗認一次。
+        只認不存（存在階段 3）；清單外的道具不碰；清單裡沒找到的只記 missing"""
         import bag
-        rc = bag.goto_page('bag')
-        if rc:
-            return rc
         names = [it['name'] for it in spec['items']]
         ir = bag.icon_read('bag', names, pool=[]) or {}
         after = ir.get('occ') or bag.slot_occupancy()
@@ -694,18 +724,27 @@ class Tools:
                 print(f'rebirth_pets：{role} 背包第 {i + 1} 格新出現「{nm}」不在禮盒清單 → 不碰', flush=True)
         st['plan'] = {str(i): v for i, v in sorted(plan_.items())}
         st['missing'] = [n for n in names if n not in {v[0] for v in plan_.values()}]
-        stored = st.setdefault('stored', [])
-        for depot in ('public', 'personal'):
-            for i, (nm, d) in sorted(plan_.items()):
-                if d != depot or [i, nm] in stored:
-                    continue
-                rc = bag.store_slot(i, nm, depot)
-                if rc:
-                    st['failed'] = nm
-                    return rc
-                stored.append([i, nm])
         if st['missing']:
             print(f'rebirth_pets：{role} 一次截圖沒認出 {st["missing"]}（可能疊進原有那疊或沒開出）→ 不逐格找', flush=True)
+        return 0
+
+    def _box_put(self, role, st, depot, save):
+        """階段 3 一人：把 plan 裡該存 depot（public / personal）的格依序存進去；沒有就不切頭像。已存的 [格, 名稱] 不重存（續跑）"""
+        import bag
+        stored = st.setdefault('stored', [])
+        todo = [(int(i), nm) for i, (nm, d) in sorted((st.get('plan') or {}).items(), key=lambda kv: int(kv[0])) if d == depot and [int(i), nm] not in stored]
+        if not todo:
+            return 0
+        rc = bag.select_role(role)
+        if rc:
+            return rc
+        for i, nm in todo:
+            rc = bag.store_slot(i, nm, depot)                  # open_depot 先驗子分頁亮色（頭像切換後掉了才補點）
+            if rc:
+                st['failed'] = nm
+                return rc
+            stored.append([i, nm])
+            save()
         return 0
 
     def bait_take(self, role, keep, keep_short=False):

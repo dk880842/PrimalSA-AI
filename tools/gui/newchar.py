@@ -18,10 +18,13 @@ ass.py set_many（實機過）/ points（同日新增、未實機）、team.py f
 
 步驟（名單 = clients.roster()，第 1 個是隊長；每步驗證 → 點 → 驗證，失敗不重點）：
   preflight  uikit.preflight（驗證視窗 9 / 斷線 10 / 其他腳本佔用 8 直接停）→ 當前角色 = 隊長（char.ensure）
-  boxes      背包面板開一次、左欄頭像逐人：bag.find_items 盤點 → 認得的開局禮盒（迎新助力禮盒 90334）才使用（其他禮盒如
-             「2轉新手禮盒」等級條件不符 → 跳過、只記錄，不算錯誤）→ 使用「石幣2萬」→ 穿 新手棍棒 / 新手鎧甲 / 新手頭盔（bag.wear_item；背包沒有 = 已穿上）
+  boxes      背包面板整段只開一次、左欄頭像逐人（2026-10-17 分階段批次，**未實機**）：階段 A（背包頁）bag.find_items 盤點 → 認得的開局禮盒（迎新助力禮盒 90334）才使用
+             （其他禮盒如「2轉新手禮盒」等級條件不符 → 跳過、只記錄，不算錯誤）→ 使用「石幣2萬」→ 穿 新手棍棒 / 新手鎧甲 / 新手頭盔（bag.wear_item；背包沒有 = 已穿上）；
+             禮盒本來就在背包 = 沒有「從倉庫取出」階段；階段 B 同一個面板接著存倉（= 下面 store 的內容）：**公共分頁切一次 → 5 人依序存公共的 → 個人分頁切一次 → 5 人依序存個人的**，
+             不逐人來回切分頁、不關面板再開；進度記 data.store_done（'public:DKBO' 等），中斷後續跑接著做。完成後 boxes 與 store 都記為完成（--to boxes 也會做完存倉）
   pets       寵物面板：迪基格斯 → 出戰、瑪斯貝卡 → 騎乘（pet.set_state_many；騎乘要 allow_mount；已是目標狀態不點）
-  store      背包面板開一次逐人：寵物誘餌 / 離線水晶 / 2倍智慧果 / 安撫之素 → 公共倉庫；1轉新手禮盒（banPubDepot）→ 個人倉庫（bag.depot_store_items；沒有的略過）
+  store      寵物誘餌 / 離線水晶 / 2倍智慧果 / 安撫之素 → 公共倉庫；1轉新手禮盒（banPubDepot）→ 個人倉庫（分階段：公共輪 → 個人輪，沒有的略過）。
+             2026-10-17 起 boxes 結尾已在同一個面板做完，正常流程跑到這步是「進度檔已完成 → 跳過」；只有 boxes 存倉中斷 / `--from store` 才單獨開面板跑
   battle     外掛 5 人「自動戰鬥」開（ass.set_many，隊長最後；快速戰鬥在村長家被禁，練功時 grind 再開）
   heal       外掛 戰鬥設置 → 自動補血 → 精靈補血 5 人打勾（ass.heal_set；OCR 找「精靈補血」標籤列再點勾選框，已勾不點、點後驗證；
              失敗 = 195（info.ass_rc / ass_step = heal；ass 17 = 找不到標籤）；**未實機**；舊進度檔沒有此步驟也能續跑）
@@ -88,7 +91,7 @@ QUEST_UNKNOWN = 2                                             # quest.py：不�
 LAST: dict = {}
 
 STATUS = {   # 步驟實作狀態（plan 顯示）
-    'preflight': '完成', 'boxes': '完成（bag.wear 未實機）', 'pets': '完成', 'store': '完成（bag.store-items 未實機）', 'battle': '完成',
+    'preflight': '完成', 'boxes': '完成（bag.wear 未實機；存倉分階段併入，2026-10-17 未實機）', 'pets': '完成', 'store': '完成（分階段存倉未實機）', 'battle': '完成',
     'heal': '未實機（ass.heal 同日新增）',
     'points': '座標待量測', 'team': '完成', 'quest': '完成', 'buy': '完成（buywendy.py 未實機）', 'grind': '完成',
 }
@@ -110,9 +113,10 @@ def plan(o: dict) -> list:
     return [
         ('preflight', STATUS['preflight'], [f'preflight（9 / 10 / 8 停手）', f'當前角色 = {LEADER}（char.ensure）']),
         ('boxes', STATUS['boxes'], [f'{n} 人（背包開一次逐人）：使用 {"/".join(OPEN_BOXES)}（{"/".join(SKIP_BOXES)} 等級不符 → 跳過只記錄）',
-                                   f'使用 {COIN}', f'穿 {" / ".join(GEAR)}（背包沒有 = 已穿上）']),
+                                   f'使用 {COIN}', f'穿 {" / ".join(GEAR)}（背包沒有 = 已穿上）',
+                                   '同一個背包面板接著存倉（不關面板再開）：公共分頁一輪 → 個人分頁一輪（內容見 store 步驟）']),
         ('pets', STATUS['pets'], [f'{BATTLE_PET} → 出戰、{MOUNT_PET} → 騎乘（allow_mount；已是目標不點）']),
-        ('store', STATUS['store'], [f'公共：{" / ".join(BOX_CONTENTS)}', f'個人：{NEXT_BOX}（禁止存公共）', '沒有的略過']),
+        ('store', STATUS['store'], ['（boxes 步驟結尾已在同一個面板做完；本步只在 boxes 存倉中斷 / --from store 時單獨跑）', f'公共輪（5 人依序）：{" / ".join(BOX_CONTENTS)}', f'個人輪（5 人依序）：{NEXT_BOX}（禁止存公共）', '沒有的略過']),
         ('battle', STATUS['battle'], [f'外掛 {n} 人自動戰鬥開（隊長最後）']),
         ('heal', STATUS['heal'], [f'外掛 戰鬥設置 → 自動補血 → 精靈補血 {n} 人打勾（ass.heal_set；OCR 找標籤列、已勾不點、點後驗證；失敗 195）']),
         ('points', STATUS['points'], ['外掛自動加點：速度80 / 體力50 / 腕力999 / 耐力0 + 同步加點（隊長設、其他人看勾選）',
@@ -202,9 +206,40 @@ class Tools:
         import bag
         return bag.wear_item(role, name)
 
-    def store_items(self, roles, items):
+    def store_items(self, roles, items, done=None, mark=None):
+        """分階段存倉（2026-10-17，使用者「全程只需開一次物品窗口」）：背包面板只開一次（外層 Session 已開就巢狀不重開）；
+        **公共分頁一輪（5 人依序存該存公共的）→ 個人分頁一輪（5 人依序）**，不逐人來回切分頁。
+        每次切頭像後 bag.depot_store → open_depot 仍會驗子分頁亮色（頭像切換後分頁是否保持沒實機證據，不對才補點）。
+        done = 已完成的 'depot:角色' 集合（續跑跳過）、mark(key) = 每人每輪完成後記進度。沒有（92）略過、95 等 2 秒重存一次
+        （重存回 92 = 第一次其實存進了）、其他失敗立即停。→ (rc, {角色: {名稱: rc}})"""
         import bag
-        return bag.depot_store_items(roles, items, True)
+        out, done = {}, set(done or ())
+        with bag.Session() as s:
+            if s.rc:
+                return s.rc, out
+            for depot in ('public', 'personal'):
+                names = [n for n, d in items if d == depot]
+                for r in roles:
+                    key = f'{depot}:{r}'
+                    if key in done or not names:
+                        continue
+                    res = out.setdefault(r, {})
+                    for nm in names:
+                        rc = bag.depot_store(r, nm, depot)
+                        if rc == bag.EXIT_VERIFY:
+                            uikit.sleep(2)
+                            rc = bag.depot_store(r, nm, depot)
+                            if rc == bag.EXIT_ITEM:
+                                rc = 0
+                        res[nm] = rc
+                        if rc == bag.EXIT_ITEM:
+                            bag.log(f'{r} 沒有「{nm}」，略過')
+                            continue
+                        if rc:
+                            return rc, out
+                    if mark:
+                        mark(key)
+        return 0, out
 
     def pet_state_many(self, roles, pet, state, allow_mount=False):
         import pet as petmod
@@ -358,7 +393,14 @@ class Run:
                         return self.fail(rc, EXIT_BOX, f'{r} 穿「{g}」失敗（bag rc {rc}）', bag_rc=rc, boxes=res)
                     info['worn'].append(g)
                 event(f'{r}：使用 {info["used"] or "（無）"}、穿上 {info["worn"] or "（無，已穿 / 沒有）"}')
-        return self.done('boxes', boxes=res)
+            self.done('boxes', boxes=res)                    # 開箱 / 石幣 / 穿裝完成先記；存倉在同一個背包面板裡接著做（不關面板再開）
+            if 'store' in (self.o.get('skip') or ()):
+                return 0
+            rc, st = self._store_phase()
+            if rc:
+                return self.fail(rc, EXIT_STORE, f'存倉失敗（bag rc {rc}；boxes 已完成，--from store 續跑）', bag_rc=rc, stored=st)
+            self.p.get('data', {}).pop('store_done', None)
+            return self.done('store', stored=st)
 
     def pets(self):
         for pet, state, mount in ((BATTLE_PET, '出戰', False), (MOUNT_PET, '騎乘', True)):
@@ -367,10 +409,23 @@ class Run:
                 return self.fail(rc, EXIT_PET, f'{pet} → {state} 失敗（pet rc {rc}）', pet_rc=rc)
         return self.done('pets')
 
+    def _store_phase(self):
+        """分階段存倉（公共輪 → 個人輪）；進度記 data.store_done（'depot:角色'），中斷後續跑從那一輪那個人接。→ (rc, 結果)"""
+        d = self.p.setdefault('data', {})
+        done = d.setdefault('store_done', [])
+
+        def mark(key):
+            if key not in done:
+                done.append(key)
+            self.save()
+        return self.T.store_items(ALL_ROLES, STORE_ITEMS, list(done), mark)
+
     def store(self):
-        rc, res = self.T.store_items(ALL_ROLES, STORE_ITEMS)
+        """單獨跑（--from store / boxes 內存倉中斷後續跑）；boxes 正常跑完時存倉已在同一個面板做完、進度檔 store 已完成 → run 迴圈跳過本步"""
+        rc, res = self._store_phase()
         if rc:
             return self.fail(rc, EXIT_STORE, f'存倉失敗（bag rc {rc}）', bag_rc=rc, stored=res)
+        self.p.get('data', {}).pop('store_done', None)
         return self.done('store', stored=res)
 
     def battle(self):

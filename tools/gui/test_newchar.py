@@ -156,21 +156,30 @@ class FakeTools:
         self.worn[role].append(name)
         return 0
 
-    def store_items(self, roles, items):
+    def store_items(self, roles, items, done=None, mark=None):
         self.calls.append(('store', tuple(roles), tuple(items)))
         rc = self._rc('store')
         out = {}
         if rc:
             return rc, out
-        for r in roles:
-            res = out.setdefault(r, {})
-            for nm, dep in items:
-                if nm in self.bags[r]:
-                    self.bags[r].remove(nm)
-                    (self.depot['public'].append(nm) if dep == 'public' else self.depot['personal'].setdefault(r, []).append(nm))
-                    res[nm] = 0
-                else:
-                    res[nm] = 92
+        done = set(done or ())
+        for depot in ('public', 'personal'):                  # 分階段：公共輪 → 個人輪，每輪 5 人依序
+            for r in roles:
+                if f'{depot}:{r}' in done:
+                    continue
+                res = out.setdefault(r, {})
+                for nm, dep in items:
+                    if dep != depot:
+                        continue
+                    self.calls.append(('store1', depot, r, nm))
+                    if nm in self.bags[r]:
+                        self.bags[r].remove(nm)
+                        (self.depot['public'].append(nm) if dep == 'public' else self.depot['personal'].setdefault(r, []).append(nm))
+                        res[nm] = 0
+                    else:
+                        res[nm] = 92
+                if mark:
+                    mark(f'{depot}:{r}')
         return 0, out
 
     def pet_state_many(self, roles, pet, state, allow_mount=False):
@@ -230,9 +239,9 @@ reset_progress()
 T = FakeTools()
 rc, out = quiet(nc.run, tools=T, fresh=True)
 check('全新 5 人：跑完、只有 points 待手動 → 199', rc == nc.EXIT_PENDING and set(nc.LAST['pending']) == {'points'}, f'rc={rc} {out[-400:]}')
-check('步驟順序 preflight → 背包 → 寵物 → 存倉 → 外掛 → 加點 → 組隊 → 任務 → 練功',
+check('步驟順序 preflight → 背包（含存倉，同一個面板）→ 寵物 → 外掛 → 加點 → 組隊 → 任務 → 練功',
       [n for n in T.names() if n in ('preflight', 'bag_open', 'pet', 'store', 'ass', 'points', 'team', 'quest', 'grind')][:1] == ['preflight']
-      and T.names().index('pet') > T.names().index('bag_close') and T.names().index('store') > T.names().index('pet')
+      and T.names().index('pet') > T.names().index('bag_close') and T.names().index('store') < T.names().index('bag_close')
       and T.names().index('ass') < T.names().index('points') < T.names().index('team') < T.names().index('quest') < T.names().index('grind'))
 check('背包面板只開一次（boxes），5 人連續做完', T.names().count('bag_open') == 1)
 check('每人：開迎新助力禮盒 → 石幣2萬 → 穿 3 件', all(('use', r, '迎新助力禮盒') in T.calls and ('use', r, '石幣2萬') in T.calls and T.worn[r] == nc.GEAR for r in ROLES))
@@ -267,7 +276,7 @@ check('禮盒已開、裝備已穿：0 次使用 / 穿戴，誘餌照存', rc ==
 T4 = FakeTools(bags={r: ['2轉新手禮盒', '迎新助力禮盒'] for r in ROLES})
 rc, out = quiet(nc.run, tools=T4, fresh=True, to_stage='boxes')
 check('2轉新手禮盒 不開、記 skipped；迎新照開', rc == 0 and not any(c[0] == 'use' and c[2] == '2轉新手禮盒' for c in T4.calls)
-      and nc.LAST['done'] == ['boxes'] and all('2轉新手禮盒' in T4.bags[r] for r in ROLES), f'rc={rc}')
+      and nc.LAST['done'] == ['boxes', 'store'] and all('2轉新手禮盒' in T4.bags[r] for r in ROLES), f'rc={rc}')
 check('--to boxes：之後的步驟都沒跑', 'pet' not in T4.names() and 'grind' not in T4.names())
 
 # 使用後還在（按鈕落空）→ 重用一次；仍在 → 95 → 192
@@ -292,7 +301,7 @@ check('--from boxes 續跑：已開的不再開、DKBO3 補穿鎧甲、全部完
 for code in (8, 9, 10):
     T7 = FakeTools(rc={'pet': code})
     rc, out = quiet(nc.run, tools=T7, fresh=True)
-    check(f'寵物步驟回 {code} → 原碼 {code} 停手、後面沒跑', rc == code and 'store' not in T7.names() and 'grind' not in T7.names())
+    check(f'寵物步驟回 {code} → 原碼 {code} 停手、後面沒跑', rc == code and 'ass' not in T7.names() and 'grind' not in T7.names())
 T7 = FakeTools(rc={'preflight': 9})
 rc, out = quiet(nc.run, tools=T7, fresh=True)
 check('preflight 9（疑似驗證視窗）→ 9、零動作', rc == 9 and T7.names() == ['preflight'])
@@ -535,6 +544,38 @@ rc, out = quiet(nc.run, tools=T)
 check('舊進度檔沒有 heal：整段續跑時 heal 補做一次、battle 不重做', rc == 0 and 'heal' in T.names() and 'ass' not in T.names(), f'rc={rc}')
 rc, out = quiet(nc.run, dry_run=True, fresh=True)
 check('plan 顯示 heal 步驟', 'heal［' in out, out[-300:])
+
+# ---------------- 分階段存倉（2026-10-17）：公共輪 → 個人輪、同一個面板、續跑 ----------------
+stores.clear()
+seq.clear()
+items = [('1轉新手禮盒', 'personal'), ('寵物誘餌', 'public'), ('離線水晶', 'public')]
+marks = []
+rc, d = nc.Tools().store_items(['DKBO', 'DKBO2', 'DKBO3'], items, None, marks.append)
+check('Tools.store_items：公共輪 3 人依序（每人 2 樣）→ 個人輪 3 人依序，不逐人來回',
+      rc == 0 and [x[2] for x in stores] == ['public'] * 6 + ['personal'] * 3 and [x[0] for x in stores[:6:2]] == ['DKBO', 'DKBO2', 'DKBO3']
+      and marks == ['public:DKBO', 'public:DKBO2', 'public:DKBO3', 'personal:DKBO', 'personal:DKBO2', 'personal:DKBO3'], str(stores))
+stores.clear()
+seq.update({('DKBO2', '寵物誘餌'): 92, ('DKBO', '寵物誘餌'): [bag.EXIT_VERIFY, bag.EXIT_ITEM]})
+rc, d = nc.Tools().store_items(['DKBO', 'DKBO2'], items, ['personal:DKBO'], None)
+check('Tools.store_items：沒有（92）略過、95 重存回 92 = 已存、done 內的輪不重做', rc == 0 and d['DKBO2']['寵物誘餌'] == bag.EXIT_ITEM and d['DKBO']['寵物誘餌'] == 0
+      and ('DKBO', '1轉新手禮盒', 'personal') not in stores and ('DKBO2', '1轉新手禮盒', 'personal') in stores, str(stores))
+stores.clear()
+seq.clear()
+seq.update({('DKBO2', '離線水晶'): bag.EXIT_FULL})
+rc, d = nc.Tools().store_items(['DKBO', 'DKBO2'], items, None, marks.append)
+check('Tools.store_items：倉庫滿 94 → 立即停、個人輪沒開始', rc == bag.EXIT_FULL and not any(x[2] == 'personal' for x in stores))
+
+# Run 層：boxes 內存倉、公共輪全在個人輪前、中斷後 --from store 從那一輪接
+reset_progress()
+T = FakeTools(rc={'store': lambda *a: 0})
+rc, out = quiet(nc.run, tools=T, fresh=True, to_stage='store')
+order = [c[1] for c in T.calls if c[0] == 'store1']
+check('Run：5 人公共輪（4 樣 × 5 人）全在個人輪之前', rc == 0 and order == ['public'] * 20 + ['personal'] * 5 and T.names().count('store') == 1 and 'pet' not in T.names()[:T.names().index('store')],
+      f'rc={rc} {order[:3]}')
+check('Run：boxes / store 都完成、store 沒有第二次開面板（bag_open 1 次）', nc.LAST['done'] == ['boxes', 'store', 'pets'] and T.names().count('bag_open') == 1 and 'store_done' not in nc.load_progress().get('data', {}), str(nc.LAST['done']))
+T = FakeTools(rc={'store': 94})
+rc, out = quiet(nc.run, tools=T, fresh=True)
+check('存倉失敗 → 194、boxes 仍記完成（--from store 續跑）、pets 沒做', rc == nc.EXIT_STORE and 'boxes' in nc.load_progress()['done'] and 'pets' not in T.names(), f'rc={rc}')
 
 print('全部通過' if not fails else f'{fails} 項失敗')
 sys.exit(1 if fails else 0)
