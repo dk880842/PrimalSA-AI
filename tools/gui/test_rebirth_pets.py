@@ -992,7 +992,10 @@ check('1轉 5 人：rc 0、背包面板整段只開 1 次', rc == 0 and g.sessio
 check('1轉：每人彈窗 2 次（取出核對 + 使用核對）、一次截圖 1 次，沒有逐格彈窗掃', g.popups == 2 * len(ROLES) and g.shots == len(ROLES), f'popups={g.popups} shots={g.shots}')
 check('1轉：公共 = 4 種內容物 × 5 人、個人倉庫 = 2轉新手禮盒', sorted(x[1] for x in g.public) == sorted(['寵物誘餌', '離線水晶（8H）', '2倍智慧果（綁定）', '安撫之素'] * len(ROLES))
       and all(any(x and x[1] == '2轉新手禮盒' for x in g.personal[r]) for r in ROLES) and all(not any(g.bags[r]) for r in ROLES), str(g.public[:4]))
-check('1轉：分頁切換每人 ≤ 4 次（個人取 → 背包使用 → 公共存 → 個人存）', g.tabs <= 4 * len(ROLES), f'tabs={g.tabs}')
+check('1轉：分頁整段只切 4 次（個人倉庫取 → 背包使用 → 公共存 → 個人存；不隨人數增加）', g.tabs == 4, f'tabs={g.tabs}')
+check('1轉：階段順序 = 5 人全取完 → 5 人全用完 → 公共 5 人 → 個人 5 人（不逐人來回）',
+      [o[0] for o in g.ops] == ['take'] * 5 + ['use'] * 5 + ['store'] * 20 + ['store'] * 5
+      and [o[3] for o in g.ops if o[0] == 'store'] == ['public'] * 20 + ['personal'] * 5, str([(o[0], o[1]) for o in g.ops][:12]))
 check('1轉：每人進度 done、每步都記（take / use / store 至少 3 次 save）', all(st[r]['step'] == 'done' for r in ROLES) and len(saves) >= 3 * len(ROLES))
 
 g = GameBag(5)
@@ -1020,13 +1023,19 @@ check('背包 / 個人倉庫都沒有 → skipped、不使用，其他人照開'
 
 g = GameBag(1, store_fail=('DKBO3', '離線水晶（8H）'))
 rc, st, _ = run_boxes(g)
-check('DKBO3 存倉失敗 → 回 95、停在 DKBO3（step used）', rc == 95 and st['DKBO3']['step'] == 'used' and 'DKBO4' not in st, str(st.get('DKBO3')))
-n_use = len([o for o in g.ops if o[0] == 'use'])
+check('DKBO3 存倉失敗（公共輪）→ 回 95、DKBO3 停在 planned（5 人都已取 / 用完）', rc == 95 and st['DKBO3']['step'] == 'planned' and st['DKBO3'].get('failed') == '離線水晶（8H）'
+      and all(st[r]['step'] == 'planned' for r in ROLES) and not any(o[0] == 'store' and o[1] == 'DKBO4' for o in g.ops), str(st.get('DKBO3')))
+n_use, n_take = len([o for o in g.ops if o[0] == 'use']), len([o for o in g.ops if o[0] == 'take'])
 rc, st, _ = run_boxes(g, states=st)
-check('續跑：done 的人跳過、DKBO3 從存倉接（不再取 / 開）、DKBO4～5 照開', rc == 0 and len([o for o in g.ops if o[0] == 'use']) == n_use + 2
-      and not [o for o in g.ops if o[0] == 'take' and o[1] in ('DKBO', 'DKBO2', 'DKBO3')][3:] and all(st[r]['step'] == 'done' for r in ROLES) and g.sessions == 2,
-      f'{g.ops[-6:]}')
+check('續跑：不再取 / 開（階段 1、2 跳過）、DKBO3 從公共存接（已存的格不重存）、5 人全 done', rc == 0 and len([o for o in g.ops if o[0] == 'use']) == n_use
+      and len([o for o in g.ops if o[0] == 'take']) == n_take and all(st[r]['step'] == 'done' for r in ROLES) and g.sessions == 2
+      and sorted(x[1] for x in g.public) == sorted(['寵物誘餌', '離線水晶（8H）', '2倍智慧果（綁定）', '安撫之素'] * len(ROLES)), f'{g.ops[-6:]}')
 
+# 舊進度檔相容：step taken（舊版取完還沒開）→ 階段 2 開 + 認 + 存
+g2 = GameBag(1)
+g2.bags['DKBO'][0] = ('box', g2.box, 'v1')
+rc, st2, _ = run_boxes(g2, states={'DKBO': {'step': 'taken', 'slot': 0}}, roles=['DKBO'])
+check('續跑 step taken（舊進度）：只開 + 認 + 存，不再取', rc == 0 and st2['DKBO']['step'] == 'done' and not [o for o in g2.ops if o[0] == 'take'], str(g2.ops))
 f = Fake()
 rc, _ = go(f, to_stage='boxes')
 check('boxes 段開頭先 quiet（停 follow / 關遇敵 / 等戰鬥）再開箱', rc == 0 and ci('quiet') and ci('quiet')[0] < ci('box_open')[0])
