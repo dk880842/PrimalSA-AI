@@ -311,6 +311,14 @@ def resolve_name(panel: dict, pop: dict, mats, recipes: dict):
     return None
 
 
+def pop_wrong(name, pop: dict, recipes: dict):
+    """合成前防點錯項（2026-10-17 起合成不再以大字為閘門）：彈窗大字投票明確投給「name 同族（只差數字）以外的已知成品名」→ 回那個名字；
+    讀空 / 讀不出 / 只投給同族 → None（放行）。只看大字、不看材料列"""
+    fam = digit_family(norm(name), recipes)
+    gv = vote_lines((pop or {}).get('name') if isinstance(pop, dict) else pop, recipes)
+    return next((v for v in gv['votes'] if v not in fam), None)
+
+
 def pop_check(name, pop: dict, recipes: dict):
     """合成前核對快速合成彈窗是不是 name → True / False / None（看不全 / 大字讀不到、還不能確定 → 呼叫端 ▼ 亮就捲一次再讀，仍 None 就不合成）。
     pop = {'name': 大字原始行, 'list' / 'up' / 'down' / 'list2' / 'up2'（見 pop_mats）}（舊格式 'mats' 也收）。

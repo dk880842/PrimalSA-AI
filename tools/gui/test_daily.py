@@ -169,27 +169,35 @@ try:
     check('pop_name：3 次都空 → 回空、只讀 3 次', daily.Tools().pop_name() == [] and len(_ocr_n) == daily.POP_NAME_TRIES == 3 and len(_sl) == 2)
     _ocr_n.clear(); _sl.clear(); _open[0] = False
     check('pop_name：彈窗不在 → 不重讀', daily.Tools().pop_name() == [] and len(_ocr_n) == 1 and not _sl)
-    # craft_item：大字 3 次全空 → 不按合成、存現場圖、回失敗（229 路徑）
-    _open[0] = True; _seq[:] = []
+    # craft_item（2026-10-17 起大字不當閘門）：大字讀空 → 照樣合成且變綠成功
+    _open[0] = True; _seq[:] = []; _ocr_n.clear()
     uikit.safe_click = lambda x, y, panel=None, note='', **k: (_clicks.append(note), True)[1]
-    uikit.px = lambda pts, cmd='pixel': [(223, 187, 147)] * len(pts)
     uikit.snap = lambda tag: (_snaps.append(tag), 'tools/.cache/ui-log/x.png')[1]
     uikit.gui = lambda *a, **k: ''
-    ok, why = daily.Tools().craft_item(0, '合成弓箭8')
-    check('craft_item：大字 3 次全空 → 不合成、存現場圖、原因帶圖路徑',
-          not ok and not any('1000 石幣' in n for n in _clicks) and _snaps == ['daily-pop-fail'] and 'ui-log/x.png' in why, f'{ok} {why} {_clicks}')
-    # craft_item：剛開讀空、重讀到大字 → 照常合成（按合成鈕）
-    _clicks.clear(); _snaps.clear(); _seq[:] = [[], LV['name']]
+    _red = [False]
     def _px(pts, cmd='pixel'):
         if list(pts) == [p for g in daily.STATE_GRID for p in g]:
             return [(135, 255, 91)] * len(daily.STATE_GRID[0]) + [(240, 210, 170)] * len(daily.STATE_GRID[1])   # 合成後第 1 項綠
         if list(pts) == daily.POP_COUNT_PX:
-            return [tuple(c) for c in LV['counts']]
+            return [(255, 40, 40)] * len(pts) if _red[0] else [tuple(c) for c in LV['counts']]
         return [(223, 187, 147)] * len(pts)
     uikit.px = _px
     ok, why = daily.Tools().craft_item(0, '合成弓箭8')
-    check('craft_item：剛開大字讀空、重讀到 → 照常按合成（花 1000 石幣）且不存失敗圖',
-          any('1000 石幣' in n for n in _clicks) and not _snaps, f'{ok} {why} {_clicks}')
+    check('craft_item：大字讀空 → 照樣按合成（花 1000 石幣）、變綠成功、不存失敗圖、不重讀大字',
+          ok and any('1000 石幣' in n for n in _clicks) and not _snaps and [b for b in _ocr_n if tuple(b) == daily.POP_NAME_BOX] == [daily.POP_NAME_BOX], f'{ok} {why} {_clicks} {_ocr_n}')
+    _clicks.clear(); _ocr_n.clear(); _seq[:] = [LV['name']]
+    ok, why = daily.Tools().craft_item(0, '合成弓箭8')
+    check('craft_item：大字讀到同一成品 → 照常合成', ok and any('1000 石幣' in n for n in _clicks) and not _snaps, f'{ok} {why}')
+    _clicks.clear(); _ocr_n.clear(); _seq[:] = [LV['name']]
+    ok, why = daily.Tools().craft_item(0, '合成爪5')
+    check('craft_item：大字明確是別的已知成品 → 229 路徑（不合成、存現場圖、原因帶名字）',
+          not ok and not any('1000 石幣' in n for n in _clicks) and _snaps == ['daily-pop-fail'] and '合成弓箭8' in why, f'{ok} {why} {_clicks}')
+    _clicks.clear(); _snaps.clear(); _seq[:] = []; _red[0] = True
+    ok, why = daily.Tools().craft_item(0, '合成弓箭8')
+    check('craft_item：計數紅字 → 不合成（大字讀空照樣擋）', not ok and '紅字' in why and not any('1000 石幣' in n for n in _clicks), f'{ok} {why}')
+    check('pop_wrong：讀空 / 同族 → None；別的成品 → 回名字',
+          dp.pop_wrong('合成弓箭8', [], RECIPES) is None and dp.pop_wrong('合成弓箭8', LV['name'], RECIPES) is None
+          and dp.pop_wrong('合成爪5', LV['name'], RECIPES) == '合成弓箭8')
 finally:
     uikit.ocr_lines, uikit.is_open, uikit.sleep, uikit.safe_click, uikit.px, uikit.snap, uikit.gui = _kp
 
