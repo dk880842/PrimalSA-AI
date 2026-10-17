@@ -803,6 +803,126 @@ W.bag['DKBO'].update({'成品:厚肉塊串燒': 1, '成品:熱的魚味噌湯': 
 rc, out, _ = go(W)
 check('讀到第 1 環已綠：不買它的材料、不合成；仍提交（5/5）', rc == 0 and W.reward['DKBO'] == 5 and not any(a[0] == 'buy' and a[2] in ('幹燥肉', '新鮮的魚') and False for a in W.log), f'{rc} {out[-300:]}')
 
+# ---------------- 情境 13：解散後各自走（2026-10-17：隊員落點不一致）----------------
+H = 1005
+for name, pos, want_v, want in [
+    ('村裡（1000:74,72）→ 先 walk_village、走全部 waypoint', (1000, 74, 72), True, [(31, 60), (36, 60), (38, 55), (38, 48)]),
+    ('位置讀不到 → 同不在醫院', None, True, [(31, 60), (36, 60), (38, 55), (38, 48)]),
+    ('醫院入口 25,65 → 全部 waypoint（不先 walk_village）', (H, 25, 65), False, [(31, 60), (36, 60), (38, 55), (38, 48)]),
+    ('醫院 26,64 → 全部', (H, 26, 64), False, [(31, 60), (36, 60), (38, 55), (38, 48)]),
+    ('31,60 已到 → 不回頭、從 36,60 起', (H, 31, 60), False, [(36, 60), (38, 55), (38, 48)]),
+    ('35,55（卡點）→ 從 38,55 起，不回 31,60', (H, 35, 55), False, [(38, 55), (38, 48)]),
+    ('35,54 → 同上', (H, 35, 54), False, [(38, 55), (38, 48)]),
+    ('38,55 → 只剩 38,48', (H, 38, 55), False, [(38, 48)]),
+    ('38,52 → 只剩 38,48', (H, 38, 52), False, [(38, 48)]),
+    ('38,48 站位 → 不走', (H, 38, 48), False, []),
+    ('NPC 3 格內 40,44 → 不走', (H, 40, 44), False, []),
+]:
+    v, r = daily.hosp_route(pos)
+    check(f'hosp_route {name}', v == want_v and r == want, f'{v} {r}')
+check('hosp_route 任何起點都不含站位以前的 31,60（除非更靠近入口）', all((31, 60) not in daily.hosp_route((H, x, y))[1] for x, y in [(36, 60), (38, 50), (37, 57)]))
+
+
+class _Mod:
+    pass
+
+
+def fake_walk_env(pos):
+    log = []
+    walk, heal = _Mod(), _Mod()
+    walk.wait_pos = lambda tries=6, want_map=None, gap=0.5: pos
+    walk.step_to = lambda m, x, y, exit_map=None: log.append(('step', m, x, y))
+    heal.walk_village = lambda: log.append(('village',))
+    old = (sys.modules.get('walk'), sys.modules.get('heal'))
+    sys.modules['walk'], sys.modules['heal'] = walk, heal
+    return log, old
+
+
+def restore_env(old):
+    for k, v in zip(('walk', 'heal'), old):
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
+
+for name, pos, want in [
+    ('村裡', (1000, 74, 72), [('village',), ('step', H, 31, 60), ('step', H, 36, 60), ('step', H, 38, 55), ('step', H, 38, 48)]),
+    ('醫院入口', (H, 26, 64), [('step', H, 31, 60), ('step', H, 36, 60), ('step', H, 38, 55), ('step', H, 38, 48)]),
+    ('35,55', (H, 35, 55), [('step', H, 38, 55), ('step', H, 38, 48)]),
+    ('38,48', (H, 38, 48), []),
+]:
+    log, old = fake_walk_env(pos)
+    try:
+        ok = daily.Tools().into_hospital()
+    finally:
+        restore_env(old)
+    check(f'Tools.into_hospital 從{name}：走法正確', ok and log == want, f'{ok} {log}')
+
+
+class SpotT:
+    """go_spot 用的最小假 Tools（各自的位置 + 動作 log）"""
+    def __init__(self, pos, hosp_ok=True, walk_ok=True):
+        self.p, self.log, self.hosp_ok, self.walk_ok = pos, [], hosp_ok, walk_ok
+
+    def pos(self): return self.p
+    def sleep(self, s): pass
+
+    def into_hospital(self):
+        self.log.append('hospital')
+        return self.hosp_ok
+
+    def to_town(self):
+        self.log.append('to_town')
+        self.p = (1000, 92, 99)
+        return True
+
+    def to_marinas(self):
+        self.log.append('to_marinas')
+        self.p = (2000, 65, 58)
+        return True
+
+    def walk_to(self, m, x, y, exit_map=None):
+        self.log.append(('walk_to', m, x, y, exit_map))
+        return self.walk_ok
+
+
+def spot(pos, where_, **kw):
+    T = SpotT(pos, **kw)
+    D = daily.Daily(T, {}, ['DKBO', 'DKBO2'], recipes=RECIPES, stores=STORES, where=WHERE)
+    try:
+        D.go_spot('DKBO3', where_)
+        return 0, T
+    except daily.Stop as e:
+        return e.rc, T
+
+
+rc, T = spot((1005, 38, 48), 'hospital')
+check('go_spot 醫院：交給 into_hospital（pos-aware）', rc == 0 and T.log == ['hospital'])
+rc, T = spot((1005, 35, 55), 'hospital', hosp_ok=False)
+check('go_spot 醫院走不到 → 224 帶座標', rc == 224 and '35, 55' in str(T.pos()))
+rc, T = spot((1000, 92, 99), 'sam')
+check('go_spot 薩村料：在村裡 → 直接走 1009 出口、不傳送', rc == 0 and T.log == [('walk_to', 1000, 106, 91, 1009)], T.log)
+rc, T = spot((1009, 25, 17), 'sam')
+check('go_spot 薩村料：已在店內 → 不動', rc == 0 and T.log == [])
+rc, T = spot((1005, 38, 48), 'sam')
+check('go_spot 薩村料：在醫院 → 先傳送再走', rc == 0 and T.log == ['to_town', ('walk_to', 1000, 106, 91, 1009)], T.log)
+rc, T = spot((2000, 70, 100), 'fish')
+check('go_spot 漁村料：在瑪麗娜絲 → 走 2009 出口', rc == 0 and T.log == [('walk_to', 2000, 73, 103, 2009)], T.log)
+rc, T = spot((2009, 25, 15), 'fish')
+check('go_spot 漁村料：已在店內 → 不動', rc == 0 and T.log == [])
+rc, T = spot((1000, 92, 99), 'sam', walk_ok=False)
+check('go_spot 走不進店 → 224', rc == 224)
+
+# 整段流程：解散前隊長不走進醫院（只傳送）、解散後每人各自 into_hospital
+fresh_dir()
+W = scenario()
+rc, out, _ = go(W)
+lg = [a[0] for a in W.log]
+first_dis = lg.index('disband')
+check('prep：解散前沒有 into_hospital / walk_to（只傳送）', rc == 0 and 'into_hospital' not in lg[:first_dis] and 'walk_to' not in lg[:first_dis], f'{rc} {lg[:first_dis]}')
+check('read：每人切角色後各自 into_hospital', lg.count('into_hospital') >= len(W.roles), f'{lg.count("into_hospital")}')
+
 # ---------------- 結尾 ----------------
 check('0 次 powershell（全測試）', not PS_CALLS)
 print('ALL PASS' if not fails else f'FAILED {fails}')

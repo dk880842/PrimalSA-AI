@@ -2,16 +2,17 @@
 """每日任務（委託接取）腳本：薩姆吉爾醫院 1005 的「委託接取」NPC，5 環 × 2 項成品，各項「快速合成」→ 兩項 1/1 綠 →「提交委託」→ 5/5 領裝備升級石。只用標準函式庫。
 
 設計（notes/plan-daily.md v3 §4，使用者 2026-10-17 定案；**全程未實機**，只有離線測試）：全隊一起移動、各買各的、各合成各的，不經公倉轉手（胡椒除外）。
-  prep    停練功 / 關遇敵 / 等戰鬥 → 全隊傳送薩姆吉爾 → 隊長帶隊走進醫院 1005 站 38,48 → 解散
+  prep    停練功 / 關遇敵 / 等戰鬥 → 全隊傳送薩姆吉爾 → 解散（只傳送、不帶隊走進建築；2026-10-17：隊員是跟隨者、落點不一致 → 解散後每人切成當前角色各自走 go_spot）
   read    DKBO2 → DKBO3 → DKBO4 → DKBO5 → DKBO 輪流 char.switch：點 NPC 開委託面板 → 讀 5 環 × 上 / 下 → daily-<角色>.json
           成品名讀法（2026-10-17 修 225）：名稱框 OCR -Zooms 2,3,4,5 -Dark 0 → dp.vote_lines **逐倍率各自 snap 投票**（舊版把各倍率 join 成一串 →「成弓箭8口成弓箭8」）；
           數字尾碼（合成爪 7 / 3）要 ≥2 倍率同意才確定，否則開快速合成彈窗讀大字 + 材料列 → dp.resolve_name（同族只差數字的用材料列分）；仍不確定 → 225 不猜
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
-  sam     組隊 → 帶隊到 1009 → 解散 → 5 人輪流沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
-  mid     組隊 → 傳送薩姆吉爾 → 帶隊回醫院 → 解散 → 5 人輪流：材料齊的項先合成、該環兩項都綠就提交（沒人有事可做就整段跳過）
-  fish    組隊 → 傳送瑪麗娜絲 → 帶隊進 2009 → 解散 → 5 人輪流買漁村料
-  final   組隊 → 傳送薩姆吉爾 → 帶隊回醫院 → 解散 → 5 人輪流：每環先從個人倉庫 / 公倉取料 → 合成 → 提交，直到 5/5（胡椒從公倉取整疊、用完整疊存回）
+  sam     組隊 → 傳送薩姆吉爾 → 解散 → 5 人輪流（各自 go_spot 走進 1009）沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
+  mid     組隊 → 傳送薩姆吉爾 → 解散 → 5 人輪流（各自 go_spot 走到醫院 38,48）：材料齊的項先合成、該環兩項都綠就提交（沒人有事可做就整段跳過）
+  fish    組隊 → 傳送瑪麗娜絲 → 解散 → 5 人輪流（各自 go_spot 走進 2009）買漁村料
+  final   組隊 → 傳送薩姆吉爾 → 解散 → 5 人輪流（各自 go_spot）：每環先從個人倉庫 / 公倉取料 → 合成 → 提交，直到 5/5（胡椒從公倉取整疊、用完整疊存回）
   finish  組隊 → grind.go（--no-grind 略）
+go_spot：醫院 = daily.hosp_route 依目前位置接著走 waypoint（不回頭重走 31,60，已在站位 / NPC 3 格內不走）；1009 / 2009 = 不在店內地圖就傳送 / 走出口。
 順序固定 DKBO2 → DKBO3 → DKBO4 → DKBO5 → DKBO（clients.leader_last；結束時當前角色 = 隊長，不用另外切回）。
 
 用法（專案根目錄；WSL / Windows 原生指令相同；PSA_CLIENT=PrimalSA2 → DKBO6～10）：
@@ -62,6 +63,7 @@ HOSP_ENTRY = (25, 65)
 HOSP_WAYPOINTS = [(31, 60), (36, 60), (38, 55), (38, 48)]       # 醫院無通行格資料：照探路走出來的 waypoint（直接 36,50 會卡在 31,60）
 HOSP_STAND = (38, 48)                                            # 站這裡點得到委託接取（41,42）
 DAILY_NPC = (41, 42)
+HOSP_PATH = [HOSP_ENTRY] + HOSP_WAYPOINTS                         # 入口 → 站位的折線（hosp_route 找「目前在哪一段」）
 MARINAS_XY = (553, 625)                                          # 傳送面板尼斯大陸分頁的「瑪麗娜絲」→ 2000:65,58（ui/transfer.md）
 SAM_WALK = (1000, 106, 91)                                       # 薩村 → 1009 出口
 FISH_WALK = (2000, 73, 103)                                      # 瑪麗娜絲 → 2009 出口（快速走路卡 67,90 → walk 自動慢速）
@@ -79,6 +81,31 @@ POP_COUNT_PX = [(695, 287), (695, 378), (695, 470)]              # 彈窗材料�
 POP_CRAFT_XY = (480, 552)
 STONE = '裝備升級石'                                              # 5/5 獎勵（Item 93016）
 SHOP_STAND_DX = -2                                               # 店員 (27, y) 前 2 格站 (25, y)；點 NPC 會自己走近
+
+def hosp_route(p) -> tuple:
+    """各自走到醫院站位（2026-10-17）：依目前位置算還要走的 waypoint，**不回頭重走**（從 38,48 重走 31,60 會卡 35,54～35,55）。
+    回 (要先走進醫院 bool, [剩下的 waypoint])。
+      p 讀不到 / 不在醫院 1005 → (True, 全部 waypoint)（呼叫端先 heal.walk_village 進醫院，入口 25,65）
+      已在站位 38,48 或離委託 NPC 3 格內 → (False, [])（點得到 NPC，不走）
+      在醫院 → 找離 p 最近的折線段（入口 → 31,60 → 36,60 → 38,55 → 38,48），從該段終點的 waypoint 開始；離 p 1 格內的 waypoint 視為已到"""
+    if not p or p[0] != HOSPITAL:
+        return True, list(HOSP_WAYPOINTS)
+    x, y = p[1], p[2]
+    if (x, y) == HOSP_STAND or max(abs(x - DAILY_NPC[0]), abs(y - DAILY_NPC[1])) <= 3:
+        return False, []
+    best, bi = None, 0
+    for i in range(len(HOSP_PATH) - 1):
+        (ax, ay), (bx, by) = HOSP_PATH[i], HOSP_PATH[i + 1]
+        dx, dy = bx - ax, by - ay
+        t = max(0.0, min(1.0, ((x - ax) * dx + (y - ay) * dy) / float(dx * dx + dy * dy)))
+        d = (x - (ax + t * dx)) ** 2 + (y - (ay + t * dy)) ** 2
+        if best is None or d < best - 2.0:                     # 差距不大取靠前的段（偏保守：多經過一個 waypoint，不會從卡點直奔下下個）
+            best, bi = d, i
+    rest = HOSP_WAYPOINTS[bi:]
+    while len(rest) > 1 and max(abs(rest[0][0] - x), abs(rest[0][1] - y)) <= 1:
+        rest = rest[1:]
+    return False, list(rest)
+
 
 MAT_PRICE_TXT = f'{dp.MAT_PRICE:,}'
 LAST: dict = {}
@@ -193,14 +220,15 @@ class Tools:
         return True
 
     def into_hospital(self) -> bool:
-        """1000:92,99 → 醫院 1005（heal.walk_village）→ 照 waypoint 走到 38,48。已在醫院 → 只補 waypoint（已在站位不動）"""
+        """走到醫院站位 38,48（每人切成當前角色後自己走）：讀目前位置 → hosp_route 算剩下的 waypoint（不在醫院先 heal.walk_village；在站位 / NPC 3 格內不動）"""
         import heal
         import walk
         try:
             p = walk.wait_pos(4)
-            if not p or p[0] != HOSPITAL:
+            need_village, route = hosp_route(p)
+            if need_village:
                 heal.walk_village()
-            for wx, wy in HOSP_WAYPOINTS:
+            for wx, wy in route:
                 walk.step_to(HOSPITAL, wx, wy)
         except RuntimeError as e:
             print(f'{SRC}：走進醫院站位失敗：{e}', file=sys.stderr)
@@ -486,52 +514,56 @@ class Daily:
         if rc:
             self.tool_fail(rc, EXIT_PREP, f'解散隊伍失敗（team rc {rc}）', team_rc=rc)
 
-    def go_hospital(self):
-        """（隊長當前）→ 傳送薩姆吉爾（不在村 / 醫院才傳）→ 進醫院走到 38,48。不含組隊 / 解散"""
+    def go_town(self, where_: str):
+        """（隊長當前）→ 傳送到目的地的城鎮（hospital / sam → 薩姆吉爾村；fish → 瑪麗娜絲）。已在該城鎮或目的建築內就不傳。
+        不帶隊走進建築：隊員是跟隨者、落點不一致，每人解散後切成當前角色自己走（go_spot）"""
         T = self.T
+        town = MARINAS_MAP if where_ == 'fish' else VILLAGE
+        inside = {'hospital': HOSPITAL, 'sam': dp.SAM_MAP, 'fish': dp.FISH_MAP}[where_]
         p = T.pos()
-        if not p or p[0] not in (VILLAGE, HOSPITAL):
-            if not T.to_town():
-                self.fail(EXIT_PREP, '傳送薩姆吉爾失敗')
-            T.sleep(1.0)
-        if not T.into_hospital():
-            self.fail(EXIT_WALK, f'走不到醫院站位 {HOSP_STAND}')
+        if p and p[0] in (town, inside, HOSPITAL if where_ == 'hospital' else None):
+            return
+        if not (T.to_marinas() if where_ == 'fish' else T.to_town()):
+            self.fail(EXIT_PREP, f'傳送{"瑪麗娜絲" if where_ == "fish" else "薩姆吉爾"}失敗')
+        T.sleep(1.0)
 
-    def go_shops(self, stage: str):
-        """（隊長當前）→ 到 1009（sam）/ 2009（fish）。已在目標地圖就不動"""
+    def go_spot(self, role, where_: str):
+        """（當前角色 = role）自己走到定點：hospital = 醫院站位 38,48（從目前位置接著走，不回頭）；sam / fish = 1009 / 2009 店內（店員前由 shop_enter 走）。
+        走不到 → 224（帶座標）"""
         T = self.T
-        target = dp.SAM_MAP if stage == 'sam' else dp.FISH_MAP
+        if where_ == 'hospital':
+            if not T.into_hospital():
+                self.fail(EXIT_WALK, f'{role} 走不到醫院站位 {HOSP_STAND}（目前 {T.pos()}）', role=role)
+            return
+        target = dp.SAM_MAP if where_ == 'sam' else dp.FISH_MAP
+        town, walk_ = (VILLAGE, SAM_WALK) if where_ == 'sam' else (MARINAS_MAP, FISH_WALK)
         p = T.pos()
         if p and p[0] == target:
             return
-        if stage == 'sam':
-            if not p or p[0] != VILLAGE:
-                if not T.to_town():
-                    self.fail(EXIT_PREP, '傳送薩姆吉爾失敗')
-                T.sleep(1.0)
-            if not T.walk_to(*SAM_WALK, exit_map=dp.SAM_MAP):
-                self.fail(EXIT_WALK, '走不進 1009（薩姆吉爾便利商店）')
-        else:
-            if not p or p[0] != MARINAS_MAP:
-                if not T.to_marinas():
-                    self.fail(EXIT_PREP, '傳送瑪麗娜絲失敗')
-                T.sleep(1.0)
-            if not T.walk_to(*FISH_WALK, exit_map=dp.FISH_MAP):
-                self.fail(EXIT_WALK, '走不進 2009（瑪麗娜絲便利商店）')
+        if not p or p[0] != town:
+            if not (T.to_town() if where_ == 'sam' else T.to_marinas()):
+                self.fail(EXIT_PREP, f'{role} 傳送{"薩姆吉爾" if where_ == "sam" else "瑪麗娜絲"}失敗', role=role)
+            T.sleep(1.0)
+        if not T.walk_to(*walk_, exit_map=target):
+            self.fail(EXIT_WALK, f'{role} 走不進 {target}（目前 {T.pos()}）', role=role)
+
+    def open_daily(self, role):
+        """go_spot('hospital') → 點委託 NPC 開面板；打不開 → 224"""
+        self.go_spot(role, 'hospital')
+        if not self.T.daily_open():
+            self.fail(EXIT_WALK, f'{role} 委託面板打不開（目前 {self.T.pos()}）', role=role)
 
     def move_team(self, where_: str):
-        """隊長帶隊：當前 = 隊長 → 組隊 → 走 → 解散（隊員無法和 NPC 互動，各人要單人點店員 / 委託 NPC）"""
+        """隊長帶隊傳送一次（全隊同時到）→ 解散；之後每人自己走（go_spot）。隊長已在目的城鎮 / 建築 → 不組隊不傳（隊伍早已解散）"""
         self.check_day()
         self.leader_current()
         p = self.T.pos()
-        target = {'hospital': HOSPITAL, 'sam': dp.SAM_MAP, 'fish': dp.FISH_MAP}[where_]
-        already = bool(p and p[0] == target)
-        if not already:
-            self.form_team()
-        if where_ == 'hospital':
-            self.go_hospital()
-        else:
-            self.go_shops(where_)
+        town = MARINAS_MAP if where_ == 'fish' else VILLAGE
+        inside = {'hospital': HOSPITAL, 'sam': dp.SAM_MAP, 'fish': dp.FISH_MAP}[where_]
+        if p and p[0] in (town, inside, HOSPITAL if where_ == 'hospital' else None):
+            return
+        self.form_team()
+        self.go_town(where_)
         self.disband_team()
 
     # ---- 階段 ----
@@ -546,7 +578,7 @@ class Daily:
             self.fail(EXIT_PREP, 'follow 停不掉（60 秒內沒結束）')
         T.encounter_off()
         self.leader_current()
-        self.go_hospital()
+        self.go_town('hospital')
         self.disband_team()
 
     def stage_read(self):
@@ -566,8 +598,7 @@ class Daily:
     def read_role(self, role):
         """（當前角色 = role）開面板 → 讀獎勵計數 → 1～5 頁 × 2 項。名稱 snap 不到 → 開快速合成彈窗讀大字再 snap；仍不行 → 225"""
         T, st = self.T, self.st[role]
-        if not T.daily_open():
-            self.fail(EXIT_WALK, f'{role} 委託面板打不開')
+        self.open_daily(role)
         try:
             st['reward'] = T.reward_count()
             if st['reward'] == dp.RINGS:                        # 今天 5/5 已完成：清單畫面可能不是 5 環 × 2 項，不讀、記成已讀
@@ -659,6 +690,7 @@ class Daily:
     def buy_role(self, role, stage):
         T, st = self.T, self.st[role]
         plan = self.plan_of(role)
+        self.go_spot(role, stage)
         route = dp.store_route(stage, dp.remaining_buy(plan, stage, st['bought']), self.where, self.stores, plan['first_use'])
         for store, mats in route:
             led = dp.Ledger(st['ledger'])
@@ -790,8 +822,7 @@ class Daily:
                         opened = False
                     self.fetch_materials(role, plan, r, todo)
                 if not opened:
-                    if not T.daily_open():
-                        self.fail(EXIT_WALK, f'{role} 委託面板打不開', role=role)
+                    self.open_daily(role)
                     opened = True
                 if not T.goto_page(ri):
                     self.fail(EXIT_CRAFT, f'{role} 翻不到第 {ri} 頁', role=role)
