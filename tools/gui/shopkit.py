@@ -1,0 +1,184 @@
+#!/usr/bin/env python3
+"""便利店 / NPC 商店共用動作（從 buywendy.py 抽出，2026-10-17；buywendy 改 import、行為不變；daily.py 也用）。只用標準函式庫。
+
+內容：
+  純函式   parse_coin / coin_delta_ok（buywendy 沿用）、title_match（商品標題名稱模糊比對）、visible_candidates（清單定位候選列）、
+           qty_digit_xy（數字鍵盤鍵位）
+  座標     商店面板固定座標（ui/shop.md、notes/daily-probe.md M11～M13；截圖 1440×830、鏡頭最左）
+  動作     shop_open（✕ 紅圓像素）、read_title、select_item（名稱定位 + 捲動）、set_qty（數字鍵盤）、buy_once（購買 → 提示確定）、
+           qty_now（讀數量框）、close_shop（✕ 1207,107；買完還疊提示窗再補）
+鐵則 3：本模組不讀石幣 / 鑽石（buywendy 自己用 parse_coin 讀石幣；daily 不讀）；只在呼叫端明確要買時才按「購買」。
+**未實機**（select_item / set_qty 的座標取自 daily-probe 探路量測，2026-10-17；shop_open / 購買 / 確定 = 既有實測值）。
+"""
+import re
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import uikit  # noqa: E402
+
+# ---- 座標（截圖 1440×830）----
+SHOP_BTN = (948, 461)                            # NPC 對話框「道具商店」（競技場 / 1009 實測）
+SHOP_CLOSE = (1207, 107)                         # 便利店右上 ✕（紅圓 190,74,49）
+BUY_BTN, CONFIRM_BTN = (995, 592), (615, 557)    # 購買 / 提示「確定」（同 shopbuy）
+COIN_BOX = (285, 8, 130, 30)                     # 頂端資源列石幣（buywendy 專用；daily 不讀）
+TITLE_BOX = (880, 185, 230, 45)                  # 右側標題（選中的商品名；紅底米白 / 黃字）
+TITLE_OPTS = ('-Zooms', '2,3', '-Dark', '0')     # 淺字紅底：不二值化（fork ocrbench 2026-10-15：24/24；舊讀法 9/24）
+QTY_XY = (995, 465)                              # 數量框：點它跳出數字鍵盤
+QTY_BOX = (968, 450, 56, 32)                     # 數量白字 bbox 989～1002 × 455～477
+KEY_CLEAR, KEY_ENTER = (910, 455), (910, 572)    # 鍵盤 ✕（清除）/ ↵（確定）
+KEYPAD = {'1': (490, 333), '2': (615, 333), '3': (743, 333), '0': (863, 333),
+          '4': (490, 455), '5': (615, 455), '6': (740, 455),
+          '7': (490, 572), '8': (615, 572), '9': (740, 572)}
+# 清單：兩欄卡片（先左後右），第 1 列卡中心 y=214、列距 114、可見 4 列 + 半列；拖 114 px ≈ 捲 224 px（約 2 列，有慣性）
+COL_X = (404, 671)
+ROW_Y0, ROW_PITCH, VIEW_ROWS = 214, 114, 5
+DRAG_UP = (540, 560, 540, 446)                   # 往上拖 114 px = 清單往下捲約 2 列
+DRAG_DOWN = (540, 446, 540, 560)                 # 往回拖（捲到頂用）
+DRAG_SETTLE_MS = 1500                            # 慣性停下後才讀（實測 ≥1.2 s）
+ROWS_PER_DRAG = 2
+
+
+# ---- 純函式 ----
+def parse_coin(text) -> int | None:
+    """「150,000」（OCR 可能夾空白 / 句點 / 多倍率重複）→ 150000；讀不到 None。多倍率串接（-Zooms）會把同一串數字重複 2～3 次 → 整段等分重複只取一份"""
+    t = re.sub(r'[\s,.，。]', '', str(text or ''))
+    if not t.isdigit():
+        t = ''.join(re.findall(r'\d+', t))
+    for n in (4, 3, 2):
+        if t and len(t) % n == 0 and len(t) // n >= 3 and t[:len(t) // n] * n == t:
+            t = t[:len(t) // n]
+            break
+    return int(t) if t else None
+
+
+def coin_delta_ok(before, after, price: int = 500) -> bool | None:
+    """石幣前後差剛好 price → True；差不是 price → False；任一讀不到 → None（呼叫端改看背包有沒有道具）"""
+    if before is None or after is None:
+        return None
+    return before - after == price
+
+
+def _norm(t) -> str:
+    return re.sub(r'\s+', '', str(t or ''))
+
+
+def title_match(text, want: str, cutoff: float = 0.8) -> bool:
+    """商店右側標題 OCR 是不是 want：去空白後完全包含 / 相等，或字元序列相似度 ≥ cutoff（OCR 掉字 / 部首拆字容錯）。
+    同族名稱只差數字（合成爪 7 / 合成爪 3）要數字都一樣才算（日常材料名一般無數字，保險）"""
+    a, b = _norm(text), _norm(want)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    da, db = re.findall(r'\d+', a), re.findall(r'\d+', b)
+    if db and da and da != db:
+        return False
+    if b in a:
+        return True
+    import difflib
+    return difflib.SequenceMatcher(None, a, b).ratio() >= cutoff
+
+
+def card_xy(row_pos: int, col: int) -> tuple:
+    """目前視野第 row_pos 列（0 起算）、第 col 欄（0 / 1）的卡片中心"""
+    return COL_X[col], ROW_Y0 + ROW_PITCH * row_pos
+
+
+def visible_candidates(idx: int, n_drags: int, rows: int = VIEW_ROWS) -> list:
+    """商品在清單第 idx 項（0 起算、2 欄先左後右）；已往下拖 n_drags 次（每次約 ROWS_PER_DRAG 列，有慣性 / 到底夾住）
+    → 目前視野裡可能的列位置 [row_pos, ...]（預測列優先）；視野外 → []。
+    預測 = idx//2 − n_drags×ROWS_PER_DRAG。實際偏移 ≤ 預測（到底夾住）→ 實際列位置 ≥ 預測；慣性多滑約 1 列 → 實際列位置可能 = 預測 − 1。
+    所以只試 {pred, pred+1, pred−1, pred+2} ∩ [0, rows)；預測列離視野太遠（pred−1 ≥ rows）→ [] = 呼叫端再拖一次"""
+    pred = idx // 2 - n_drags * ROWS_PER_DRAG
+    out = []
+    for r in (pred, pred + 1, pred - 1, pred + 2):
+        if 0 <= r < rows and r not in out:
+            out.append(r)
+    return out
+
+
+def qty_digit_xy(n: int) -> list:
+    """要輸入的數量 → 依序點的鍵位 [(x, y)...]（不含清除 / 確定）；n < 0 或超過 3 位 → ValueError"""
+    if n < 0 or n > 999:
+        raise ValueError(f'數量 {n} 超出 0～999')
+    return [KEYPAD[c] for c in str(n)]
+
+
+def parse_qty(text) -> int | None:
+    """數量框 OCR → 整數；讀不到 None。多倍率重複同 parse_coin 處理"""
+    return parse_coin(text) if re.search(r'\d', str(text or '')) else None
+
+
+# ---- 碰遊戲的動作 ----
+def shop_open() -> bool:
+    """便利店面板：右上 X 紅圓（1207,107）。用 pixel 比紅色（2026-10-17 從 shopbuy._shop_open 抽出，行為相同）"""
+    px = uikit.px([SHOP_CLOSE]) or []
+    return bool(px) and px[0][0] > 180 and px[0][1] < 100
+
+
+def read_title() -> str:
+    """右側標題文字：先 -Dark 0，沒字再用舊讀法"""
+    t = ''.join(uikit.ocr(TITLE_BOX, *TITLE_OPTS))
+    return t if t.strip() else ''.join(uikit.ocr(TITLE_BOX, '-Zooms', '2,3'))
+
+
+def qty_now() -> int | None:
+    """讀目前數量框（購買後應為 0）。讀不到 None"""
+    return parse_qty(''.join(uikit.ocr(QTY_BOX, '-Zooms', '2,3', '-Dark', '0')))
+
+
+def scroll_top(rows: int) -> None:
+    """清單捲到頂：往回拖足夠次數（每次約 2 列）"""
+    for _ in range(max(1, (rows + 1) // ROWS_PER_DRAG + 1)):
+        uikit.gui('seq', 'drag {} {} {} {}; wait {}'.format(*DRAG_DOWN, DRAG_SETTLE_MS), note='shopkit 清單捲回頂端')
+
+
+def select_item(want: str, order: list, state: dict | None = None, reader=None) -> bool:
+    """在商店清單選 want（order = 該店商品順序 = 遊戲清單順序，2 欄先左後右；來自 npc-shops.md）。
+    靠標題名稱核對定位（不算位移）：預測列優先、不對再試鄰近列、視野外就往下拖一次；最多拖 len(order)//4+2 次。
+    state = {'drags': n} 跟蹤已拖次數（呼叫端開店時給 {'drags': 0}）；回傳 True = 標題已是 want（已選中）。
+    開店時第 1 項自動選中；清單 ≤ 8 項（≤4 列）不用捲。reader 可換（測試）"""
+    reader = reader or read_title
+    st = state if state is not None else {'drags': 0}
+    if want not in order:
+        return False
+    idx = order.index(want)
+    col = idx % 2
+    for _ in range(len(order) // (2 * ROWS_PER_DRAG) + 3):
+        for r in visible_candidates(idx, st['drags']):
+            x, y = card_xy(r, col)
+            uikit.gui('seq', f'click {x} {y}; wait 450', note=f'shopkit 選商品「{want}」（第 {idx + 1} 項，視野列 {r}）')
+            if title_match(reader(), want):
+                return True
+        if st['drags'] * ROWS_PER_DRAG > idx // 2 + 2:
+            break
+        uikit.gui('seq', 'drag {} {} {} {}; wait {}'.format(*DRAG_UP, DRAG_SETTLE_MS), note='shopkit 清單往下捲')
+        st['drags'] += 1
+    return False
+
+
+def set_qty(n: int, reader=None) -> bool:
+    """點數量框 → 數字鍵盤：清除 → 逐位按數字 → ↵；讀回數量 == n 才算成功"""
+    reader = reader or qty_now
+    keys = qty_digit_xy(n)
+    seq = [f'click {QTY_XY[0]} {QTY_XY[1]}; wait 400', f'click {KEY_CLEAR[0]} {KEY_CLEAR[1]}; wait 150']
+    seq += [f'click {x} {y}; wait 150' for x, y in keys]
+    seq.append(f'click {KEY_ENTER[0]} {KEY_ENTER[1]}; wait 400')
+    uikit.gui('seq', '; '.join(seq), note=f'shopkit 數量輸入 {n}')
+    return reader() == n
+
+
+def buy_once() -> None:
+    """按「購買」→ 提示「確定」（同 shopbuy；呼叫端已確認商品 / 數量）"""
+    uikit.gui('seq', f'click {BUY_BTN[0]} {BUY_BTN[1]}; wait 700; click {CONFIRM_BTN[0]} {CONFIRM_BTN[1]}; wait 900', note='shopkit 購買 → 確定')
+
+
+def close_shop(tries: int = 3) -> bool:
+    """點 ✕ 關便利店（絕不點空白處）；買完還疊提示窗 → 面板還在就再點（最多 tries 次）。回 True = 已關"""
+    for _ in range(tries):
+        if not shop_open():
+            return True
+        uikit.gui('seq', f'click {SHOP_CLOSE[0]} {SHOP_CLOSE[1]}; wait 500', note='shopkit 關便利店（✕）')
+    return not shop_open()

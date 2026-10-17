@@ -378,6 +378,13 @@ PLAYERPICK = Panel('PLAYERPICK', None,
                    [(1110, 300, 127, 95, 53, 12), (1420, 400, 124, 97, 66, 12), (1250, 480, 245, 229, 191, 12), (1190, 480, 245, 228, 191, 12),
                     (1300, 500, 245, 227, 191, 12), (1200, 520, 245, 224, 187, 12), (1350, 420, 245, 225, 183, 12), (1250, 555, 234, 203, 158, 12)],
                    None)
+# 每日任務（委託接取）面板 + 快速合成彈窗（2026-10-17 daily.py，未實機；特徵 = screen_sigs.DAILY_SIG / QCRAFT_SIG，單張探路樣本）。
+# 沒有自己的開啟鈕（點醫院 1005 的「委託接取」NPC 直接開）；open_panel 不能用，daily.py 點 NPC 後輪詢 is_open。
+# 禁區：提交委託（只有 daily 的 submit 動作 allow=('submit',) 放行）、獎勵區兩個黃箭頭（用途未知）；快速合成彈窗內「合成」花 1000 石幣（只有 craft 動作 allow=('craft',)）。
+# 面板上沒有「更換委託 / 一鍵完成」（daily-probe M9）；若某狀態出現一律不點（沒有座標可列，safe_click 只點 daily.py 寫死的座標）。
+DAILY = Panel('DAILY', None, screen_sigs.DAILY_SIG, (1193, 98),
+              forbidden={'submit': rect(1015, 685, 45), 'reward_prev': rect(912, 363, 22), 'reward_next': rect(1117, 363, 22)})
+QCRAFT = Panel('QCRAFT', None, screen_sigs.QCRAFT_SIG, (1080, 156), forbidden={'craft': rect(480, 552, 40)})
 ASS = Panel('ASS', None, None, None)                                          # 見 _ass_panel()
 
 

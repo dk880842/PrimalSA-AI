@@ -53,8 +53,8 @@ def missing_roles(roles) -> tuple:
 
 def _shop_open() -> bool:
     """便利店面板：右上 X 紅圓（1207,107）+ 標題「便利店」。用 pixel 比紅色"""
-    px = uikit.px([(1207, 107)]) or []
-    return bool(px) and px[0][0] > 180 and px[0][1] < 100
+    import shopkit                                           # 2026-10-17 抽到 shopkit.shop_open（同一份像素判斷）
+    return shopkit.shop_open()
 
 
 def buy_one(role: str, log) -> int:

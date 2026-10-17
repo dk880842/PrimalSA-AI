@@ -55,7 +55,9 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import clients  # noqa: E402
 import logpaths  # noqa: E402
+import shopkit  # noqa: E402
 import uikit  # noqa: E402
+from shopkit import parse_coin, coin_delta_ok as _coin_delta_ok  # noqa: E402,F401  共用便利店純函式（行為不變）
 
 SRC = 'buywendy'
 EVENT_LOG = logpaths.p(clients.npath('quest-events.log'))     # 主視窗 = notes/；其他 = notes/clients/<程序名>/
@@ -75,13 +77,13 @@ ENTER_BTN = (948, 461)                           # 嚮導對話框「進入競�
 ROLE_FIRST_DD = (1137, 313)                      # 外掛 戰鬥設置：人物 首次動作 下拉 ▼（ui/ass.md；選項在欄位下方每列 +42，x=944）
 VILLAGE, ARENA = 1000, 130
 SHOP_NPC, SHOP_STAND = (43, 3), (46, 6)          # 競技場 130：鬥技場的道具屋（走 46,6 後點她，身體 ≈527,375）；牆在 y=4，只能從南邊點
-SHOP_BTN = (948, 461)                            # 道具屋對話框「道具商店」
+SHOP_BTN = shopkit.SHOP_BTN                      # 道具屋對話框「道具商店」
 ITEM_XY = (700, 440)                             # 便利店左欄第 3 列右邊「溫蒂妮Lv5的金幣」卡（清單未捲動）
 TITLE_BOX = (880, 185, 230, 45)                  # 便利店右側標題（選中的商品名；紅底米白字）
 SKILL_BOX = (850, 285, 300, 36)                  # 右側「技能　風的精靈Lv.5」列
 PRICE_BOX = (900, 505, 200, 40)                  # 右側總價（石幣圖示右邊）
-BUY_BTN, CONFIRM_BTN = (995, 592), (615, 557)    # 購買 / 提示「確定」（同 shopbuy）
-COIN_BOX = (285, 8, 130, 30)                     # 背包 / 商店面板頂端「石幣 150,000」（面板開著才有這條）
+BUY_BTN, CONFIRM_BTN = shopkit.BUY_BTN, shopkit.CONFIRM_BTN   # 購買 / 提示「確定」（同 shopbuy；座標在 shopkit）
+COIN_BOX = shopkit.COIN_BOX                      # 背包 / 商店面板頂端「石幣 150,000」（面板開著才有這條）
 # 裝備格（背包頁中間人物圖兩側）：左上 / 右上 = 飾品格、下中 = 腰飾格；2026-10-15 DKBO6 實測三格都是空剪影、金幣沒穿
 ACC_SLOTS = [(234, 210), (624, 210), (425, 455)]
 EQUIP_POPUP_WAIT_S = 1.0                         # 點裝備格後等彈窗；空格不會開彈窗
@@ -99,16 +101,7 @@ def event(msg: str) -> None:
 
 
 # ---- 純函式 ----
-def parse_coin(text) -> int | None:
-    """「150,000」（OCR 可能夾空白 / 句點 / 多倍率重複）→ 150000；讀不到 None。多倍率串接（-Zooms）會把同一串數字重複 2～3 次 → 整段等分重複只取一份"""
-    t = re.sub(r'[\s,.，。]', '', str(text or ''))
-    if not t.isdigit():
-        t = ''.join(re.findall(r'\d+', t))
-    for n in (4, 3, 2):
-        if t and len(t) % n == 0 and len(t) // n >= 3 and t[:len(t) // n] * n == t:
-            t = t[:len(t) // n]
-            break
-    return int(t) if t else None
+# parse_coin / coin_delta_ok 已抽到 shopkit.py（2026-10-17；這裡 import 同名，buywendy.parse_coin 等外部呼叫 / 測試不變）
 
 
 def title_ok(text) -> bool:
@@ -134,10 +127,8 @@ def option_pos(lines, want: str):
 
 
 def coin_delta_ok(before, after, price: int = PRICE) -> bool | None:
-    """石幣前後差剛好 price → True；差不是 price → False；任一讀不到 → None（呼叫端改看背包有沒有道具）"""
-    if before is None or after is None:
-        return None
-    return before - after == price
+    """石幣前後差剛好 price（預設 500）→ True；差不是 → False；任一讀不到 → None（shopkit.coin_delta_ok，預設價換成本檔 PRICE）"""
+    return _coin_delta_ok(before, after, price)
 
 
 # ---- 碰遊戲的動作（既有工具的薄包裝；測試換成 FakeTools）----
@@ -241,8 +232,7 @@ class Tools:
 
     # -- 商店 --
     def shop_open(self) -> bool:
-        import shopbuy
-        return shopbuy._shop_open()
+        return shopkit.shop_open()
 
     def shop_select_read(self) -> tuple:
         """點商品卡 → 等 0.5 秒 → 讀標題 / 技能 / 總價 OCR → (title, skill, price_text)"""

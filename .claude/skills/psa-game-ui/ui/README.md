@@ -13,6 +13,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | 切換角色、**快速組隊**、組隊面板、**解散隊伍** | [team.md](team.md) | 切換 763,760／組隊 850,760 | 實測（組隊、解散都成功） |
 | 任務面板、任務詳情、**自動巡路 / 解任務監測 quest.py（--task、黃色問號、追蹤列表 OCR；--solo / --fight 單人逃跑、完整戰鬥逃跑鈕 1283,168 / 自動戰鬥鈕 1380,600）** | [quest.md](quest.md) | 左側 148,236／詳情 368,328／追蹤 205,325 | 實測（成人儀式） |
 | 背包、倉庫、材料圖鑑 | [bag.md](bag.md) | 背包 1120,760 | 實測（`bag.py` find / hp / list / purge / store --all-copies 2026-10-12 實機；purge 提示窗核對 2026-10-14 改綠字二值化 + 漏行過濾，未實機；drop / swap-weapon 未實機） |
+| 每日任務（委託接取）：醫院 1005 NPC、5 環合成提交、1009 / 2009 便利店 | [daily.md](daily.md) | 醫院 1005 (41,42) 點 NPC | 探路實測，腳本離線測試（未實機） |
 | 漆黑洞窟轉生任務一行腳本 | [rebirth.md](rebirth.md) | — | 離線測試（實機未驗證） |
 | 寵物面板（出戰 / 騎乘 / 休息、技能、成長、還原名字） | [pet.md](pet.md) | 寵物頭像 318,80 | 實測（設定出戰、騎乘；修改名字視窗座標 2026-10-14） |
 | 地圖傳送（大陸／練級／便捷／英雄戰場） | [transfer.md](transfer.md) | 圓形傳送鈕 1340,65 | 實測（練級傳送實際等級門檻已全測） |
@@ -34,6 +35,7 @@ bundle 名對應 `knowledge/overview/ui-screens.md`。紅區規則在 [../SKILL.
 | `pet.py list / set-state / rest-all / store / take / reset-name / depot-fix-names` | 寵物面板讀 / 狀態 / 存取（硬性擋騎寵）/ 成長字串還原物種名（名字為主）；退出碼 66 / 67、70～78；**store / take 掛機中要加 `--pause-encounter`**（戰鬥中操作會被吃掉） | [pet.md](pet.md) |
 | `rebirth.py [--trans N] [--from 階段] [--dry-run]` | 漆黑洞窟轉生任務（2004～2008）整段：前置檢查 → 進洞 → 兩場 BOSS → 換弓 → 補血 / 忠犬 → 精靈王轉生 → 收尾；退出碼 80～89；**新寫的 bag.py / petdrop.py 實機沒驗證** | [rebirth.md](rebirth.md) |
 | `ass.py get / set / pet`（API：`set_many`） | 外掛面板讀 / 設四項勾選與戰寵動作；`select_role` 內建等遮擋 + 重試（頂部跑馬燈蓋住 DKBO3 → 等它消失）| [ass.md](ass.md) |
+| `daily.py read-all / plan / show / run [--confirm-buy] [--from 段] [--fresh] [--dry-run] [--no-grind]` | 每日任務（委託接取）：全隊一起移動、各買各的、各合成各的（prep → read → plan → sam → mid → fish → final → finish）；不讀石幣 / 鑽石 / 格數；退出碼 220～229（**未實機**，離線 test_daily.py） | [daily.md](daily.md) |
 | `netwatch.py`（`guard` 已接進 quest / petwatch / heal --watch） | 斷線重連 / 自動登錄；重登後清 charstate、`team.form`、自動 `grind.ensure` | [network.md](network.md) |
 | `clientupdate.py run [--no-grind] [--restart] [--dry-run]` | 伺服器改版「登錄失敗！版本錯誤！」→ 重開本視窗客戶端 → 熱更新 → 登入 → grind ensure（退出碼 210～219，未實機） | [network.md](network.md) |
 | 多視窗 `PSA_CLIENT=PrimalSA2 …`（`clients.py` 印名稱 / 名單 / 狀態資料夾） | 選要操作的遊戲視窗（程序名稱，不設 = PrimalSA）；click / drag 有全域點擊鎖（逾時 exit 7）；狀態檔各視窗一份（主視窗路徑不變，其他在 `tools/.cache/clients/<程序名>/`、`notes/clients/<程序名>/`）；多視窗不自動登錄、每視窗驗證停手旗標 `verifyhalt.py`（只停出事的視窗；畫面恢復正常穩定 5 秒自動清）；PrimalSA2 目前可用 gui.sh / mirror.sh / 讀圖 .ps1 / walk.py / watch.py / netwatch.py（--no-team --no-grind）/ heal.py | [SKILL.md「多視窗」](../SKILL.md)、[network.md](network.md) |
