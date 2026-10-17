@@ -113,3 +113,15 @@ function Exit-PsaInputLock($Lock) {
     $Lock.mutex.Dispose(); $Lock.mutex = $null
   }
 }
+
+# 縮圖（shot 與 spixel 共用同一段，2026-10-17 dev-shop-qty2）：客戶區原生 Bitmap → 1/Scale、HighQualityBicubic。
+# 為什麼要共用：`pixel` 取的是原生 (x×Scale, y×Scale) 單點，`shot` 存的是 bicubic 縮圖；細筆畫的字（便利店數量框「1」主幹 3 px）
+# 兩邊二值化後點陣不同 → 從截圖切出的樣板在實機 pixel 認不出（numglyph shop 實機讀 None → 每日任務 227）。
+# 要跟截圖逐點一致的讀法（numglyph shop）改用 `spixel`：同一張縮圖取色，跟存下來的 PNG 完全相同。呼叫端負責 Dispose 回傳的 Bitmap。
+function ConvertTo-PsaSmall($Full, [double]$Scale) {
+  $w = [int]($Full.Width / $Scale); $hh = [int]($Full.Height / $Scale)
+  $small = New-Object System.Drawing.Bitmap $w, $hh
+  $g = [System.Drawing.Graphics]::FromImage($small)
+  $g.InterpolationMode = 'HighQualityBicubic'; $g.DrawImage($Full, 0, 0, $w, $hh); $g.Dispose()
+  return $small
+}

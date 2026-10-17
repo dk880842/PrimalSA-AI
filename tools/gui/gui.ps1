@@ -7,7 +7,9 @@
 #   gui.ps1 key <SendKeys字串>        送鍵盤，例：{ESC}、{ENTER}、abc
 #   gui.ps1 typeq <文字>              只打字（逐字 WM_CHAR，一律背景 PostMessage 到本視窗 hwnd、不轉 SendKeys 特殊鍵）；操作 log 只記字數、不記內容（登入畫面重打帳號用）
 #   gui.ps1 info                      印出視窗大小 / 位置
-#   gui.ps1 pixel <x> <y> | "x,y x,y ..."  背景截圖後印出各點顏色 r,g,b（縮圖座標），給腳本判斷畫面狀態
+#   gui.ps1 pixel <x> <y> | "x,y x,y ..."  背景截圖後印出各點顏色 r,g,b（縮圖座標），給腳本判斷畫面狀態（取客戶區原生 (x×Scale, y×Scale) 單點，不經縮圖）
+#   gui.ps1 spixel "x,y x,y ..."      同 pixel，但取自跟 shot 同一段縮圖（HighQualityBicubic）→ 跟存下來的截圖 PNG 逐點相同；
+#                                     樣板從截圖切的細字（numglyph shop 便利店數量框）要用它，pixel 單點取樣點陣不同（2026-10-17 每日任務 227）。比 pixel 慢（整張縮圖）
 #   gui.ps1 max                       最大化遊戲視窗（ui/ 座標以最大化的 2880×1659 為準）
 #   gui.ps1 end                       任務結束：把前景視窗與游標還給使用者（只有 fg 模式需要）
 #   gui.ps1 wait <毫秒>               等待（給 seq 用）
@@ -124,14 +126,14 @@ public class Guard {
 }
 "@
 [W]::SetProcessDPIAware() | Out-Null
-if (-not (Test-Path Function:\Get-PsaVerifyHalt)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # Find-PsaProcess（依 PSA_CLIENT 選程序）、Enter/Exit-PsaInputLock（點擊鎖）、Get-PsaCacheDir、Get-PsaVerifyHalt（每視窗旗標；看最新的函式：舊 server 沒有就重載）
+if (-not (Test-Path Function:\Get-PsaVerifyHalt) -or -not (Test-Path Function:\ConvertTo-PsaSmall)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }   # Find-PsaProcess（依 PSA_CLIENT 選程序）、Enter/Exit-PsaInputLock（點擊鎖）、Get-PsaCacheDir、Get-PsaVerifyHalt（每視窗旗標；看最新的函式：舊 server 沒有就重載）
 $Client = Get-PsaClient
 # 視窗 handle 快取（只給唯讀的 pixel / info 用；常駐 serve.ps1 以 & 呼叫、同一 runspace，$global: 跨次保留；一次性執行每次新行程，等於沒快取）。
 # 命中條件：快取的 client 名稱 == 這次的 PSA_CLIENT，且 IsWindow、該視窗所屬行程 PID == 快取的 PID（防 handle 被回收給別的視窗）；任一不符就重查（約 27 ms）。
 # 常駐 server 每個請求可能是不同 client（serve.ps1 依請求設 PSA_CLIENT），所以 client 名稱一定要在快取鍵裡，不然會拿到別的視窗。
 # click / key 等輸入指令一律不用快取，每次重查，確保不會把輸入送到錯的視窗。
 $h = [IntPtr]::Zero
-if (($Cmd -eq 'pixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:__psa_pid -and $global:__psa_client -eq $Client) {
+if (($Cmd -eq 'pixel' -or $Cmd -eq 'spixel' -or $Cmd -eq 'info') -and $global:__psa_hwnd -and $global:__psa_pid -and $global:__psa_client -eq $Client) {
   $__psa_wp = [uint32]0
   if ([W]::IsWindow([IntPtr]$global:__psa_hwnd)) {
     [W]::GetWindowPid([IntPtr]$global:__psa_hwnd, [ref]$__psa_wp) | Out-Null
@@ -304,10 +306,8 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     # 3 = PW_CLIENTONLY | PW_RENDERFULLCONTENT（DirectX 視窗要 RENDERFULLCONTENT 才不會黑畫面）
     $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
     if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
-    $w = [int]($r.R / $Scale); $hh = [int]($r.B / $Scale)
-    $small = New-Object System.Drawing.Bitmap $w, $hh
-    $g = [System.Drawing.Graphics]::FromImage($small)
-    $g.InterpolationMode = 'HighQualityBicubic'; $g.DrawImage($full, 0, 0, $w, $hh); $g.Dispose()
+    $small = ConvertTo-PsaSmall $full $Scale         # psawin.ps1：跟 spixel 同一段縮圖
+    $w = $small.Width; $hh = $small.Height
     $small.Save($A1, [System.Drawing.Imaging.ImageFormat]::Png)
     $small.Dispose(); $full.Dispose()   # 兩張都是大 Bitmap（~19 MB / ~5 MB），常駐 server 下不能留給 GC
     "saved ${w}x${hh}"
@@ -421,6 +421,20 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
     }
     $full.Dispose(); $out -join ' '
   }
+  'spixel' {
+    # 縮圖取色：同 shot 的縮圖（ConvertTo-PsaSmall）逐點 GetPixel；點在縮圖外 → 0,0,0（呼叫端的框都在畫面內）
+    $full = New-Object System.Drawing.Bitmap $r.R, $r.B
+    $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
+    $ok = [W]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
+    if (-not $ok) { $full.Dispose(); Write-Error "PrintWindow 失敗"; exit 1 }
+    $small = ConvertTo-PsaSmall $full $Scale; $full.Dispose()
+    $pts = if ($A2) { @("$A1,$A2") } else { $A1 -split '[\s/]+' | Where-Object { $_ } }
+    $out = foreach ($pt in $pts) {
+      $v = $pt -split ','; $x = [int]$v[0]; $y = [int]$v[1]
+      if ($x -lt 0 -or $y -lt 0 -or $x -ge $small.Width -or $y -ge $small.Height) { '0,0,0' } else { $c = $small.GetPixel($x, $y); "$($c.R),$($c.G),$($c.B)" }
+    }
+    $small.Dispose(); $out -join ' '
+  }
   'waitpix' {
     # waitpix <逾時毫秒> "x,y,r,g,b x,y,r,g,b!..." [容差，預設 30]（seq 裡用 / 分隔各點：x,y,r,g,b/x,y,r,g,b）：反覆背景截圖，等到每個點的顏色都符合才回來
     # （點後面加 ! = 這點要「不是」這個顏色）。印出「ok <毫秒>」或「timeout <毫秒>」，給 seq 取代固定等待用。
@@ -494,7 +508,7 @@ function Invoke-Gui($Cmd, $A1, $A2, $A3, $A4, $A5) {
       if ($t[0]) { Invoke-Gui $t[0] $t[1] $t[2] $t[3] $t[4] $t[5] }
     }
   }
-  default { "未知指令：$Cmd（shot|click|dclick|drag|key|typeq|info|max|end|wait|seq|fg）" }
+  default { "未知指令：$Cmd（shot|click|dclick|drag|key|typeq|info|pixel|spixel|max|end|wait|seq|fg）" }
 }
 }
 Invoke-Gui $Cmd $A1 $A2 $A3 $A4 $A5

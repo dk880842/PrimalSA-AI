@@ -306,6 +306,9 @@ NUMGLYPH_SRC = [
     ('daily-probe/17-shop.png', 'shop', None, 1),
     ('daily-probe/22-qty3.png', 'shop', None, 3),
     ('daily-probe/20-qtyclick.png', 'shop', None, None),
+    # 2026-10-17 19:27 / 19:29 實機 227 存證（實機 px 讀 None、同一張截圖讀 1 → numglyph LIVE_SRC shop = 'shot'，dev-shop-qty2）
+    ('ui-log/192744-shop-qty-unread.png', 'shop', None, 1),
+    ('ui-log/192929-shop-qty-unread.png', 'shop', None, 1),
 ]
 
 

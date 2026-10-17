@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""小數字「像素字形」讀值（只用標準函式庫；唯讀：只經 uikit.px 讀像素）。2026-10-16。
+"""小數字「像素字形」讀值（只用標準函式庫；唯讀：只經 uikit.px / uikit.spx 讀像素）。2026-10-16。
 
 為什麼（2026-10-16 p2 卡坦 catch2 實跑）：
   - 拆分「數量輸入」框的整疊數量 20：rebirth_pets._split 用 OCR 預設參數讀成空 →「整疊數量讀不出」rc 164；
@@ -14,12 +14,19 @@
   slot  背包格右下角疊數白字（相對格心 SLOT_COUNT；字高 16～17）—— 拆分前讀一次，跟數量框交叉核對
   ass   外掛「捉寵設置」可抓捕數深色字（ASS_COUNT_BOX 1170,300 80×30；字高約 15）
   shop  便利店數量框白字（SHOP_QTY_BOX 968,450 56×32，米底；字高 19，筆畫比 qty 細 → 另一組樣板；2026-10-17 p1 每日任務 OCR 讀單一「1」全空 → 227）
+現場取像素的來源（LIVE_SRC，2026-10-17 dev-shop-qty2 查 227 根因）：
+  `gui pixel`（uikit.px）取的是客戶區**原生 (2x, 2y) 單點**，`gui shot` 存的是 **HighQualityBicubic 縮圖** —— 兩者點陣不同。
+  種子樣板全部從截圖切 → 實機用 px 讀，字形對不上：shop 實機 4 次全 None（同一張存證圖離線讀得出 1，play-p1-dailyrun）；
+  qty 的種子 03:11 就有 1、4，19:41 實機仍學了另一版 1、4（tools/.cache/num-tpl.json，字高 20 vs 種子 19）。
+  shop → 'shot'：改用 uikit.spx（gui.ps1 spixel：跟 shot 同一段縮圖取色）→ 實機與截圖 / fixture 逐點相同。
+  qty / slot / ass 仍 'px'（OCR 備援 + 實機學到的字在撐；要切 'shot' 得連 bag / catchbuy 實機驗證，見 dev-shop-qty2 報告）。
+  label 子指令從截圖學字：只適合 LIVE_SRC = 'shot' 的 kind（px 的 kind 學了也只認得截圖字形）。
 樣板：種子 tools/gui/fixtures/num_glyph_tpl.json（2026-10-16 從 tools/.cache 3056 張截圖切字、人工看點陣標籤；qty / ass 只有 0 1 2 4 5，slot 缺 3 7；
   shop 2026-10-17 從 8217 張掃出便利店畫面 165 張：只有 1〔143 張點陣完全相同〕與 3〔daily-probe/22-qty3.png〕，其他數字等實機截圖人工 label）
   + 執行中學到的 tools/.cache/num-tpl.json（OCR 位數與字數一致才學；測試環境改用暫存資料夾）。
 
 用法（專案根目錄；唯讀）：
-  uv run --no-project python tools/gui/numglyph.py read qty|ass|shop       # 現場讀一次數量框 / 可抓捕數 / 便利店數量框（只讀像素）
+  uv run --no-project python tools/gui/numglyph.py read qty|ass|shop       # 現場讀一次數量框 / 可抓捕數 / 便利店數量框（只讀像素；shop 走 spixel 縮圖取色）
   uv run --no-project python tools/gui/numglyph.py read slot <格號 0 起>    # 背包格疊數
   uv run --no-project python tools/gui/numglyph.py shot <截圖.png> qty|ass|shop|slot [格號]   # 離線讀截圖
   uv run --no-project python tools/gui/numglyph.py label <截圖.png> shop 0  # 人工看過截圖的值 → 學進 tools/.cache/num-tpl.json（例：ui-log/*-shop-qty-unread.png）
@@ -50,6 +57,7 @@ QTY_BOX = (670, 430, 170, 45)                     # = bag.SPLIT_QTY_BOX
 ASS_COUNT_BOX = (1170, 300, 80, 30)               # 「可抓捕數:」冒號（x≈1158）之後、「+」鈕（x≥1256）之前
 SHOP_QTY_BOX = (968, 450, 56, 32)                 # = shopkit.QTY_BOX（便利店數量框；「1」在 x 991～1001 × y 457～475）
 BOXES = {'qty': QTY_BOX, 'ass': ASS_COUNT_BOX, 'shop': SHOP_QTY_BOX}
+LIVE_SRC = {'qty': 'px', 'slot': 'px', 'ass': 'px', 'shop': 'shot'}   # 現場取像素：'px' = uikit.px 原生單點；'shot' = uikit.spx 截圖同一段縮圖（見檔頭）
 SLOT_COUNT = (0, 18, 46, 28)                      # 背包格疊數框（相對格心 dx, dy, w, h；實測「21」在 cx+20～+43、cy+26～+42）
 SLOT_X, SLOT_Y = [752, 860, 966, 1072, 1180], [245, 352, 460]     # = bag.SLOT_X / SLOT_Y（不 import bag：bag 會 import 本模組）
 
@@ -156,10 +164,11 @@ def learn(rows, value: int, kind: str, save: bool = True) -> int:
 
 # ---- 現場讀（唯讀像素）----
 def live_rows(box, kind: str):
-    """框內一次 uikit.px → 二值列；讀不到 None"""
+    """框內一次讀像素（LIVE_SRC：'shot' → uikit.spx 跟截圖同一段縮圖；'px' → uikit.px 原生單點）→ 二值列；讀不到 None"""
     import uikit
     x, y, w, h = box
-    cols = uikit.px([(x + i, y + j) for j in range(h) for i in range(w)])
+    pts = [(x + i, y + j) for j in range(h) for i in range(w)]
+    cols = uikit.spx(pts) if LIVE_SRC.get(kind) == 'shot' else uikit.px(pts)
     if not cols or len(cols) != w * h:
         return None
     return binarize(cols, w, h, kind)

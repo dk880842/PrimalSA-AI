@@ -12,6 +12,8 @@
 數量框（2026-10-17 p1 正式跑 227 修）：Windows OCR 讀單獨一個白色「1」各種參數都回空 → 改 numglyph 像素切字 + 樣板（fixtures/num_glyph_tpl.json 'shop'；
   樣本只有 0 1 3 的話其他數字 = 讀不出 None → 呼叫端不買 / 不判買到；OCR 讀到且位數 = 切出字數才採用並學字；讀不出存圖 ui-log/*-shop-qty-unread.png 供人工補樣板）。
   set_qty：先讀一次，已是 n（開店預設 1）就不開鍵盤；否則鍵盤輸入後讀回 == n 才算成功。
+  現場讀像素走 gui spixel（numglyph.LIVE_SRC shop = 'shot'，跟截圖同一段縮圖）：dd6f945 用 gui pixel（原生單點）實機 4 次全 None、
+  同一畫面截圖讀得出 1 → 227（2026-10-17 19:27 / 19:29，dev-shop-qty2 修）。
   qty_chunks：要買的數量拆成「每位數字都有樣板」的幾次（樣板只有 1 3 時 7 → 3+3+1、20 → 13+3+3+1），學到新數字自動變少次。
   buy_checked：購買前後各讀一次數量框 → 'bought'（讀到 0）/ 'zeroish'（變成一個認不出的字：ui/shop.md 競技場實機「購買後數量框自動變 0」，
   0 尚無樣板 → 視為買到，**呼叫端要用背包名稱核對把關**）/ 'not_bought'（點陣跟買前完全一樣 = 仍是原數量）/ 'unknown'（其他：不確定，不重買）。

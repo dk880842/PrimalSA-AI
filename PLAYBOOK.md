@@ -84,7 +84,8 @@ Windows PowerShell 用 Win32 API（WSL 的 bash 用 `gui.sh` 包一層；Python 
 | `key '{ESC}'` / `key 文字` | 背景：特殊鍵送 WM_KEYDOWN / WM_KEYUP；一般字元只送 WM_CHAR（`PostMessageW`） | 游標完全不動。字元若連按鍵一起送，Unity 會自己 TranslateMessage 再生一個字（abc → aabbcc）；用 ANSI 版 PostMessage 中文會被截成低位元組 |
 | `info` / `max` | 視窗大小 / 最大化 | 座標只在固定視窗大小下有效 |
 | `seq "a; wait 300; b; shot"` | 同一個行程連跑多個動作 | 省掉每次啟動 PowerShell 的約 0.4 秒 |
-| `pixel "X,Y X,Y"` | 背景截圖讀指定點顏色 | 腳本判斷畫面狀態（開關圖示、血條末端），不用叫 AI 看圖 |
+| `pixel "X,Y X,Y"` | 背景截圖讀指定點顏色 | 腳本判斷畫面狀態（開關圖示、血條末端），不用叫 AI 看圖。取客戶區原生單點，跟截圖縮圖同座標的顏色不一定相同 |
+| `spixel "X,Y X,Y"` | 同上，但取自跟 `shot` 同一段縮圖 | 樣板是從截圖切出來的讀字（便利店數量框）：實機點陣才會跟截圖一樣（2026-10-17 pixel 讀不出 → 每日任務 227） |
 | `waitpix 逾時 "x,y,r,g,b[!]/..." [容差]` | 反覆背景截圖，等到每個點都符合（`!` = 不符合）才回來，印 `ok` / `timeout` 毫秒 | **取代固定 `wait`**：面板 / 對話框 / Loading 結束一出現就做下一步。特徵點要選「只有這個畫面才有」的顏色（相近色的地面要配第二個點一起判斷） |
 | `waitstill 逾時 [開始等待]` | 取畫面中間一圈取樣點（避開角色本身的待機動畫），先等「開始動」，再等連續 2 張幾乎不變，印 `still` / `nomove` / `timeout` | 點地面走路後剛好等到走完、鏡頭停住（走路中點下一段會點偏）；`nomove` = 點擊沒讓角色走（點到 UI 或走不到的格子） |
 | `ifok` / `ifnok <指令>` | 依上一個 waitpix / waitstill 結果決定做不做 | seq 裡的條件分支：面板沒出現就不點（不會點穿面板）、走路某段沒動就跳過後面各段 |

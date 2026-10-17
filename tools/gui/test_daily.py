@@ -254,11 +254,35 @@ def _qpaint(s):
     return {(x + i % w, y + i // w): tuple(int(hx[i * 6 + k:i * 6 + k + 2], 16) for k in (0, 2, 4)) for i in range(w * h)}
 
 
-check('shop 樣本 4 張（1 ×2、3、鍵盤開著）', len(_NFX) == 4 and tuple(numglyph.SHOP_QTY_BOX) == shopkit.QTY_BOX)
+check('shop 樣本 6 張（1 ×2、3、鍵盤開著、實機 227 存證 ×2）', len(_NFX) == 6 and tuple(numglyph.SHOP_QTY_BOX) == shopkit.QTY_BOX)
+check('shop 現場取像素走 spixel（跟截圖同一段縮圖；dev-shop-qty2）', numglyph.LIVE_SRC['shop'] == 'shot')
 _keep_px, _keep_ocrl, _keep_sleep, _keep_buy = uikit.px, uikit.ocr_lines, uikit.sleep, shopkit.buy_once
-_qp, _ocr_calls = {}, []
+_keep_gui0 = uikit.gui
+_qp, _ocr_calls, _gcmds = {}, [], []
+
+
+def _fake_gui(cmd, arg='', note=''):
+    """模擬 gui.ps1 這一層（uikit.px / spx 真的跑）：spixel = 截圖縮圖取色（= fixture）；pixel = 原生單點（點陣跟截圖不同，這裡回框底色 → 0 字）"""
+    _gcmds.append(cmd)
+    pts = [tuple(int(v) for v in t.split(',')) for t in arg.split()]
+    if cmd == 'spixel':
+        return ' '.join('%d,%d,%d' % _qp.get(pt, (223, 187, 147)) for pt in pts)
+    if cmd == 'pixel':
+        return ' '.join('223,187,147' for _ in pts)
+    return ''
+
+
 try:
-    uikit.px = lambda pts: [_qp.get(pt, (223, 187, 147)) for pt in pts]
+    uikit.gui = _fake_gui
+    _qp.update(_qpaint(next(x for x in _NFX if x['f'].endswith('192744-shop-qty-unread.png'))))
+    check('模擬實機：qty_now 經 uikit.spx → gui spixel 讀 227 存證 = 1', shopkit.qty_now() == 1 and 'spixel' in _gcmds and 'pixel' not in _gcmds, str(_gcmds))
+    _gcmds.clear()
+    check('模擬實機：buy_checked 前後讀也走 spixel', numglyph.read_box('shop')['value'] == 1 and _gcmds == ['spixel'], str(_gcmds))
+    _gcmds.clear()
+    check('對照：qty 仍走 pixel（LIVE_SRC px；點多會分批）', numglyph.read_box('qty')['n'] == 0 and set(_gcmds) == {'pixel'}, str(_gcmds))
+    uikit.gui = _keep_gui0
+    _qp.clear()
+    uikit.px = lambda pts, cmd='pixel': [_qp.get(pt, (223, 187, 147)) for pt in pts]
     uikit.ocr_lines = lambda box, *o: (_ocr_calls.append(box), [])[1]       # OCR 一律讀空（實機就是這樣）
     uikit.sleep = lambda t: None
     for smp in _NFX:
@@ -293,6 +317,7 @@ try:
     uikit.gui = keep_gui
 finally:
     uikit.px, uikit.ocr_lines, uikit.sleep, shopkit.buy_once = _keep_px, _keep_ocrl, _keep_sleep, _keep_buy
+    uikit.gui = _keep_gui0
 
 # buy_verdict（純函式）
 R1, R0 = ['01'], ['10']

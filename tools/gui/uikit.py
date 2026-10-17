@@ -102,14 +102,14 @@ def px_chunks(points, max_chars: int = PX_ARG_MAX) -> list:
     return out
 
 
-def px(points) -> list | None:
-    """一次讀多點 → [(r,g,b), ...]；失敗 / 數量不符回 None（同 ass._px）。
+def px(points, cmd: str = 'pixel') -> list | None:
+    """一次讀多點 → [(r,g,b), ...]；失敗 / 數量不符回 None（同 ass._px）。cmd = 'pixel'（客戶區原生單點）或 'spixel'（縮圖取色，見 spx）。
     走常駐 server 時一次送完（同一張截圖）；一次性 powershell.exe 時依 PX_ARG_MAX 分批（errlog #383～#396：
     team.read_pixels 5784 點約 46000 字元超過 Windows 命令列上限，沒開 server 的程序〔questdetail roles 0be283c 前、Windows 原生預設〕一律「讀不到面板像素」）"""
     pts = list(points)
     cols = []
     for ch in px_chunks(pts, 0 if winenv.long_args_ok('gui.ps1') else PX_ARG_MAX):
-        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in ch)).split()
+        out = gui(cmd, ' '.join(f'{x},{y}' for x, y in ch)).split()
         try:
             part = [tuple(int(v) for v in c.split(',')) for c in out]
         except ValueError:
@@ -118,6 +118,13 @@ def px(points) -> list | None:
             return None
         cols += part
     return cols if len(cols) == len(pts) and all(len(c) == 3 for c in cols) else None
+
+
+def spx(points) -> list | None:
+    """同 px，但取自跟 `gui shot` 同一段縮圖（gui.ps1 spixel，HighQualityBicubic）→ 跟截圖 PNG 逐點相同。
+    px 取的是原生 (2x, 2y) 單點，細筆畫的字二值化後點陣跟截圖不同；樣板從截圖切的（numglyph shop）實機要用這個才認得
+    （2026-10-17 每日任務 227：同一畫面截圖讀得出 1、實機 px 讀 None）。整張縮圖，比 px 慢，只給這種讀字用"""
+    return px(points, 'spixel')
 
 
 def sig_match(sig) -> bool:
