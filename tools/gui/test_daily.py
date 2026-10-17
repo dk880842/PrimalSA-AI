@@ -3,6 +3,8 @@
 用法：uv run --no-project python tools/gui/test_daily.py"""
 import contextlib
 import io
+import json
+import subprocess
 import os
 import sys
 from pathlib import Path
@@ -181,8 +183,11 @@ R_SAM = dp.store_route('sam', P['buy']['sam'], WHERE, STORES, P['first_use'])
 R_FISH = dp.store_route('fish', P['buy']['fish'], WHERE, STORES, P['first_use'])
 check('store_route：薩村 2 間、漁村 7 間；店員 y 由小到大', len(R_SAM) == 2 and len(R_FISH) == 7 and [s.y for s, _ in R_FISH] == sorted(s.y for s, _ in R_FISH)
       and [s.y for s, _ in R_SAM] == [17, 28], str([(s.name, s.y) for s, _ in R_FISH]))
-check('store_route：店內早環材料先買（米店：好吃的米(貝類飯 第5環) 排在 銳利的串(第1環) 之後）',
-      [n for n, _ in dict((s.npc, v) for s, v in R_FISH)[2824]].index('銳利的串') < [n for n, _ in dict((s.npc, v) for s, v in R_FISH)[2824]].index('好吃的米'))
+def _monotone(route):
+    return all([st.items.index(n) for n, _ in v] == sorted(st.items.index(n) for n, _ in v) for st, v in route)
+
+
+check('store_route：店內依商品清單 index 由小到大（227 修；不再早環先買）', _monotone(R_SAM) and _monotone(R_FISH))
 check('remaining_buy：扣掉已買', dp.remaining_buy(P, 'sam', {'硬的殼': 1, '猛獸的牙': 1}) == {'折斷的牙': 1, '有裂痕的殼': 1})
 lines = dp.plan_lines('DKBO', P, STORES, WHERE)
 check('plan_lines 有薩姆吉爾 / 瑪麗娜絲 / 26,000', any('26,000' in ln for ln in lines) and any('瑪麗娜絲 2009：24 種' in ln for ln in lines))
@@ -369,7 +374,95 @@ ok, drags, clicked = run_select('商品17')
 check('select_item：第 17 項（row 8）拖 2 次、預測列命中', ok and drags == 2 and clicked == [17], f'{ok} {drags} {clicked}')
 ok, drags, clicked = run_select('商品19', truth_first_row_of_drag=lambda d: min(d * 2, 5))     # 到底夾住：實際視野第一列最多 5
 check('select_item：到底夾住（實際偏移比預測小）→ 鄰近列也試、仍命中', ok, f'{ok} {drags} {clicked}')
+# 227 重現：目標在視野上方（舊版只會往下拖 → 選不到）→ 捲回頂端歸零再找
+def run_select_back(want, start_drags, top_resets=True):
+    GUI_LOG.clear()
+    state = {'drags': start_drags}
+    off = {'d': start_drags}                                  # 真實視野第一列 = d×2；scroll_top 的 DRAG_DOWN 拖回 0
+
+    def reader():
+        last = [a for a in GUI_LOG if a and a[0] == 'seq' and a[1].startswith('click')]
+        x, y = [int(v) for v in last[-1][1].split(';')[0].split()[1:3]]
+        col = 0 if x < 540 else 1
+        idx = (off['d'] * 2 + round((y - shopkit.ROW_Y0) / shopkit.ROW_PITCH)) * 2 + col
+        return ORDER[idx] if 0 <= idx < len(ORDER) else ''
+    for a in list(GUI_LOG):
+        pass
+    orig = uikit.gui
+
+    def fake(*a, **k):
+        r = orig(*a, **k)
+        if a and a[0] == 'seq' and a[1].startswith('drag'):
+            off['d'] = 0 if (top_resets and a[1].split()[2] == str(shopkit.DRAG_DOWN[1])) else off['d'] + 1
+        return r
+    uikit.gui = fake
+    try:
+        ok = shopkit.select_item(want, ORDER, state, reader=reader)
+    finally:
+        uikit.gui = orig
+    return ok, state['drags']
+
+
+ok, drags = run_select_back('商品01', 3)
+check('select_item：目標在視野上方（已拖 3 次、要第 1 項）→ 捲回頂端後選到', ok and drags == 0, f'{ok} {drags}')
+ok, drags = run_select_back('商品04', 2)
+check('select_item：已拖 2 次、要第 4 項（上方）→ 選到', ok, f'{ok} {drags}')
 check('select_item：不在清單 → False', not shopkit.select_item('沒這個', ORDER, {'drags': 0}, reader=lambda: ''))
+
+
+# 整店模擬：商店清單（2 欄先左後右）、視野第一列 = min(拖次數×2, 最大偏移)；依 store_route 的店內順序逐項 select_item，全部要選得到
+def sim_shop(store, mats, nav_state=None):
+    order = store.items
+    max_off = max(0, (len(order) + 1) // 2 - shopkit.VIEW_ROWS + 1)
+    off = {'d': 0}
+    cur = {'c': None}
+    orig = uikit.gui
+
+    def fake(*a, **k):
+        if a and a[0] == 'seq':
+            cmd = a[1].split(';')[0].split()
+            if cmd[0] == 'drag':
+                off['d'] = max(0, min(max_off, off['d'] + (2 if int(cmd[2]) == shopkit.DRAG_UP[1] else -2 * 99)))
+            elif cmd[0] == 'click':
+                x, y = int(cmd[1]), int(cmd[2])
+                cur['c'] = ((off['d'] + round((y - shopkit.ROW_Y0) / shopkit.ROW_PITCH)) * 2 + (0 if x < 540 else 1))
+        return ''
+    uikit.gui = fake
+    res = []
+    try:
+        st = {'drags': 0}
+        for name, q in mats:
+            res.append(shopkit.select_item(name, order, st, reader=lambda: order[cur['c']] if cur['c'] is not None and 0 <= cur['c'] < len(order) else ''))
+    finally:
+        uikit.gui = orig
+    return res
+
+
+def sim_role_items(items):
+    pl = dp.plan_role(items, RECIPES, WHERE, STORES)
+    bad = []
+    for stage in ('sam', 'fish'):
+        for store, mats in dp.store_route(stage, pl['buy'].get(stage) or {}, WHERE, STORES, pl['first_use']):
+            if not _monotone([(store, mats)]) or not all(sim_shop(store, mats)):
+                bad.append((store.name, [n for n, _ in mats]))
+    return bad
+
+
+P1_DKBO2 = [['合成弓箭8', '合成投擲斧頭2'], ['原始肉的經濟套餐', '原始粽子'], ['合成弓箭5', '精心燉煮過的肉丸'], ['鹽味的油炸螃蟹', '半熟的芋頭'], ['大補飯團', '合成兜3']]
+check('227 重現：p1 DKBO2 今天清單（球石 / 薄的皮 …）修後每店全部選得到、順序單調', sim_role_items(P1_DKBO2) == [], str(sim_role_items(P1_DKBO2)))
+_main_cache = Path(HERE).parents[1] / '.cache'
+if not _main_cache.exists():
+    _gc = subprocess.run(['git', 'rev-parse', '--git-common-dir'], capture_output=True, text=True, cwd=str(HERE)).stdout.strip()
+    _main_cache = (Path(_gc) if Path(_gc).is_absolute() else Path(HERE) / _gc).resolve().parent / 'tools' / '.cache'
+_n = 0
+for _r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5'):
+    _f = _main_cache / f'daily-{_r}.json'
+    if _f.exists():
+        _it = json.load(open(_f, encoding='utf-8')).get('items')
+        if _it and all(all(x for x in row) for row in _it):
+            _n += 1
+            check(f'今天 {_r} 清單：店內順序單調 + 全部選得到', sim_role_items(_it) == [], str(sim_role_items(_it)))
+print(f'  （今天進度檔實際模擬 {_n} 人）')
 
 # 面板特徵（單張探路樣本）：有 tools/.cache/daily-probe 的 PNG 才驗（主工作樹才有；worktree 沒有就略過）
 try:

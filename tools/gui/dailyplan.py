@@ -404,8 +404,8 @@ def plan_role(items, recipes: dict, where: dict, stores: dict, done=None) -> dic
 
 def store_route(stage: str, wanted: dict, where: dict, stores: dict, first_use: dict | None = None) -> list:
     """某段要買的 {材料: 量} → [(Store, [(材料, 量)…])]：店順序 = 店員 y 由小到大（全在 x=27 一直線，走一趟不折返）；
-    店內材料順序 = 最早用到的環先、其次清單順序（早環材料先買，背包要放不下時被存倉的是晚環的）"""
-    fu = first_use or {}
+    店內材料順序 = 該店商品清單 index 由小到大（= 遊戲清單由上往下、2 欄先左後右；2026-10-17 修 227：舊版「早環先買」讓清單靠前的商品
+    排在後面買、已被往下捲出視野 → 選不到）。first_use 保留參數但不再影響順序；背包放不下的存倉由 make_room / choose_evict（看 _next_use）決定，與購買順序無關"""
     per = collections.defaultdict(list)
     for n, q in wanted.items():
         if q > 0 and n in where:
@@ -413,7 +413,7 @@ def store_route(stage: str, wanted: dict, where: dict, stores: dict, first_use: 
     out = []
     for npc in sorted(per, key=lambda k: (stores[k].y, stores[k].x)):
         st = stores[npc]
-        out.append((st, sorted(per[npc], key=lambda nq: (fu.get(nq[0], 99), st.items.index(nq[0]) if nq[0] in st.items else 999))))
+        out.append((st, sorted(per[npc], key=lambda nq: (st.items.index(nq[0]) if nq[0] in st.items else 999, nq[0]))))
     return out
 
 

@@ -17,6 +17,7 @@
   qty_chunks：要買的數量拆成「每位數字都有樣板」的幾次（樣板只有 1 3 時 7 → 3+3+1、20 → 13+3+3+1），學到新數字自動變少次。
   buy_checked：購買前後各讀一次數量框 → 'bought'（讀到 0）/ 'zeroish'（變成一個認不出的字：ui/shop.md 競技場實機「購買後數量框自動變 0」，
   0 尚無樣板 → 視為買到，**呼叫端要用背包名稱核對把關**）/ 'not_bought'（點陣跟買前完全一樣 = 仍是原數量）/ 'unknown'（其他：不確定，不重買）。
+選商品（2026-10-17 227 修）：呼叫端（dailyplan.store_route / daily.buy_at）店內依清單 index 由小到大買；select_item 目標在視野上方時 scroll_top 歸零再找。
 **未實機**（select_item / set_qty 的座標取自 daily-probe 探路量測，2026-10-17；shop_open / 購買 / 確定 = 既有實測值）。
 """
 import re
@@ -244,19 +245,28 @@ def select_item(want: str, order: list, state: dict | None = None, reader=None) 
     """在商店清單選 want（order = 該店商品順序 = 遊戲清單順序，2 欄先左後右；來自 npc-shops.md）。
     靠標題名稱核對定位（不算位移；標題逐倍率比對本店清單投票 title_is）：預測列優先、不對再試鄰近列、視野外就往下拖一次；最多拖 len(order)//4+2 次。
     state = {'drags': n} 跟蹤已拖次數（呼叫端開店時給 {'drags': 0}）；回傳 True = 標題已是 want（已選中）。
-    開店時第 1 項自動選中；清單 ≤ 8 項（≤4 列）不用捲。reader 可換（測試）"""
+    開店時第 1 項自動選中；清單 ≤ 8 項（≤4 列）不用捲。reader 可換（測試）。
+    目標在目前視野上方（之前往下捲過頭）→ scroll_top 往回拖到頂、drags 歸 0 再找（只歸零重找一次）；呼叫端（daily.buy_at）另依清單 index 由小到大買，正常不會觸發"""
     reader = reader or (lambda: read_title(order))
     st = state if state is not None else {'drags': 0}
     if want not in order:
         return False
     idx = order.index(want)
     col = idx % 2
+    topped = False
     for _ in range(len(order) // (2 * ROWS_PER_DRAG) + 3):
         for r in visible_candidates(idx, st['drags']):
             x, y = card_xy(r, col)
             uikit.gui('seq', f'click {x} {y}; wait 450', note=f'shopkit 選商品「{want}」（第 {idx + 1} 項，視野列 {r}）')
             if title_is(reader(), want, order):
                 return True
+        if idx // 2 - st['drags'] * ROWS_PER_DRAG < 0:        # 目標在視野上方（只會往下拖、之前捲過頭）→ 捲回頂端歸零再找（2026-10-17 227 修）
+            scroll_top(len(order) // 2 + 1)
+            st['drags'] = 0
+            if topped:                                       # 已歸零重找過仍不中 → 放棄，免得無限來回
+                break
+            topped = True
+            continue
         if st['drags'] * ROWS_PER_DRAG > idx // 2 + 2:
             break
         uikit.gui('seq', 'drag {} {} {} {}; wait {}'.format(*DRAG_UP, DRAG_SETTLE_MS), note='shopkit 清單往下捲')

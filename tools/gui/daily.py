@@ -13,6 +13,8 @@
           （play-p1-route 實測：隊員在 2009、隊長在 1005:38,40 form 成功，4 人落 38,47；--regroup gather = 先在店內組隊再帶隊走，保留備援、預設不用）
   續跑：team.form（已組好 = 0 不點、不完整 → 解散重組）/ team.disband（沒隊伍 = 0 不點）本身看現況，所以每段開頭照上面的流程呼叫即可
         （fish 買到一半斷 → 隊伍是散的，重跑 into_shop 先組隊再解散；醫院合成到一半斷 → 隊伍組著，form 不點）
+  店內買序（2026-10-17 p1 兩次 227 修）：dailyplan.store_route 與 buy_at 都把店內商品依該店清單 index 由小到大排（只往下捲、不回頭；不再「早環先買」）；
+          shopkit.select_item 目標在視野上方時 scroll_top 歸零再找。存倉由 make_room / choose_evict 決定，與買序無關；bought 以名稱記，續跑不重買。
   prep    停練功 / 關遇敵 / 等戰鬥 → 組隊（練功時本來就組著，不點）→ 全隊傳送薩姆吉爾（不解散）
   read    gather_hospital → 輪流 char.switch：點 NPC 開委託面板 → 讀 5 環 × 上 / 下 → daily-<角色>.json
           成品名讀法（2026-10-17 修 225）：名稱框 OCR -Zooms 2,3,4,5 -Dark 0 → dp.vote_lines **逐倍率各自 snap 投票**（舊版把各倍率 join 成一串 →「成弓箭8口成弓箭8」）；
@@ -870,6 +872,7 @@ class Daily:
             T.cleanup()
             self.fail(EXIT_WALK, f'{role} 走不到 / 點不開「{store.name}」（{store.map}:{store.x},{store.y}）的道具商店', role=role)
         done = []
+        mats = sorted(mats, key=lambda nq: (store.items.index(nq[0]) if nq[0] in store.items else 999, nq[0]))   # 店內依清單 index 由小到大買（只往下捲、不回頭；2026-10-17 227 修）
         try:
             nav = {'drags': 0}
             for name, q in mats:
