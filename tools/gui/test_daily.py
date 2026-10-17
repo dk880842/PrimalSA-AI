@@ -296,17 +296,31 @@ try:
         got = shopkit.qty_now()
         check(f'qty_now 讀真截圖 {smp["f"]} → {smp["value"]!r}（OCR 全空也讀得到）', got == smp['value'], repr(got))
     check('數量框認得 1、3（種子樣板）', {'1', '3'} <= shopkit.known_digits())
-    # set_qty：已是 1 → 不開鍵盤；要 3 → 鍵盤輸入後讀回 3
+    # set_qty（＋ / － 鈕）：已是 1 → 不點；要 3 → ＋ ×2；差一 → －/＋ 補差；讀不出 → 退回起點 False；鍵盤備援仍在
     one = next(x for x in _NFX if x['value'] == 1)
     three = next(x for x in _NFX if x['value'] == 3)
     _qp.clear(); _qp.update(_qpaint(one))
     calls = []
     keep_gui = uikit.gui
     uikit.gui = lambda *a, **k: (calls.append(a), '')[1]
-    check('set_qty(1)：數量框已是 1 → 不點鍵盤', shopkit.set_qty(1) and not calls, str(calls))
+    nclk = lambda xy: sum(a[1].count(f'click {xy[0]} {xy[1]};') for a in calls)
+    check('set_qty(1)：數量框已是 1 → 不點', shopkit.set_qty(1) and not calls, str(calls))
     reads = iter([1, 3])
-    check('set_qty(3)：讀到 1 → 鍵盤輸入 → 讀回 3 = 成功', shopkit.set_qty(3, reader=lambda: next(reads)) and len(calls) == 1)
-    check('set_qty：讀不出（None）→ 失敗（不猜）', not shopkit.set_qty(2, reader=lambda: None))
+    check('set_qty(3)：讀到 1 → ＋ ×2 → 讀回 3 = 成功；沒點鍵盤', shopkit.set_qty(3, reader=lambda: next(reads)) and nclk(shopkit.QTY_PLUS) == 2 and nclk(shopkit.QTY_XY) == 0, str(calls))
+    calls.clear(); reads = iter([1, 33])
+    check('set_qty(33)：＋ ×32，批次 ≤ 25 下 / seq', shopkit.set_qty(33, reader=lambda: next(reads)) and nclk(shopkit.QTY_PLUS) == 32 and len(calls) == 2, str(len(calls)))
+    calls.clear(); reads = iter([1, 4, 3])
+    check('set_qty(3)：＋ ×2 後讀到 4（多一）→ － ×1 補差 → 讀回 3', shopkit.set_qty(3, reader=lambda: next(reads)) and nclk(shopkit.QTY_PLUS) == 2 and nclk(shopkit.QTY_MINUS) == 1, str(calls))
+    calls.clear(); reads = iter([1, 2, 3])
+    check('set_qty(3)：＋ ×2 後讀到 2（少一）→ ＋ ×1 補差', shopkit.set_qty(3, reader=lambda: next(reads)) and nclk(shopkit.QTY_PLUS) == 3, str(calls))
+    calls.clear(); reads = iter([1, None])
+    check('set_qty(3)：＋ 後讀不出 → 不猜、－ ×2 退回起點、False', (not shopkit.set_qty(3, reader=lambda: next(reads))) and nclk(shopkit.QTY_PLUS) == 2 and nclk(shopkit.QTY_MINUS) == 2, str(calls))
+    calls.clear()
+    check('set_qty：起點讀不出又沒給 start → False 不點', not shopkit.set_qty(2, reader=lambda: None) and not calls, str(calls))
+    calls.clear(); reads = iter([None, 1])
+    check('set_qty(1, start=0)：框讀不出（買完歸 0）→ ＋ ×1 → 讀回 1', shopkit.set_qty(1, reader=lambda: next(reads), start=0) and nclk(shopkit.QTY_PLUS) == 1, str(calls))
+    calls.clear(); reads = iter([1, 3])
+    check('set_qty_keypad（備援）：讀到 1 → 鍵盤輸入 → 讀回 3', shopkit.set_qty_keypad(3, reader=lambda: next(reads)) and nclk(shopkit.QTY_XY) == 1 and nclk(shopkit.QTY_PLUS) == 0, str(calls))
     # buy_checked（buy_once 換成「把框換成下一張圖」）：買後一樣 / 認得但不是 0 / 沒字
     seq = []
     shopkit.buy_once = lambda: (_qp.clear(), _qp.update(seq.pop(0)))
@@ -751,7 +765,10 @@ class FakeTools:
         self.W.shop_item = name
         return True
 
-    def shop_set_qty(self, q):
+    def shop_set_qty(self, q, start=None):
+        if self.inj.get('plus_unread') and q > 1:             # 模擬 ＋ 到 q 讀不回（數字沒樣板）→ 已退回起點、回 False
+            self.L('plus_unread', q)
+            return False
         self.W.qty = q
         return True
 
@@ -1342,6 +1359,14 @@ T.shop_buy = _sb
 rc, out, _ = go(W, T)
 first = next(a for a in W.log if a[0] == 'buy')
 check('買後數量框讀不出（unknown）→ 227、該項不重買', rc == 227 and sum(1 for a in W.log if a[0] == 'buy' and a[1:3] == first[1:3]) == 1, f'{rc} {out[-300:]}')
+
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+T.inj['plus_unread'] = True                                               # ＋ 到 >1 讀不回 → 退回每次買 1 個
+rc, out, _ = go(W, T)
+buys = [a for a in W.log if a[0] == 'buy']
+check('＋ 讀不回 → 每次買 1 個、買 n 次：照樣 5/5、總共買 160 個、每次數量都是 1', rc == 0 and W.bought_n == 160 and all(W.reward[r] == 5 for r in W.roles) and all(a[3] == 1 for a in buys), f'{rc} {out[-300:]}')
 
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))

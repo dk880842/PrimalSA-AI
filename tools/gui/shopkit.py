@@ -6,15 +6,18 @@
            舊版各倍率 join 成一串；p1 樣本 11 間店 132 張 → 主讀法 130 對、備援補讀後 132 對、0 誤認）、title_match（字串模糊比對，舊介面 / 無清單時）、
            visible_candidates（清單定位候選列）、qty_digit_xy（數字鍵盤鍵位）
   座標     商店面板固定座標（ui/shop.md、notes/daily-probe.md M11～M13；截圖 1440×830、鏡頭最左）
-  動作     shop_open（✕ 紅圓像素）、read_title（回 OCR 原始行；主讀法投不出就 TITLE_FALLBACK 補讀）、select_item（名稱定位 + 捲動）、set_qty（數字鍵盤）、buy_once（購買 → 提示確定）、
+  動作     shop_open（✕ 紅圓像素）、read_title（回 OCR 原始行；主讀法投不出就 TITLE_FALLBACK 補讀）、select_item（名稱定位 + 捲動）、set_qty（＋ / － 鈕；數字鍵盤留 set_qty_keypad 備援）、buy_once（購買 → 提示確定）、
            qty_now（讀數量框：**像素字形 numglyph kind 'shop'**，2026-10-17 改；OCR 只當位數相符的備援）、close_shop（✕ 1207,107；買完還疊提示窗再補）
 鐵則 3：本模組不讀石幣 / 鑽石（buywendy 自己用 parse_coin 讀石幣；daily 不讀）；只在呼叫端明確要買時才按「購買」。
 數量框（2026-10-17 p1 正式跑 227 修）：Windows OCR 讀單獨一個白色「1」各種參數都回空 → 改 numglyph 像素切字 + 樣板（fixtures/num_glyph_tpl.json 'shop'；
   樣本只有 0 1 3 的話其他數字 = 讀不出 None → 呼叫端不買 / 不判買到；OCR 讀到且位數 = 切出字數才採用並學字；讀不出存圖 ui-log/*-shop-qty-unread.png 供人工補樣板）。
-  set_qty：先讀一次，已是 n（開店預設 1）就不開鍵盤；否則鍵盤輸入後讀回 == n 才算成功。
+  set_qty（2026-10-17 改用數量框兩側「＋ 1112,466 / － 880,466」鈕，不開數字鍵盤）：先讀一次，已是 n 不點；否則 ＋ (n−起點) 次再讀回 == n 才算成功；
+    讀得到但不是 n → ＋ / － 補差一次；讀不出（數字沒樣板）→ 不猜，用 － 退回起點、回 False，呼叫端（daily.buy_item）改「每次買 1 個、買 n 次」。
+    起點 = 讀到的值，讀不出用 start（開店 / 選商品後預設 1；買完一次後框歸 0 → 傳 0）。n 的每位數字都認得才一次 ＋ 到 n 買（qty_chunks）。
+    實機遇到新數字：看 ui-log/*-shop-qty-unread.png 後 `numglyph.py label <圖> shop <值>` 補樣板 → 下次自動走一次買。
   現場讀像素走 gui spixel（numglyph.LIVE_SRC shop = 'shot'，跟截圖同一段縮圖）：dd6f945 用 gui pixel（原生單點）實機 4 次全 None、
   同一畫面截圖讀得出 1 → 227（2026-10-17 19:27 / 19:29，dev-shop-qty2 修）。
-  qty_chunks：要買的數量拆成「每位數字都有樣板」的幾次（樣板只有 1 3 時 7 → 3+3+1、20 → 13+3+3+1），學到新數字自動變少次。
+  qty_chunks：數量每位數字都有樣板 → 一次 ＋ 到 n 買；有不認得的數字才拆成「每位數字都有樣板」的幾次（樣板只有 1 3 時 7 → 3+3+1、20 → 13+3+3+1），學到新數字自動變少次。
   buy_checked：購買前後各讀一次數量框 → 'bought'（讀到 0）/ 'zeroish'（變成一個認不出的字：ui/shop.md 競技場實機「購買後數量框自動變 0」，
   0 尚無樣板 → 視為買到，**呼叫端要用背包名稱核對把關**）/ 'not_bought'（點陣跟買前完全一樣 = 仍是原數量）/ 'unknown'（其他：不確定，不重買）。
 選商品（2026-10-17 227 修）：呼叫端（dailyplan.store_route / daily.buy_at）店內依清單 index 由小到大買；select_item 目標在視野上方時 scroll_top 歸零再找。
@@ -39,7 +42,9 @@ TITLE_BOX = (870, 180, 254, 54)                  # 右側標題（選中的商�
 TITLE_OPTS = ('-Zooms', '2,3,4,5,6', '-Dark', '0')   # 不二值化、5 倍率**逐倍率各自比對該店商品清單投票**（title_vote；p1 2026-10-17 132 張 130 對 0 誤認，2 張全倍率讀空 → 備援）
 TITLE_FALLBACK = (((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Dark', '0')),   # 主讀法投不出名字才依序補讀（倍率鍵加前綴、各自投票）
                   ((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Light', '92')))
-QTY_XY = (995, 465)                              # 數量框：點它跳出數字鍵盤
+QTY_XY = (995, 465)                              # 數量框：點它跳出數字鍵盤（備援 set_qty_keypad 用）
+QTY_MINUS, QTY_PLUS = (880, 466), (1112, 466)    # 數量框兩側綠色「－」「＋」圓鈕（ui/shop.md 競技場實測、daily-probe M13 同版面）
+PLUS_GAP_MS, PLUS_BATCH = 150, 25                # ＋ / － 每下間隔（同鍵盤節奏）/ 每個 seq 最多連點幾下
 QTY_BOX = numglyph.SHOP_QTY_BOX                  # (968, 450, 56, 32) 數量白字 bbox 989～1002 × 455～477（numglyph kind 'shop'）
 KEY_CLEAR, KEY_ENTER = (910, 455), (910, 572)    # 鍵盤 ✕（清除）/ ↵（確定）
 KEYPAD = {'1': (490, 333), '2': (615, 333), '3': (743, 333), '0': (863, 333),
@@ -274,9 +279,44 @@ def select_item(want: str, order: list, state: dict | None = None, reader=None) 
     return False
 
 
-def set_qty(n: int, reader=None) -> bool:
-    """先讀數量框：已是 n（例：預設 1、要買 1）→ 不開鍵盤直接成功（讀不出就照常輸入）。
-    否則點數量框 → 數字鍵盤：清除 → 逐位按數字 → ↵；讀回數量 == n 才算成功（讀不出 = 失敗，不猜）"""
+def _step_clicks(xy, k: int) -> None:
+    """連點 ＋ / － 共 k 下（每個 seq 最多 PLUS_BATCH 下，每下間隔 PLUS_GAP_MS）"""
+    while k > 0:
+        m = min(k, PLUS_BATCH)
+        uikit.gui('seq', '; '.join([f'click {xy[0]} {xy[1]}; wait {PLUS_GAP_MS}'] * m) + '; wait 300',
+                  note=f'shopkit 數量 {"＋" if xy == QTY_PLUS else "－"} ×{m}')
+        k -= m
+
+
+def set_qty(n: int, reader=None, start: int | None = None) -> bool:
+    """數量用「＋ / －」鈕調到 n（2026-10-17 改，不開數字鍵盤；鍵盤流程留在 set_qty_keypad 備援）。
+    起點 = 先讀數量框；讀不出才用呼叫端給的 start（開店 / 選商品後預設 1；買完一次後框歸 0 → 呼叫端傳 0；不給且讀不出 = 不猜、False）。
+    已是 n → 不點。否則 ＋ (n−起點) 次（負數點 －）→ 讀回：== n 成功；讀得到但不是 n → 用 ＋ / － 補差一次再讀；
+    讀不出（數字沒樣板）→ 不猜：用 － / ＋ 退回起點（框回到 start）並回 False，呼叫端改「每次買 1 個」。"""
+    reader = reader or qty_now
+    cur = reader()
+    if cur == n:
+        return True
+    base = cur if cur is not None else start
+    if base is None or n < 0:
+        return False
+    d = n - base
+    if d:
+        _step_clicks(QTY_PLUS if d > 0 else QTY_MINUS, abs(d))
+    got = reader()
+    if got == n:
+        return True
+    if got is None:                                    # 讀不出：退回起點，不猜
+        if d:
+            _step_clicks(QTY_MINUS if d > 0 else QTY_PLUS, abs(d))
+        return False
+    d2 = n - got                                       # 讀得到但差了 → 補差一次
+    _step_clicks(QTY_PLUS if d2 > 0 else QTY_MINUS, abs(d2))
+    return reader() == n
+
+
+def set_qty_keypad(n: int, reader=None) -> bool:
+    """備援（預設不用）：先讀數量框，已是 n 不開鍵盤；否則點數量框 → 數字鍵盤：清除 → 逐位按數字 → ↵；讀回 == n 才算成功"""
     reader = reader or qty_now
     if reader() == n:
         return True
@@ -284,7 +324,7 @@ def set_qty(n: int, reader=None) -> bool:
     seq = [f'click {QTY_XY[0]} {QTY_XY[1]}; wait 400', f'click {KEY_CLEAR[0]} {KEY_CLEAR[1]}; wait 150']
     seq += [f'click {x} {y}; wait 150' for x, y in keys]
     seq.append(f'click {KEY_ENTER[0]} {KEY_ENTER[1]}; wait 400')
-    uikit.gui('seq', '; '.join(seq), note=f'shopkit 數量輸入 {n}')
+    uikit.gui('seq', '; '.join(seq), note=f'shopkit 數量輸入（鍵盤）{n}')
     return reader() == n
 
 

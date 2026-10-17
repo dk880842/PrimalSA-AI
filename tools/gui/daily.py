@@ -538,8 +538,8 @@ class Tools:
     def shop_select(self, name, store, state) -> bool:
         return shopkit.select_item(name, store.items, state)
 
-    def shop_set_qty(self, q) -> bool:
-        return shopkit.set_qty(q)
+    def shop_set_qty(self, q, start=None) -> bool:
+        return shopkit.set_qty(q, start=start)
 
     def shop_chunks(self, q):
         return shopkit.qty_chunks(q)
@@ -900,7 +900,7 @@ class Daily:
         event(f'{role} {store.name} 買完：' + '、'.join(f'{n}×{dict(mats)[n]}' for n in done))
 
     def buy_item(self, role, plan, store, name, q, nav, protect=()) -> bool:
-        """店內一項：選商品（標題核對）→ 數量拆成認得的數字分次買（shopkit.qty_chunks）→ 每次：數量 c → 購買 → 看數量框（shopkit.buy_checked）。
+        """店內一項：選商品（標題核對）→ 數量每位數字都認得就 ＋ 到 n 一次買、不認得才拆（shopkit.qty_chunks）；＋ 後讀不回 → 改每次買 1 個 → 每次：數量 c（＋ / － 鈕）→ 購買 → 看數量框（shopkit.buy_checked）。
         bought / zeroish（歸 0 但 0 還沒樣板；每間店買完的背包名稱核對把關）= 記 ledger；not_bought（仍是原數量，可能背包放不下）→ 存最晚環的材料再試一次（只一次）；
         unknown（不確定有沒有買到）→ 不重買、回 False（呼叫端 227）。每買到一次就記 bought / ledger（中斷可續跑）"""
         T, st = self.T, self.st[role]
@@ -913,9 +913,15 @@ class Daily:
             if not chunks:
                 event(f'{role} 數量 {left} 拆不出認得的數字（{name}；數量框樣板不足）')
                 return False
-            for c in chunks:
-                if not T.shop_set_qty(c):
-                    event(f'{role} 數量輸入 {c} 讀回不對（{name}）')
+            chunks, start, i = list(chunks), 1, 0              # 開店 / 選商品後數量預設 1；買完一次框歸 0（start 給 set_qty 當讀不出時的起點）
+            while i < len(chunks):
+                c = chunks[i]
+                if not T.shop_set_qty(c, start):
+                    if c > 1:                                   # ＋ 到 c 讀不回（數字沒樣板）→ 已退回起點，改每次買 1 個
+                        event(f'{role} 數量 ＋ 到 {c} 讀回不對（{name}）→ 改每次買 1 個')
+                        chunks[i:i + 1] = [1] * c
+                        continue
+                    event(f'{role} 數量 {c} 讀回不對（{name}）')
                     return False
                 v = T.shop_buy_checked(c)
                 if v in ('bought', 'zeroish'):
@@ -925,6 +931,7 @@ class Daily:
                     st['bought'][name] = int(st['bought'].get(name, 0)) + c
                     self.save_role(role)
                     left -= c
+                    start, i = 0, i + 1
                     if v == 'zeroish':
                         event(f'{role} 買「{name}」×{c}：數量框變成認不出的字（應為 0，尚無樣板）→ 視為買到，等背包名稱核對')
                     continue
