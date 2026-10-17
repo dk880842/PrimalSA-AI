@@ -542,6 +542,107 @@ def itempop_points() -> list:
     return list(dict.fromkeys(pts))
 
 
+# ---- 完整戰鬥上疊「寵物資訊浮窗」（battle_tip，2026-10-17 p2 四大洞窟 / 1.82 連 3 次 rc 9，quest-log 211413 / 214750 / 215115-UNKNOWN）----
+# 根因：quest.py --fast-dialog 的「無腦」第二下（948,461）在最後一頁對話關掉、任務戰已開打時落在己方寵物身上 → 遊戲跳出
+# 寵物資訊浮窗（名字綠字 / 金幣 / HP 紅字 / 等級 / 位置，約 246×194 深棕底金框），同時整個畫面被模態遮罩壓暗 ×0.516（每點每通道同比例）
+# → SIG_BATTLE 9 點全不中、classify = unknown。浮窗跟著被點的寵物走（樣本兩種位置：x 795～1042 × y 265～460、x 767～1013 × y 183～376），所以用格點找：
+#   1. 戰鬥上方棕框 SIG_BATTLE 9 點同一比例壓暗，k ∈ TIP_DIM_K（答題介面遮罩 ×0.40 不在範圍內）、至少 TIP_DIM_NEED 點在容差（_dim_k 共用 ITEMPOP_DIM_TOL）內；
+#   2. 40 px 格點上「浮窗底色」(38,28,16) 容差 TIP_BG_TOL（不透明實色，壓暗的場景只是接近、極少剛好）最大 4 連通塊 ≥ TIP_MIN_PTS 點、
+#      外接框 TIP_COLS 欄 × TIP_ROWS 列（浮窗大小）且填滿率 ≥ TIP_FILL；
+#   3. 浮窗外（外接框外推 TIP_MARGIN）所有格點都是壓暗的（max(rgb) ≤ TIP_BRIGHT），最多 TIP_BRIGHT_MAX 點例外
+#      —— 答題介面、網路提示等任何其他沒壓暗的大面板都不會成立。
+# 三個條件全中才算；缺點一律不符。浮窗會自己消失（實測 25 秒內，戰鬥結束前後），quest.py 只等、不點。
+TIP_DIM_K = (0.46, 0.58)
+TIP_DIM_NEED = 8
+TIP_BG = (38, 28, 16)
+TIP_BG_TOL = 3
+TIP_STEP = 40
+TIP_GRID = [(x, y) for y in range(100, 661, TIP_STEP) for x in range(200, 1321, TIP_STEP)]
+TIP_MIN_PTS = 12
+TIP_COLS = (4, 7)
+TIP_ROWS = (3, 6)
+TIP_FILL = 0.8
+TIP_BRIGHT = 160
+TIP_MARGIN = 40
+TIP_BRIGHT_MAX = 2
+
+
+# 變體（樣本 quest-log/213157 / 213217-unknown1）：戰鬥「關閉 + 頭像」列在上方位置（ROW_UP）且**沒被壓暗**、蓋在浮窗上，格點只剩浮窗
+# 露在列外的一條（列下緣下一排 y 420）→ 主判法列數不夠。改判：列 5 點未壓暗全中（TIP_ROW_SIG）、浮窗底色連通塊只有 1～2 排且緊貼列的上 / 下緣、
+# 寬 TIP_COLS 欄連續、x 在列的範圍內；亮點檢查把列的矩形一起排除。其餘條件（戰鬥框壓暗、其他地方全暗）相同。
+TIP_ROW_RECT = (465, 262, 1098, 396)            # 列在上方位置的範圍（關閉鈕 x 470～553 + 頭像條到 x 1093，y 268～392）
+TIP_ROW_SIG = [(490, 300, 188, 162, 134, 22), (530, 300, 188, 162, 134, 22), (490, 360, 188, 162, 134, 22),
+               (510, 280, 188, 162, 134, 22), (510, 385, 180, 156, 128, 22)]      # 關閉鈕米色（未壓暗；壓暗時是 ×0.52 ≈ 97,83,68）
+
+
+def _in_rect(pt, r) -> bool:
+    return r[0] <= pt[0] <= r[2] and r[1] <= pt[1] <= r[3]
+
+
+def _tip_box(px: dict, skip=None):
+    """浮窗底色格點（skip 矩形內的不算）的最大 4 連通塊 → 外接框 (x0, y0, x1, y1, 點數) 或 None"""
+    hit = {pt for pt in TIP_GRID if pt in px and close(px[pt], TIP_BG, TIP_BG_TOL) and not (skip and _in_rect(pt, skip))}
+    best, seen = [], set()
+    for st in hit:
+        if st in seen:
+            continue
+        comp, todo = [], [st]
+        seen.add(st)
+        while todo:
+            x, y = todo.pop()
+            comp.append((x, y))
+            for nb in ((x + TIP_STEP, y), (x - TIP_STEP, y), (x, y + TIP_STEP), (x, y - TIP_STEP)):
+                if nb in hit and nb not in seen:
+                    seen.add(nb)
+                    todo.append(nb)
+        if len(comp) > len(best):
+            best = comp
+    if not best:
+        return None
+    xs, ys = [p[0] for p in best], [p[1] for p in best]
+    return min(xs), min(ys), max(xs), max(ys), len(best)
+
+
+def _tip_dark_outside(px: dict, box, extra=None) -> bool:
+    """浮窗（外推 TIP_MARGIN）與 extra 矩形以外的格點都是壓暗的（亮點最多 TIP_BRIGHT_MAX）"""
+    x0, y0, x1, y1 = box
+    r = (x0 - TIP_MARGIN, y0 - TIP_MARGIN, x1 + TIP_MARGIN, y1 + TIP_MARGIN)
+    bright = sum(1 for pt in TIP_GRID if not _in_rect(pt, r) and not (extra and _in_rect(pt, extra)) and max(px[pt]) > TIP_BRIGHT)
+    return bright <= TIP_BRIGHT_MAX
+
+
+def battle_tip(px: dict) -> bool:
+    """完整戰鬥上疊寵物資訊浮窗（主判法三個條件 + 「關閉」列蓋住的變體，見上方註解）。缺點一律不符"""
+    k, n = _dim_k(px, [p[:5] for p in SIG_BATTLE])
+    if k is None or not TIP_DIM_K[0] <= k <= TIP_DIM_K[1] or n < TIP_DIM_NEED:
+        return False
+    if any(pt not in px for pt in TIP_GRID):
+        return False
+    box = _tip_box(px)
+    if box:
+        x0, y0, x1, y1, cnt = box
+        cols, rows = (x1 - x0) // TIP_STEP + 1, (y1 - y0) // TIP_STEP + 1
+        if (cnt >= TIP_MIN_PTS and TIP_COLS[0] <= cols <= TIP_COLS[1] and TIP_ROWS[0] <= rows <= TIP_ROWS[1] and cnt >= TIP_FILL * cols * rows
+                and _tip_dark_outside(px, (x0, y0, x1, y1))):
+            return True
+    if not _match_safe(px, TIP_ROW_SIG):
+        return False
+    box = _tip_box(px, skip=TIP_ROW_RECT)                # 變體：列蓋住浮窗中段
+    if not box:
+        return False
+    x0, y0, x1, y1, cnt = box
+    cols, rows = (x1 - x0) // TIP_STEP + 1, (y1 - y0) // TIP_STEP + 1
+    rx0, ry0, rx1, ry1 = TIP_ROW_RECT
+    touch = 0 < y0 - ry1 <= TIP_STEP or 0 < ry0 - y1 <= TIP_STEP     # 緊貼列的下緣或上緣
+    return (TIP_COLS[0] <= cols <= TIP_COLS[1] and 1 <= rows <= 2 and cnt == cols * rows and touch and rx0 <= x0 and x1 <= rx1
+            and _tip_dark_outside(px, (x0, y0, x1, y1), extra=TIP_ROW_RECT))
+
+
+def battle_tip_points() -> list:
+    """battle_tip 要讀的全部點（SIG_BATTLE 9 點 + 格點 + 「關閉」列 5 點，不重複）"""
+    return list(dict.fromkeys([(x, y) for x, y, *_ in SIG_BATTLE] + TIP_GRID + [(x, y) for x, y, *_ in TIP_ROW_SIG]))
+
+
 def dim_panel(px: dict):
     """被模態彈窗壓暗的已知面板名（PANEL_TITLE 同一比例 k 縮暗）或 None。缺點一律不符。未壓暗（k≈1）的面板不算"""
     for name, pts in PANEL_TITLE.items():
@@ -568,7 +669,7 @@ def popup_over_panel(px: dict):
     return (pn, kinds[0]) if pn in POPUP_PANELS else None
 
 
-ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'net_lost', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角 / 網路異常窗是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗；popup_item = 背包道具說明彈窗）。答題介面 quiz 刻意不在這裡（它是「認得的危險畫面」）
+ANNOT_KNOWN = ('login', 'charsel', 'loading', 'black', 'net_lost', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item', 'battle_tip')    # 這些畫面本來就是「已知畫面」：不算 unknown（登入 / 選角 / 網路異常窗是 netwatch 那一層；載入 / 全黑是地圖轉場；popup_* = 面板上疊已知彈窗；popup_delok = 背包刪除確認窗；popup_item = 背包道具說明彈窗；battle_tip = 完整戰鬥上疊寵物資訊浮窗，2026-10-17）。答題介面 quiz 刻意不在這裡（它是「認得的危險畫面」）
 
 
 # ---- 網路異常提示窗（「提示：網路異常，是否重連?」，2026-10-16 使用者定案：交給 netwatch、不設驗證停手旗標）----
@@ -653,7 +754,7 @@ def quiz_points() -> list:
 
 
 NORMAL_STATES = ('idle', 'walking', 'battle', 'panel')   # 驗證停手旗標自動清認的「已知正常畫面」（verifyhalt.AutoClear，使用者 2026-10-16）
-NORMAL_ANNOT = ('login', 'charsel', 'loading', 'net_lost')   # 這些附註也算已知正常（登入 / 選角 / 載入 / 網路異常窗，使用者 2026-10-16：netwatch 那一層的畫面要能自動清旗標，否則斷線會死結）
+NORMAL_ANNOT = ('login', 'charsel', 'loading', 'net_lost', 'battle_tip')   # battle_tip = 戰鬥上疊寵物資訊浮窗（2026-10-17）； 這些附註也算已知正常（登入 / 選角 / 載入 / 網路異常窗，使用者 2026-10-16：netwatch 那一層的畫面要能自動清旗標，否則斷線會死結）
 
 
 def normal_screen(state, annot=()) -> bool:
@@ -690,10 +791,10 @@ def annot_points() -> list:
 
 def loading_points() -> list:
     """watch 另外加讀的點：「加載中」字形遮罩 + 英文版進度條 + 背包刪除確認窗（delok_points，2026-10-15）+ 背包道具說明彈窗（itempop_points，2026-10-16）
-    + 網路異常窗字形（net_points）+ 答題介面（quiz_points，2026-10-16）。
+    + 網路異常窗字形（net_points）+ 答題介面（quiz_points，2026-10-16）+ 戰鬥寵物資訊浮窗（battle_tip_points，2026-10-17）。
     不在 points() / annot_points()（那兩組被凍結 fixture 綁住）"""
     seen, out = set(points()) | set(annot_points()), []
-    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points() + delok_points() + itempop_points() + net_points() + quiz_points():
+    for pt in [(x, y) for x, y, _ in LOADING_TEXT_PTS] + loading_bar_points() + delok_points() + itempop_points() + net_points() + quiz_points() + battle_tip_points():
         if pt not in seen:
             seen.add(pt)
             out.append(pt)
@@ -728,6 +829,8 @@ def annotate(px: dict, base: dict) -> list:
         hit = popup_over_panel(px)
         if hit:
             return ['popup_' + hit[1], 'over_' + hit[0]]
+        if battle_tip(px):                      # 完整戰鬥上疊寵物資訊浮窗（2026-10-17；整畫面壓暗 ×0.52 → classify 不認）
+            return ['battle_tip']
     return []
 
 
@@ -746,7 +849,8 @@ _LABELS = {'idle': '主畫面', 'walking': '自動跑路中', 'dialog': '對話�
 
 _ANNOT_TEXT = {'notice_dialog': '提示視窗', 'login': '登入畫面', 'charsel': '選角畫面', 'loading': '載入畫面', 'black': '黑畫面（轉場）',
                'net_lost': '網路異常窗（交給 netwatch）', 'quiz': '答題 / 驗證視窗',
-               'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗', 'popup_delok': '刪除確認窗', 'popup_item': '道具說明彈窗'}
+               'popup_keypad': '數字鍵盤', 'popup_qty': '數量輸入視窗', 'popup_confirm': '確定 / 取消提示窗', 'popup_delok': '刪除確認窗', 'popup_item': '道具說明彈窗',
+               'battle_tip': '戰鬥中（寵物資訊浮窗）'}
 
 
 def label(d: dict, annot=None) -> str:

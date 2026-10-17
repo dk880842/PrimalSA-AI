@@ -529,6 +529,34 @@ def make_verify_fixture() -> list:
     return miss
 
 
+# ---- 戰鬥上疊寵物資訊浮窗（screen_sigs.battle_tip，2026-10-17 p2 rc 9 ×4）+ 同時段的「解決異常」確認窗 / 加載中 ----
+# 檔名 → 期望 annotate 附註（None = 沒有附註）。正例 = 浮窗兩種位置 + 「關閉」列蓋住浮窗的變體；負例 = 一般完整戰鬥、設置面板「解決異常」確認窗（不是腳本點的，照舊不認得）、
+# 加載中（附註 loading）、答題介面模擬圖疊在戰鬥上（附註 quiz，不可變成 battle_tip）、壓暗的外掛面板 ass_b（全庫掃描唯一「戰鬥框同比例壓暗」的非浮窗圖）。
+TIP_SRC = {
+    'clients/PrimalSA2/quest-log/211413-UNKNOWN.png': 'battle_tip', 'clients/PrimalSA2/quest-log/214750-UNKNOWN.png': 'battle_tip',
+    'clients/PrimalSA2/quest-log/215115-UNKNOWN.png': 'battle_tip', 'clients/PrimalSA2/quest-log/213157-unknown1.png': 'battle_tip',
+    'clients/PrimalSA2/quest-log/210739-unknown1.png': None, 'clients/PrimalSA2/quest-log/210747-UNKNOWN.png': 'loading',
+    'battle-samples/full_playing_01.png': None, 'battle-samples/cmd_a.png': None, 'ass_b.png': None,
+    'npcanswer-extract/mock_battle_k10546_+0+0.png': 'quiz', 'npcanswer-extract/mock_battle_k10546_+6-5.png': 'quiz',
+}
+
+
+def make_battle_tip_fixture() -> list:
+    """battle_tip_px.json：points = watch 實際讀的全部點；每張存 hex 與期望附註。回缺的檔案"""
+    pts = list(dict.fromkeys(screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()))
+    samples, miss = [], []
+    for rel, want in TIP_SRC.items():
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        px = {tuple(map(int, k.split(','))): tuple(v) for k, v in grab(p, pts).items()}
+        samples.append({'f': rel, 'expect': want, 'px': ''.join('%02x%02x%02x' % px[pt] for pt in pts)})
+    write('battle_tip_px.json', {'note': '戰鬥上疊寵物資訊浮窗樣本（2026-10-17）：expect = annotate 第一個附註（battle_tip / loading / quiz）或 null；points = watch 讀的全部點',
+                                 'points': [list(p) for p in pts], 'samples': samples})
+    return miss
+
+
 # ---- 每日委託面板兩項計數字區（daily.STATE_GRID → dailyplan.count_area；2026-10-17 dev-pop-live）----
 # 全是紅「0/1」（今天沒有任何 1/1 綠的實機截圖）；綠只在 test_daily 用合成點陣測
 DAILY_COUNT_SRC = ['daily-p1-a.png'] + [f'dp-{r}-{i}.png' for r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5') for i in (1, 2, 3, 4, 5)] + \
@@ -554,14 +582,14 @@ def make_daily_counts_fixture() -> list:
 
 
 def main() -> int:
-    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del / bag_itempop / numglyph / itemname_newtag / verify / shop）
+    if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del / bag_itempop / numglyph / itemname_newtag / verify / shop / battle_tip）
         names = sys.argv[sys.argv.index('--only') + 1].split(',')
         for n in names:
             miss = {'bag_slots': make_bag_slots_fixture, 'leader_badge': make_leader_badge_fixture, 'world': make_world_fixture,
                     'panel': make_panel_fixture, 'popup': make_popup_fixture, 'bag_del': make_bag_del_fixture,
                     'bag_itempop': make_bag_itempop_fixture, 'numglyph': make_numglyph_fixture,
                     'itemname_newtag': make_itemname_newtag_fixture, 'verify': make_verify_fixture,
-                    'shop': make_shop_fixture, 'daily_counts': make_daily_counts_fixture}[n]()
+                    'shop': make_shop_fixture, 'daily_counts': make_daily_counts_fixture, 'battle_tip': make_battle_tip_fixture}[n]()
             print(n, '缺', miss) if miss else None
         return 0
     done, skipped = [], []

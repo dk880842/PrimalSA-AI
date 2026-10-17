@@ -572,6 +572,23 @@ _pf.update(open=True, trip=[])
 _use('quest-log/060801-UNKNOWN.png')                # 不是已知面板（可能是驗證視窗）→ 不碰
 rc = uikit.preflight('t')
 check('preflight：不認得且不是已知面板 → 不點、照舊 9', rc == 9 and not _closed, f'rc={rc} {_closed}')
+# preflight 遇到戰鬥上疊寵物資訊浮窗（2026-10-17 p2）→ 同轉場等它消失、不計次；一直不消失 → TRANSITION_MAX_S 後照舊 9
+_keep_tip = (uikit.screen_annot, uikit.clock)
+_tt = {'t': 0.0, 'until': 20.0}
+uikit.clock = lambda: _tt['t']
+uikit.sleep = lambda s_: _tt.__setitem__('t', _tt['t'] + s_)
+uikit.screen = lambda: {'state': 'unknown' if _tt['t'] < _tt['until'] else 'idle'}
+uikit.screen_annot = lambda: ({'state': 'unknown'}, ['battle_tip'])
+_keep_ckp = uikit.close_known_panel
+uikit.close_known_panel = lambda: None
+_pf.update(trip=[])
+rc = uikit.preflight('t', fast=False)
+check('preflight：戰鬥寵物資訊浮窗 20 秒後消失 → 等完回 0、不設停手', rc == 0 and not _pf['trip'] and _tt['t'] >= 20, f'rc={rc} t={_tt["t"]} {_pf}')
+_tt.update(t=0.0, until=1e9)
+rc = uikit.preflight('t', fast=False)
+check('preflight：浮窗一直不消失 → TRANSITION_MAX_S 後照舊 9', rc == 9 and _tt['t'] >= screen_sigs.TRANSITION_MAX_S, f'rc={rc} t={_tt["t"]}')
+uikit.screen_annot, uikit.clock = _keep_tip
+uikit.close_known_panel = _keep_ckp
 (uikit.screen, uikit.transition_now, uikit.sleep, uikit.trip_verify) = _keep_pf
 uikit.px, uikit.close_panel = _keep_px, _keep_close
 

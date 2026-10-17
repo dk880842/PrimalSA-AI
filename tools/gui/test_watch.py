@@ -770,12 +770,15 @@ check('壓暗的背包 + 不認得的彈窗 ≥ 10 s → 照樣 unknown_long（�
 
 # ---- 背包刪除確認窗（2026-10-15 23:34 / 23:39 p1 purge 核對清單時 watch 誤設驗證停手旗標）：用真截圖取點 fixture ----
 _dfx = json.loads((HERE / 'fixtures' / 'bag_del_px.json').read_text(encoding='utf-8'))
-check('bag_del fixture 點順序 = watch.pts', [tuple(p) for p in _dfx['points']] == list(dict.fromkeys(ALLPTS)) == ALLPTS)
+_dn = len(_dfx['points'])
+# 10-15 產的 fixture 是當時 watch.pts；之後 watch 只在尾端加點（10-17 battle_tip_points），所以比前綴、尾端補黑點（battle_tip 缺點 / 全黑 = 不符）
+check('bag_del fixture 點順序 = watch.pts 前綴（尾端只多 battle_tip 點）', [tuple(p) for p in _dfx['points']] == ALLPTS[:_dn] and list(dict.fromkeys(ALLPTS)) == ALLPTS
+      and set(ALLPTS[_dn:]) <= set(screen_sigs.battle_tip_points()))
 
 
 def px_fixture(f):
     h = next(s['px'] for s in _dfx['samples'] if s['f'] == f)
-    return ' '.join(f'{int(h[i:i + 2], 16)},{int(h[i + 2:i + 4], 16)},{int(h[i + 4:i + 6], 16)}' for i in range(0, len(h), 6))
+    return ' '.join([f'{int(h[i:i + 2], 16)},{int(h[i + 2:i + 4], 16)},{int(h[i + 4:i + 6], 16)}' for i in range(0, len(h), 6)] + ['0,0,0'] * (len(ALLPTS) - _dn))
 
 
 w, clk, fk = make('popup-delok')
@@ -1409,13 +1412,28 @@ TRIPS = []
 _real_trip = watch.trip_verify
 watch.trip_verify = lambda reason: TRIPS.append(reason) or True
 _vfx = json.loads((HERE / 'fixtures' / 'verify_px.json').read_text(encoding='utf-8'))
-check('verify fixture 點順序 = watch.pts', [tuple(p) for p in _vfx['points']] == ALLPTS)
+_vn = len(_vfx['points'])
+check('verify fixture 點順序 = watch.pts 前綴（尾端只多 battle_tip 點）', [tuple(p) for p in _vfx['points']] == ALLPTS[:_vn]
+      and set(ALLPTS[_vn:]) <= set(screen_sigs.battle_tip_points()))
 
 
 def px_vfix(f):
     h = next(s_['px'] for s_ in _vfx['samples'] if s_['f'] == f)
-    return ' '.join(f'{int(h[i:i + 2], 16)},{int(h[i + 2:i + 4], 16)},{int(h[i + 4:i + 6], 16)}' for i in range(0, len(h), 6))
+    return ' '.join([f'{int(h[i:i + 2], 16)},{int(h[i + 2:i + 4], 16)},{int(h[i + 4:i + 6], 16)}' for i in range(0, len(h), 6)] + ['0,0,0'] * (len(ALLPTS) - _vn))
 
+
+# 0. 戰鬥上疊寵物資訊浮窗（2026-10-17 p2）：fixtures/battle_tip_px.json（點 == watch.pts）→ 已知畫面，30 秒不觸發 unknown_long、不設旗標
+_tfx = json.loads((HERE / 'fixtures' / 'battle_tip_px.json').read_text(encoding='utf-8'))
+check('battle_tip fixture 點順序 = watch.pts', [tuple(p) for p in _tfx['points']] == ALLPTS)
+_th = next(s_['px'] for s_ in _tfx['samples'] if s_['f'].endswith('211413-UNKNOWN.png'))
+w, clk, fk = make('battle-tip')
+fk.pixel = (0, ' '.join(f'{int(_th[i:i + 2], 16)},{int(_th[i + 2:i + 4], 16)},{int(_th[i + 4:i + 6], 16)}' for i in range(0, len(_th), 6)), '')
+n_trip = len(TRIPS)
+for _ in range(34):
+    w.cycle(); clk.t += 0.9
+st = watchstate.read()
+check('戰鬥寵物資訊浮窗 30 s：不觸發 unknown_long / verify_suspect、不 trip、label = 戰鬥中（寵物資訊浮窗）', st['alerts'] == [] and st['flags']['verify_suspect'] is False
+      and st['flags']['unknown_screen'] is False and len(TRIPS) == n_trip and st['screen']['label'] == '戰鬥中（寵物資訊浮窗）', str(st['screen']))
 
 # 1. 答題介面（合成模擬圖）→ 第一輪就設旗標（不等 10 秒）
 w, clk, fk = make('vr-quiz')
