@@ -6,8 +6,12 @@
 #   -Green N：綠字二值化（G > N 且 G - max(R,B) > 60 視為字；優先於 -Light / -Dark）。背包刪除管理提示窗的綠字清單 (40,240,0) 用，
 #     米黃底、白色「是否批量刪除道具?」都變白 → 只剩清單（2026-10-14：不二值化時 Windows OCR 常整行漏讀）。
 #   -Image 路徑：改讀截圖檔（gui shot 存的 1440 寬或原始 2880 寬都可，依寬度換算），不碰遊戲；離線核對 OCR 參數 / 做 fixtures 用。
+#   -Small 1：先把整張客戶區縮成跟 gui shot 同一張 1440 縮圖（psawin.ps1 ConvertTo-PsaSmall，HighQualityBicubic）再裁框放大，
+#     讓實機讀到的像素跟截圖 / -Image 離線讀完全相同。預設 0 = 舊行為（直接從客戶區原生 2880 裁框縮放，其他呼叫者不受影響）。
+#     2026-10-17 每日任務快速合成彈窗大字（黃字黑邊 16px）：-Image 讀 1440 截圖讀得出「合成弓箭8」，實機從原生 2880 取像 4 倍率全空（229）；
+#     把截圖放大 2 倍模擬原生 → 3/4/5 倍全掉、只剩 2 倍。根因同 2e224bc（numglyph px vs spixel）。-Image 給 2880 原圖時 -Small 1 也會先縮。
 #   每行的 x / y = 該行文字在截圖座標的中心。
-param([int]$X, [int]$Y, [int]$Wd, [int]$Ht, [int]$Zoom = 3, [int]$Dark = 150, [string]$Zooms = "", [int]$Light = 0, [int]$Green = 0, [string]$Image = "")
+param([int]$X, [int]$Y, [int]$Wd, [int]$Ht, [int]$Zoom = 3, [int]$Dark = 150, [string]$Zooms = "", [int]$Light = 0, [int]$Green = 0, [string]$Image = "", [int]$Small = 0)
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Drawing, System.Runtime.WindowsRuntime
 Add-Type @"
@@ -98,6 +102,11 @@ $full = New-Object System.Drawing.Bitmap $r.R, $r.B
 $g = [System.Drawing.Graphics]::FromImage($full); $dc = $g.GetHdc()
 $ok = [WO]::PrintWindow($h, $dc, 3); $g.ReleaseHdc($dc); $g.Dispose()
 if (-not $ok) { Out-Json @{ ok = $false; error = 'PrintWindow 失敗' } }
+}
+# -Small 1：縮成 gui shot 那張 1440 縮圖再裁（舊 server 已載入的 psawin 沒有 ConvertTo-PsaSmall 就重載）
+if ($Small -gt 0 -and $k -gt 1.01) {
+  if (-not (Test-Path Function:\ConvertTo-PsaSmall)) { . (Join-Path $PSScriptRoot 'psawin.ps1') }
+  $sm = ConvertTo-PsaSmall $full $k; $full.Dispose(); $full = $sm; $k = 1
 }
 $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
 $null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType = WindowsRuntime]

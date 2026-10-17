@@ -529,6 +529,30 @@ def make_verify_fixture() -> list:
     return miss
 
 
+# ---- 每日委託面板兩項計數字區（daily.STATE_GRID → dailyplan.count_area；2026-10-17 dev-pop-live）----
+# 全是紅「0/1」（今天沒有任何 1/1 綠的實機截圖）；綠只在 test_daily 用合成點陣測
+DAILY_COUNT_SRC = ['daily-p1-a.png'] + [f'dp-{r}-{i}.png' for r in ('DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5') for i in (1, 2, 3, 4, 5)] + \
+                  [f'dp-{r}-b.png' for r in ('DKBO2', 'DKBO3', 'DKBO4', 'DKBO5')]
+
+
+def make_daily_counts_fixture() -> list:
+    """daily_panel_counts.json：每張委託面板截圖兩項計數字區格點的 hex 顏色（直接 pngread，不走 shotcache）。回缺的檔案"""
+    import daily
+    cases, miss = [], []
+    for rel in DAILY_COUNT_SRC:
+        p = CACHE / rel
+        if not p.exists():
+            miss.append(rel)
+            continue
+        w, h, bpp, rows = pngread.decode(p.read_bytes())
+        px = pngread.pixels(rows, bpp, [pt for g in daily.STATE_GRID for pt in g])
+        cases.append({'img': rel, 'truth': ['red', 'red'],
+                      'grid': [''.join('%02x%02x%02x' % tuple(px[pt][:3]) for pt in g) for g in daily.STATE_GRID]})
+    write('daily_panel_counts.json', {'_說明': '每日委託面板兩項計數「0/1」字區（daily.STATE_GRID 每項 72 點，hex 每點 6 字）；p1 2026-10-17 dp-*.png / daily-p1-a.png，全是紅 0/1（人眼看過）',
+                                      'cases': cases})
+    return miss
+
+
 def main() -> int:
     if '--only' in sys.argv:                      # 只產指定的 fixture（不重產其他檔）：--only bag_slots,leader_badge（另有 world / panel / popup / bag_del / bag_itempop / numglyph / itemname_newtag / verify / shop）
         names = sys.argv[sys.argv.index('--only') + 1].split(',')
@@ -537,7 +561,7 @@ def main() -> int:
                     'panel': make_panel_fixture, 'popup': make_popup_fixture, 'bag_del': make_bag_del_fixture,
                     'bag_itempop': make_bag_itempop_fixture, 'numglyph': make_numglyph_fixture,
                     'itemname_newtag': make_itemname_newtag_fixture, 'verify': make_verify_fixture,
-                    'shop': make_shop_fixture}[n]()
+                    'shop': make_shop_fixture, 'daily_counts': make_daily_counts_fixture}[n]()
             print(n, '缺', miss) if miss else None
         return 0
     done, skipped = [], []

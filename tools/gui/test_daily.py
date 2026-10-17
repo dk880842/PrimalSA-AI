@@ -181,8 +181,8 @@ try:
     # craft_item：剛開讀空、重讀到大字 → 照常合成（按合成鈕）
     _clicks.clear(); _snaps.clear(); _seq[:] = [[], LV['name']]
     def _px(pts, cmd='pixel'):
-        if list(pts) == [daily.STATE_PX[0]]:
-            return [(0, 200, 0)]                                     # 合成後該項綠
+        if list(pts) == [p for g in daily.STATE_GRID for p in g]:
+            return [(135, 255, 91)] * len(daily.STATE_GRID[0]) + [(240, 210, 170)] * len(daily.STATE_GRID[1])   # 合成後第 1 項綠
         if list(pts) == daily.POP_COUNT_PX:
             return [tuple(c) for c in LV['counts']]
         return [(223, 187, 147)] * len(pts)
@@ -1413,6 +1413,85 @@ T.inj['plus_unread'] = True                                               # ＋ 
 rc, out, _ = go(W, T)
 buys = [a for a in W.log if a[0] == 'buy']
 check('＋ 讀不回 → 每次買 1 個、買 n 次：照樣 5/5、總共買 160 個、每次數量都是 1', rc == 0 and W.bought_n == 160 and all(W.reward[r] == 5 for r in W.roles) and all(a[3] == 1 for a in buys), f'{rc} {out[-300:]}')
+
+# ---------------- 委託面板計數字區（dev-pop-live 2026-10-17）----------------
+CX = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_panel_counts.json').read_text(encoding='utf-8'))
+_hex = lambda s: [tuple(int(s[i + j:i + j + 2], 16) for j in (0, 2, 4)) for i in range(0, len(s), 6)]   # noqa: E731
+bad = [c['img'] for c in CX['cases'] if [dp.count_area(_hex(g)) for g in c['grid']] != c['truth']]
+check(f'count_area：實機紅 0/1 面板 {len(CX["cases"])} 張兩項全判 red', len(CX['cases']) == 30 and not bad, str(bad[:3]))
+check('STATE_GRID 每項 72 點、涵蓋紅字 x 390～398 × y 285～299', all(len(g) == 72 for g in daily.STATE_GRID)
+      and min(x for x, _ in daily.STATE_GRID[0]) <= 390 and max(x for x, _ in daily.STATE_GRID[0]) >= 398
+      and min(y for _, y in daily.STATE_GRID[0]) <= 285 and max(y for _, y in daily.STATE_GRID[0]) >= 299)
+_bg = [(240, 210, 170)] * 60 + [(170, 150, 120)] * 12                     # 米色底 + 暗邊
+check('count_area：米色底含暗邊 (170,150,120) → ?（舊 count_state 會把暗邊當 green）', dp.count_area(_bg) == '?' and dp.count_state((170, 150, 120)) == 'green')
+_one = [(135, 255, 91) if (i % 9) in (4, 5) else (240, 210, 170) for i in range(72)]   # 合成點陣：「1」= 中間兩欄直筆
+check('count_area：「1」細直筆（中間兩欄綠）→ green；舊單點 390 落在米色底', dp.count_area(_one) == 'green' and _one[2 + 3 * 9] == (240, 210, 170))
+check('count_area：只有 1～2 點綠（雜訊）→ ?；None / 空 → ?', dp.count_area([(135, 255, 91)] * 2 + _bg) == '?' and dp.count_area(None) == '?' and dp.count_area([]) == '?')
+_kp2 = uikit.px
+try:
+    uikit.px = lambda pts, cmd='pixel': ([(255, 0, 0)] * 72 + _one) if len(pts) == 144 else []
+    check('Tools.item_states：一次取 144 點 → [red, green]', daily.Tools().item_states() == ['red', 'green'])
+    uikit.px = lambda pts, cmd='pixel': []
+    check('Tools.item_states：px 讀失敗 → [?, ?]', daily.Tools().item_states() == ['?', '?'])
+finally:
+    uikit.px = _kp2
+
+# ---------------- 情境：上次手動補合成（面板已 1/1 綠、進度檔沒記）→ 不開彈窗、記 crafted ----------------
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+daily.ROLES[:] = W.roles
+daily.LEADER = W.roles[0]
+quiet(daily.run, roles=W.roles, confirm_buy=True, from_stage='prep', stop_after='sam', tools=T, recipes=RECIPES, stores=STORES, where=WHERE)
+
+
+def _manual(r, ring, k):
+    """假世界裡人手動在遊戲合成：扣真實材料（背包 → 個人倉庫 → 公倉）、加成品、面板該項變綠（進度檔不知道）"""
+    nm = dp.norm(W.items[r][ring - 1][k])
+    for n, q in W.recipes[nm][0]:
+        src = next(d for d in (W.bag[r], W.personal[r], W.public) if d.get(n, 0) >= q)
+        src[n] -= q
+        if src[n] <= 0:
+            del src[n]
+    W.bag[r]['成品:' + nm] = W.bag[r].get('成品:' + nm, 0) + 1
+    W.green[r][ring - 1][k] = True
+
+
+_manual('DKBO2', 2, 1)                                                    # sam 後 DKBO2 第 2 環下項（合成爪 7，薩村料）被手動合成（同 p1 20:24 實況）
+_, out_f = quiet(daily.run, roles=W.roles, confirm_buy=True, stop_after='fish', tools=T, recipes=RECIPES, stores=STORES, where=WHERE)
+_manual('DKBO3', 1, 0)                                                    # fish 後 DKBO3 第 1 環兩項都手動合成了
+_manual('DKBO3', 1, 1)
+rc, out, _ = go(W, T)
+crafts = [a for a in W.log if a[0] == 'craft']
+check('手動補完的項：全流程 rc 0、5 人 5/5', rc == 0 and all(W.reward[r] == 5 for r in W.roles), f'{rc} {out[-400:]}')
+check('DKBO2 第 2 環下項沒再合成（mid）；DKBO3 第 1 環兩項沒再合成、直接提交（final）；腳本合成 47 項', not any(a[1] == 'DKBO2' and dp.norm(a[2]) == '合成爪7' for a in crafts)
+      and not any(a[1] == 'DKBO3' and dp.norm(a[2]) in ('厚肉塊串燒', '熱的魚味噌湯') for a in crafts) and W.crafted_n == 47 and W.submitted['DKBO3'][0], f'{W.crafted_n}')
+check('事件記「面板已 1/1 綠 → 跳過不開彈窗」（mid 1 項 + final 2 項）', out_f.count('面板已 1/1 綠') == 1 and out.count('面板已 1/1 綠') == 2, out_f[-300:])
+st2 = dp.load(dp.role_path('DKBO2'))
+check('DKBO2 進度檔：第 2 環 crafted 下項 True、已提交', st2['rings'][1]['crafted'][1] and st2['rings'][1]['submitted'])
+
+# ---------------- daily.py mark（離線補記）----------------
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+quiet(daily.run, roles=W.roles, from_stage='prep', stop_after='read', tools=T, recipes=RECIPES, stores=STORES, where=WHERE)
+rc1, o1 = quiet(daily.mark, 'DKBO2', 1, '上', 'crafted')
+s1 = dp.load(dp.role_path('DKBO2'))
+check('mark crafted：rc 0、rings[0].crafted[0] True、帳上有成品', rc1 == 0 and s1['rings'][0]['crafted'] == [True, False] and s1['ledger']['bag'].get('成品:厚肉塊串燒') == 1, o1)
+check('mark crafted：材料帳上都沒有（還沒買）→ 說明「帳上沒有…只加成品」', '帳上沒有' in o1 and '只加成品' in o1, o1)
+rc2, o2 = quiet(daily.mark, 'DKBO2', 1, '上', 'crafted')
+check('mark crafted 再跑一次：不變', rc2 == 0 and '不變' in o2, o2)
+rc3, o3 = quiet(daily.mark, 'DKBO2', '1', '下', 'submitted')
+s3 = dp.load(dp.role_path('DKBO2'))
+check('mark submitted：整環兩項 crafted + submitted、帳上成品扣掉', rc3 == 0 and s3['rings'][0] == {'crafted': [True, True], 'submitted': True}
+      and not any(k.startswith('成品:') for k in s3['ledger']['bag']), f'{o3} {s3["rings"][0]} {s3["ledger"]["bag"]}')
+check('mark 參數錯（環 6 / 中 / done）→ EXIT_ARGS', all(quiet(daily.mark, 'DKBO2', *a)[0] == daily.EXIT_ARGS for a in ((6, '上', 'crafted'), (1, '中', 'crafted'), (1, '上', 'done'))))
+check('mark 沒讀過清單的角色 → EXIT_ARGS', quiet(daily.mark, 'DKBO99', 1, '上', 'crafted')[0] == daily.EXIT_ARGS)
+daily.ROLES[:] = W.roles
+rcm, om = quiet(daily.main, ['mark', 'DKB04', '2', '上', 'crafted'])
+check('main mark：DKB04（數字 0）→ DKBO4、rc 0', rcm == 0 and dp.load(dp.role_path('DKBO4'))['rings'][1]['crafted'][0], om[-200:])
+check('main mark 參數不足 → EXIT_ARGS', quiet(daily.main, ['mark', 'DKBO4', '2'])[0] == daily.EXIT_ARGS)
+check('POP_NAME_OPTS 帶 -Small 1、面板名稱 NAME_OPTS 不帶（其他呼叫者不變）', daily.POP_NAME_OPTS[-2:] == ('-Small', '1') and '-Small' not in daily.NAME_OPTS)
 
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))

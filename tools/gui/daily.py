@@ -22,6 +22,8 @@
           快速合成彈窗（第二輪，p1 樣本 99 張）：大字框 380,398,204,50；材料列整欄一次讀（dp.pop_rows 依 y 分列）；▼ 亮（材料 4 種以上）且還分不出 → 材料列內拖一次再讀（pop_scroll）；
           合成前 dp.pop_check：材料列依序比對配方 + 一定要有大字證據（item-book 有 38 組材料完全相同的不同成品）；None 且 ▼ → 捲一次再核對、捲回頂端
           大字投不出名字 → pop_name 隔 0.5 秒只重讀大字、最多 3 次（2026-10-17 修 p1 229：剛開彈窗大字全空；材料齊時字色仍是黃字，不是白字）；仍不行 229 + ui-log 存 daily-pop-fail 現場圖
+          大字 OCR 帶 -Small 1（POP_NAME_OPTS）：實機先縮成跟截圖同一張 1440 縮圖再裁（根因：實機原生 2880 取像讀空、截圖讀得出，2026-10-17 dev-pop-live）
+  mid / final 每人開頭 sync_greens：還沒記 crafted 的項先看面板計數（STATE_GRID 字區 → dp.count_area），已 1/1 綠 → 記 crafted 不開彈窗；兩項都綠 → 直接提交
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
   （便利店選商品：shopkit.select_item 標題逐倍率比對該店清單投票 title_is，第二輪離線 132/132）
   sam     into_shop → 5 人輪流沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
@@ -35,6 +37,7 @@
   uv run --no-project python tools/gui/daily.py read-all [--roles DKBO,DKBO2]      # 只做 prep + read（不花錢）
   uv run --no-project python tools/gui/daily.py plan [--roles ...]                  # 離線：讀進度檔印每人計畫與石幣估算
   uv run --no-project python tools/gui/daily.py show                                # 離線：每人各段 / 各環狀態
+  uv run --no-project python tools/gui/daily.py mark <角色> <環> <上|下> crafted|submitted   # 離線：手動補完後同步進度檔（submitted 整環、上下不看）
   uv run --no-project python tools/gui/daily.py run [--roles ...] [--from 段] [--confirm-buy] [--fresh] [--dry-run] [--no-grind] [--regroup pull|gather]
     --confirm-buy  買材料（500 / 個）與合成（1000 / 項）都花石幣：沒給 = 讀完清單 + 印計畫就停（221）
     --from 段      prep / read / plan / sam / mid / fish / final / finish；預設從進度檔續跑（段內跳過已完成的人 / 已買的種類 / 已合成的項）
@@ -126,7 +129,10 @@ FISH_WALK = (2000, 73, 103)                                      # 瑪麗娜絲 
 NAME_BOXES = [(382, 236, 240, 36), (382, 340, 240, 36)]          # 第 1 / 2 項名稱（x386～、y242～268 / 346～372；寬 200 會切掉「肉丸」的丸）
 NAME_OPTS = ('-Zooms', '2,3,4,5', '-Dark', '0')                   # 褐字米色底：不二值化，4 倍率逐倍率 snap 投票（dp.vote_lines；離線 50/50，2026-10-17）
 MERGE_XY = [(735, 265), (735, 370)]                              # 兩顆「合成」藍鈕
-STATE_PX = [(390, 291), (390, 396)]                              # 兩項計數「0」紅字像素（1/1 綠字位置相同）
+STATE_PX = [(390, 291), (390, 396)]                              # 兩項計數「0」紅字像素（舊單點；只留給文件 / 測試對照，判色改用 STATE_GRID）
+# 兩項計數第一個字的字區格點（x 386～402、y 285～299 每 2 點，各 9×8 = 72 點）→ dp.count_area。
+# 紅「0」量過 x 390～398 × y 284～299（dp-*.png 30 張）；綠「1/1」沒有實機樣本（2026-10-17），單點 390 可能落在「1」細筆畫外 → 用字區（dev-pop-live）
+STATE_GRID = [[(x + dx, y + dy) for dy in range(-6, 9, 2) for dx in range(-4, 13, 2)] for x, y in STATE_PX]
 PAGE_BOX = (520, 672, 70, 45)                                    # 頁碼「n/5」
 PREV_XY, NEXT_XY = (363, 692), (745, 692)
 SUBMIT_XY = (1015, 685)
@@ -135,6 +141,10 @@ POP_NAME_BOX = (380, 398, 204, 50)                               # 彈窗成品�
                                                                  #   離線 99 張 0 誤認：舊框 392,404,180,38 97/99、加寬但不加高的框掉到 83～89，2026-10-17 第二輪）
 POP_NAME_TRIES, POP_NAME_WAIT = 3, 0.5                          # 大字投票讀不出 → 只重讀大字（最多 3 次、隔 0.5 秒）：p1 2026-10-17 20:09 229 彈窗剛開大字 4 倍率全空、
                                                                  #   同一彈窗 20:12 實機圖（材料 1/1 綠）用同參數讀得出且字色與舊樣本相同（黃字黑邊，不是白字）→ 推測剛開時還沒畫好 / OCR 逾時回空
+# 彈窗大字專用：ocr.ps1 -Small 1 = 先縮成 gui shot 同一張 1440 縮圖再裁（2026-10-17 dev-pop-live 修 229 根因）。
+# 實機 ocr.ps1 預設從客戶區原生 2880 裁框縮放，-Image 讀的是 1440 截圖：20:24 現場圖 -Image 讀得出「合成弓箭8」，實機重讀 3 次全空；
+# 把截圖放大 2 倍模擬原生 → 3/4/5 倍全掉（同 2e224bc numglyph px vs spixel）。加 -Small 後實機取像 = 存證截圖 = 離線樣本。
+POP_NAME_OPTS = NAME_OPTS + ('-Small', '1')
 POP_LIST_BOX = (686, 228, 234, 402)                              # 彈窗材料列整欄一次讀（每行帶 y → dp.pop_rows 分列；視野 y 228～630、列距 92；99 張 0 誤認）
 POP_DOWN_PX = [(812, 626), (820, 626), (828, 626)]               # 材料列下緣黃 ▼（還有更多列；5 種材料 + 石幣要捲）
 POP_UP_PX = [(812, 242), (820, 242), (828, 242)]                 # 材料列上緣黃 ▲（拖過後才出現；短清單也會冒、會蓋住第 1 列右半）
@@ -440,8 +450,7 @@ class Tools:
     def read_page(self) -> dict:
         """目前頁：{'names': [OCR 原始行 ×2（uikit.ocr_lines，多倍率）], 'states': ['red'|'green'|'?' ×2]}（呼叫端 dp.vote_lines 逐倍率投票）"""
         names = [uikit.ocr_lines(box, *NAME_OPTS) for box in NAME_BOXES]
-        cols = uikit.px(STATE_PX) or [None, None]
-        return {'names': names, 'states': [dp.count_state(c) for c in cols]}
+        return {'names': names, 'states': self.item_states()}
 
     def peek_item(self, k: int, panel: dict | None = None) -> dict:
         """名稱不確定時：開該項快速合成彈窗讀成品名大字 + 材料列（不按彈窗合成）→ 關彈窗。
@@ -474,7 +483,7 @@ class Tools:
         回最後一次的原始行（pop_check 照舊要大字證據，不放寬）"""
         known = _recipes()
         for i in range(POP_NAME_TRIES):
-            lines = uikit.ocr_lines(POP_NAME_BOX, *NAME_OPTS)
+            lines = uikit.ocr_lines(POP_NAME_BOX, *POP_NAME_OPTS)
             if dp.vote_lines(lines, known)['name'] or i == POP_NAME_TRIES - 1 or not uikit.is_open(uikit.QCRAFT):
                 return lines
             uikit.sleep(POP_NAME_WAIT)
@@ -523,7 +532,7 @@ class Tools:
             return False, '彈窗特徵不在，沒按合成'
         close_pop()
         for _ in range(8):
-            if uikit.is_open(uikit.DAILY) and dp.count_state((uikit.px([STATE_PX[k]]) or [None])[0]) == 'green':
+            if uikit.is_open(uikit.DAILY) and self.item_states()[k] == 'green':
                 return True, ''
             uikit.sleep(0.3)
         return False, '合成後該項沒變綠'
@@ -532,8 +541,12 @@ class Tools:
         return uikit.safe_click(*SUBMIT_XY, uikit.DAILY, note='daily 提交委託', allow=('submit',), wait_ms=1500)
 
     def item_states(self) -> list:
-        cols = uikit.px(STATE_PX) or [None, None]
-        return [dp.count_state(c) for c in cols]
+        """兩項計數 → ['red'|'green'|'?' ×2]：字區格點（STATE_GRID）一次取色、dp.count_area 判"""
+        n = len(STATE_GRID[0])
+        cols = uikit.px([p for g in STATE_GRID for p in g]) or []
+        if len(cols) != n * len(STATE_GRID):
+            return ['?'] * len(STATE_GRID)
+        return [dp.count_area(cols[i * n:(i + 1) * n]) for i in range(len(STATE_GRID))]
 
     # ---- 便利店 ----
     def shop_enter(self, store) -> bool:
@@ -643,9 +656,7 @@ class Daily:
             self.fail(EXIT_ARGS, f'跨過 00:00（進度檔日期 {self.team.get("date")}，現在 {dp.today()}）：遊戲環數已清 0，停手；人看過再決定 --fresh', crossed=True)
 
     def plan_of(self, role) -> dict:
-        st = self.st[role]
-        done = [[bool(d) for d in pair] for pair in (st.get('done') or [])] or None
-        return dp.plan_role(st['items'], self.recipes, self.where, self.stores, done)
+        return role_plan(self.st[role], self.recipes, self.where, self.stores)
 
     def role_complete(self, role) -> bool:
         st = self.st[role]
@@ -1002,11 +1013,32 @@ class Daily:
             self.st[role]['stages'][stage] = True
             self.save_role(role)
 
+    def sync_greens(self, role, plan, final: bool) -> bool:
+        """開每環前先看面板：還沒記 crafted 的項，面板已 1/1 綠（例：上次手動補合成、進度檔沒記）→ 記 crafted、不開彈窗。
+        只看有這種項的環；開了面板回 True（呼叫端接著用、最後關）。兩項都綠 → 後面 ring_ready 直接提交"""
+        T, st = self.T, self.st[role]
+        rings = [(r, rs) for r, rs in zip(plan['rings'], st['rings']) if r['supported'] and not rs.get('submitted')
+                 and any(not it['done'] and not rs['crafted'][k] for k, it in enumerate(r['items']))]
+        if not rings:
+            return False
+        self.open_daily(role)
+        for r, rs in rings:
+            if not T.goto_page(r['ring']):
+                self.fail(EXIT_CRAFT, f'{role} 翻不到第 {r["ring"]} 頁', role=role)
+            states = T.item_states()
+            for k, it in enumerate(r['items']):
+                if not it['done'] and not rs['crafted'][k] and states[k] == 'green':
+                    msg = dp.mark_item(st, r, k, 'crafted')
+                    self.save_role(role)
+                    event(f'{stage_name(final)} {role} 第 {r["ring"]} 環{"上下"[k]}項面板已 1/1 綠 → 跳過不開彈窗（{msg}）')
+        return True
+
     def craft_role(self, role, final: bool):
         T, st = self.T, self.st[role]
         plan = self.plan_of(role)
         opened = False
         try:
+            opened = self.sync_greens(role, plan, final)
             for r, rs in zip(plan['rings'], st['rings']):
                 if not r['supported'] or rs.get('submitted'):
                     continue
@@ -1230,6 +1262,40 @@ class Daily:
             getattr(self, 'stage_' + s)()
 
 
+def role_plan(st, recipes, where, stores) -> dict:
+    """每人進度（items + done）→ dp.plan_role 計畫（Daily.plan_of 與 mark 共用）"""
+    done = [[bool(d) for d in pair] for pair in (st.get('done') or [])] or None
+    return dp.plan_role(st['items'], recipes, where, stores, done)
+
+
+def mark(role, ring, which, what) -> int:
+    """離線補記進度檔（不碰遊戲）：手動在遊戲裡補完某項合成 / 提交後同步，續跑才不會再做一次。
+    ring = 1～5；which = 上 / 下（submitted 是整環，上下不看）；what = crafted / submitted（dp.mark_item）"""
+    k = {'上': 0, '下': 1}.get(str(which))
+    try:
+        ring = int(ring)
+    except ValueError:
+        ring = 0
+    if k is None or not 1 <= ring <= dp.RINGS or what not in ('crafted', 'submitted'):
+        print(f'{SRC}：用法 daily.py mark <角色> <環 1～{dp.RINGS}> <上|下> crafted|submitted', file=sys.stderr)
+        return EXIT_ARGS
+    st = dp.load(dp.role_path(role))
+    if not st or not st.get('read'):
+        print(f'{SRC}：{role} 沒有已讀清單的進度檔，不用補記', file=sys.stderr)
+        return EXIT_ARGS
+    if dp.stale(st):
+        print(f'{SRC}：{role} 進度檔日期 {st.get("date")} 不是今天，不補記', file=sys.stderr)
+        return EXIT_ARGS
+    stores, where = dp.load_stores()
+    rp = role_plan(st, dp.load_recipes(), where, stores)['rings'][ring - 1]
+    msg = dp.mark_item(st, rp, k, what)
+    if msg:
+        dp.save(dp.role_path(role), st)
+        event(f'mark {role} 第 {ring} 環{which}項 {what}：{msg}')
+    print(f'{role} 第 {ring} 環{which}項 {what}：{msg or "進度檔已是這個狀態，不變"}')
+    return 0
+
+
 def stage_name(final: bool) -> str:
     return 'final' if final else 'mid'
 
@@ -1315,7 +1381,8 @@ def main(argv=None) -> int:
     if hasattr(sys.stdout, 'reconfigure'):
         sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    ap.add_argument('cmd', choices=['read-all', 'plan', 'show', 'run'])
+    ap.add_argument('cmd', choices=['read-all', 'plan', 'show', 'run', 'mark'])
+    ap.add_argument('mark_args', nargs='*', help='mark 用：<角色> <環 1～5> <上|下> crafted|submitted')
     ap.add_argument('--roles', help='逗號分隔角色（預設本視窗名單全部）')
     ap.add_argument('--from', dest='from_stage', choices=list(dp.STAGES), help='從這一段開始（預設從進度檔續跑）')
     ap.add_argument('--confirm-buy', action='store_true', help='買材料（500 / 個）與合成（1000 / 項）；沒給 = 讀清單 + 印計畫就停（221）')
@@ -1338,6 +1405,16 @@ def main(argv=None) -> int:
             return EXIT_ARGS
     if a.cmd == 'show':
         return show()
+    if a.cmd == 'mark':
+        if len(a.mark_args) != 4:
+            print(f'{SRC}：用法 daily.py mark <角色> <環 1～{dp.RINGS}> <上|下> crafted|submitted', file=sys.stderr)
+            return EXIT_ARGS
+        import charname
+        role = next((x for x in ROLES if charname.canon(x) == charname.canon(a.mark_args[0])), None)
+        if not role:
+            print(f'{SRC}：角色 {a.mark_args[0]} 不在本視窗名單 {ROLES}', file=sys.stderr)
+            return EXIT_ARGS
+        return mark(role, *a.mark_args[1:])
     if a.cmd == 'plan' or a.dry_run:
         return _finish_cli(run(roles, dry_run=True))
     import winenv

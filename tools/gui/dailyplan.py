@@ -491,6 +491,23 @@ class Ledger:
         self.bag[PRODUCT_PREFIX + product] += 1
         return True
 
+    def consume(self, mats) -> list:
+        """手動合成補記用：材料已被用掉，帳上依 背包 → 個人倉庫 → 公倉 扣（胡椒不扣）；回帳上找不到的 [(名稱, 缺量)]"""
+        miss = []
+        for n, q in mats:
+            if n in PEPPERS:
+                continue
+            for box in (self.bag, self.personal, self.public):
+                take = min(q, box.get(n, 0))
+                if take:
+                    box[n] -= take
+                    q -= take
+                    if box[n] <= 0:
+                        del box[n]
+            if q > 0:
+                miss.append((n, q))
+        return miss
+
     def submit(self, products) -> None:
         for p in products:
             k = PRODUCT_PREFIX + p
@@ -587,6 +604,68 @@ def count_state(rgb) -> str:
     if g > 140 and r < 190 and b < 170:
         return 'green'
     return '?'
+
+
+def green_strict(rgb) -> bool:
+    """委託面板計數的綠字（1/1，估 135,255,91）嚴格版：G 要明顯高過 R、B。
+    count_state 的寬鬆綠（g>140 且 r<190）會把面板米色底的暗邊（例 170,150,120）也當綠 → 字區多點取樣不能用它。"""
+    if not rgb:
+        return False
+    r, g, b = rgb[:3]
+    return g > 180 and g - r > 50 and g - b > 60
+
+
+def count_area(colors, min_n: int = 3) -> str:
+    """委託面板一項計數「0/1」/「1/1」第一個字的字區多點顏色（daily.STATE_GRID）→ 'red' | 'green' | '?'。
+    紅點（255,0,0 系）≥ min_n → red；否則嚴格綠點 ≥ min_n → green；其他 '?'（看不出就當不知道，呼叫端照舊流程）。
+    為什麼不用單點：舊 STATE_PX 390,291 落在「0」的左筆畫，「1/1」的「1」是細直筆，單點很可能落在米色底（2026-10-17 dev-pop-live 量紅字字區 x 390～398 × y 284～299）"""
+    cs = [c for c in (colors or []) if c]
+    if sum(1 for c in cs if count_state(c) == 'red') >= min_n:
+        return 'red'
+    if sum(1 for c in cs if green_strict(c)) >= min_n:
+        return 'green'
+    return '?'
+
+
+def mark_item(st: dict, ring_plan: dict, k: int, what: str) -> str:
+    """進度檔補記一項已完成（面板已 1/1 綠 / 手動補完）。st = 每人進度、ring_plan = plan_role 的該環、k = 0 上 / 1 下。
+    crafted：rings[].crafted[k] = True；帳上照合成扣材料、加成品；背包帳上不夠 → Ledger.consume 依 背包 → 個人倉庫 → 公倉 扣
+      （人手動合成前一定已把料取到背包；帳不扣的話後面存倉 / 取倉會找不到東西 → 92 / 228），扣完歸 0 的從 in_personal / in_public 拿掉。
+    submitted：整環（k 不看）兩項沒記 crafted 的先照 crafted 記、再 submitted = True、帳上扣成品。回一行說明（已記過回空字串）"""
+    rs = st['rings'][ring_plan['ring'] - 1]
+    led = Ledger(st.get('ledger'))
+    notes = []
+
+    def craft_one(i):
+        it = ring_plan['items'][i]
+        if it.get('done') or rs['crafted'][i]:
+            return
+        if not led.craft(it.get('mats') or [], it['name']):
+            miss = led.consume(it.get('mats') or [])
+            led.bag[PRODUCT_PREFIX + it['name']] += 1
+            notes.append(f'「{it["name"]}」材料從背包 / 倉庫帳上扣' + (f'（帳上沒有：{"、".join(f"{n}×{q}" for n, q in miss)}，只加成品）' if miss else ''))
+        rs['crafted'][i] = True
+        notes.append(f'「{it["name"]}」記為已合成')
+    if what == 'crafted':
+        if rs.get('submitted') or ring_plan['items'][k].get('done') or rs['crafted'][k]:
+            return ''
+        craft_one(k)
+    elif what == 'submitted':
+        if rs.get('submitted'):
+            return ''
+        for i in range(len(ring_plan['items'])):
+            craft_one(i)
+        led.submit([it['name'] for it in ring_plan['items'] if not it.get('done')])
+        rs['submitted'] = True
+        notes.append(f'第 {ring_plan["ring"]} 環記為已提交')
+    else:
+        raise ValueError(f'mark 只收 crafted / submitted：{what}')
+    st['ledger'] = led.to_dict()
+    used = {n for it in ring_plan['items'] for n, _ in (it.get('mats') or [])}
+    for key, box in (('in_personal', led.personal), ('in_public', led.public)):
+        if key in st:                                   # 只動這環材料：倉庫帳扣到 0 的從清單拿掉
+            st[key] = [n for n in st[key] if n not in used or box.get(n, 0) > 0]
+    return '；'.join(notes)
 
 
 def popup_short(colors) -> bool:
