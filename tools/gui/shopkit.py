@@ -7,8 +7,14 @@
            visible_candidates（清單定位候選列）、qty_digit_xy（數字鍵盤鍵位）
   座標     商店面板固定座標（ui/shop.md、notes/daily-probe.md M11～M13；截圖 1440×830、鏡頭最左）
   動作     shop_open（✕ 紅圓像素）、read_title（回 OCR 原始行；主讀法投不出就 TITLE_FALLBACK 補讀）、select_item（名稱定位 + 捲動）、set_qty（數字鍵盤）、buy_once（購買 → 提示確定）、
-           qty_now（讀數量框）、close_shop（✕ 1207,107；買完還疊提示窗再補）
+           qty_now（讀數量框：**像素字形 numglyph kind 'shop'**，2026-10-17 改；OCR 只當位數相符的備援）、close_shop（✕ 1207,107；買完還疊提示窗再補）
 鐵則 3：本模組不讀石幣 / 鑽石（buywendy 自己用 parse_coin 讀石幣；daily 不讀）；只在呼叫端明確要買時才按「購買」。
+數量框（2026-10-17 p1 正式跑 227 修）：Windows OCR 讀單獨一個白色「1」各種參數都回空 → 改 numglyph 像素切字 + 樣板（fixtures/num_glyph_tpl.json 'shop'；
+  樣本只有 0 1 3 的話其他數字 = 讀不出 None → 呼叫端不買 / 不判買到；OCR 讀到且位數 = 切出字數才採用並學字；讀不出存圖 ui-log/*-shop-qty-unread.png 供人工補樣板）。
+  set_qty：先讀一次，已是 n（開店預設 1）就不開鍵盤；否則鍵盤輸入後讀回 == n 才算成功。
+  qty_chunks：要買的數量拆成「每位數字都有樣板」的幾次（樣板只有 1 3 時 7 → 3+3+1、20 → 13+3+3+1），學到新數字自動變少次。
+  buy_checked：購買前後各讀一次數量框 → 'bought'（讀到 0）/ 'zeroish'（變成一個認不出的字：ui/shop.md 競技場實機「購買後數量框自動變 0」，
+  0 尚無樣板 → 視為買到，**呼叫端要用背包名稱核對把關**）/ 'not_bought'（點陣跟買前完全一樣 = 仍是原數量）/ 'unknown'（其他：不確定，不重買）。
 **未實機**（select_item / set_qty 的座標取自 daily-probe 探路量測，2026-10-17；shop_open / 購買 / 確定 = 既有實測值）。
 """
 import re
@@ -18,6 +24,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import dailyplan  # noqa: E402  （vote_lines / norm：標題逐倍率投票）
+import numglyph  # noqa: E402  （數量框像素字形）
 import uikit  # noqa: E402
 
 # ---- 座標（截圖 1440×830）----
@@ -30,7 +37,7 @@ TITLE_OPTS = ('-Zooms', '2,3,4,5,6', '-Dark', '0')   # 不二值化、5 倍率**
 TITLE_FALLBACK = (((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Dark', '0')),   # 主讀法投不出名字才依序補讀（倍率鍵加前綴、各自投票）
                   ((880, 185, 230, 45), ('-Zooms', '2,3,4,5,6', '-Light', '92')))
 QTY_XY = (995, 465)                              # 數量框：點它跳出數字鍵盤
-QTY_BOX = (968, 450, 56, 32)                     # 數量白字 bbox 989～1002 × 455～477
+QTY_BOX = numglyph.SHOP_QTY_BOX                  # (968, 450, 56, 32) 數量白字 bbox 989～1002 × 455～477（numglyph kind 'shop'）
 KEY_CLEAR, KEY_ENTER = (910, 455), (910, 572)    # 鍵盤 ✕（清除）/ ↵（確定）
 KEYPAD = {'1': (490, 333), '2': (615, 333), '3': (743, 333), '0': (863, 333),
           '4': (490, 455), '5': (615, 455), '6': (740, 455),
@@ -153,9 +160,76 @@ def read_title(order=None) -> list:
     return lines
 
 
-def qty_now() -> int | None:
-    """讀目前數量框（購買後應為 0）。讀不到 None"""
-    return parse_qty(''.join(uikit.ocr(QTY_BOX, '-Zooms', '2,3', '-Dark', '0')))
+def qty_vote(lines) -> int | None:
+    """數量框 OCR 原始行（多倍率）→ **每個倍率各自**取數字，至少 2 個倍率讀到且全部一致才回值；否則 None。
+    不把各倍率 join 起來（「1」+「1」會變 11 → 位數湊巧對上就學錯字）"""
+    by = {}
+    for ln in lines or ():
+        by.setdefault(ln.get('zoom'), []).append(str(ln.get('text', '')))
+    vals = {''.join(re.findall(r'\d', ''.join(t))) for t in by.values()}
+    vals.discard('')
+    got = [z for z, t in by.items() if re.search(r'\d', ''.join(t))]
+    return int(vals.pop()) if len(vals) == 1 and len(got) >= 2 else None
+
+
+def _qty_ocr() -> int | None:
+    """OCR 備援（單一數字常讀空；numglyph 只在位數 = 像素字數時採用並學字）"""
+    return qty_vote(uikit.ocr_lines(QTY_BOX, '-Zooms', '2,3,4', '-Dark', '0'))
+
+
+def qty_now(log=None) -> int | None:
+    """讀目前數量框（開店 / 選商品後預設 1；購買後歸 0）。像素字形為主（numglyph 'shop'），每個字都認得才算；讀不出 None（不猜）並存圖供補樣板"""
+    r = numglyph.read_number('shop', QTY_BOX, ocr_reads=(_qty_ocr,), sleep_fn=uikit.sleep, tries=2, log=log)
+    if r['value'] is None and r['n'] > 0:
+        uikit.snap('shop-qty-unread')                     # 有字但認不出 → 存圖（人工看了補進 fixtures/num_glyph_tpl.json）
+    return r['value']
+
+
+def known_digits() -> set:
+    """數量框目前認得的數字（種子 + 學到的 'shop' 樣板）"""
+    return {ch for ch, vs in (numglyph.load_tpl().get('shop') or {}).items() if ch.isdigit() and vs}
+
+
+def qty_chunks(q: int, known=None) -> list | None:
+    """q 拆成幾次購買，每次的數量每一位都在 known（認得的數字）裡、≤ 999（鍵盤 3 位）；貪婪取最大。拆不出（沒有 1）→ None"""
+    known = known_digits() if known is None else set(known)
+    out, rem = [], int(q)
+    while rem > 0:
+        c = next((c for c in range(min(rem, 999), 0, -1) if set(str(c)) <= known), None)
+        if c is None:
+            return None
+        out.append(c)
+        rem -= c
+    return out
+
+
+def buy_verdict(before: dict, after: dict, n: int) -> str:
+    """購買前後的數量框讀值（numglyph.read_box 結果，含 rows）→ 'bought' | 'zeroish' | 'not_bought' | 'unknown'（純函式，見檔頭）"""
+    if after.get('value') == 0:
+        return 'bought'
+    if after.get('rows') is not None and after.get('rows') == before.get('rows') and before.get('value') == n:
+        return 'not_bought'
+    if after.get('value') is None and after.get('n') == 1 and before.get('value') == n and after.get('rows') != before.get('rows'):
+        return 'zeroish'
+    return 'unknown'
+
+
+def buy_checked(n: int, log=None) -> str:
+    """數量框已是 n → 讀一次 → 購買 → 確定 → 再讀（字還沒出來就等，最多約 2 秒）→ buy_verdict。認不出的字存圖供補樣板"""
+    before = numglyph.read_box('shop', QTY_BOX)
+    buy_once()
+    after = numglyph.read_box('shop', QTY_BOX)
+    for _ in range(5):
+        if after['n'] >= 1:
+            break
+        uikit.sleep(0.4)
+        after = numglyph.read_box('shop', QTY_BOX)
+    v = buy_verdict(before, after, n)
+    if v in ('zeroish', 'unknown') and after['n'] > 0 and after['value'] is None:
+        uikit.snap('shop-qty-unread')                     # 人工看了 → numglyph.py label <圖> shop 0
+    if log:
+        log(f'shopkit 購買 {n}：數量框 買前 {before.get("value")!r} → 買後 {after.get("value")!r}（{after.get("n")} 字）= {v}')
+    return v
 
 
 def scroll_top(rows: int) -> None:
@@ -189,8 +263,11 @@ def select_item(want: str, order: list, state: dict | None = None, reader=None) 
 
 
 def set_qty(n: int, reader=None) -> bool:
-    """點數量框 → 數字鍵盤：清除 → 逐位按數字 → ↵；讀回數量 == n 才算成功"""
+    """先讀數量框：已是 n（例：預設 1、要買 1）→ 不開鍵盤直接成功（讀不出就照常輸入）。
+    否則點數量框 → 數字鍵盤：清除 → 逐位按數字 → ↵；讀回數量 == n 才算成功（讀不出 = 失敗，不猜）"""
     reader = reader or qty_now
+    if reader() == n:
+        return True
     keys = qty_digit_xy(n)
     seq = [f'click {QTY_XY[0]} {QTY_XY[1]}; wait 400', f'click {KEY_CLEAR[0]} {KEY_CLEAR[1]}; wait 150']
     seq += [f'click {x} {y}; wait 150' for x, y in keys]

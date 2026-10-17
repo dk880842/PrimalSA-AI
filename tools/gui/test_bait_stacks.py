@@ -218,7 +218,7 @@ try:
         hx = s['px']
         cols = [(int(hx[i * 6:i * 6 + 2], 16), int(hx[i * 6 + 2:i * 6 + 4], 16), int(hx[i * 6 + 4:i * 6 + 6], 16)) for i in range(w * h)]
         r = numglyph.read_rows(numglyph.binarize(cols, w, h, s['kind']), s['kind'], keep_tpl())
-        check(f'numglyph 實際截圖 {s["f"].split("/")[-1]} {s["kind"]} = {s["value"]}', r['value'] == s['value'] and r['n'] == len(str(s['value'])), str(r))
+        check(f'numglyph 實際截圖 {s["f"].split("/")[-1]} {s["kind"]} = {s["value"]}', r['value'] == s['value'] and r['n'] == (len(str(s['value'])) if s['value'] is not None else 0), str(r))   # value null = 框內沒字
 finally:
     uikit.px, uikit.ocr, uikit.sleep, numglyph.load_tpl = keep_px, keep_ocr2, keep_sleep, keep_tpl
 

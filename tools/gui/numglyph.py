@@ -13,13 +13,16 @@
   qty   拆分「數量輸入」視窗的數量框白字（bag.SPLIT_QTY_BOX 670,430 170×45；字高約 19～20）
   slot  背包格右下角疊數白字（相對格心 SLOT_COUNT；字高 16～17）—— 拆分前讀一次，跟數量框交叉核對
   ass   外掛「捉寵設置」可抓捕數深色字（ASS_COUNT_BOX 1170,300 80×30；字高約 15）
-樣板：種子 tools/gui/fixtures/num_glyph_tpl.json（2026-10-16 從 tools/.cache 3056 張截圖切字、人工看點陣標籤；qty / ass 只有 0 1 2 4 5，slot 缺 3 7）
+  shop  便利店數量框白字（SHOP_QTY_BOX 968,450 56×32，米底；字高 19，筆畫比 qty 細 → 另一組樣板；2026-10-17 p1 每日任務 OCR 讀單一「1」全空 → 227）
+樣板：種子 tools/gui/fixtures/num_glyph_tpl.json（2026-10-16 從 tools/.cache 3056 張截圖切字、人工看點陣標籤；qty / ass 只有 0 1 2 4 5，slot 缺 3 7；
+  shop 2026-10-17 從 8217 張掃出便利店畫面 165 張：只有 1〔143 張點陣完全相同〕與 3〔daily-probe/22-qty3.png〕，其他數字等實機截圖人工 label）
   + 執行中學到的 tools/.cache/num-tpl.json（OCR 位數與字數一致才學；測試環境改用暫存資料夾）。
 
 用法（專案根目錄；唯讀）：
-  uv run --no-project python tools/gui/numglyph.py read qty|ass            # 現場讀一次數量框 / 可抓捕數（只讀像素）
+  uv run --no-project python tools/gui/numglyph.py read qty|ass|shop       # 現場讀一次數量框 / 可抓捕數 / 便利店數量框（只讀像素）
   uv run --no-project python tools/gui/numglyph.py read slot <格號 0 起>    # 背包格疊數
-  uv run --no-project python tools/gui/numglyph.py shot <截圖.png> qty|ass|slot [格號]   # 離線讀截圖
+  uv run --no-project python tools/gui/numglyph.py shot <截圖.png> qty|ass|shop|slot [格號]   # 離線讀截圖
+  uv run --no-project python tools/gui/numglyph.py label <截圖.png> shop 0  # 人工看過截圖的值 → 學進 tools/.cache/num-tpl.json（例：ui-log/*-shop-qty-unread.png）
 程式用：read_rows(rows, kind) / read_box(kind, box) / read_number(kind, box, ocr_reads, sleep_fn) / slot_box(i) / digits_ok(n, v) / learn(rows, v, kind)
 """
 import argparse
@@ -40,10 +43,13 @@ PREDS = {
     'qty': lambda c: min(c[:3]) > 200,            # 數量框白字（米色框底 223,187,147）
     'slot': lambda c: min(c[:3]) > 200,           # 背包格疊數白字（深色描邊）
     'ass': lambda c: max(c[:3]) < 110,            # 外掛面板淺灰底（221,221,219）上的深色字
+    'shop': lambda c: min(c[:3]) > 200,           # 便利店數量框白字（米底；鍵盤開著時框內只剩 1 px 寬直線，字高篩掉）
 }
-HEIGHT = {'qty': (17, 22), 'slot': (14, 18), 'ass': (13, 17)}     # 字高範圍（px）：其他高度的元件（圖示白點、框線）不算字
+HEIGHT = {'qty': (17, 22), 'slot': (14, 18), 'ass': (13, 17), 'shop': (16, 22)}     # 字高範圍（px）：其他高度的元件（圖示白點、框線）不算字
 QTY_BOX = (670, 430, 170, 45)                     # = bag.SPLIT_QTY_BOX
 ASS_COUNT_BOX = (1170, 300, 80, 30)               # 「可抓捕數:」冒號（x≈1158）之後、「+」鈕（x≥1256）之前
+SHOP_QTY_BOX = (968, 450, 56, 32)                 # = shopkit.QTY_BOX（便利店數量框；「1」在 x 991～1001 × y 457～475）
+BOXES = {'qty': QTY_BOX, 'ass': ASS_COUNT_BOX, 'shop': SHOP_QTY_BOX}
 SLOT_COUNT = (0, 18, 46, 28)                      # 背包格疊數框（相對格心 dx, dy, w, h；實測「21」在 cx+20～+43、cy+26～+42）
 SLOT_X, SLOT_Y = [752, 860, 966, 1072, 1180], [245, 352, 460]     # = bag.SLOT_X / SLOT_Y（不 import bag：bag 會 import 本模組）
 
@@ -161,7 +167,7 @@ def live_rows(box, kind: str):
 
 def read_box(kind: str, box=None) -> dict:
     """現場讀一次 → read_rows 結果 + 'rows'（讀不到像素 → n = -1）"""
-    box = box or {'qty': QTY_BOX, 'ass': ASS_COUNT_BOX}[kind]
+    box = box or BOXES[kind]
     rows = live_rows(box, kind)
     if rows is None:
         return {'n': -1, 'text': None, 'value': None, 'rows': None}
@@ -210,8 +216,13 @@ def main(argv=None) -> int:
     s.add_argument('png')
     s.add_argument('kind', choices=sorted(PREDS))
     s.add_argument('slot', nargs='?', type=int, default=0)
+    lb = sub.add_parser('label', help='人工確認截圖框內的數值 → 學字（位數須 = 像素字數；與已認得的字矛盾 / 太像別的字就不學）')
+    lb.add_argument('png')
+    lb.add_argument('kind', choices=sorted(PREDS))
+    lb.add_argument('value', type=int)
+    lb.add_argument('slot', nargs='?', type=int, default=0)
     a = ap.parse_args(argv)
-    box = slot_box(a.slot) if a.kind == 'slot' else {'qty': QTY_BOX, 'ass': ASS_COUNT_BOX}[a.kind]
+    box = slot_box(a.slot) if a.kind == 'slot' else BOXES[a.kind]
     if a.cmd == 'read':
         import winenv
         winenv.enable_server()
@@ -223,6 +234,8 @@ def main(argv=None) -> int:
         x, y, w, h = box
         rows = binarize([get(x + i, y + j) for j in range(h) for i in range(w)], w, h, a.kind)
         res = read_rows(rows, a.kind)
+        if a.cmd == 'label':
+            res['learned'] = learn(rows, a.value, a.kind)
     print(json.dumps(res, ensure_ascii=False))
     return 0
 

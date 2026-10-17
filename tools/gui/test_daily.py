@@ -242,6 +242,78 @@ except ValueError:
     check('qty_digit_xy(1000) 要丟 ValueError', True)
 check('parse_qty', shopkit.parse_qty('0') == 0 and shopkit.parse_qty('x') is None and shopkit.parse_qty('12') == 12)
 
+# ---------------- 便利店數量框：像素字形（numglyph kind shop；fixtures/numglyph_samples.json = 真截圖裁切；2026-10-17 p1 OCR 讀「1」全空 → 227）----------------
+import json  # noqa: E402
+import numglyph  # noqa: E402
+_NFX = [x for x in json.loads((HERE / 'fixtures' / 'numglyph_samples.json').read_text(encoding='utf-8'))['samples'] if x['kind'] == 'shop']
+
+
+def _qpaint(s):
+    x, y, w, h = s['box']
+    hx = s['px']
+    return {(x + i % w, y + i // w): tuple(int(hx[i * 6 + k:i * 6 + k + 2], 16) for k in (0, 2, 4)) for i in range(w * h)}
+
+
+check('shop 樣本 4 張（1 ×2、3、鍵盤開著）', len(_NFX) == 4 and tuple(numglyph.SHOP_QTY_BOX) == shopkit.QTY_BOX)
+_keep_px, _keep_ocrl, _keep_sleep, _keep_buy = uikit.px, uikit.ocr_lines, uikit.sleep, shopkit.buy_once
+_qp, _ocr_calls = {}, []
+try:
+    uikit.px = lambda pts: [_qp.get(pt, (223, 187, 147)) for pt in pts]
+    uikit.ocr_lines = lambda box, *o: (_ocr_calls.append(box), [])[1]       # OCR 一律讀空（實機就是這樣）
+    uikit.sleep = lambda t: None
+    for smp in _NFX:
+        _qp.clear()
+        _qp.update(_qpaint(smp))
+        got = shopkit.qty_now()
+        check(f'qty_now 讀真截圖 {smp["f"]} → {smp["value"]!r}（OCR 全空也讀得到）', got == smp['value'], repr(got))
+    check('數量框認得 1、3（種子樣板）', {'1', '3'} <= shopkit.known_digits())
+    # set_qty：已是 1 → 不開鍵盤；要 3 → 鍵盤輸入後讀回 3
+    one = next(x for x in _NFX if x['value'] == 1)
+    three = next(x for x in _NFX if x['value'] == 3)
+    _qp.clear(); _qp.update(_qpaint(one))
+    calls = []
+    keep_gui = uikit.gui
+    uikit.gui = lambda *a, **k: (calls.append(a), '')[1]
+    check('set_qty(1)：數量框已是 1 → 不點鍵盤', shopkit.set_qty(1) and not calls, str(calls))
+    reads = iter([1, 3])
+    check('set_qty(3)：讀到 1 → 鍵盤輸入 → 讀回 3 = 成功', shopkit.set_qty(3, reader=lambda: next(reads)) and len(calls) == 1)
+    check('set_qty：讀不出（None）→ 失敗（不猜）', not shopkit.set_qty(2, reader=lambda: None))
+    # buy_checked（buy_once 換成「把框換成下一張圖」）：買後一樣 / 認得但不是 0 / 沒字
+    seq = []
+    shopkit.buy_once = lambda: (_qp.clear(), _qp.update(seq.pop(0)))
+    seq[:] = [_qpaint(one)]
+    _qp.clear(); _qp.update(_qpaint(one))
+    check('buy_checked：買後點陣跟買前一樣 → not_bought', shopkit.buy_checked(1) == 'not_bought')
+    seq[:] = [_qpaint(three)]
+    _qp.clear(); _qp.update(_qpaint(one))
+    check('buy_checked：買 1 後讀到 3（認得但不是 0）→ unknown', shopkit.buy_checked(1) == 'unknown')
+    seq[:] = [{}]
+    _qp.clear(); _qp.update(_qpaint(one))
+    check('buy_checked：買後框內沒字（被蓋住）→ unknown（等過也沒字）', shopkit.buy_checked(1) == 'unknown')
+    uikit.gui = keep_gui
+finally:
+    uikit.px, uikit.ocr_lines, uikit.sleep, shopkit.buy_once = _keep_px, _keep_ocrl, _keep_sleep, _keep_buy
+
+# buy_verdict（純函式）
+R1, R0 = ['01'], ['10']
+check('buy_verdict：讀到 0 → bought', shopkit.buy_verdict({'value': 1, 'n': 1, 'rows': R1}, {'value': 0, 'n': 1, 'rows': R0}, 1) == 'bought')
+check('buy_verdict：認不出的單字、點陣變了 → zeroish（交背包核對）', shopkit.buy_verdict({'value': 1, 'n': 1, 'rows': R1}, {'value': None, 'n': 1, 'rows': R0}, 1) == 'zeroish')
+check('buy_verdict：買前就讀不出 → 不能判 zeroish / not_bought → unknown',
+      shopkit.buy_verdict({'value': None, 'n': 1, 'rows': R1}, {'value': None, 'n': 1, 'rows': R0}, 1) == 'unknown'
+      and shopkit.buy_verdict({'value': None, 'n': 1, 'rows': R1}, {'value': None, 'n': 1, 'rows': R1}, 1) == 'unknown')
+check('buy_verdict：2 個認不出的字 → unknown', shopkit.buy_verdict({'value': 13, 'n': 2, 'rows': R1}, {'value': None, 'n': 2, 'rows': R0}, 13) == 'unknown')
+# qty_chunks：只用認得的數字
+check('qty_chunks：{1,3} 7 → 3+3+1、20 → 13+3+3+1、1 → [1]、33 → [33]',
+      shopkit.qty_chunks(7, {'1', '3'}) == [3, 3, 1] and shopkit.qty_chunks(20, {'1', '3'}) == [13, 3, 3, 1]
+      and shopkit.qty_chunks(1, {'1', '3'}) == [1] and shopkit.qty_chunks(33, {'1', '3'}) == [33])
+check('qty_chunks：全認得 → 一次；沒有 1 拆不出 → None；1500 → 999+…',
+      shopkit.qty_chunks(256, set('0123456789')) == [256] and shopkit.qty_chunks(2, {'3'}) is None
+      and shopkit.qty_chunks(1500, set('0123456789')) == [999, 501])
+check('qty_vote：各倍率一致才收、單一倍率 / 不一致 → None（不把「1」「1」併成 11）',
+      shopkit.qty_vote([{'text': '12', 'zoom': 2}, {'text': '12', 'zoom': 3}]) == 12
+      and shopkit.qty_vote([{'text': '1', 'zoom': 2}]) is None
+      and shopkit.qty_vote([{'text': '1', 'zoom': 2}, {'text': '7', 'zoom': 3}]) is None)
+
 # select_item：假讀標題 → 預測列先點、不對再試鄰近、視野外先拖
 ORDER = [f'商品{i:02d}' for i in range(20)]
 
@@ -586,6 +658,21 @@ class FakeTools:
             raise RuntimeError('假：買完後世界爆炸（模擬腳本被砍）')
 
     def shop_qty(self): return self.W.qty
+
+    def shop_chunks(self, q):
+        # 預設一次買完；inj chunks=True → 用真的 shopkit.qty_chunks（種子樣板只認得 1 3 → 分次）
+        return shopkit.qty_chunks(q) if self.inj.get('chunks') else [q]
+
+    def shop_buy_checked(self, n):
+        before = self.W.qty
+        self.shop_buy()                                        # 走 self.shop_buy（情境 8 會換掉它）
+        got = self.inj.get('verdict_once')
+        if got and got[0] == (self.W.cur, self.W.shop_item):
+            self.inj.pop('verdict_once')
+            return got[1]
+        if self.W.qty == 0:
+            return 'zeroish' if self.inj.get('zeroish') else 'bought'
+        return 'not_bought' if self.W.qty == before else 'unknown'
 
     def shop_close(self):
         self.W.shop = None
@@ -1104,6 +1191,39 @@ n0 = len(W.log)
 rc, out, _ = go(W, T)
 tail = [a[0] for a in W.log[n0:]]
 check('續跑：先組隊（拉回）→ 解散 → 接著買 → 完成', rc == 0 and tail.index('form') < tail.index('disband') < tail.index('shop_enter') and all(W.reward[r] == 5 for r in W.roles), f'{rc} {tail[:12]}')
+
+# ---------------- 情境：數量框只認得 1 3（真 qty_chunks 分次買）/ 買後歸 0 但 0 沒樣板（zeroish）/ 讀不出 ----------------
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+T.inj['chunks'] = True
+rc, out, _ = go(W, T)
+nbuy = sum(1 for a in W.log if a[0] == 'buy')
+check('分次買（7 → 3+3+1 等）：照樣 5/5、總共買 160 個、按購買次數變多', rc == 0 and W.bought_n == 160 and all(W.reward[r] == 5 for r in W.roles) and nbuy > 5 * 30, f'{rc} {nbuy} {out[-300:]}')
+check('分次買每次數量的位數都只有 1 / 3', all(set(str(a[3])) <= {'1', '3'} for a in W.log if a[0] == 'buy'), str([a[3] for a in W.log if a[0] == 'buy'][:10]))
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+T.inj['zeroish'] = True
+rc, out, _ = go(W, T)
+check('買後數量框是認不出的字（zeroish）→ 視為買到、背包核對通過 → 完成', rc == 0 and all(W.reward[r] == 5 for r in W.roles), f'{rc} {out[-300:]}')
+fresh_dir()
+W = scenario()
+T = FakeTools(W)
+T.inj['verdict_once'] = None                                              # 第一次購買回 unknown
+_orig_sb = T.shop_buy
+
+
+def _sb():
+    if T.inj.get('verdict_once') is None and W.shop_item:
+        T.inj['verdict_once'] = ((W.cur, W.shop_item), 'unknown')
+    _orig_sb()
+
+
+T.shop_buy = _sb
+rc, out, _ = go(W, T)
+first = next(a for a in W.log if a[0] == 'buy')
+check('買後數量框讀不出（unknown）→ 227、該項不重買', rc == 227 and sum(1 for a in W.log if a[0] == 'buy' and a[1:3] == first[1:3]) == 1, f'{rc} {out[-300:]}')
 
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))

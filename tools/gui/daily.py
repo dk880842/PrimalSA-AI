@@ -539,11 +539,11 @@ class Tools:
     def shop_set_qty(self, q) -> bool:
         return shopkit.set_qty(q)
 
-    def shop_buy(self) -> None:
-        shopkit.buy_once()
+    def shop_chunks(self, q):
+        return shopkit.qty_chunks(q)
 
-    def shop_qty(self):
-        return shopkit.qty_now()
+    def shop_buy_checked(self, n) -> str:
+        return shopkit.buy_checked(n, log=event)
 
     def shop_close(self) -> bool:
         return shopkit.close_shop()
@@ -897,25 +897,41 @@ class Daily:
         event(f'{role} {store.name} 買完：' + '、'.join(f'{n}×{dict(mats)[n]}' for n in done))
 
     def buy_item(self, role, plan, store, name, q, nav, protect=()) -> bool:
-        """店內一項：選商品（標題核對）→ 數量 q → 購買 → 數量框歸 0。失敗（可能背包放不下）→ 存最晚環的材料再試一次（只一次）。成功才記 bought / ledger"""
+        """店內一項：選商品（標題核對）→ 數量拆成認得的數字分次買（shopkit.qty_chunks）→ 每次：數量 c → 購買 → 看數量框（shopkit.buy_checked）。
+        bought / zeroish（歸 0 但 0 還沒樣板；每間店買完的背包名稱核對把關）= 記 ledger；not_bought（仍是原數量，可能背包放不下）→ 存最晚環的材料再試一次（只一次）；
+        unknown（不確定有沒有買到）→ 不重買、回 False（呼叫端 227）。每買到一次就記 bought / ledger（中斷可續跑）"""
         T, st = self.T, self.st[role]
+        left = int(q)
         for attempt in range(2):
             if not T.shop_select(name, store, nav):
                 event(f'{role} 選不到商品「{name}」（{store.name}）')
                 return False
-            if not T.shop_set_qty(q):
-                event(f'{role} 數量輸入 {q} 讀回不對（{name}）')
+            chunks = T.shop_chunks(left)
+            if not chunks:
+                event(f'{role} 數量 {left} 拆不出認得的數字（{name}；數量框樣板不足）')
                 return False
-            T.shop_buy()
-            after = T.shop_qty()
-            if after == 0:
-                led = dp.Ledger(st['ledger'])
-                led.buy(name, q)
-                st['ledger'] = led.to_dict()
-                st['bought'][name] = int(st['bought'].get(name, 0)) + q
-                self.save_role(role)
+            for c in chunks:
+                if not T.shop_set_qty(c):
+                    event(f'{role} 數量輸入 {c} 讀回不對（{name}）')
+                    return False
+                v = T.shop_buy_checked(c)
+                if v in ('bought', 'zeroish'):
+                    led = dp.Ledger(st['ledger'])
+                    led.buy(name, c)
+                    st['ledger'] = led.to_dict()
+                    st['bought'][name] = int(st['bought'].get(name, 0)) + c
+                    self.save_role(role)
+                    left -= c
+                    if v == 'zeroish':
+                        event(f'{role} 買「{name}」×{c}：數量框變成認不出的字（應為 0，尚無樣板）→ 視為買到，等背包名稱核對')
+                    continue
+                if v != 'not_bought':                           # 不確定有沒有買到 → 不重買（避免買兩次），呼叫端 227
+                    event(f'{role} 買「{name}」×{c} 後數量框讀不出 / 怪值 → 不確定有沒有買到，不重買')
+                    return False
+                break
+            if left <= 0:
                 return True
-            event(f'{role} 買「{name}」後數量框讀到 {after!r}（應為 0）' + ('；背包可能已滿 → 存倉再試一次' if attempt == 0 else ''))
+            event(f'{role} 買「{name}」後數量框仍是原數量（應為 0；還差 {left}）' + ('；背包可能已滿 → 存倉再試一次' if attempt == 0 else ''))
             if attempt == 0:
                 led = dp.Ledger(st['ledger'])
                 m = dp.choose_evict(led, plan, st['rings'], protect={name} | set(protect))

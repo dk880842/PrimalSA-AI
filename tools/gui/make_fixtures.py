@@ -301,6 +301,11 @@ NUMGLYPH_SRC = [
     ('ui-log/215658-manual-catch-tab.png', 'ass', None, 0),
     ('ui-log/220112-rebirth-catch-family.png', 'ass', None, 5),
     ('ui-log/093442-rebirth-catch-species.png', 'ass', None, 4),
+    # 便利店數量框（numglyph kind shop；2026-10-17 p1 每日任務 OCR 讀單一「1」全空 → 227）：選中商品預設 1、鍵盤輸入 3 後、鍵盤開著（框內只有直線 → 0 字）
+    ('daily-samples/shop-地方特產品販賣員-01.png', 'shop', None, 1),
+    ('daily-probe/17-shop.png', 'shop', None, 1),
+    ('daily-probe/22-qty3.png', 'shop', None, 3),
+    ('daily-probe/20-qtyclick.png', 'shop', None, None),
 ]
 
 
@@ -313,7 +318,7 @@ def make_numglyph_fixture() -> list:
         if not p.exists():
             miss.append(rel)
             continue
-        box = numglyph.slot_box(slot) if kind == 'slot' else {'qty': numglyph.QTY_BOX, 'ass': numglyph.ASS_COUNT_BOX}[kind]
+        box = numglyph.slot_box(slot) if kind == 'slot' else numglyph.BOXES[kind]
         x, y, w, h = box
         pts = [(x + i, y + j) for j in range(h) for i in range(w)]
         px = grab(p, pts)
