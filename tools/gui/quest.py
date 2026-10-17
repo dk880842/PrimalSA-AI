@@ -1210,21 +1210,13 @@ def fast_page_ok(a, s: dict, g) -> bool:
 
 
 def fast_dialog_chain(ref, base: int) -> tuple[int, str]:
-    """左鈕剛按完：每 FAST_DIALOG_GAP 秒只讀像素，仍是同型對話框（dialog、按鈕字樣指紋同 ref）就再按同位置，最多 FAST_DIALOG_MAX 次。
-    → (連按次數, 停下原因)。不做 OCR、不碰其他鈕；對話框關了 / 變了就不按（回主迴圈照常判斷）"""
-    n = 0
-    while n < FAST_DIALOG_MAX:
-        time.sleep(FAST_DIALOG_GAP)
-        s2 = read_screen()
-        if s2.get('state') != 'dialog' or s2.get('fight_fallback'):
-            return n, f'對話框已關 / 換畫面（{s2.get("state")}）'
-        if not dialog_fp_same(ref, read_dialog_fp()):
-            return n, '按鈕字樣變了 / 讀不準 → 回正常流程（OCR）'
-        n += 1
-        shot = snap('dialog-fast')
-        gui('seq', f'click {DIALOG_NEXT[0]} {DIALOG_NEXT[1]}')
-        event(f'對話框 #{base + n}：快速連按 #{n}（只讀像素：對話框仍開、按鈕字樣同上一頁）→ 按左鈕 {DIALOG_NEXT}', shot)
-    return n, f'連按 {FAST_DIALOG_MAX} 次上限 → 回正常流程'
+    """左鈕剛按完（這頁已過 OCR 不可逆防護）：等 FAST_DIALOG_GAP 秒**無腦**在同位置再按一次（使用者 2026-10-17：第二下不要像素判斷，直接點）。
+    → (1, 說明)。只按一次；之後回主迴圈照常判斷（下一頁照舊 OCR）。ref 保留給呼叫端相容，不再使用"""
+    time.sleep(FAST_DIALOG_GAP)
+    gui('seq', f'click {DIALOG_NEXT[0]} {DIALOG_NEXT[1]}')
+    event(f'對話框 #{base + 1}：快速連按（無腦，隔 {FAST_DIALOG_GAP:g} 秒同位置再按一次左鈕 {DIALOG_NEXT}）')
+    return 1, '無腦連按 1 次 → 回正常流程'
+
 
 
 def check_dialog_irreversible() -> dict:
@@ -2294,7 +2286,7 @@ def _run(a) -> int:
                 return EXIT_IRREVERSIBLE
         if st == 'dialog':
             dialogs += 1
-            fp_ref = read_dialog_fp() if fast_page_ok(a, s, g) else None   # --fast-dialog：按前記下按鈕字樣（剛 OCR 過、確定安全的這頁）
+            fp_ref = fast_page_ok(a, s, g)                     # --fast-dialog：這頁剛 OCR 過、確定安全 → 按完無腦再按一次（2026-10-17 不再讀像素指紋）
             shot = snap('dialog')
             gui('seq', f'click {DIALOG_NEXT[0]} {DIALOG_NEXT[1]}')
             last_action = time.time()
