@@ -81,12 +81,13 @@
            **先驗隊伍（check_team）再停手、不點追蹤 / 黃問號、不接下一步**：滿員 = 退出碼 37、不滿 / 讀不到 = 38（事件 log 寫誰不在隊；重打流程由呼叫端做：char.py switch 被打飛者當單人隊長 → 追蹤自動傳送 → 重打 → 切回 DKBO → team.form）。
            `--no-stop-after-boss` = 不停、照舊連跑（相容保留；蓋過 --boss-team-check）；--boss-team-check 且 --team-size 0 / 1 仍會停 37，只是沒驗隊伍。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
+           讀不到內文（沒命中關鍵字）先重讀（recheck_unread_dialog，2026-10-17 p3 火的守護獸 OCR 偶發誤擋）：等 DIALOG_UNREAD_WAIT=0.7 秒、確認畫面仍是 dialog，換倍率（DIALOG_RETRY_ZOOMS）整組重讀，最多 DIALOG_UNREAD_RETRIES=2 次；
+           讀到且沒命中 → 照常按；仍讀不到 / 重讀命中 → 39；畫面已不是 dialog → 不按、不 39，回主迴圈照常判斷。命中關鍵字一律立刻 39、不重讀。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
            **快速連按例外（--fast-dialog，使用者 2026-10-17 選「安全版」）**：只有呼叫端明確打開才生效（questrun 依 questdefs.fast_dialog 帶；轉生 2004～2008 / rebirth.py / 未列任務一律不帶；
-           與 --allow-irreversible 同時給 → 不快）。每串對話的第一頁照舊完整 OCR 防護；按左鈕後等 FAST_DIALOG_GAP=1.0 秒 → **只讀像素**：read_screen 仍是 dialog（不是 fight_fallback / 獎勵窗 / 選擇對象）
-           且兩顆按鈕的字樣指紋（DIALOG_FP_PTS 264 點深色二值，dialog_fp_same 差 ≤ DIALOG_FP_TOL=3 點；391 張樣本同字樣 0 差、不同字樣最少差 10）跟剛 OCR 過那頁相同 → 直接再按同位置（事件「快速連按 #n」），不做 OCR；
-           對話框關了 / 按鈕字樣變了 / 深色點太少（讀不準）/ 剛 OCR 那頁按鈕含「戰鬥」「接受」（FAST_STOP_BUTTONS）→ 不按、回主迴圈照常判斷（下一頁再 OCR）；同一串最多 FAST_DIALOG_MAX=6 次後回正常流程。
-           風險（使用者已接受）：同按鈕字樣的後續頁內文不再 OCR —— 所以只給沒有轉生 / 封印 / 寵物轉生的一般任務用。
+           與 --allow-irreversible 同時給 → 不快）。每一頁照舊完整 OCR 防護；OCR 過、按完左鈕的那頁（按鈕不含「戰鬥」「接受」FAST_STOP_BUTTONS、不是 fight_fallback）
+           → 等 FAST_DIALOG_GAP=1.0 秒**無腦**在同位置再按 1 次（使用者 2026-10-17 改：不讀畫面、不讀像素指紋、不連按；事件「快速連按（無腦…）」），之後回主迴圈照常判斷（下一頁照舊 OCR）。
+           風險（使用者已接受）：第二下按到的那頁內文不 OCR —— 所以只給沒有轉生 / 封印 / 寵物轉生的一般任務用。（dialog_fp_* 指紋函式留著沒用到）
 結束時印「走路不計時 N 秒」「本片戰鬥 N 場」兩行（questrun 解析：巡路不計時、沒打仗才沿用全隊 HP）。
 退出碼：43 載入 / 轉場畫面連續 LOADING_MAX_S 秒（結束本片，呼叫端重跑）、42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 --boss-team-check 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 --boss-team-check 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（--boss-team-check 任務戰後下一次點追蹤 / 黃問號前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、44 --solo-talk 到 NPC 後 team.form 失敗（呼叫端重組後跑舊對話步）、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
@@ -219,6 +220,9 @@ DIALOG_FP_TOL = 3
 DIALOG_FP_MIN_DARK = 20                    # 深色點少於這個（樣本最少 34）= 按鈕被蓋住 / 讀不準 → 不快
 FAST_STOP_BUTTONS = ('戰鬥', '接受')         # 剛 OCR 那頁的按鈕含這些 → 這串不快速連按（開打 / 接任務的頁照正常流程）
 DIALOG_OCR_TRIES = 2                       # 內文讀不到時最多重讀幾次；仍讀不到 = 無法確認 → 不按（保守）
+DIALOG_UNREAD_RETRIES = 2                  # check_dialog_irreversible 因「讀不到內文」擋下（沒命中關鍵字）→ 等一下、確認仍是 dialog 再整組重讀幾次（2026-10-17 p3 火的守護獸 OCR 偶發誤擋 39）
+DIALOG_UNREAD_WAIT = 0.7                   # 每次重讀前等幾秒（對話框開窗 / 翻頁動畫）
+DIALOG_RETRY_ZOOMS = ('3,4', '2,4')        # 重讀換 ocr.ps1 -Zooms 倍率（第 1 次用預設 '2,3'）
 # 「只有一顆再見鈕」的閒聊對話（2026-10-12 紅暴步 1：領獎後又跳選擇對象面板，點到同 NPC 的閒聊「可不可以給我耐久力回復藥…」[再見]）：
 # 兩顆鈕的位置（948 / 1220,445）變成棕底、中間 1085,445 一顆米色寬鈕；classify 判 unknown → 舊版連 3 次不認得 rc 2（誤警報）。
 # 9 點全中（容差 40）才算候選，tools/.cache 1587 張 1440×830 截圖只有這次的 2 張（quest-log/140941-UNKNOWN、watch-alerts/unknown-1791785384）全中、其餘 0；
@@ -1159,20 +1163,20 @@ def find_irreversible(texts: list[str], keywords=None) -> list[str]:
     return [k for k in kws if k in flat]
 
 
-def read_dialog_texts() -> dict:
+def read_dialog_texts(zooms: str = '2,3') -> dict:
     """OCR 目前對話框：內文（亮字，-Light）與兩顆按鈕（深字，-Dark）。回 {'body': [行], 'buttons': [行], 'body_ok': 內文有讀到字}
-    內文每次都有字，所以 body 空 = 讀圖失敗（呼叫端保守不按）。ocr.ps1 只讀不點。"""
+    內文每次都有字，所以 body 空 = 讀圖失敗（呼叫端保守不按）。ocr.ps1 只讀不點。zooms = ocr.ps1 -Zooms（重讀時換倍率）"""
     out = {'body': [], 'buttons': [], 'body_ok': False}
     bx, by, bw, bh = DIALOG_BODY_BOX
     for _ in range(DIALOG_OCR_TRIES):
-        r = ps_json('ocr.ps1', bx, by, bw, bh, '-Zooms', '2,3', '-Light', DIALOG_BODY_LIGHT)
+        r = ps_json('ocr.ps1', bx, by, bw, bh, '-Zooms', zooms, '-Light', DIALOG_BODY_LIGHT)
         out['body'] = [ln['text'] for ln in r.get('lines', []) if ln.get('text')]
         if out['body']:
             out['body_ok'] = True
             break
         time.sleep(0.3)
     tx, ty, tw, th = DIALOG_BTN_BOX
-    r = ps_json('ocr.ps1', tx, ty, tw, th, '-Zooms', '2,3', '-Dark', DIALOG_BTN_DARK)
+    r = ps_json('ocr.ps1', tx, ty, tw, th, '-Zooms', zooms, '-Dark', DIALOG_BTN_DARK)
     out['buttons'] = [ln['text'] for ln in r.get('lines', []) if ln.get('text')]
     return out
 
@@ -1219,10 +1223,10 @@ def fast_dialog_chain(ref, base: int) -> tuple[int, str]:
 
 
 
-def check_dialog_irreversible() -> dict:
+def check_dialog_irreversible(zooms: str | None = None) -> dict:
     """按對話框前的防護：回 {'blocked': bool, 'reason': 說明, 'hits': [關鍵字], 'body': [...], 'buttons': [...]}
-    命中關鍵字 → blocked；內文讀不到 → blocked（無法確認不是不可逆選項）。"""
-    t = read_dialog_texts()
+    命中關鍵字 → blocked；內文讀不到 → blocked（無法確認不是不可逆選項；主迴圈先 recheck_unread_dialog 重讀）。zooms 不給 = read_dialog_texts 預設倍率"""
+    t = read_dialog_texts() if zooms is None else read_dialog_texts(zooms=zooms)
     hits = find_irreversible(t['body'] + t['buttons'])
     if hits:
         why = f'對話框文字含不可逆關鍵字 {hits}'
@@ -1231,6 +1235,26 @@ def check_dialog_irreversible() -> dict:
     else:
         why = ''
     return dict(t, blocked=bool(why), reason=why, hits=hits)
+
+
+def recheck_unread_dialog(g: dict) -> tuple[str, dict, int]:
+    """check_dialog_irreversible 擋下後的重讀（2026-10-17 p3 10:49 四大洞窟火的守護獸：內文 []、按鈕 [] → 39，agent 9 分鐘後看對話框已關、續跑正常 = OCR 偶發誤擋）。
+    只處理「讀不到內文」：命中不可逆關鍵字 → 不重讀，照舊擋。每次等 DIALOG_UNREAD_WAIT 秒、現場確認畫面仍是 dialog，再換 DIALOG_RETRY_ZOOMS 倍率整組重讀，最多 DIALOG_UNREAD_RETRIES 次。
+    → ('ok', 新 g, 第幾次讀到)：讀到內文且沒命中 → 照常按；('blocked', g, n)：命中關鍵字 / 仍讀不到 → 39；('gone', g, n)：畫面已不是 dialog → 不按、不 39，回主迴圈照常判斷"""
+    if not g.get('blocked'):
+        return 'ok', g, 0
+    if g.get('hits'):
+        return 'blocked', g, 0
+    for i in range(DIALOG_UNREAD_RETRIES):
+        time.sleep(DIALOG_UNREAD_WAIT)
+        if read_screen()['state'] != 'dialog':
+            return 'gone', g, i + 1
+        g = check_dialog_irreversible(zooms=DIALOG_RETRY_ZOOMS[i % len(DIALOG_RETRY_ZOOMS)])
+        if not g['blocked']:
+            return 'ok', g, i + 1
+        if g['hits']:
+            return 'blocked', g, i + 1
+    return 'blocked', g, DIALOG_UNREAD_RETRIES
 
 
 def close_reward() -> tuple[bool, int]:
@@ -1916,8 +1940,8 @@ def _main() -> int:
     ap.add_argument('--hp-check-min', type=int, default=0, help='預設模式：每打完 --hp-check-every 場戰鬥、回主畫面閒置確認後讀全隊 HP（開背包約 8 秒），任一人低於這個 %%%% → 結束本片，退出碼 %d（questrun 補血後續片）；0 = 不檢查' % EXIT_HP_LOW)
     ap.add_argument('--hp-check-every', type=int, default=HP_CHECK_EVERY, help='--hp-check-min：路上一般戰鬥每幾場讀一次（預設 %d；0 = 只在任務戰後讀）' % HP_CHECK_EVERY)
     ap.add_argument('--allow-irreversible', action='store_true', help='不檢查對話框是否含不可逆關鍵字（%s）：預設遇到會不按、存 snap、退出碼 %d；人 / agent 看過截圖確認要做才加' % ('、'.join(IRREVERSIBLE_KEYWORDS), EXIT_IRREVERSIBLE))
-    ap.add_argument('--fast-dialog', action='store_true', help='快速連按（2026-10-17，安全任務才由 questrun 依 questdefs 帶）：每串對話第一頁照舊 OCR 防護，之後每 %.1f 秒只讀像素，'
-                    '對話框仍開且按鈕字樣同上一頁就直接再按左鈕（最多 %d 次）；轉生 / 封印 / 未列任務 / rebirth.py 不帶；與 --allow-irreversible 同給 = 不快' % (FAST_DIALOG_GAP, FAST_DIALOG_MAX))
+    ap.add_argument('--fast-dialog', action='store_true', help='快速連按（2026-10-17，安全任務才由 questrun 依 questdefs 帶）：每頁照舊 OCR 防護，OCR 過的頁按完左鈕隔 %.1f 秒'
+                    '無腦在同位置再按 1 次（不讀畫面 / 指紋）；轉生 / 封印 / 未列任務 / rebirth.py 不帶；與 --allow-irreversible 同給 = 不快' % FAST_DIALOG_GAP)
     ap.add_argument('--solo-talk', action='store_true', help='單人逃跑對話步一次跑完（questrun --solo 用，2026-10-17）：--solo 巡路到 NPC（20）→ 清殘留 → team.form 快速組隊（自己最後驗過隊伍）→ '
                     '同一支程序接著 --stop-after-dialog --disband-after（開始前隊伍檢查略過 = --team-fresh）；--max-seconds 管單人巡路、--talk-seconds 管對話。'
                     '退出碼：單人段非 20 原樣回（21 / 5 / 2 / 39 / 33 / 19 / 3…）；組隊失敗 %d（team rc 印在輸出，呼叫端自己重組再跑舊的對話步）；team 9 / 10 透傳；其餘 = 對話段退出碼' % EXIT_SOLO_FORM)
@@ -2279,6 +2303,17 @@ def _run(a) -> int:
         if st == 'dialog' and not a.allow_irreversible:
             # 不可逆防護（errlog #68）：內文 / 按鈕含「轉生」等關鍵字、或讀不到內文 → 不按，對話框留著，交給人 / agent 看圖
             g = check_dialog_irreversible()
+            if g['blocked'] and not g['hits']:
+                # 讀不到內文（沒命中關鍵字）→ 先重讀（recheck_unread_dialog），對話框已關就回主迴圈；命中關鍵字不重讀
+                res, g, n_re = recheck_unread_dialog(g)
+                if res == 'gone':
+                    event(f'不可逆對話防護：讀不到對話框內文，重讀第 {n_re} 次前畫面已不是對話框 → 沒按，回主迴圈照常判斷')
+                    time.sleep(a.every)
+                    continue
+                if res == 'ok':
+                    event(f'不可逆對話防護：第 1 次讀不到內文，重讀第 {n_re} 次讀到（內文 {g["body"]}、按鈕 {g["buttons"]}）→ 沒命中關鍵字，照常按')
+                else:
+                    g = dict(g, reason=g['reason'] + f'（已重讀 {n_re} 次）')
             if g['blocked']:
                 shot = snap('irreversible')
                 event(f'不可逆對話防護：{g["reason"]}；內文 {g["body"]}、按鈕 {g["buttons"]} → 沒按任何鈕，對話框維持開著，退出碼 {EXIT_IRREVERSIBLE}（確認要做再加 --allow-irreversible）', shot)

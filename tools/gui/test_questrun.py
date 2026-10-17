@@ -2023,6 +2023,38 @@ f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING], D99: [questrun.DO
 go(f, [2017, 2015, 2999], after='none')
 check('3 個任務：背包只讀 1 次（run 開始）', f.names().count('bag_free') == 1, str(f.names()))
 
+# 組隊前先關殘留 NPC 對話框（2026-10-17 p3 09:37 造斧專家哈恩：對話框蓋住 HUD → form 40 ×3 → 111）
+f = Fake(screen='dialog')
+rc = quiet(questrun.retry_form, f, f.team_regroup, 'x')
+check('regroup 前畫面是對話框 → ESC 1 次後 form（--regroup）成功', rc == 0 and f.names() == ['esc', 'team_regroup'], str(f.names()))
+f = Fake(screen='idle')
+rc = quiet(questrun.retry_form, f, f.team_form, 'x')
+check('沒對話框 → 不 ESC，直接 form', rc == 0 and f.names() == ['team_form'], str(f.names()))
+
+
+class StuckDialog(Fake):
+    def esc(self):
+        self.rec('esc')                                    # ESC 關不掉：畫面仍是 dialog
+
+
+f = StuckDialog(screen='dialog', team_rcs=[40])
+rc = quiet(questrun.retry_form, f, f.team_form, 'x', tries=1)
+check(f'對話框 ESC {questrun.FORM_DIALOG_ESC} 次關不掉 → 照舊 form、失敗照舊回碼 40', rc == 40 and f.names() == ['esc'] * questrun.FORM_DIALOG_ESC + ['team_form', 'close_stray'], str(f.names()))
+f = Fake(screen='dialog')
+f.quiz_now = lambda: True
+rc = quiet(questrun.retry_form, f, lambda: 9, 'x')
+check('畫面像對話框但答題介面正面命中 → 不 ESC，form 的 9 透傳', rc == 9 and 'esc' not in f.names(), str(f.names()))
+f = Fake(screen='dialog', team_rcs=[40, 0])
+f.esc = lambda: f.rec('esc')                               # 第 1 輪關不掉
+_tf0 = f.team_form
+def _tf_close():
+    r = _tf0()
+    f.screen = 'dialog' if r else 'idle'
+    return r
+f.team_form = _tf_close
+rc = quiet(questrun.retry_form, f, f.team_form, 'x')
+check('第 1 次 form 失敗後重試時仍先清對話框（每次 form 前都清）', rc == 0 and f.names().count('esc') == 2 * questrun.FORM_DIALOG_ESC and f.names().count('team_form') == 2, str(f.names()))
+
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 
 sys.exit(1 if fails else 0)

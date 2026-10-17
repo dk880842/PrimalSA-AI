@@ -199,10 +199,9 @@
 - **BOSS 戰收尾（`--boss-team-check`；2026-10-17 起不再是預設）**：沒帶 = 任務戰打完不驗隊伍、不停，照常點追蹤往下跑（= 舊 `--no-stop-after-boss`，後者相容保留、同時給會蓋過）；questrun 只對紅暴 / 四寶玉帶、rebirth.py 預設模式一律帶（`rebirth.with_boss_check`）、bossretry 重打一律帶。帶了：任務戰（對話框 / 黃問號後 15 秒內開打）打完、閒置 2.5 秒 → 先 `check_team`（5 人都要在隊）再停：**37 = 滿員**、**38 = 不滿 / 讀不到**（事件 log「預設模式 BOSS 戰結束 …：隊伍…：隊長 …、隊員 …、不在隊 …」，snap `*-boss-done.png`）。停下後不點追蹤 / 黃問號。38 的重打流程由呼叫端做：被打飛的人 `char.py switch` 當單人隊長 → 按任務追蹤自動傳送 → 重打 → 切回 DKBO → `team.py form`。`--no-stop-after-boss` 才連跑。
   - 偵測限制：BOSS 戰靠「對話 / 點黃問號後 15 秒內開打」判定；Auto Walking 抵達後直接開打、中間沒按對話框的 BOSS 戰認不出來（照舊連跑），該步請改用 `--fight`。對話後又出現 Auto Walking，之後的遇敵算路上小怪。
 - **不可逆對話防護**：按左鈕前 OCR 對話框（內文 `DIALOG_BODY_BOX` 805,285,565×115 用 `-Light 140`——內文是淺米字在棕底；按鈕 `DIALOG_BTN_BOX` 815,428,540×68 用 `-Dark 140`），含 `IRREVERSIBLE_KEYWORDS`（轉生、寵物轉生、封印、刪除、丟棄，含簡體）或內文讀不到 → **不按、不 ESC、對話框留著**，snap `*-irreversible.png`，退出碼 **39**。人 / agent 看圖確認要做，再用 `--allow-irreversible` 重跑（它會跳過 OCR 全放行，只用在確認過的那一頁）。副作用：內文提到「封印」等字的普通對話也會停，同樣看圖確認後放行。OCR 約多花 1～3 秒 / 頁。
+  - **讀不到內文先重讀（2026-10-17，離線測試，未實機）**：p3 10:49 四大洞窟「火的守護獸」內文 []、按鈕 [] → 39 → questrun 116，9 分鐘後看對話框已關、續跑正常 = OCR 偶發誤擋。現在只在「讀不到內文」（沒命中關鍵字）時 `recheck_unread_dialog`：等 0.7 秒（`DIALOG_UNREAD_WAIT`）→ 現場確認仍是 dialog → 換倍率（`DIALOG_RETRY_ZOOMS` 3,4 / 2,4）整組重讀，最多 2 次（`DIALOG_UNREAD_RETRIES`）。讀到且沒命中 → 照常按（事件「重讀第 n 次讀到」）；仍讀不到或重讀命中 → 39；畫面已不是 dialog → 不按、不 39，回主迴圈。**命中關鍵字一律立刻 39、不重讀。**
 - **快速連按例外 `--fast-dialog`（2026-10-17 使用者選「安全版」；離線測試，未實機）**：只在安全任務由呼叫端打開——questrun / petquest 依 `questdefs.fast_dialog(任務)`（`FAST_DIALOG`：1.82 全部、四大洞窟、紅暴、成人儀式、彌生和日美子、恐龍博士 / 卡坦 / 猜謎三兄弟）帶；轉生 2004～2008（rebirth.py 一律不帶）、未列任務、標了 `irreversible_risk` / 步 `irreversible` 的、`--allow-irreversible` 時都不快。
-  每串對話**第一頁照舊完整 OCR 防護**；按左鈕後等 1.0 秒 → 只讀像素：`read_screen` 仍是 dialog（不是戰鬥鈕後備 / 獲得物品 / 選擇對象）且兩顆按鈕字樣指紋（`DIALOG_FP_PTS` 264 點：左鈕字 x 920～980、右鈕字 x 1192～1256、y 451～472，max(RGB) ≤ 110 記 1）與剛 OCR 那頁差 ≤ 3 點 → 直接再按 948,461（事件「快速連按 #n」，仍存 `*-dialog-fast.png`），最多 6 次後回正常流程。
-  對話框關了 / 換畫面 / 字樣變了 / 深色點 < 20（讀不準）→ 不按、回主迴圈（下一頁照常 OCR）；剛 OCR 那頁按鈕含「戰鬥」「接受」→ 這串不快。指紋門檻用 tools/.cache/quest-log 391 張 `*-dialog.png` 量：同字樣 46 群幾乎 0 差、不同字樣最少差 10 點。
-  預估每頁省約 1 秒（OCR 內文 + 按鈕），一頁約 2 秒 → 約 1.1～1.3 秒。風險（使用者已接受）：同字樣的後續頁內文不再 OCR，所以只給沒有不可逆選項的任務。
+  **2026-10-17 改無腦第二下（使用者指定）**：每頁照舊完整 OCR 防護；OCR 過、按完左鈕的那頁 → 等 `FAST_DIALOG_GAP` 1.0 秒**無腦**在 948,461 再按 1 次（不讀畫面、不讀像素指紋、不連按），之後回主迴圈照常判斷（下一頁照舊 OCR）。剛 OCR 那頁按鈕含「戰鬥」「接受」、戰鬥鈕後備判斷頁 → 不補按。舊版像素指紋（`DIALOG_FP_PTS` / `dialog_fp_same`）函式還在、不再使用。
 - 退出碼 37 / 38 / 39 都不是「成功完成任務」；呼叫端要自己看狀況，不能當 0。
 
 ## questdetail.py：任務詳情列表讀取 / 接取任務（P1，2026-10-11；計畫 notes/plan-182-script.md）
@@ -287,6 +286,7 @@
   - **步號前進不算卡住**（2026-10-14 猜謎三兄弟步 1 的通用版）：quest.py 3 時讀追蹤步號（有特殊步驟的任務本來就讀；其他任務只在 3 時讀一次），比上一次讀到的大 → 該步其實完成，直接下一片、不刷新 / 不計卡住。
   - **戰鬥中不組隊**（2026-10-14 09:17：交接時畫面還在打〔清殘留回 battle，關遇敵只等 20 秒〕，team.form 開不了切換面板 40 / 40 / 42 → 111）：交接 form 前 `wait_battle_end` 等畫面不是戰鬥（每 3 秒看一次、最多 240 秒，超過 111）；
     `retry_form`（questrun.form / bossretry 共用）form 失敗時畫面是戰鬥 → 等打完再試、**不計入 3 次**（最多 `BATTLE_WAITS`＝3 輪）。
+  - **組隊前先關殘留 NPC 對話框**（2026-10-17 p3 09:37 1.82 後段：「造斧專家哈恩」對話框〔樵夫伐木 / 再見〕蓋住 HUD → team.form 40，--regroup 重試 3 次都在同一個對話框前失敗 → 111；離線測試，未實機）：`retry_form` 每次 form（含 --regroup）前 `clear_dialog_before_form`：畫面是 dialog / bye → ESC（不回答任何選項）最多 2 次（`FORM_DIALOG_ESC`）再 form；答題 / 驗證介面（`T.quiz_now` = `uikit.quiz_now`）先判，命中不碰、交給 form 的 preflight 停手；ESC 關不掉 → 照舊 form，失敗照舊回碼。
   - **龍王失敗後收尾**（2026-10-14 08:21 / 08:49 / 09:01：depot_use 90 step=open，Session 判背包沒開所以沒關，面板晚一步出現 / 對話框蓋住 → 下一片 quest.py 連 3 次不認得誤報 9）：
     `depot_use.run` 非 0 出口（9 / 10 除外）一律 `tidy()`（等 1 秒 → `bag.close_leftover`：彈窗 ESC、NPC 對話框 ESC 不回答、背包 ✕）再開回遇敵；questrun `ensure_dragon` 失敗後再等 1 秒跑一次 `quest.clear_leftovers`。
   - **交寵物**：quest.py 29（對話 ↔ 選擇對象循環，S6 卡坦步 2 雞沒湊齊按完成 54 次）→ 117，訊息改「寵物沒湊齊 / 等級不夠 / 還在出戰？」；rest-all 失敗訊息帶提示（72 名字 / 縮圖都認不出、74 外掛鎖定戰寵還勾著）；

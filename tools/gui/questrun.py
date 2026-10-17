@@ -95,7 +95,7 @@
 quest.py 退出碼分支（37 / 38 只有 --boss-team-check 的任務〔紅暴 / 四寶玉〕與 bossretry 會出現）：0 → tail 有「任務完成」= 結束；其他（時間到 / 提前結束 / 模糊）一律不開詳情直接下一片；5 找不到任務 = 完成；37 BOSS 戰贏且滿 5 人 → 下一片；38 BOSS 後隊伍不滿 / 21 被打飛 → bossretry.py 自動補人（落後者當隊長組 5 人按追蹤回 BOSS 處全隊重打 → 切回 DKBO 重組；每任務最多 BOSS_RETRY_MAX 次，0 → 補血檢查後下一片；--no-boss-retry 關）；
   （2026-10-11）quest.py 的 slice 時限不計自動巡路時間（它結束時印「走路不計時 N 秒」，questrun 把 N 加回 t0 = 不計入 --max-min；子程序逾時 = slice + WALK_CAP_S + 120）；
   quest.py 回 0 沒有「任務完成」（時間到 / 提前結束 / 模糊）→ 直接下一片，完成由下一片 quest.py「任務完成」或回 5 判定（2026-10-14 起不再讀詳情確認）
-  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 當完成（不看詳情）；30 / 32 隊伍不符 → 原地 form()（失敗先關誤開面板再重試 3 次；失敗時畫面在戰鬥 → 等打完再試、不計次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
+  3 追蹤沒反應 → 有 walk 步驟先走，否則 112；5 找不到任務 → 當完成（不看詳情）；30 / 32 隊伍不符 → 原地 form()（每次 form 前畫面是 NPC 對話框 → 先 ESC 最多 2 次、不回答、答題介面不碰〔2026-10-17 p3 造斧專家哈恩對話框 → form 40 ×3 → 111〕；失敗先關誤開面板再重試 3 次；失敗時畫面在戰鬥 → 等打完再試、不計次）再起一片，最多 3 輪仍不行才 111（不退出整套）；
   41 片內戰鬥後全隊 HP 偏低（只有 --team-hp-min > 0 才會出現）→ 補血（小護士）+ team.form → 下一片（每任務最多 HP_LOW_MAX=5 次，超過 111）；
   40 任務 NPC 只有「再見」（quest.py 已 ESC）→ 背包 / 信箱處理：背包空格 < 1 的人刪白名單 → mail.py claim 領「丟失的物品」→ 續跑（不重置任務；每任務最多 BYE_RECOVER_MAX=2 次）；
      背包沒滿且信箱沒有丟失信（mail 112）→ 153；背包刪不出空位 / mail 114 等 → 154；
@@ -294,6 +294,10 @@ class Tools(rebirth.Tools):
 
     def esc(self):
         uikit.gui('key', '{ESC}', note='questrun 交接：關閉殘留的對話窗')
+
+    def quiz_now(self):
+        """現場讀一次：答題 / 驗證介面正面命中（uikit.quiz_now）"""
+        return uikit.quiz_now()
 
     def encounter_off_wait(self):
         """關原地遇敵並等這場戰鬥打完（關遇敵不會中止正在打的那場）"""
@@ -588,13 +592,45 @@ def wait_battle_end(T, what: str, max_s: float = BATTLE_WAIT_S) -> bool:
         waited += BATTLE_POLL_S
 
 
+FORM_DIALOG_ESC = 2             # 組隊前畫面是 NPC 對話框 → ESC（不回答）最多幾次（2026-10-17 p3 09:37 造斧專家哈恩對話框蓋住 HUD → form 40 ×3 → 111）
+
+
+def clear_dialog_before_form(T, what: str) -> bool:
+    """team.form 前：畫面是 NPC 對話框（screen_state 'dialog' / 'bye'）→ ESC 關（不回答任何選項）最多 FORM_DIALOG_ESC 次，
+    比照 quest.py「啟動時對話框已開：先 ESC 關閉」與 rebirth._clear_dialog。答題 / 驗證介面（T.quiz_now，screen_sigs.quiz_screen）先判：命中不碰（鐵則 5，交給 form 的 preflight 停手）。
+    → True = 現在不是對話框（或 T 沒 screen_state / esc：舊呼叫端）；False = ESC 關不掉 / 答題介面（照舊去 form，失敗照舊回碼）"""
+    ss, esc = getattr(T, 'screen_state', None), getattr(T, 'esc', None)
+    if ss is None or esc is None:
+        return True
+    for i in range(FORM_DIALOG_ESC + 1):
+        try:
+            st = ss()
+        except Exception:                                              # noqa: BLE001
+            return True
+        if st not in ('dialog', 'bye'):
+            return True
+        if i == FORM_DIALOG_ESC:
+            break
+        qn = getattr(T, 'quiz_now', None)
+        if qn is not None and qn():
+            event(f'{what}：組隊前畫面像對話框但是答題 / 驗證介面 → 不碰（鐵則 5）')
+            return False
+        esc()
+        event(f'{what}：組隊前畫面是 NPC 對話框 → ESC 關閉（不回答，第 {i + 1}/{FORM_DIALOG_ESC} 次）')
+        T.sleep(0.8)
+    event(f'{what}：組隊前對話框 ESC {FORM_DIALOG_ESC} 次仍關不掉 → 照舊 team.form（失敗照舊回碼）')
+    return False
+
+
 def retry_form(T, form_fn, what: str, tries: int = FORM_TRIES) -> int:
     """team.form 原地重試（可恢復的小錯：切換面板偶爾讀到 0 張卡片 rc 42、誤開面板）：失敗 → 關誤開面板 → 等 2 秒 → 再組；
     9（驗證視窗）/ 10（斷線）立即透傳；超過 tries 次才回最後一個失敗碼。questrun.Run.form 與 bossretry.form_as 共用。
+    每次 form 前先 clear_dialog_before_form（畫面是 NPC 對話框 → ESC 最多 2 次，答題介面不碰；2026-10-17）
     （2026-10-14 09:17）失敗時畫面在戰鬥 → 等戰鬥結束（wait_battle_end）再試，**不計次**（最多 BATTLE_WAITS 輪，防無限迴圈）"""
     rc = 0
     i = waits = 0
     while i < tries:
+        clear_dialog_before_form(T, what)                              # 殘留 NPC 對話框蓋住 HUD → 切換面板開不了（form 40）：先 ESC
         rc = form_fn()
         if not rc or rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
             return rc

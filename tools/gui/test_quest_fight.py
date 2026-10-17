@@ -76,11 +76,14 @@ def fake_team(size, tag=''):
 POS_FN = lambda: (5510, 50, 17)
 DLG = {'body': ['你要進入裏面嗎？那趕緊通過吧！'], 'buttons': ['完成', '再見'], 'body_ok': True}   # 假的對話框 OCR（絕不呼叫真的 ocr.ps1）
 DLG_READS = []
+DLG_SEQ = []                                       # 有排就依序回（重讀測試用），排完回 DLG
+DLG_ZOOMS = []                                     # 每次讀的 zooms 參數（None = 預設）
 
 
-def fake_dialog_texts():
+def fake_dialog_texts(zooms=None):
     DLG_READS.append(1)
-    return dict(DLG)
+    DLG_ZOOMS.append(zooms)
+    return dict(DLG_SEQ.pop(0) if DLG_SEQ else DLG)
 
 
 def run(argv, sim, real_verify=False):
@@ -1126,9 +1129,9 @@ RB = {'body': ['你真是厲害，居然打敗了帖拉所伊朵來到我這裏�
 for name, texts in (('內文含轉生、按鈕只寫「完成」（精靈王第 2 頁實況）', RB),
                     ('按鈕含「寵物轉生」', {'body': ['你想做什麼'], 'buttons': ['寵物轉生', '再見'], 'body_ok': True}),
                     ('內文含「丟棄」', {'body': ['確定要丟棄嗎'], 'buttons': ['完成', '再見'], 'body_ok': True}),
-                    ('內文讀不到（OCR 失敗）→ 保守不按', {'body': [], 'buttons': ['完成', '再見'], 'body_ok': False})):
+                    ('內文讀不到（OCR 失敗，重讀 2 次仍讀不到）→ 保守不按', {'body': [], 'buttons': ['完成', '再見'], 'body_ok': False})):
     DLG.clear(); DLG.update(texts)
-    s = Script([DIALOG, DIALOG, IDLE, IDLE, IDLE, IDLE])
+    s = Script([DIALOG, DIALOG, DIALOG, IDLE, IDLE, IDLE, IDLE])
     rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
     ok &= check(f'{name} → 39、沒按左鈕', rc == quest.EXIT_IRREVERSIBLE and lclicks(s) == 0, f'rc={rc} 左鈕={lclicks(s)}')
 DLG.clear(); DLG.update(RB)
@@ -1143,69 +1146,82 @@ rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
 ok &= check('精靈王第 1 頁（無關鍵字）照按', rc == 0 and lclicks(s) == 1, f'rc={rc} 左鈕={lclicks(s)}')
 DLG.clear(); DLG.update({'body': ['你要進入裏面嗎？那趕緊通過吧！'], 'buttons': ['完成', '再見'], 'body_ok': True})
 
-print('--- 快速連按對話框（--fast-dialog，2026-10-17）')
-FP_A = tuple([1] * 40 + [0] * (len(quest.DIALOG_FP_PTS) - 40))
-FP_B = tuple([0] * 40 + [1] * 40 + [0] * (len(quest.DIALOG_FP_PTS) - 80))
-_REAL_FP = quest.read_dialog_fp
-FP_SEQ = []
-def _fake_fp():
-    return FP_SEQ.pop(0) if len(FP_SEQ) > 1 else (FP_SEQ[0] if FP_SEQ else None)
-quest.read_dialog_fp = _fake_fp
+print('--- 讀不到對話框內文 → 先重讀再判 39（2026-10-17 p3 火的守護獸 OCR 偶發誤擋）')
+UNREAD = {'body': [], 'buttons': [], 'body_ok': False}
 SAFE = {'body': ['你要進入裏面嗎？那趕緊通過吧！'], 'buttons': ['完成', '再見'], 'body_ok': True}
-FASTARGS = ['--no-track', '--max-seconds', '60', '--team-size', '0', '--fast-dialog']
-DLG.clear(); DLG.update(SAFE); FP_SEQ[:] = [FP_A]
+BASEARGS = ['--no-track', '--max-seconds', '60', '--team-size', '0']
+DLG.clear(); DLG.update(SAFE)
+DLG_SEQ[:] = [UNREAD]; DLG_ZOOMS.clear()
+s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(BASEARGS, s)
+ok &= check('讀不到內文、重讀第 1 次讀到 → 照常按（OCR 2 次、左鈕 1 次、rc 0）', rc == 0 and lclicks(s) == 1 and len(DLG_READS) - n0 == 2, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+ok &= check('重讀換倍率（第 1 次預設、重讀用 DIALOG_RETRY_ZOOMS[0]）', DLG_ZOOMS == [None, quest.DIALOG_RETRY_ZOOMS[0]], str(DLG_ZOOMS))
+DLG_SEQ[:] = [UNREAD, UNREAD]
 s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
 n0 = len(DLG_READS)
-rc = run2(FASTARGS, s)
-ok &= check('fast：3 頁同字樣 → 第 1 頁 OCR 一次，第 2、3 頁不 OCR 直接連按（共 3 次左鈕）', rc == 0 and lclicks(s) == 3 and len(DLG_READS) - n0 == 1, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
-gaps = [round(b[0] - a_[0], 1) for a_, b in zip(has(s, 'click 948 461'), has(s, 'click 948 461')[1:])]
-ok &= check('fast：連按間隔 = FAST_DIALOG_GAP 1.0 秒', gaps == [quest.FAST_DIALOG_GAP] * 2, str(gaps))
+rc = run2(BASEARGS, s)
+ok &= check('讀不到內文、重讀第 2 次才讀到 → 照常按（OCR 3 次、左鈕 1 次）', rc == 0 and lclicks(s) == 1 and len(DLG_READS) - n0 == 3, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+DLG_SEQ[:] = [UNREAD, UNREAD, UNREAD]
+s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(BASEARGS, s)
+ok &= check('三次都讀不到（第 1 次 + 重讀 2 次）→ 39、沒按', rc == quest.EXIT_IRREVERSIBLE and lclicks(s) == 0 and len(DLG_READS) - n0 == 1 + quest.DIALOG_UNREAD_RETRIES, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+DLG_SEQ[:] = [{'body': ['確定要丟棄嗎'], 'buttons': ['完成', '再見'], 'body_ok': True}]
+s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+n0 = len(DLG_READS)
+rc = run2(BASEARGS, s)
+ok &= check('命中不可逆關鍵字 → 不重讀、立刻 39（OCR 1 次）', rc == quest.EXIT_IRREVERSIBLE and lclicks(s) == 0 and len(DLG_READS) - n0 == 1, f'rc={rc} OCR={len(DLG_READS) - n0}')
+DLG_SEQ[:] = [UNREAD, {'body': ['使用封印書'], 'buttons': ['完成', '再見'], 'body_ok': True}]
+s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
+rc = run2(BASEARGS, s)
+ok &= check('讀不到 → 重讀讀到關鍵字 → 39、沒按', rc == quest.EXIT_IRREVERSIBLE and lclicks(s) == 0, f'rc={rc} 左鈕={lclicks(s)}')
+DLG_SEQ[:] = [UNREAD]
+s = Script([DIALOG, IDLE] + [IDLE] * 6)
+n0 = len(DLG_READS)
+rc = run2(BASEARGS, s)
+ok &= check('讀不到 → 重讀前對話框已關 → 不按、不 39，回主迴圈（rc 0、OCR 1 次）', rc == 0 and lclicks(s) == 0 and len(DLG_READS) - n0 == 1, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+DLG_SEQ[:] = []
+
+print('--- 快速連按對話框（--fast-dialog，2026-10-17 改無腦第二下）')
+_REAL_FP = quest.read_dialog_fp
+_fp_calls = []
+quest.read_dialog_fp = lambda: _fp_calls.append(1) or None
+FASTARGS = BASEARGS + ['--fast-dialog']
+DLG.clear(); DLG.update(SAFE)
 s = Script([DIALOG, IDLE] + [IDLE] * 4)
 n0 = len(DLG_READS)
 rc = run2(FASTARGS, s)
-ok &= check('fast：按完對話框就關了 → 不補按（左鈕 1 次）', rc == 0 and lclicks(s) == 1 and len(DLG_READS) - n0 == 1, f'rc={rc} 左鈕={lclicks(s)}')
-s = Script([DIALOG, REWARD, IDLE] + [IDLE] * 4)
-rc = run2(FASTARGS, s)
-ok &= check('fast：按完變獲得物品視窗 → 不按左鈕（左鈕 1 次）', lclicks(s) == 1, f'rc={rc} 左鈕={lclicks(s)}')
-FP_SEQ[:] = [FP_A, FP_B, FP_B]
+ok &= check('fast：OCR 過的頁按完 → 隔 FAST_DIALOG_GAP 無腦再按 1 次（左鈕 2 次、OCR 1 次、不讀指紋）', rc == 0 and lclicks(s) == 2 and len(DLG_READS) - n0 == 1 and not _fp_calls, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0} 指紋={len(_fp_calls)}')
+gaps = [round(b[0] - a_[0], 1) for a_, b in zip(has(s, 'click 948 461'), has(s, 'click 948 461')[1:])]
+ok &= check('fast：兩下間隔 = FAST_DIALOG_GAP 1.0 秒', gaps == [quest.FAST_DIALOG_GAP], str(gaps))
 s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
 n0 = len(DLG_READS)
 rc = run2(FASTARGS, s)
-ok &= check('fast：第 2 頁按鈕字樣變了 → 不連按，下一輪回正常流程再 OCR（OCR 2 次、左鈕 2 次）', lclicks(s) == 2 and len(DLG_READS) - n0 == 2, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
-FP_SEQ[:] = [FP_A]
+ok &= check('fast：每次主迴圈看到對話框都照舊 OCR（3 次讀到 dialog → OCR 3 次、左鈕 6 次）', rc == 0 and lclicks(s) == 6 and len(DLG_READS) - n0 == 3, f'rc={rc} 左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+s = Script([DIALOG] * 30)
+quest.read_screen, quest.gui = s.screen, s.gui
+quest.time.time, quest.time.sleep = s.time, s.sleep
+i0 = s.i
+n, why = quest.fast_dialog_chain(None, 1)
+ok &= check('fast_dialog_chain：只按 1 次、不讀畫面（read_screen 沒被呼叫）', n == 1 and lclicks(s) == 1 and s.i == i0 and abs(s.t - 1000 - quest.FAST_DIALOG_GAP) < 1e-9, f'{n} {why} 讀畫面 {s.i - i0}')
 s = Script([DIALOG, DIALOG, DIALOG, IDLE] + [IDLE] * 4)
 n0 = len(DLG_READS)
-rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
-ok &= check('非 fast（沒帶旗標）：每頁照舊 OCR（3 頁 3 次）', lclicks(s) == 3 and len(DLG_READS) - n0 == 3, f'左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+rc = run2(BASEARGS, s)
+ok &= check('非 fast（沒帶旗標）：每頁照舊 OCR、不補按（3 頁 3 次）', lclicks(s) == 3 and len(DLG_READS) - n0 == 3, f'左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
 DLG.clear(); DLG.update({'body': ['要接這個任務嗎'], 'buttons': ['接受', '再見'], 'body_ok': True})
 s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
 n0 = len(DLG_READS)
 rc = run2(FASTARGS, s)
-ok &= check('fast：剛 OCR 那頁按鈕是「接受」→ 這串不快速連按（每頁 OCR）', lclicks(s) == 2 and len(DLG_READS) - n0 == 2, f'左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
+ok &= check('fast：剛 OCR 那頁按鈕是「接受」→ 不補按（每頁 OCR）', lclicks(s) == 2 and len(DLG_READS) - n0 == 2, f'左鈕={lclicks(s)} OCR={len(DLG_READS) - n0}')
 DLG.clear(); DLG.update(RB)
 s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
 rc = run2(FASTARGS, s)
 ok &= check('fast：第 1 頁含轉生 → 照擋 39、沒按（防護不受 fast 影響）', rc == quest.EXIT_IRREVERSIBLE and lclicks(s) == 0, f'rc={rc}')
 DLG.clear(); DLG.update(SAFE)
-_fp_calls = []
-quest.read_dialog_fp = lambda: _fp_calls.append(1) or FP_A
 s = Script([DIALOG, DIALOG, IDLE] + [IDLE] * 4)
 rc = run2(FASTARGS + ['--allow-irreversible'], s)
-ok &= check('fast + --allow-irreversible → 不快（不讀指紋、照主迴圈每頁按）', not _fp_calls and lclicks(s) == 2, f'指紋讀 {len(_fp_calls)} 次')
-quest.read_dialog_fp = _fake_fp
-FP_SEQ[:] = [FP_A]
-s = Script([DIALOG] * 30)
-quest.read_screen, quest.gui = s.screen, s.gui
-n, why = quest.fast_dialog_chain(FP_A, 1)
-ok &= check('fast_dialog_chain：一直是同型對話框 → 連按 FAST_DIALOG_MAX=6 次就回正常流程', n == quest.FAST_DIALOG_MAX == 6 and '上限' in why, f'{n} {why}')
-s = Script([dict(DIALOG, fight_fallback=True)])
-quest.read_screen, quest.gui = s.screen, s.gui
-ok &= check('fast_dialog_chain：fight_fallback（戰鬥鈕後備判斷）→ 不按', quest.fast_dialog_chain(FP_A, 1)[0] == 0 and not s.clicks)
-ok &= check('dialog_fp_same：差 ≤ 3 同、> 3 不同、深色點太少 / None 不同',
-            quest.dialog_fp_same(FP_A, FP_A) and quest.dialog_fp_same(FP_A, (0, 0, 0) + FP_A[3:]) and not quest.dialog_fp_same(FP_A, (0, 0, 0, 0) + FP_A[4:])
-            and not quest.dialog_fp_same(FP_A, None) and not quest.dialog_fp_same(tuple([1] * 5 + [0] * 259), tuple([1] * 5 + [0] * 259)))
-ok &= check('dialog_fp_from：max(RGB) <= 110 記 1', quest.dialog_fp_from([(60, 40, 30), (229, 197, 155), (110, 90, 80)]) == (1, 0, 1))
-ok &= check('DIALOG_FP_PTS 264 點（左鈕 16 + 右鈕 17 欄 × 8 列）', len(quest.DIALOG_FP_PTS) == 264)
+ok &= check('fast + --allow-irreversible → 不快（照主迴圈每頁按 1 次）', lclicks(s) == 2, f'左鈕={lclicks(s)}')
 quest.read_dialog_fp = _REAL_FP
 
 # read_dialog_texts：用假 ps_json 驗證兩塊區域與參數；內文失敗會重試
