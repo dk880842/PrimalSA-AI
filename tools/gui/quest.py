@@ -159,8 +159,9 @@ TRACKER = (205, 325)                 # 左側任務追蹤第一條：點了自�
 SWITCH_BTN = (763, 760)              # 主畫面「切換」（快速戰鬥 = 主畫面）
 SWITCH_FULL = (850, 765)             # 完整戰鬥畫面的「切換」（戰鬥時最右「遇敵」鈕消失，按鈕列右移；2026-10-10 實測）
 REFRESH_GAP = 3.0                    # 同一場戰鬥「刷新成功」後最多每幾秒再按一次（2026-10-17 8 → 3：刷新後多數 1～2 秒結束，沒結束的 79 / 251 場舊版要多等 8 秒）
-REFRESH_FIRST_DELAY = 3.5            # 2026-10-17 1.5 → 3.5：251 場有 172 場第一次按切換被開戰動畫吃掉（重試約開戰 5 秒才成功，第一次刷新中位數 6 秒）； 偵測到戰鬥後至少等幾秒才按第一次（2026-10-13 actions.log：一偵測到就按切換 850,765 共 5 場 5 場面板都沒開，隨後底部出現「關閉 + 頭像」列；開戰約 2 秒後按的成功）
+REFRESH_FIRST_DELAY = 1.5            # 2026-10-17 曾改 3.5 無效、改回 1.5（第一次點切換點不到不是時機問題，改成連點兩次，見 SWITCH_FIRST_WAIT_MS）；舊註：251 場有 172 場第一次按切換被開戰動畫吃掉（重試約開戰 5 秒才成功，第一次刷新中位數 6 秒）； 偵測到戰鬥後至少等幾秒才按第一次（2026-10-13 actions.log：一偵測到就按切換 850,765 共 5 場 5 場面板都沒開，隨後底部出現「關閉 + 頭像」列；開戰約 2 秒後按的成功）
 REFRESH_RETRY = 1.0                  # 刷新沒成功（面板沒開 / 關閉列還在 / 切換鈕沒露出）幾秒後重試（舊版要等 REFRESH_GAP 8 秒）
+SWITCH_FIRST_WAIT_MS = 400            # 刷新：第一次點切換後等面板幾毫秒，沒開就立刻再點一次（2026-10-17 使用者：每場第一次點都點不到）
 REFRESH_STUCK_SNAP = 10              # 同一場連續幾次沒成功就存一張 close-row-stuck / refresh-fail 圖（只存一次）
 REFRESH_BTN = (910, 578)             # 切換角色面板「刷新角色」（綠色，最右；按完面板自己關）
 QUEST_BATTLE_WINDOW = 15.0           # 最後一次「按對話框 / 點 NPC / 點問號」後幾秒內開始的戰鬥 = 任務戰鬥（才按刷新角色）
@@ -1363,12 +1364,13 @@ def battle_over() -> bool:
 
 
 def waitpix_result(out: str) -> str | None:
-    """純函式：gui seq 輸出裡 waitpix 那行 → 'ok' / 'timeout' / 'pwfail'；沒有 waitpix 結果（假遊戲 / 輸出空）→ None"""
+    """純函式：gui seq 輸出裡最後一個 waitpix 那行 → 'ok' / 'timeout' / 'pwfail'；沒有 waitpix 結果（假遊戲 / 輸出空）→ None"""
+    res = None
     for ln in (out or '').splitlines():
         head = ln.split()[0] if ln.split() else ''
         if head in ('ok', 'timeout', 'pwfail'):
-            return head
-    return None
+            res = head                                   # 取最後一個 waitpix（刷新的 seq 有兩個：第一次點切換常點不到）
+    return res
 
 
 def panel_visible() -> bool:
@@ -1419,7 +1421,10 @@ def refresh_characters(full: bool = False, attempt: int = 0, click_row: bool = T
         return 'notready'
     sw = SWITCH_FULL if full else SWITCH_BTN
     sig = screen_sigs.sig_str(SIG_PANEL)
-    out = gui('seq', f'click {sw[0]} {sw[1]}; waitpix 1500 {sig} 40; ifok click {REFRESH_BTN[0]} {REFRESH_BTN[1]}; wait 500')
+    # 2026-10-17 使用者實機發現：每場戰鬥第一次點切換一定點不到（不是時機問題，251 場 172 場第一次失敗），第二次才彈出刷新窗
+    # → 點一下、短等 SWITCH_FIRST_WAIT_MS 看面板，沒開就立刻再點一次（不用等 waitpix 1.5 秒逾時 + REFRESH_RETRY 1 秒）
+    out = gui('seq', f'click {sw[0]} {sw[1]}; waitpix {SWITCH_FIRST_WAIT_MS} {sig} 40; ifnok click {sw[0]} {sw[1]}; '
+                     f'waitpix 1500 {sig} 40; ifok click {REFRESH_BTN[0]} {REFRESH_BTN[1]}; wait 500')
     w = waitpix_result(out)
     if w is not None and w != 'ok':
         return 'nopanel'
