@@ -1701,5 +1701,65 @@ r = quest.refresh_characters(True, attempt=2)
 ok &= check('拖過 2 次還在 → 退回點「關閉」', r == 'row' and n_close(g) == 1 and not any(c.startswith('drag') for c in g.clicks), str(g.clicks))
 quest.CLOSE_ROW_DRAG_TRIES = 0
 
+# ---- (s) --solo-talk（2026-10-17 精簡 questrun --solo 對話步）：單人段 → team.form → 對話段同一支程序；假 _run / team.form，不碰遊戲 ----
+print('(s) --solo-talk：單人巡路 → 組隊 → 對話 → 解散 一次跑完')
+import io as _io  # noqa: E402
+import contextlib as _ctx  # noqa: E402
+import team as _team  # noqa: E402
+_keep_s = (quest._run, quest.clear_leftovers, _team.form, quest.disband_team, quest.ensure_task_tab, quest.event)
+
+
+def solo_talk_case(phase_rcs, form_rc=0):
+    """phase_rcs = [單人段 rc, 對話段 rc]；回 (rc, 每段 args 摘要, 呼叫順序, stdout 行)"""
+    runs, order = [], []
+    q = list(phase_rcs)
+
+    def fake_run(a):
+        runs.append({'solo': a.solo, 'sad': a.stop_after_dialog, 'disband': a.disband_after, 'fresh': a.team_fresh, 'max': a.max_seconds})
+        order.append('run')
+        quest.WALK['clock'] = quest.WalkClock(a.max_seconds, 0.0)
+        quest.WALK['clock'].walked = 10.0
+        quest.STATS['battles'] = 1
+        rc_ = q.pop(0)
+        if not a.solo and a.disband_after and rc_ in (0, 24):
+            quest.finish(a)                                            # 真的 finish（disband_team 假的）
+        return rc_
+    quest._run = fake_run
+    quest.clear_leftovers = lambda *a: order.append('clear') or 'idle'
+    _team.form = lambda *a, **k: order.append('form') or form_rc
+    quest.disband_team = lambda *a, **k: order.append('disband') or 0
+    quest.ensure_task_tab = lambda: order.append('task_tab')
+    quest.event = lambda m, shot=None: None
+    quest.layout.current = lambda: '2880x1659'
+    for d_ in (quest.CARRY, quest.DISBAND, quest.PHASE, quest.STATS, quest.WALK):
+        d_.clear()
+    sys.argv = ['quest.py', '--solo-talk', '--task', '英雄島前傳', '--max-seconds', '900', '--talk-seconds', '120']
+    buf = _io.StringIO()
+    with _ctx.redirect_stdout(buf):
+        rc_ = quest.main()
+    return rc_, runs, order, buf.getvalue().splitlines()
+
+
+rc, runs, order, out = solo_talk_case([20, 0])
+ok &= check('--solo-talk happy：單人段（--solo、900 秒）→ 清殘留 → team.form → 對話段（--stop-after-dialog --disband-after --team-fresh、120 秒）→ 解散 → 切回任務分頁',
+            rc == 0 and runs[0]['solo'] and runs[0]['max'] == 900 and not runs[1]['solo'] and runs[1]['sad'] and runs[1]['disband'] and runs[1]['fresh']
+            and runs[1]['max'] == 120 and order == ['run', 'clear', 'form', 'run', 'disband', 'task_tab'], f'{rc} {runs} {order}')
+ok &= check('--solo-talk 結尾印 階段 talk + 已驗證解散 + 兩段合計巡路 / 戰鬥', 'solo-talk 階段：talk' in out and quest.DISBAND_OK_LINE in out
+            and '走路不計時 20 秒' in out and '本片戰鬥 2 場' in out, str(out))
+for want, rcs in ((21, [21]), (5, [5]), (2, [2]), (39, [39]), (0, [0])):
+    rc, runs, order, out = solo_talk_case(rcs)
+    ok &= check(f'--solo-talk 單人段回 {want} → 原樣回、不組隊、階段 walk', rc == want and order == ['run'] and 'solo-talk 階段：walk' in out
+                and quest.DISBAND_OK_LINE not in out, f'{rc} {order}')
+rc, runs, order, out = solo_talk_case([20], form_rc=43)
+ok &= check('--solo-talk 到 NPC 後 team.form 43 → 44、不跑對話段、階段 form', rc == quest.EXIT_SOLO_FORM and order == ['run', 'clear', 'form'] and 'solo-talk 階段：form' in out, f'{rc} {order}')
+rc, runs, order, out = solo_talk_case([20], form_rc=9)
+ok &= check('--solo-talk team.form 9（驗證視窗）→ 9 透傳', rc == 9 and order == ['run', 'clear', 'form'], f'{rc} {order}')
+rc, runs, order, out = solo_talk_case([20, 26])
+ok &= check('--solo-talk 對話段 26（解散沒做成）→ 26、不印已驗證解散', rc == 26 and quest.DISBAND_OK_LINE not in out, f'{rc} {out}')
+sys.argv = ['quest.py', '--solo-talk', '--task', 'x', '--fight']
+with _ctx.redirect_stdout(_io.StringIO()):
+    ok &= check('--solo-talk 與 --fight 並用 → 4', quest.main() == 4)
+quest._run, quest.clear_leftovers, _team.form, quest.disband_team, quest.ensure_task_tab, quest.event = _keep_s
+
 print('全部通過' if ok else '有失敗')
 sys.exit(0 if ok else 1)

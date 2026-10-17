@@ -226,9 +226,21 @@ class Fake:
             return (q.pop(0) if len(q) > 1 else q[0]) if q else (20, [])
         # 2026-10-14：questrun 不再開詳情判完成；quest.py 回 0 沒有「任務完成」= 下一片。
         # 舊測試腳本的 (0, []) 當「這片做完」：最後一個腳本片 / 腳本用完 → 印「任務完成」（模擬追蹤欄找不到任務）
+        if '--solo-talk' in args:                                      # 2026-10-17：模擬 quest.py --solo-talk = 單人段（取一個）→ 20 才 team.form → 對話段（再取一個）
+            rc, tail = self.quest_q.pop(0) if self.quest_q else (0, [])
+            if rc != 20:
+                return rc, list(tail) + ['solo-talk 階段：walk']
+            self.rec('qp_form')                                        # quest.py 程序內的 team.form（開 2 次切換面板：讀 + 組隊後驗）
+            frc = self.qp_form_rcs.pop(0) if getattr(self, 'qp_form_rcs', None) else 0
+            if frc:
+                return (frc if frc in (9, 10) else 44), ['solo-talk 組隊失敗 team rc=%d' % frc, 'solo-talk 階段：form']
+            rc, tail = self.quest_q.pop(0) if self.quest_q else (0, [])
+            return rc, list(tail) + (['解散確認：--disband-after 已驗證解散'] if rc in (0, 24) else []) + ['solo-talk 階段：talk']
         rc, tail = self.quest_q.pop(0) if self.quest_q else (0, [])
         if rc == 0 and not tail and not self.quest_q:
             tail = ['任務完成：假']
+        if '--disband-after' in args and rc in (0, 24):
+            tail = list(tail) + ['解散確認：--disband-after 已驗證解散']
         return rc, tail
 
     def read_pos(self):
@@ -1810,12 +1822,66 @@ rc = go(f, [2031], after='none', solo=True, drop_items='薩姆吉爾的首飾', 
 n = f.names()
 qs = [c[1] for c in f.calls if c[0] == 'quest']
 check('--solo 紅暴 happy：不吃龍王 → 接取 → DKBO 戰寵防禦 → 步 1～5 解散 + --solo + 組隊對話 → 步 6 --fight → 步 7 / 8 組隊 → 完成', rc == 0 and 'dragon' not in n
-      and n.index('accept') < n.index('solo_setup') and sum('--solo' in q for q in qs) == 5 and sum('--disband-after' in q for q in qs) == 5
-      and sum('--fight' in q for q in qs) == 1 and n.count('disband') == 5, f'rc={rc} {qs}')
+      and n.index('accept') < n.index('solo_setup') and sum('--solo-talk' in q for q in qs) == 5 and sum('--disband-after' in q for q in qs) == 0
+      and sum('--fight' in q for q in qs) == 1 and n.count('disband') == 1 and n.count('qp_form') == 5, f'rc={rc} {qs} {n}')
+
 check('--solo：步 6 前先組隊、便捷傳送龍王守衛', ('warp', (1160, 646), 5510, '龍王守衛') in f.calls)
 check('--solo：完成後 DKBO 戰寵改回、存倉（英雄的祝福 / 龍王的守護）、丟巴朵蘭恩 / 首飾', 'solo_restore' in n and ('store_many', '英雄的祝福', 'personal') in f.calls
       and ('bag_drop', ('薩姆吉爾的首飾',)) in f.calls and ('pet_drop', '巴朵蘭恩', 1) in f.calls and n.index('solo_restore') < n.index('store_many'), str(n[-12:]))
 check('--solo：單人逃跑算風險事件 → 當場逐人驗', 'status_all' in n)
+
+def solo_cost(f):
+    """假遊戲計數（2026-10-17 精簡驗收）：(切換面板開啟次數, quest.py 啟動次數)。
+    team.disband = 2 次（解散前讀 + 解散後驗）、team.form = 2 次（讀 + 組隊後驗；quest.py --solo-talk 程序內的 qp_form 同）、
+    quest.py 非 --solo / --fight 且沒 --team-fresh = 開始前隊伍檢查 1 次（--solo-talk 的對話段固定帶 --team-fresh = 0 次）"""
+    sw = launches = 0
+    for c in f.calls:
+        if c[0] in ('disband', 'team_form', 'qp_form'):
+            sw += 2
+        elif c[0] == 'quest':
+            launches += 1
+            q = c[1]
+            if not ({'--solo', '--solo-talk', '--fight', '--team-fresh'} & set(q)):
+                sw += 1
+    return sw, launches
+
+
+def old_solo_cost(n_talk, other_sw, other_launch):
+    """舊版（2026-10-17 前）每個對話步：team_disband 2 + quest --solo 1 次啟動 + team.form 2 + quest --stop-after-dialog --disband-after（1 次啟動 + 開始前檢查 1）= 5 次切換面板、2 次啟動"""
+    return n_talk * 5 + other_sw, n_talk * 2 + other_launch
+
+
+_sw, _ln = solo_cost(f)
+_talk_sw = 2 + 2 + 2 * 4                                               # 新版 5 個對話步：步 1 解散 2 + form 2；步 2～5 只有 form 2
+_other_sw, _other_ln = _sw - _talk_sw, _ln - 5
+_osw, _oln = old_solo_cost(5, _other_sw, _other_ln)
+print(f'  紅暴 --solo 5 個對話步：切換面板 新 {_talk_sw} 次 / 舊 25 次；quest.py 啟動 新 5 次 / 舊 10 次；整個任務 切換 {_sw} / 舊 {_osw}、啟動 {_ln} / 舊 {_oln}')
+check('--solo 精簡：每個對話步切換面板次數與 quest.py 啟動次數都比舊版少（5 步：面板 25 → 12、啟動 10 → 5）',
+      _talk_sw == 12 and _sw < _osw and _ln < _oln and _ln - _other_ln == 5, f'{_sw}/{_osw} {_ln}/{_oln}')
+check('--solo 精簡：--solo-talk 帶 --talk-seconds；步 7 / 8 組隊步剛 form 過才帶 --team-fresh',
+      all('--talk-seconds' in q for q in qs if '--solo-talk' in q) and any('--stop-after-rewards' in q and '--team-fresh' in q for q in qs), str(qs))
+# --solo-talk 程序內組隊失敗（44）→ 退回舊流程：questrun retry_form → 另跑對話步（帶 --team-fresh）→ 該步沒驗證解散不影響；下一步照舊略過解散確認
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=SOLO_Q, steps=[1, 2, 3, 4, 5, 6, 7, 8, 'GONE'], bag={r: 8 for r in questrun.ALL_ROLES})
+f.qp_form_rcs = [43]
+rc = go(f, [2031], after='none', solo=True)
+qs = [c[1] for c in f.calls if c[0] == 'quest']
+n = f.names()
+check('--solo-talk 組隊失敗 44 → questrun team.form 重試 → --stop-after-dialog --disband-after --team-fresh → 完成',
+      rc == 0 and qs[1][:1] == ('--task',) and '--disband-after' in qs[1] and '--team-fresh' in qs[1] and n.count('disband') == 1, f'rc={rc} {qs[:3]} {n}')
+# 對話段 26（解散沒做成）→ 下一步開頭照舊 team.disband 確認
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(20, []), (26, [])] + [(20, []), (0, STOP)] * 4 + [(0, [])] + [(0, STOP)] * 2,
+             steps=[1, 2, 3, 4, 5, 6, 7, 8, 'GONE'], bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2031], after='none', solo=True)
+check('--solo 精簡：對話段 26（解散沒做成）→ 下一步照舊先 team.disband；之後已驗證解散的步不再確認', rc == 0 and f.names().count('disband') == 2, f'rc={rc} {f.names()}')
+# 單人段沒到 NPC（0 = 時間到）≠ 對話段 0：看「solo-talk 階段」分辨 → 112
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(0, ['x'])], steps=[1], bag={r: 8 for r in questrun.ALL_ROLES})
+check('--solo-talk 單人段回 0（沒到 NPC）→ 112，不當對話完成', go(f, [2031], after='none', solo=True) == questrun.EXIT_STEP and 'qp_form' not in f.names())
+f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(20, [])], steps=[1], bag={r: 8 for r in questrun.ALL_ROLES})
+f.qp_form_rcs = [9]
+check('--solo-talk 程序內 team.form 9（驗證視窗）→ 9 透傳、不重試組隊', go(f, [2031], after='none', solo=True) == uikit.EXIT_UNKNOWN_SCREEN
+      and 'team_form' not in f.names()[f.names().index('qp_form'):], str(f.names()))
+check('solo_talk_phase / disband_ok 純函式', questrun.solo_talk_phase(['a', 'solo-talk 階段：talk', '走路不計時 3 秒']) == 'talk'
+      and questrun.solo_talk_phase(['x']) is None and questrun.disband_ok(['解散確認：--disband-after 已驗證解散']) and not questrun.disband_ok(['x']))
 f = SoloHero(status={D31: [questrun.PENDING]}, quest=[(20, []), (0, STOP)] * 4 + [(21, [])] + [(20, []), (0, STOP)] + [(0, [])] + [(0, STOP)] * 2,
              steps=[1, 2, 3, 4, 5, 5, 6, 7, 8, 'GONE'], bag={r: 8 for r in questrun.ALL_ROLES})
 rc = go(f, [2031], after='none', solo=True)
@@ -1837,7 +1903,7 @@ f.no_dragon = True
 f.pos = (5506, 54, 5)
 rc = go(f, [2031], after='none', solo=True)
 qs = [c[1] for c in f.calls if c[0] == 'quest']
-check('--solo 續跑（進行中）步號讀不到 → 依地圖 5506 推步 4 → 步 4、5 單人 → 步 6 fight → 完成（不再 112）', rc == 0 and sum('--solo' in q for q in qs) == 2
+check('--solo 續跑（進行中）步號讀不到 → 依地圖 5506 推步 4 → 步 4、5 單人 → 步 6 fight → 完成（不再 112）', rc == 0 and sum('--solo-talk' in q for q in qs) == 2
       and sum('--fight' in q for q in qs) == 1, f'rc={rc} {questrun.LAST["info"].get("msg")} {qs}')
 f = SoloHero(status={D17: [questrun.DOING]}, quest=[(0, [])])
 check('--solo 用在沒有 solo 設定的任務 → 110', go(f, [2017], after='none', solo=True) == questrun.EXIT_PREFLIGHT)

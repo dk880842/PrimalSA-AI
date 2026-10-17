@@ -27,7 +27,12 @@
            點 NPC 後 12 秒沒對話框也沒戰鬥 → 退出碼 22（沒點到 NPC）；對話後 15 秒沒開打 → 23；被打飛 21。
            範例：quest.py --fight --task 英雄島前傳 --npc auto --max-seconds 300
   --npc-map M  --fight --npc X,Y 用：NPC 所在地圖（有 --task 時不給會用任務表反查）；與目前地圖不同 → 退出碼 34（「目前在地圖 A，NPC 在地圖 B」），不點
-  --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後隊長紅標還在 → 不亂點，退出碼 26；已是單人（組隊分頁沒隊長紅標）→ 不點任何東西，退出碼 0
+  --solo-talk  （2026-10-17，questrun --solo 對話步用；離線測試，未實機）= --solo 巡路到 NPC（20）→ clear_leftovers → team.form（自己最後重開切換面板驗隊伍）→ 同一支程序接著
+           --stop-after-dialog --disband-after --team-fresh（--max-seconds 管單人段、--talk-seconds 管對話段，預設 120）。省一次 quest.py 啟動（約 6～7 秒）與開始前隊伍檢查。
+           退出碼：單人段非 20 原樣回（21 / 5 / 2 / 39 / 33 / 19 / 3 / 0…）；team.form 失敗 44（9 / 10 透傳）；其餘 = 對話段退出碼。結尾印「solo-talk 階段：walk / form / talk」
+           （同一個 0 / 3 / 19 在兩段意義不同，questrun 據此分辨）；兩段的「走路不計時」「本片戰鬥」加總印一次。
+  --disband-after  這步完成（搭配 --stop-after-dialog / --stop-after-rewards）後立刻解散隊伍；分頁沒切到組隊 / 選單沒彈出 / 解散後隊長紅標還在 → 不亂點，退出碼 26；已是單人（組隊分頁沒隊長紅標）→ 不點任何東西，退出碼 0；
+           成功（含已是單人）→ 左側分頁切回「任務」（2026-10-17）、結尾印「解散確認：--disband-after 已驗證解散」（questrun --solo 下一步據此略過解散確認）
   --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
   --step N  --fight 用：明確指定任務第 N 步的 NPC（= --npc auto 但不 OCR 追蹤條目；需 --task）。--npc auto 不給 --step 時，改讀追蹤條目「標題正下方那行說明」
            （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 先用「目前所在地圖只對應唯一一個打 BOSS / 對話步驟」反查（事件 log 註明地圖反查），仍不行 → 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
@@ -76,7 +81,7 @@
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
 結束時印「走路不計時 N 秒」「本片戰鬥 N 場」兩行（questrun 解析：巡路不計時、沒打仗才沿用全隊 HP）。
-退出碼：43 載入 / 轉場畫面連續 LOADING_MAX_S 秒（結束本片，呼叫端重跑）、42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：43 載入 / 轉場畫面連續 LOADING_MAX_S 秒（結束本片，呼叫端重跑）、42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、44 --solo-talk 到 NPC 後 team.form 失敗（呼叫端重組後跑舊對話步）、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -108,6 +113,7 @@ EXIT_NO_BATTLE = 23                  # --fight：有對話但 QUEST_BATTLE_WINDO
 EXIT_AUTOWALK = 24                   # --stop-after-dialog：這步對話完，遊戲自己又開始 Auto Walking（腳本沒點追蹤；呼叫端要馬上處理，例如解散）
 EXIT_BATTLE_STUCK = 25               # 組隊預設模式：完整戰鬥按了自動戰鬥好幾次仍是關的（寵物指令視窗 / 其他卡住畫面）→ 人工處理
 EXIT_DISBAND_FAIL = 26               # --disband-after：解散沒做成（分頁沒切過去 / 選單沒彈出 / 解散後畫面沒變），沒亂點
+EXIT_SOLO_FORM = 44                  # --solo-talk：到 NPC 後 team.form 失敗（team rc 印在輸出）→ 呼叫端重試組隊後跑舊的對話步
 # 27 / 28 / 29（外掛自動逃跑專用）已於 2026-10-10 移除，編號保留不重用
 EXIT_TEAM_MISMATCH = 30              # --fight / 預設模式點 NPC 前：切換面板的隊伍標籤不是「1 隊長 + (N-1) 隊員」（有人脫隊 / 單人）→ 沒點 NPC
 EXIT_STEP_UNKNOWN = 31               # --npc auto：讀不到追蹤條目的目前步驟文字，或對不到任務表的步驟（不退回第一個戰鬥步）
@@ -846,6 +852,9 @@ def finish(a, rc: int = 0) -> int:
     """一步完成的收尾：--disband-after 時先解散（失敗回 26），否則回 rc"""
     if a.disband_after:
         d = disband_team()
+        if not d:
+            DISBAND['ok'] = True
+            ensure_task_tab()                            # 解散後左側停在組隊分頁 → 順手切回任務（下一支 quest.py 不用再切，2026-10-17）
         return d or rc
     return rc
 
@@ -948,6 +957,11 @@ WALK_GRACE_READS = 2                 # 巡路中途連續 unknown 最多這麼�
 
 WALK: dict = {}                      # 本次執行的 WalkClock（main 結束時印「走路不計時 N 秒」給 questrun 扣總時限）
 STATS: dict = {}                     # 本次執行的統計：battles = 打完幾場戰鬥（main 結束時印「本片戰鬥 N 場」給 questrun 判斷全隊 HP 能不能沿用）
+CARRY: dict = {}                     # --solo-talk：前一段（單人巡路）的 walked / battles，main 結束時加總印出
+DISBAND: dict = {}                   # --disband-after 這次執行已驗證解散（disband_team 回 0）→ ok=True，main 結束時印 DISBAND_OK_LINE
+PHASE: dict = {}                     # --solo-talk 結束在哪一段：walk（單人巡路）/ form（到 NPC 後組隊）/ talk（組隊對話），main 結束時印 SOLO_TALK_PHASE_LINE
+SOLO_TALK_PHASE_LINE = 'solo-talk 階段：'            # questrun 解析：後接 walk / form / talk（同一個退出碼 0 / 3 / 19 在兩段意義不同）
+DISBAND_OK_LINE = '解散確認：--disband-after 已驗證解散'   # questrun 看 tail 有這行 = 隊伍已解散（下一步 team_disband 可略過）
 
 
 SLICE_DEFER_STATES = ('battle', 'dialog', 'reward', 'select')
@@ -1836,7 +1850,62 @@ def _main() -> int:
     ap.add_argument('--hp-check-min', type=int, default=0, help='預設模式：每打完 --hp-check-every 場戰鬥、回主畫面閒置確認後讀全隊 HP（開背包約 8 秒），任一人低於這個 %%%% → 結束本片，退出碼 %d（questrun 補血後續片）；0 = 不檢查' % EXIT_HP_LOW)
     ap.add_argument('--hp-check-every', type=int, default=HP_CHECK_EVERY, help='--hp-check-min：路上一般戰鬥每幾場讀一次（預設 %d；0 = 只在任務戰後讀）' % HP_CHECK_EVERY)
     ap.add_argument('--allow-irreversible', action='store_true', help='不檢查對話框是否含不可逆關鍵字（%s）：預設遇到會不按、存 snap、退出碼 %d；人 / agent 看過截圖確認要做才加' % ('、'.join(IRREVERSIBLE_KEYWORDS), EXIT_IRREVERSIBLE))
+    ap.add_argument('--solo-talk', action='store_true', help='單人逃跑對話步一次跑完（questrun --solo 用，2026-10-17）：--solo 巡路到 NPC（20）→ 清殘留 → team.form 快速組隊（自己最後驗過隊伍）→ '
+                    '同一支程序接著 --stop-after-dialog --disband-after（開始前隊伍檢查略過 = --team-fresh）；--max-seconds 管單人巡路、--talk-seconds 管對話。'
+                    '退出碼：單人段非 20 原樣回（21 / 5 / 2 / 39 / 33 / 19 / 3…）；組隊失敗 %d（team rc 印在輸出，呼叫端自己重組再跑舊的對話步）；team 9 / 10 透傳；其餘 = 對話段退出碼' % EXIT_SOLO_FORM)
+    ap.add_argument('--talk-seconds', type=int, default=120, help='--solo-talk：組隊對話段的 --max-seconds（預設 120）')
     a = ap.parse_args()
+    if a.solo_talk:
+        return solo_talk(a)
+    return _run(a)
+
+
+def solo_talk(a) -> int:
+    """--solo-talk：單人巡路 → 組隊 → 對話 → 解散，同一支程序（省一次 quest.py 啟動 + 開始前隊伍檢查 + 下一步解散前的確認，見檔頭）"""
+    if a.fight or a.stop_at_npc or a.stop_after_dialog or a.stop_after_rewards or a.disband_after or a.once:
+        log('--solo-talk 不可與 --fight / --stop-at-npc / --stop-after-* / --disband-after / --once 並用（它自己會依序做）')
+        return 4
+    a1 = argparse.Namespace(**vars(a))
+    a1.solo, a1.solo_talk = True, False
+    PHASE['solo_talk'] = 'walk'
+    rc = _run(a1)
+    _carry_stats()
+    if rc != EXIT_AT_NPC:
+        return rc                                        # 21 被打飛 / 5 完成 / 2 不認得 / 39 / 33 / 19 / 3 …：與舊版 --solo 相同，呼叫端照舊處理
+    try:
+        clear_leftovers()                                # 到 NPC 後對話框可能又跳出來（2026-10-15 紅暴步 1）→ 先清殘留（不認得的不碰；之後 team.form 的 preflight 會擋）
+    except Exception as e:                               # noqa: BLE001 —— 與舊版 questrun clear_screen 相同：例外只記不擋
+        event(f'--solo-talk：到 NPC 後清殘留例外 {e}')
+    import team
+    import uikit
+    PHASE['solo_talk'] = 'form'
+    trc = team.form()                                    # 快速組隊；form 自己最後重開切換面板驗 1 隊長 + 4 隊員
+    if trc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+        return trc
+    if trc:
+        event(f'--solo-talk：到 NPC 後 team.form 失敗 rc={trc} → 退出碼 {EXIT_SOLO_FORM}（呼叫端重試組隊後跑舊的 --stop-after-dialog --disband-after）')
+        print(f'solo-talk 組隊失敗 team rc={trc}', flush=True)
+        return EXIT_SOLO_FORM
+    event('--solo-talk：已組好 5 人隊伍（team.form 剛驗過）→ 同一支程序接著組隊對話，開始前不再開切換面板')
+    a2 = argparse.Namespace(**vars(a))
+    a2.solo = a2.solo_talk = False
+    a2.stop_after_dialog = a2.disband_after = a2.team_fresh = True
+    a2.max_seconds = a.talk_seconds
+    PHASE['solo_talk'] = 'talk'
+    return _run(a2)
+
+
+def _carry_stats() -> None:
+    """--solo-talk 兩段：前一段的巡路不計時秒數 / 戰鬥場數累加到 CARRY，main 結束時一起印（questrun 解析）"""
+    wc = WALK.get('clock')
+    CARRY['walked'] = CARRY.get('walked', 0) + (wc.walked if wc is not None else 0)
+    CARRY['battles'] = CARRY.get('battles', 0) + STATS.get('battles', 0)
+    WALK.pop('clock', None)
+    STATS.clear()
+
+
+def _run(a) -> int:
+    """一次監測（參數已解析）；--solo-talk 會依序呼叫兩次"""
     a.npc_map_arg = a.npc_map or None
     a.npc_map = None
     if a.step and not a.npc:
@@ -2479,9 +2548,14 @@ def main() -> int:
     try:
         rc = _main()
         wc = WALK.get('clock')
-        if wc is not None:
-            print(f'走路不計時 {int(wc.walked)} 秒', flush=True)      # questrun 解析這行：slice / 總時限都不把巡路時間算進去
-            print(f'本片戰鬥 {STATS.get("battles", 0)} 場', flush=True)  # questrun 解析這行：沒打仗 → 全隊 HP 讀數可沿用（review §5.2）
+        if wc is not None or CARRY:
+            walked = (wc.walked if wc is not None else 0) + CARRY.get('walked', 0)
+            print(f'走路不計時 {int(walked)} 秒', flush=True)      # questrun 解析這行：slice / 總時限都不把巡路時間算進去
+            print(f'本片戰鬥 {STATS.get("battles", 0) + CARRY.get("battles", 0)} 場', flush=True)  # questrun 解析這行：沒打仗 → 全隊 HP 讀數可沿用（review §5.2）
+        if PHASE.get('solo_talk'):
+            print(SOLO_TALK_PHASE_LINE + PHASE['solo_talk'], flush=True)
+        if DISBAND.get('ok'):
+            print(DISBAND_OK_LINE, flush=True)               # questrun 解析這行：--disband-after 已驗證解散 → 下一步單人跑前不再開切換面板確認
         return rc
     finally:
         battleguard.release()

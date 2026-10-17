@@ -11,8 +11,9 @@ description: Use when the PrimalSA (精靈王石器) quest chain must be solved 
 **只有 questrun 回 156（背包與公共倉庫都沒有龍王的守護）才用本 skill 的第 4 節單人逃跑**；156 但訊息是「吃不到（一時失敗）」→ 先處理再重跑 questrun，不要直接改逃跑。
 **2026-10-14 起紅暴單人逃跑已腳本化**（照 02:41～02:55 手動流程寫，**未實機**）：先跑
 `uv run --no-project python tools/gui/questrun.py run 2031 --solo --after none --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾`
-（不吃龍王；DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 1～5「解散 → `quest.py --solo` 到 NPC → team.form → `--stop-after-dialog --disband-after`」→ 步 6 組隊 + 便捷傳送 + `--fight` → 步 7 / 8 組隊 `--stop-after-rewards 1`
+（不吃龍王；DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 1～5「解散 → `quest.py --solo-talk`（同一支程序：`--solo` 到 NPC → team.form → `--stop-after-dialog --disband-after`）」→ 步 6 組隊 + 便捷傳送 + `--fight` → 步 7 / 8 組隊 `--stop-after-rewards 1`
 → DKBO 戰寵改回 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾；耐久力回複藥 NPC 會給，不檢查不買）。`postrebirth.py` hero 段收到 156 會**自動**改跑這一行。
+2026-10-17 精簡（離線測試，未實機）：每個對話步只啟動 1 次 quest.py（`--solo-talk`，舊版 2 次各約 6～7 秒）；對話段不再開始前驗隊伍（form 剛驗過）；上一步已驗證解散就不再開切換面板確認（26 / 未知 / 續跑照舊確認）；解散後左側自動切回任務分頁。quest.py 內組隊失敗（44）→ questrun 退回舊流程重組再對話。下面第 2 節是手動流程，步驟不變。
 續跑（任務已「進行中」）時步 1～5 說明行同文字讀不出步號：2026-10-17 起 questrun 依目前地圖推（步 k 的薩姆吉爾地圖 5501 / 5503 / 5505 / 5506 / 5508 = 步 k，其他 = 步 1；步 1～5 做法相同，推錯只影響計數），不用再設 `QUESTRUN_SOLO_STEP`（仍可手動指定，優先；未實機）。
 
 腳本非 0 才照下面第 2～4 節手動做（退出碼見 questrun.py 檔頭；細節 `../psa-game-ui/ui/quest.md`「--solo」）。

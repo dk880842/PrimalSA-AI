@@ -9,7 +9,11 @@
         [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
         [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post] [--solo] [--buy-missing（相容保留，no-op）]
   --solo（2026-10-14，紅暴沒龍王 156 的退路；只限 questdefs 有 solo 的任務，其他 110；**未實機**）：不吃龍王，接取後 DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 →
-        每輪讀步號：步 < solo.group_from = 解散 → quest.py --solo 單人逃跑到 NPC（20；21 補血重跑 ≤2）→ team.form → quest.py --stop-after-dialog --disband-after；
+        每輪讀步號：步 < solo.group_from = 解散 → **一支** quest.py --solo-talk（單人逃跑到 NPC 20 → 清殘留 → team.form → --stop-after-dialog --disband-after；21 補血重跑 ≤2）；
+        2026-10-17 精簡（離線測試，未實機）：對話步從「2 次 quest.py 啟動 + 5 次切換面板」降為「1 次啟動 + 2 次」——對話段帶 --team-fresh（form 自己驗過，不再開始前驗隊伍）、
+        上一步 quest.py 印「解散確認：--disband-after 已驗證解散」且緊接著就是下一個對話步 → 不再 team_disband 開面板確認（未知 / 26 / 續跑照舊確認）、
+        --disband-after 解散完順手切回任務分頁；quest.py 結尾「solo-talk 階段：walk / form / talk」分辨退出碼屬哪一段（單人段 0 / 3 / 19 = 112，不當對話完成）；
+        quest.py 內 team.form 失敗 44 → 退回舊流程：retry_form 重組 → 另跑 --stop-after-dialog --disband-after --team-fresh；組隊步（≥ group_from）剛 form 過也帶 --team-fresh；
         kind=fight = 先組隊再 do_fight；步 ≥ group_from = 組隊 quest.py --stop-after-rewards 1；GONE / 5 = 完成 → DKBO 戰寵改回 → post → --drop-*；同一步 4 次沒前進 112
         步 1～5 說明行同文字讀不出步號：剛接取 = 步 1 起算；續跑（任務已進行中）→ infer_solo_step 依目前地圖推（步 k 的 NPC 地圖 = 步 k，其他 = 步 1；
         2026-10-17 p2 實跑 112 後補，未實機）；QUESTRUN_SOLO_STEP=N 環境變數仍可手動指定（優先）
@@ -180,6 +184,20 @@ def infer_solo_step(d: dict, pos) -> int | None:
     k = (so.get('step_maps') or {}).get(m)
     return k if k else rng[0]
 SOLO_KNOCK_MAX = 2              # --solo：單人巡路被打飛（quest.py 21）最多補血重跑幾次
+SOLO_FORM_RC = 44               # quest.py --solo-talk：到 NPC 後 team.form 失敗（quest.EXIT_SOLO_FORM）→ questrun 退回舊流程重組 + 另跑對話步
+
+
+def solo_talk_phase(tail) -> str | None:
+    """純函式：quest.py --solo-talk 結尾印的「solo-talk 階段：walk / form / talk」→ 段名；沒印（被殺 / 當掉）→ None（當單人段失敗處理）"""
+    for ln in reversed(list(tail or ())):
+        if ln.startswith('solo-talk 階段：'):
+            return ln.split('：', 1)[1].strip() or None
+    return None
+
+
+def disband_ok(tail) -> bool:
+    """純函式：quest.py --disband-after 已驗證解散（結尾印「解散確認：--disband-after 已驗證解散」）"""
+    return any(ln.startswith('解散確認：--disband-after 已驗證解散') for ln in (tail or ()))
 SOLO_PET = {'first': '防禦', 'first_on': True, 'normal': '攻擊'}         # 跑路角色 DKBO 戰寵動作（psa-quest-solo §1，使用者 2026-10-10）
 SOLO_PET_BACK = {'first': '攻擊', 'first_on': False, 'normal': '攻擊'}   # 結束後改回
 FIGHT_TRIES = 2                 # kind=fight 步（紅暴步 6）：沒點到 NPC / 沒開打 / 輸了（35，先補血）最多打幾次
@@ -706,8 +724,8 @@ def print_plan(defs, opts: dict) -> None:
     if opts.get('verify', 'risk') == 'risk':
         print('[逐人驗證] 沒風險事件的任務延後：全部任務結束後其他 4 人每人開一次詳情批次讀（失敗退出留進度檔，下次 run 結束再驗）')
     if opts.get('solo'):
-        print(f'[單人逃跑 --solo] 不吃龍王；{LEADER} 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 < group_from：解散 → quest.py --solo → team.form → '
-              f'--stop-after-dialog --disband-after；fight 步：組隊 → do_fight；步 ≥ group_from：組隊 --stop-after-rewards 1 → 完成後 {LEADER} 戰寵改回')
+        print(f'[單人逃跑 --solo] 不吃龍王；{LEADER} 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 < group_from：解散（上一步已驗證解散就略過）→ quest.py --solo-talk（單人跑 → team.form → '
+              f'--stop-after-dialog --disband-after 同一支程序）；fight 步：組隊 → do_fight；步 ≥ group_from：組隊 --stop-after-rewards 1 → 完成後 {LEADER} 戰寵改回')
     if opts.get('buy_missing'):
         print('[--buy-missing] 相容保留的 no-op（任務道具由 NPC 給，不檢查不買）')
     if opts.get('drop_items'):
@@ -1674,6 +1692,7 @@ class Run:
             if time.time() - t0 > self.o['max_min'] * 60:
                 return self.fail(EXIT_SLICES, f'任務 {tid}（單人逃跑）超過 {self.o["max_min"]} 分鐘仍未完成')
             ts['slices'] = k + 1
+            prev_disbanded, self.solo_disbanded = getattr(self, 'solo_disbanded', False), False   # 只有緊接在「已驗證解散」的對話步後面那一輪可以略過解散確認
             step = T.read_step(track)
             if step == T.gone():
                 return self.solo_done(d, ts, t0, k)
@@ -1736,7 +1755,7 @@ class Run:
                 rc = self.solo_group_step(d, step)
             else:
                 self.solo_adv = False
-                rc, knocked = self.solo_run_step(d, step, knocked)
+                rc, knocked = self.solo_run_step(d, step, knocked, disbanded=prev_disbanded)
                 if not rc and getattr(self, 'solo_adv', False) and getattr(self, 'solo_hint', None):
                     self.solo_hint += 1
             if rc == 'gone':
@@ -1761,62 +1780,78 @@ class Run:
             return self.fail(EXIT_STALL, f'任務 {tid} 步 {step} {what}：對話無進展（quest.py 33）', quest_rc=qrc)
         return None
 
-    def solo_run_step(self, d, step, knocked: int) -> tuple:
-        """對話步：解散 → quest.py --solo（逃跑巡路，到 NPC ESC 對話框 → 20）→ team.form（隊員拉到隊長旁）→
-        quest.py --stop-after-dialog --disband-after（對話 / 領獎完就停並解散）。→ (rc | 'gone' | 0, knocked)"""
+    def solo_run_step(self, d, step, knocked: int, disbanded: bool = False) -> tuple:
+        """對話步（2026-10-17 精簡）：解散（disbanded = 上一步 quest.py 印了「--disband-after 已驗證解散」且之後沒做別的事 → 略過，不開切換面板）→
+        **一支** quest.py --solo-talk：單人逃跑巡路到 NPC（20）→ 清殘留 → team.form（自己驗過隊伍）→ --stop-after-dialog --disband-after（開始前不再驗隊伍）。
+        quest.py 結尾印「solo-talk 階段：walk / form / talk」分辨退出碼屬於哪一段；form 失敗（44）→ 退回舊流程：retry_form 重組 → 另跑 --stop-after-dialog --disband-after --team-fresh。
+        → (rc | 'gone' | 0, knocked)；成功且已驗證解散時設 self.solo_disbanded = True"""
         T, tid, track = self.T, d['id'], d['track']
-        rc = T.team_disband()
+        self.solo_disbanded = False
+        if disbanded:
+            event(f'任務 {tid} 步 {step}：上一步對話完已驗證解散 → 不再開切換面板確認，直接單人跑')
+        else:
+            rc = T.team_disband()
+            if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
+                return rc, knocked
+            if rc:
+                return self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：單人跑前解散隊伍失敗 team rc={rc}'), knocked
         self.team_ok_at = 0.0
-        if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT):
-            return rc, knocked
-        if rc:
-            return self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：單人跑前解散隊伍失敗 team rc={rc}'), knocked
-        qrc, tail = T.quest(['--solo', '--task', track, '--max-seconds', SOLO_RUN_S], SOLO_RUN_S + WALK_CAP_S + 120)
-        event(f'任務 {tid} 步 {step}：quest.py --solo 退出碼 {qrc}')
-        r = self.solo_quest_rc(tid, step, qrc, '單人巡路')
-        if r is not None:
-            return r, knocked
-        if qrc == 21:                                                   # 被打飛回村（psa-quest-solo §3）：補血後重跑這一步
-            knocked += 1
-            if knocked > SOLO_KNOCK_MAX:
-                return self.fail(EXIT_TEAM, f'任務 {tid} 步 {step}：單人巡路被打飛 {knocked} 次，停手交人（等級 / 路線？）', quest_rc=qrc), knocked
-            event(f'任務 {tid} 步 {step}：單人巡路被打飛（21）→ 補血後重跑（第 {knocked}/{SOLO_KNOCK_MAX} 次）')
-            try:
-                T.heal()
-            except RuntimeError as e:
-                return self.fail(EXIT_HANDOVER, f'補血失敗：{e}'), knocked
-            return 0, knocked
-        if qrc != 20:
-            return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：quest.py --solo 退出碼 {qrc}（預期 20 到達 NPC；3 = 追蹤沒反應、19 / 42 卡住）', quest_rc=qrc), knocked
-        cs = getattr(T, 'clear_screen', None)
-        if cs:                                                          # 到 NPC 後對話框可能又跳出來（2026-10-15 紅暴步 1：ESC 後 NPC 對話重開、HUD 不在 → team.form 40）→ 先清殘留
-            try:
-                cs()
-            except Exception as e:                                      # noqa: BLE001
-                event(f'任務 {tid} 步 {step}：到 NPC 後清殘留例外 {e}')
-        rc = self.form(f'任務 {tid} 步 {step} 到 NPC 後')
-        if rc:
-            return (rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else
-                    self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：到 NPC 後 team.form 失敗 rc={rc}')), knocked
-        qrc, tail = T.quest(['--task', track, '--stop-after-dialog', '--disband-after', '--max-seconds', SOLO_TALK_S], SOLO_TALK_S + 180)
+        qrc, tail = T.quest(['--solo-talk', '--task', track, '--max-seconds', SOLO_RUN_S, '--talk-seconds', SOLO_TALK_S],
+                            SOLO_RUN_S + WALK_CAP_S + SOLO_TALK_S + 300)
+        phase = solo_talk_phase(tail)
+        event(f'任務 {tid} 步 {step}：quest.py --solo-talk 退出碼 {qrc}（結束在 {phase or "?"} 段）')
+        if phase != 'talk':
+            r = self.solo_quest_rc(tid, step, qrc, '單人巡路' if phase != 'form' else '到 NPC 後組隊')
+            if r is not None:
+                return r, knocked
+            if qrc == 21 and phase == 'walk':                           # 被打飛回村（psa-quest-solo §3）：補血後重跑這一步
+                knocked += 1
+                if knocked > SOLO_KNOCK_MAX:
+                    return self.fail(EXIT_TEAM, f'任務 {tid} 步 {step}：單人巡路被打飛 {knocked} 次，停手交人（等級 / 路線？）', quest_rc=qrc), knocked
+                event(f'任務 {tid} 步 {step}：單人巡路被打飛（21）→ 補血後重跑（第 {knocked}/{SOLO_KNOCK_MAX} 次）')
+                try:
+                    T.heal()
+                except RuntimeError as e:
+                    return self.fail(EXIT_HANDOVER, f'補血失敗：{e}'), knocked
+                return 0, knocked
+            if not (phase == 'form' and qrc == SOLO_FORM_RC):
+                return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：quest.py --solo-talk 單人段退出碼 {qrc}（預期 20 到達 NPC；3 = 追蹤沒反應、19 / 42 卡住）', quest_rc=qrc), knocked
+            # 到了 NPC 但 quest.py 內的 team.form 一次沒成：退回舊流程（retry_form 原地重試 / 等戰鬥）→ 另起一支對話步
+            cs = getattr(T, 'clear_screen', None)
+            if cs:
+                try:
+                    cs()
+                except Exception as e:                                  # noqa: BLE001
+                    event(f'任務 {tid} 步 {step}：到 NPC 後清殘留例外 {e}')
+            rc = self.form(f'任務 {tid} 步 {step} 到 NPC 後（--solo-talk 組隊失敗後重試）')
+            if rc:
+                return (rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else
+                        self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：到 NPC 後 team.form 失敗 rc={rc}')), knocked
+            qrc, tail = T.quest(['--task', track, '--stop-after-dialog', '--disband-after', '--team-fresh', '--max-seconds', SOLO_TALK_S], SOLO_TALK_S + 180)
+            event(f'任務 {tid} 步 {step}：組隊對話 quest.py --stop-after-dialog --disband-after 退出碼 {qrc}')
         self.team_ok_at = 0.0
-        event(f'任務 {tid} 步 {step}：組隊對話 quest.py --stop-after-dialog --disband-after 退出碼 {qrc}')
+        return self.solo_talk_done(tid, step, qrc, tail), knocked
+
+    def solo_talk_done(self, tid, step, qrc, tail):
+        """組隊對話段（--solo-talk 的 talk 段或退回的舊對話步）的退出碼 → 0 | 'gone' | 退出碼；tail 有「已驗證解散」→ self.solo_disbanded"""
+        T = self.T
         r = self.solo_quest_rc(tid, step, qrc, '組隊對話')
         if r is not None:
-            return r, knocked
+            return r
         if qrc in (0, 24, 26):
             self.solo_adv = True                                        # 24 = 對話完遊戲自己又巡路（已解散）；26 = 解散沒做成（下一步開頭會再 team.disband）
-            return 0, knocked
+            self.solo_disbanded = disband_ok(tail)
+            return 0
         if qrc == 18:
             rr = T.reward_retry()
             if rr != 'stuck':
                 self.solo_adv = True
-                return 0, knocked
+                return 0
             T.snap('questrun-reward-stuck')
-            return self.fail(EXIT_REWARD, f'任務 {tid} 步 {step}：領獎視窗關不掉，請人工處理', quest_rc=qrc), knocked
+            return self.fail(EXIT_REWARD, f'任務 {tid} 步 {step}：領獎視窗關不掉，請人工處理', quest_rc=qrc)
         if qrc in (30, 32):
-            return 0, knocked                                           # 隊伍不符：下一輪同一步重跑（會重新解散 → 單人跑 → 組隊）
-        return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：組隊對話 quest.py 退出碼 {qrc}', quest_rc=qrc), knocked
+            return 0                                                    # 隊伍不符：下一輪同一步重跑（會重新解散 → 單人跑 → 組隊）
+        return self.fail(EXIT_STEP, f'任務 {tid} 步 {step}：組隊對話 quest.py 退出碼 {qrc}', quest_rc=qrc)
 
     def solo_group_step(self, d, step):
         """步號 ≥ group_from（紅暴步 7 龍王對話、步 8 回村交勾玉）：組隊 quest.py --stop-after-rewards 1（psa-quest-solo §4-6 / 7）→ 0 | 'gone' | 退出碼"""
@@ -1825,7 +1860,10 @@ class Run:
             rc = self.form(f'任務 {tid} 步 {step} 組隊步前')
             if rc:
                 return rc if rc in (uikit.EXIT_UNKNOWN_SCREEN, uikit.EXIT_HALT) else self.fail(EXIT_HANDOVER, f'任務 {tid} 步 {step}：team.form 失敗 rc={rc}')
-        qrc, tail = T.quest(['--task', track, '--stop-after-rewards', 1, '--max-seconds', SOLO_GROUP_S], SOLO_GROUP_S + WALK_CAP_S + 120)
+        qargs = ['--task', track, '--stop-after-rewards', 1, '--max-seconds', SOLO_GROUP_S]
+        if self.team_fresh():
+            qargs.append('--team-fresh')                                # 剛 form 過（form 自己驗過）→ quest.py 開始前不再開切換面板
+        qrc, tail = T.quest(qargs, SOLO_GROUP_S + WALK_CAP_S + 120)
         self.team_ok_at = 0.0
         event(f'任務 {tid} 步 {step}：組隊 quest.py --stop-after-rewards 1 退出碼 {qrc}')
         r = self.solo_quest_rc(tid, step, qrc, '組隊步')
