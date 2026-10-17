@@ -8,7 +8,8 @@
            pop_rows / pop_mats / mats_fit / pop_check / arrow_on（快速合成彈窗第二輪：材料列整欄分列、▼ 捲動合併、依序比對配方、要有大字證據）
   計畫     plan_role（每人 10 項 → 每環是否支援、薩村 / 漁村 / 胡椒購買清單、石幣估算）、store_route（店順序 = 店員 y 由小到大）
   背包模型 Ledger（背包 / 個人倉庫 / 公倉的材料種類與數量；**不讀背包 / 倉庫格數**，改用「背包材料種類上限 BAG_KINDS_MAX」模型決定何時存倉）、
-           choose_evict / make_room（放不下時存最晚環才用到的種類）、craftable / ring_ready（可合成 / 可提交判斷）
+           choose_evict / make_room（放不下時存最晚環才用到的種類；材料優先、成品次之）、buy_batches（一家店放不下 → 分批買，批間存倉）、
+           products_away（成品已存倉 → 提交前要取回）、craftable / ring_ready（可合成 / 可提交判斷）
   進度檔   team_path / role_path（每視窗各自）、load / save（原子寫入）、check_date（跨 00:00 → 220）
   退出碼   EXIT_*（220～229，見 §4.5）
 
@@ -46,7 +47,7 @@ PEPPERS = ('普通的胡椒', '黑胡椒', '香味濃厚的胡椒')     # 胡椒
 BAG_KINDS_MAX = 13                                      # 背包同時放的材料 / 成品種類上限（背包可見 15 格，留 2 格給合成成品；fork 同值）
 MAT_PRICE, CRAFT_PRICE = 500, 1000
 RINGS = 5
-PRODUCT_PREFIX = '成品:'                                 # Ledger 裡合成成品（尚未提交）的鍵前綴：佔背包格、不可存倉
+PRODUCT_PREFIX = '成品:'                                 # Ledger 裡合成成品（尚未提交）的鍵前綴：佔背包格；材料存完還不夠才存倉（2026-10-17 起，提交前 final 取回）
 
 NPC_SHOPS = ROOT / 'knowledge' / 'economy' / 'npc-shops.md'
 ITEM_BOOK = ROOT / 'knowledge' / 'crafting' / 'item-book.md'
@@ -455,7 +456,7 @@ def plan_lines(role: str, plan: dict, stores: dict, where: dict) -> list:
 # ---------------- 背包 / 倉庫模型 ----------------
 class Ledger:
     """材料帳：bag / personal / public 各 {名稱: 量}。**不讀遊戲、純記帳**（購買驗證後 buy、存倉驗證後 evict、取出驗證後 take、合成後 craft）。
-    背包「格數」用種類數近似（Item overlay=1 的都疊成 1 格）；成品（PRODUCT_PREFIX）佔格、不可存倉。"""
+    背包「格數」用種類數近似（Item overlay=1 的都疊成 1 格）；成品（PRODUCT_PREFIX）佔格，最後手段才存倉（choose_evict 材料優先）。"""
 
     def __init__(self, d: dict | None = None):
         d = d or {}
@@ -517,11 +518,15 @@ class Ledger:
         return miss
 
     def submit(self, products) -> None:
+        """提交扣成品：背包優先；帳上背包沒有（例：mark 補記時成品還記在倉庫）→ 依 個人倉庫 → 公倉 扣"""
         for p in products:
             k = PRODUCT_PREFIX + p
-            self.bag[k] -= 1
-            if self.bag[k] <= 0:
-                del self.bag[k]
+            for box in (self.bag, self.personal, self.public):
+                if box.get(k, 0) > 0:
+                    box[k] -= 1
+                    if box[k] <= 0:
+                        del box[k]
+                    break
 
     def holds(self, mat: str) -> str | None:
         """材料現在在哪：'bag' / 'personal' / 'public' / None（背包優先）"""
@@ -558,12 +563,30 @@ def _next_use(plan: dict, rings_state: list, mat: str) -> int:
     return 99
 
 
+def _product_ring(plan: dict, rings_state: list, key: str) -> int:
+    """成品鍵（PRODUCT_PREFIX + 名）要在哪一環提交（還沒提交的環中最早的；找不到 = 99）"""
+    name = key[len(PRODUCT_PREFIX):]
+    for r, st in zip(plan['rings'], rings_state):
+        if not r['supported'] or st.get('submitted'):
+            continue
+        if any(it['name'] == name and not it['done'] for it in r['items']):
+            return r['ring']
+    return 99
+
+
 def choose_evict(ledger: Ledger, plan: dict, rings_state: list, protect=()) -> str | None:
-    """背包放不下 → 挑要存倉的材料：不含成品 / protect；「最晚才用到」的環優先（沒用到 = 最優先）；同分取名稱大者（確定性）。沒得挑 → None"""
-    cands = [m for m, v in ledger.bag.items() if v > 0 and not m.startswith(PRODUCT_PREFIX) and m not in protect and m not in PEPPERS]
+    """背包放不下 → 挑要存倉的種類（不含 protect / 胡椒）：**材料優先、成品次之**（2026-10-17 p1 DKBO3 fish 227：3 成品 + 8 材料 + 米店 12 種，
+    成品不能存 → 無解；改為材料存完還不夠才存成品，final 提交前 products_away 取回）。同層「最晚才用到」的環優先（材料看 _next_use、
+    成品看提交環；沒用到 = 99 最優先）；同分取名稱大者（確定性）。沒得挑 → None"""
+    cands = [m for m, v in ledger.bag.items() if v > 0 and m not in protect and m not in PEPPERS]
     if not cands:
         return None
-    return max(cands, key=lambda m: (_next_use(plan, rings_state, m), m))
+
+    def rank(m):
+        if m.startswith(PRODUCT_PREFIX):
+            return (0, _product_ring(plan, rings_state, m), m)
+        return (1, _next_use(plan, rings_state, m), m)
+    return max(cands, key=rank)
 
 
 def make_room(ledger: Ledger, plan: dict, rings_state: list, incoming, cap: int = BAG_KINDS_MAX, protect=()) -> list | None:
@@ -580,6 +603,40 @@ def make_room(ledger: Ledger, plan: dict, rings_state: list, incoming, cap: int 
             return None
         sim.evict(m, 'personal')
         out.append(m)
+    return out
+
+
+def buy_batches(ledger: Ledger, plan: dict, rings_state: list, mats, cap: int = BAG_KINDS_MAX, protect=()) -> list | None:
+    """一家店要買的 mats = [(材料, 量)…]（店內清單順序）→ [(先存倉的種類 list, 這批要買的 [(材料, 量)…])…]；放不下也挑不出 → None。
+    每批取「存倉後放得下的最長前綴」（照清單順序買，進店後只往下捲）；還沒買的材料受保護，已買的前幾批材料下一批可被存倉（最晚才用的先）。
+    一次放得下 → 只有 1 批（= 舊 make_room 行為）。**不改 ledger**（呼叫端存倉 / 購買成功才記帳）"""
+    sim = Ledger(ledger.to_dict())
+    rem, out = [(n, q) for n, q in mats if q > 0], []
+    while rem:
+        names = [n for n, _ in rem]
+        for k in range(len(rem), 0, -1):
+            room = make_room(sim, plan, rings_state, names[:k], cap, protect=set(protect) | set(names))
+            if room is not None:
+                break
+        else:
+            return None
+        for m in room:
+            sim.evict(m, 'personal')
+        for n, q in rem[:k]:
+            sim.buy(n, q)
+        out.append((room, rem[:k]))
+        rem = rem[k:]
+    return out
+
+
+def products_away(ring_plan: dict, rs: dict, ledger: Ledger) -> list:
+    """該環已合成（未提交）的成品有哪些不在背包帳上 → [(成品鍵, 倉庫 'personal' / 'public')]（提交要成品在背包；final 取回、mid 先不提交）"""
+    want = collections.Counter(PRODUCT_PREFIX + it['name'] for k, it in enumerate(ring_plan['items'])
+                               if not it['done'] and rs['crafted'][k])
+    out = []
+    for key, q in want.items():
+        if ledger.bag.get(key, 0) < q:
+            out.append((key, 'personal' if ledger.personal.get(key, 0) > 0 else ('public' if ledger.public.get(key, 0) > 0 else None)))
     return out
 
 
@@ -669,7 +726,7 @@ def mark_item(st: dict, ring_plan: dict, k: int, what: str) -> str:
     else:
         raise ValueError(f'mark 只收 crafted / submitted：{what}')
     st['ledger'] = led.to_dict()
-    used = {n for it in ring_plan['items'] for n, _ in (it.get('mats') or [])}
+    used = {n for it in ring_plan['items'] for n, _ in (it.get('mats') or [])} | {PRODUCT_PREFIX + it['name'] for it in ring_plan['items'] if it.get('name')}
     for key, box in (('in_personal', led.personal), ('in_public', led.public)):
         if key in st:                                   # 只動這環材料：倉庫帳扣到 0 的從清單拿掉
             st[key] = [n for n in st[key] if n not in used or box.get(n, 0) > 0]

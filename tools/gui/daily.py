@@ -15,6 +15,9 @@
         （fish 買到一半斷 → 隊伍是散的，重跑 into_shop 先組隊再解散；醫院合成到一半斷 → 隊伍組著，form 不點）
   店內買序（2026-10-17 p1 兩次 227 修）：dailyplan.store_route 與 buy_at 都把店內商品依該店清單 index 由小到大排（只往下捲、不回頭；不再「早環先買」）；
           shopkit.select_item 目標在視野上方時 scroll_top 歸零再找。存倉由 make_room / choose_evict 決定，與買序無關；bought 以名稱記，續跑不重買。
+  背包放不下（2026-10-17 p1 DKBO3 fish 227 修，離線測試、未實機）：每家店先 dp.buy_batches 排批——存倉順序 **材料（最晚環才用的先）→ 成品（最晚提交環的先）**；
+          存完還放不下（這家店種類太多）→ 分批：買放得下的清單前綴 → 關店存倉（剛買、最晚才用的）→ 再進店買剩下的；連一種都放不下才 227（訊息寫背包帳 / 店種類 / 上限）。
+          成品存倉後 mid 不提交該環（products_away），final fetch_materials 連成品一起從倉庫取回再提交。
   prep    停練功 / 關遇敵 / 等戰鬥 → 組隊（練功時本來就組著，不點）→ 全隊傳送薩姆吉爾（不解散）
   read    gather_hospital → 輪流 char.switch：點 NPC 開委託面板 → 讀 5 環 × 上 / 下 → daily-<角色>.json
           成品名讀法（2026-10-17 修 225）：名稱框 OCR -Zooms 2,3,4,5 -Dark 0 → dp.vote_lines **逐倍率各自 snap 投票**（舊版把各倍率 join 成一串 →「成弓箭8口成弓箭8」）；
@@ -32,7 +35,7 @@
   sam     into_shop → 5 人輪流沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
   mid     gather_hospital → 5 人輪流（組隊中）：材料齊的項先合成、該環兩項都綠就提交（沒人有事可做就整段跳過）
   fish    into_shop → 5 人輪流買漁村料
-  final   gather_hospital → 5 人輪流（組隊中）：每環先從個人倉庫 / 公倉取料 → 合成 → 提交，直到 5/5（胡椒從公倉取整疊、用完整疊存回）
+  final   gather_hospital → 5 人輪流（組隊中）：每環先從個人倉庫 / 公倉取料（含已合成但存倉的成品）→ 合成 → 提交，直到 5/5（胡椒從公倉取整疊、用完整疊存回）
   finish  組隊（已組著不點）→ grind.go（--no-grind 略）
 順序固定 DKBO2 → DKBO3 → DKBO4 → DKBO5 → DKBO（clients.leader_last；結束時當前角色 = 隊長，不用另外切回）。
 
@@ -871,16 +874,17 @@ class Daily:
         self.disband_team()
 
     def evict(self, role, mat):
-        """背包 → 個人倉庫（滿 → 公倉並記 in_public）；成功更新 ledger"""
+        """背包 → 個人倉庫（滿 → 公倉並記 in_public）；成功更新 ledger。mat 可以是成品鍵（PRODUCT_PREFIX + 名；遊戲裡用名字存）"""
         T, st = self.T, self.st[role]
         led = dp.Ledger(st['ledger'])
-        rc = T.depot_store(role, mat, 'personal')
+        game = mat[len(dp.PRODUCT_PREFIX):] if mat.startswith(dp.PRODUCT_PREFIX) else mat
+        rc = T.depot_store(role, game, 'personal')
         sub = 'personal'
         if rc:
             if rc in PASS:
                 self.fail(rc, f'存倉遇到 rc {rc}', bag_rc=rc)
             event(f'{role} 個人倉庫存「{mat}」失敗（bag rc {rc}）→ 改存公共倉庫')
-            rc = T.depot_store(role, mat, 'public')
+            rc = T.depot_store(role, game, 'public')
             sub = 'public'
             if rc:
                 self.tool_fail(rc, EXIT_DEPOT, f'{role}「{mat}」個人倉庫和公共倉庫都存不進（bag rc {rc}）', bag_rc=rc)
@@ -899,13 +903,28 @@ class Daily:
         route = dp.store_route(stage, dp.remaining_buy(plan, stage, st['bought']), self.where, self.stores, plan['first_use'])
         for store, mats in route:
             led = dp.Ledger(st['ledger'])
-            incoming = [n for n, _ in mats]
-            room = dp.make_room(led, plan, st['rings'], incoming)
-            if room is None:
-                self.fail(EXIT_BUY, f'{role} 背包放不下「{store.name}」的 {len(incoming)} 種材料，又沒有可存倉的材料', role=role)
-            for m in room:
-                self.evict(role, m)
-            self.buy_at(role, plan, store, mats)
+            mats = sorted(mats, key=lambda nq: (store.items.index(nq[0]) if nq[0] in store.items else 999, nq[0]))
+            batches = dp.buy_batches(led, plan, st['rings'], mats)    # 放不下 → 先存倉（材料最晚用的優先、成品次之）；還不夠 → 分批買、批間存剛買最晚用的
+            if batches is None:
+                prot = [m for m, v in led.bag.items() if v > 0 and m in dp.PEPPERS]
+                self.fail(EXIT_BUY, f'{role} 背包放不下「{store.name}」的材料：背包帳上 {led.kinds()} 種（胡椒 {len(prot)} 種不存）、'
+                          f'這家店要 {len(mats)} 種、上限 {dp.BAG_KINDS_MAX} 種，分批也排不出', role=role)
+            if len(batches) > 1:
+                event(f'{role}「{store.name}」{len(mats)} 種放不下 → 分 {len(batches)} 批買：'
+                      + ' / '.join(f'存{"、".join(r) or "（無）"}→買{len(b)}種' for r, b in batches))
+            for i, (_, bmats) in enumerate(batches):
+                if i:                                           # 後幾批：照現在的帳重算要存的（前一批可能有反應式存倉）
+                    led = dp.Ledger(st['ledger'])
+                    later = {n for _, bb in batches[i + 1:] for n, _ in bb}
+                    nb = dp.buy_batches(led, plan, st['rings'], bmats, protect=later)
+                    room = nb[0][0] if nb and len(nb[0][1]) == len(bmats) else None
+                    if room is None:
+                        self.fail(EXIT_BUY, f'{role}「{store.name}」第 {i + 1} 批 {len(bmats)} 種放不下（背包帳上 {led.kinds()} 種、上限 {dp.BAG_KINDS_MAX}）', role=role)
+                else:
+                    room = batches[0][0]
+                for m in room:
+                    self.evict(role, m)
+                self.buy_at(role, plan, store, bmats)
 
     def buy_at(self, role, plan, store, mats):
         T, st = self.T, self.st[role]
@@ -1010,7 +1029,7 @@ class Daily:
         for r, rs in zip(plan['rings'], st['rings']):
             if not r['supported'] or rs.get('submitted'):
                 continue
-            if final or dp.ring_ready(rs, r['items']):
+            if final or (dp.ring_ready(rs, r['items']) and not dp.products_away(r, rs, led)):
                 return True
             for k, it in enumerate(r['items']):
                 if not it['done'] and not rs['crafted'][k] and dp.craftable(it, led, bag_only=True):
@@ -1064,9 +1083,12 @@ class Daily:
                 led = dp.Ledger(st['ledger'])
                 todo = [k for k, it in enumerate(r['items']) if not it['done'] and not rs['crafted'][k]
                         and (final or dp.craftable(it, led, bag_only=True))]
+                away = dp.products_away(r, rs, led)             # 已合成但存倉的成品（背包放不下時存的；提交要在背包）
                 if not todo and not dp.ring_ready(rs, r['items']):
                     continue
-                if final and todo:
+                if not final and away and not todo:             # mid：成品在倉庫 → 這環留給 final 取回再提交
+                    continue
+                if final and (todo or away):
                     if opened:
                         T.daily_close()
                         opened = False
@@ -1087,7 +1109,7 @@ class Daily:
                     rs['crafted'][k] = True
                     self.save_role(role)
                     event(f'{stage_name(final)} {role} 第 {ri} 環「{it["name"]}」合成完成')
-                if dp.ring_ready(rs, r['items']):
+                if dp.ring_ready(rs, r['items']) and (final or not dp.products_away(r, rs, dp.Ledger(st['ledger']))):
                     if not T.goto_page(ri):                     # 提交前也確認頁碼（提交的是目前頁那環）
                         self.fail(EXIT_CRAFT, f'{role} 提交前翻不到第 {ri} 頁', role=role)
                     self.submit_ring(role, r, rs)
@@ -1103,13 +1125,19 @@ class Daily:
             self.verify_complete(role, plan)
 
     def fetch_materials(self, role, plan, ring, todo):
-        """final：這環要合成的項的材料先到背包（個人倉庫 / in_public 的公倉 / 胡椒的公倉）。panel 已關。背包放不下 → 先存最晚環的材料"""
+        """final：這環要合成的項的材料、以及已合成但存倉的成品（提交要在背包）先到背包（個人倉庫 / in_public 的公倉 / 胡椒的公倉）。
+        panel 已關。背包放不下 → 先存最晚環的材料（成品次之；這環要的都受保護）"""
         T, st = self.T, self.st[role]
         led = dp.Ledger(st['ledger'])
+        rs = st['rings'][ring['ring'] - 1]
         need = {}
         for k in todo:
             for n, q in ring['items'][k]['mats']:
                 need[n] = need.get(n, 0) + q
+        for k, it in enumerate(ring['items']):
+            if not it['done'] and rs['crafted'][k]:
+                key = dp.PRODUCT_PREFIX + it['name']
+                need[key] = need.get(key, 0) + 1
         take = []
         for n, q in need.items():
             if n in dp.PEPPERS:
@@ -1128,7 +1156,8 @@ class Daily:
         for m in room:
             self.evict(role, m)
         for n, sub in take:
-            rc = T.depot_take(role, n, sub)
+            game = n[len(dp.PRODUCT_PREFIX):] if n.startswith(dp.PRODUCT_PREFIX) else n
+            rc = T.depot_take(role, game, sub)
             for _ in range(3):                                   # 94 = 背包滿（模型比實際寬鬆，例：背包原本就有雜物）→ 多存一種不需要的再取
                 if rc != 94:
                     break
@@ -1138,7 +1167,7 @@ class Daily:
                     break
                 event(f'{role} 取「{n}」時背包滿（bag rc 94）→ 先把「{m}」存倉再取')
                 self.evict(role, m)
-                rc = T.depot_take(role, n, sub)
+                rc = T.depot_take(role, game, sub)
             if rc:
                 if n in dp.PEPPERS:
                     self.fail(EXIT_PEPPER if rc not in PASS else rc, f'{role} 公共倉庫取不到「{n}」（bag rc {rc}；胡椒要使用者先放公倉，腳本不買）', role=role, item=n, bag_rc=rc)
@@ -1153,7 +1182,7 @@ class Daily:
                     st[key].remove(n)
             st['ledger'] = led.to_dict()
             self.save_role(role)
-            event(f'final {role} 取回「{n}」（{"個人" if sub == "personal" else "公共"}倉庫 → 背包）')
+            event(f'final {role} 取回「{game}」（{"個人" if sub == "personal" else "公共"}倉庫 → 背包）')
 
     def return_peppers(self, role, peppers):
         """胡椒用完整疊存回公共倉庫（借出的道具要還）"""

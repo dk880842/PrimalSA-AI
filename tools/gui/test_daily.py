@@ -266,8 +266,40 @@ FP = dp.plan_role([['甲', '甲']] * 5, {'甲': [[('石頭', 1)]]}, FW, FS)
 check('Ledger.kinds / buy / evict / take', led.kinds() == 13 and led.evict('材00', 'personal') == 1 and led.kinds() == 12 and led.take('材00', 'personal') == 1 and led.kinds() == 13)
 check('make_room：13 種 + 新 2 種 > 13 → 要存 2 種（最晚才用到 / 沒用到的先）', dp.make_room(led, FP, rings_all, ['新1', '新2']) is not None and len(dp.make_room(led, FP, rings_all, ['新1', '新2'])) == 2)
 check('make_room：incoming 已在背包的不增格', dp.make_room(led, FP, rings_all, ['材01']) == [])
-check('make_room：不存成品 / protect / 胡椒（只剩這些 → None）', dp.make_room(dp.Ledger({'bag': {dp.PRODUCT_PREFIX + 'X': 1, '黑胡椒': 1, '石頭': 1}}), FP, rings_all, ['a'], cap=3, protect={'石頭'}) is None
-      and dp.make_room(dp.Ledger({'bag': {dp.PRODUCT_PREFIX + 'X': 1, '黑胡椒': 1, '石頭': 1}}), FP, rings_all, ['a'], cap=3) == ['石頭'])
+check('make_room：材料優先存、成品次之；protect / 胡椒不存（只剩這些 → None）',
+      dp.make_room(dp.Ledger({'bag': {dp.PRODUCT_PREFIX + 'X': 1, '黑胡椒': 1, '石頭': 1}}), FP, rings_all, ['a'], cap=3) == ['石頭']
+      and dp.make_room(dp.Ledger({'bag': {dp.PRODUCT_PREFIX + 'X': 1, '黑胡椒': 1, '石頭': 1}}), FP, rings_all, ['a'], cap=3, protect={'石頭'}) == [dp.PRODUCT_PREFIX + 'X']
+      and dp.make_room(dp.Ledger({'bag': {dp.PRODUCT_PREFIX + 'X': 1, '黑胡椒': 1, '石頭': 1}}), FP, rings_all, ['a'], cap=3, protect={'石頭', dp.PRODUCT_PREFIX + 'X'}) is None)
+# ---- 2026-10-17 p1 DKBO3 fish 227 重現：3 成品（mid 合成）+ 漁村前 4 家 8 種 + 米店 12 種、上限 13 ----
+D3_ITEMS = [['肉片煮', '合成棍棒1'], ['葉子烤蕃薯', '烤焦的蝦子串燒'], ['生包心菜', '鹽味獸肉串燒'], ['生炒蔬菜', '合成爪2'], ['鹽味的油炸螃蟹', '合成石2']]
+D3P = dp.plan_role(D3_ITEMS, RECIPES, WHERE, STORES)
+D3R = [{'crafted': [False, k in (0, 3, 4)], 'submitted': False} for k in range(5)]
+D3L = dp.Ledger({'bag': {dp.PRODUCT_PREFIX + '合成棍棒1': 1, dp.PRODUCT_PREFIX + '合成爪2': 1, dp.PRODUCT_PREFIX + '合成石2': 1,
+                         '幹燥肉': 1, '大的肉': 1, '普通的螃蟹': 1, '普通的蝦': 1, '有光澤的青椒': 1, '水分多的包心菜': 1, '有光澤的地瓜': 1, '普通的白菜': 1}})
+_rice = [r for r in dp.store_route('fish', D3P['buy']['fish'], WHERE, STORES) if r[0].npc == 2824][0][1]
+check('DKBO3 重現：米店真的要 12 種（鹽×3、炭×2 已合併成一種）、漁村共 20 種', len(_rice) == 12 and sum(len(v) for _, v in dp.store_route('fish', D3P['buy']['fish'], WHERE, STORES)) == 20, str(_rice))
+check('DKBO3 重現：舊行為「成品不存」時 make_room 無解（= 當時的 227）',
+      dp.make_room(D3L, D3P, D3R, [n for n, _ in _rice], protect={k for k in D3L.bag if k.startswith(dp.PRODUCT_PREFIX)}) is None)
+_bb = dp.buy_batches(D3L, D3P, D3R, _rice)
+_ev = _bb[0][0] if _bb else []
+check('DKBO3 重現：buy_batches 一批買完，先存 8 種材料再存 2 個成品（最晚提交環 5 / 4 的合成石2、合成爪2；第 1 環的合成棍棒1 留背包）',
+      _bb and len(_bb) == 1 and len(_ev) == 10 and all(not m.startswith(dp.PRODUCT_PREFIX) for m in _ev[:8])
+      and _ev[8:] == [dp.PRODUCT_PREFIX + '合成石2', dp.PRODUCT_PREFIX + '合成爪2'], str(_bb))
+_bb2 = dp.buy_batches(dp.Ledger({'bag': {'黑胡椒': 1, '普通的胡椒': 1, '香味濃厚的胡椒': 1}}), D3P, D3R, _rice, cap=13)
+check('buy_batches：背包有 3 種胡椒（不存）+ 米店 12 種 → 分 2 批（先買 10 種、存剛買最晚才用的 2 種、再買 2 種）',
+      _bb2 and [len(b) for _, b in _bb2] == [10, 2] and _bb2[0][0] == [] and len(_bb2[1][0]) == 2
+      and all(m in {n for n, _ in _bb2[0][1]} for m in _bb2[1][0]), str(_bb2))
+check('buy_batches：一家店 15 種 > 上限 13 → 分批（13 + 2），不 None',
+      [len(b) for _, b in dp.buy_batches(dp.Ledger(), FP, rings_all, [(f'x{i:02d}', 1) for i in range(15)])] == [13, 2])
+check('buy_batches：背包全是胡椒 / 受保護、連一種都放不下 → None',
+      dp.buy_batches(dp.Ledger({'bag': {'黑胡椒': 1}}), FP, rings_all, [('a', 1)], cap=1) is None)
+check('products_away：已合成的成品記在個人倉庫 → 列出要取回；在背包 → 空',
+      dp.products_away(D3P['rings'][4], D3R[4], dp.Ledger({'personal': {dp.PRODUCT_PREFIX + '合成石2': 1}})) == [(dp.PRODUCT_PREFIX + '合成石2', 'personal')]
+      and dp.products_away(D3P['rings'][4], D3R[4], dp.Ledger({'bag': {dp.PRODUCT_PREFIX + '合成石2': 1}})) == [])
+_ls = dp.Ledger({'personal': {dp.PRODUCT_PREFIX + '甲': 1}})
+_ls.submit(['甲'])
+check('Ledger.submit：成品帳上在個人倉庫（mark 補記）也扣得掉', not _ls.personal and not _ls.bag)
+
 # choose_evict：最晚環才用到的先存
 PE = dp.plan_role([['甲', '丙'], ['乙', '乙'], ['乙', '乙'], ['乙', '乙'], ['乙', '乙']],
                   {'甲': [[('A', 1)]], '丙': [[('B', 1)]], '乙': [[('C', 1)]]}, {'A': 2810, 'B': 2810, 'C': 2810}, FS)
@@ -783,13 +815,16 @@ class FakeTools:
         return True, ''
 
     def item_states(self):
+        """已合成但成品不在背包（存倉了）→ 計數 0/1 紅（假設遊戲面板計數看背包）"""
         r, pg = self.W.cur, self.W.page - 1
-        return ['green' if g else 'red' for g in self.W.green[r][pg]]
+        return ['green' if g and self.W.bag[r].get('成品:' + dp.norm(self.W.items[r][pg][k]), 0) > 0 else 'red'
+                for k, g in enumerate(self.W.green[r][pg])]
 
     def submit(self):
         W = self.W
         r, pg = W.cur, W.page - 1
         assert W.panel and all(W.green[r][pg]), '兩項沒全綠就提交'
+        assert all(W.bag[r].get('成品:' + dp.norm(W.items[r][pg][k]), 0) > 0 for k in range(2)), '成品不在背包就提交'
         if self.inj.get('submit_noop') == r:
             return True
         W.reward[r] += 1
@@ -876,6 +911,8 @@ class FakeTools:
     def depot_store(self, role, name, sub):
         W = self.W
         assert not W.shop and not W.panel, f'存倉時商店 / 面板還開著（{name}）'
+        if W.bag[role].get(name, 0) <= 0 and W.bag[role].get('成品:' + name, 0) > 0:
+            name = '成品:' + name                                # 遊戲裡成品就是道具名；假世界背包用前綴鍵
         if W.bag[role].get(name, 0) <= 0:
             return 92
         if sub == 'personal':
@@ -893,6 +930,8 @@ class FakeTools:
         W = self.W
         assert not W.shop and not W.panel, f'取倉時商店 / 面板還開著（{name}）'
         src = W.personal[role] if sub == 'personal' else W.public
+        if src.get(name, 0) <= 0 and src.get('成品:' + name, 0) > 0:
+            name = '成品:' + name
         if src.get(name, 0) <= 0:
             return 92
         if name not in W.bag[role] and self.kinds(role) >= W.bag_cap:
@@ -1564,6 +1603,46 @@ ok, real, clicks = run_goto(2, [None] * 20)
 check('goto_page：盲翻後仍讀不出頁碼 → False（不再盲信盲翻）', not ok, f'{ok} {real}')
 _src = Path(daily.__file__).read_text(encoding='utf-8')
 check('craft_role：每項合成前、提交前都 goto_page 確認', _src.count('if not T.goto_page(ri):') == 2 and '提交前翻不到第' in _src)
+
+# ---------------- 情境：2026-10-17 p1 DKBO3 fish 227 重現 → 修後續跑（米店從 0 接、不重買、成品存倉 final 取回提交）----------------
+fresh_dir()
+W = scenario(items={r: [list(p) for p in D3_ITEMS] for r in ROLES5}, bag_cap=13)
+_real_bb = dp.buy_batches
+_hit = {'n': 0}
+
+
+def _old_bb(led, plan, rs, mats, cap=dp.BAG_KINDS_MAX, protect=()):
+    """舊行為：成品不存、不分批（make_room 一次放不下 → None）。只在米店 2824 生效，重現當時的 227"""
+    if any(WHERE.get(n) == 2824 for n, _ in mats):
+        room = dp.make_room(led, plan, rs, [n for n, _ in mats], cap, protect=set(protect) | {k for k in led.bag if k.startswith(dp.PRODUCT_PREFIX)})
+        if room is None:
+            _hit['n'] += 1
+            return None
+    return _real_bb(led, plan, rs, mats, cap, protect)
+
+
+dp.buy_batches = _old_bb
+try:
+    rc, out, T = go(W)
+finally:
+    dp.buy_batches = _real_bb
+_s3 = dp.load(dp.role_path('DKBO2'))
+check('重現：舊行為在米店 227（第一個買漁村料的人）、已買 8 種漁村料 + 3 成品在背包帳',
+      rc == daily.EXIT_BUY and _hit['n'] == 1 and len([k for k in _s3['ledger']['bag'] if not k.startswith('成品:')]) == 8
+      and len([k for k in _s3['ledger']['bag'] if k.startswith('成品:')]) == 3, f'{rc} {_hit} {_s3["ledger"]["bag"] if _s3 else None}')
+_buys_before = [a for a in W.log if a[0] == 'buy']
+W.log.clear()
+rc, out, T = go(W)
+check('續跑（修後）：rc 0、5 人都 5/5', rc == 0 and all(W.reward[r] == 5 for r in W.roles), f'{rc} {W.reward} {out[-800:]}')
+_rebuy = [a for a in W.log if a[0] == 'buy' and a[1] == 'DKBO2' and a[2] in {n for _, b, *_ in [(0, x) for x in []]} | set(_s3['bought'])]
+check('續跑：DKBO2 已買的 14 種（薩村 6 + 漁村 8）一個都沒重買', not _rebuy, str(_rebuy[:3]))
+check('續跑：DKBO2 米店 12 種都買了（從米店接）', {a[2] for a in W.log if a[0] == 'buy' and a[1] == 'DKBO2'} == {n for n, _ in _rice}, str(sorted({a[2] for a in W.log if a[0] == 'buy' and a[1] == 'DKBO2'})))
+check('續跑：DKBO2 有把成品存個人倉庫（合成石2 / 合成爪2），final 取回後提交',
+      any(a[0] == 'store' and a[1] == 'DKBO2' and a[2] == '成品:合成石2' for a in W.log)
+      and any(a[0] == 'take' and a[1] == 'DKBO2' and a[2] == '成品:合成石2' for a in W.log)
+      and W.submitted['DKBO2'] == [True] * 5, str([a for a in W.log if a[1:2] == ('DKBO2',) and a[0] in ('store', 'take')][:20]))
+check('續跑：沒有 buy_full（模型 13 = 假世界背包 13 格，從沒買不進）、背包 / 倉庫沒剩成品',
+      not any(a[0] == 'buy_full' for a in W.log) and all(not any(k.startswith('成品:') for k in list(W.bag[r]) + list(W.personal[r])) for r in W.roles))
 
 # ---------------- 結尾 ----------------
 check("0 次 powershell（全測試）", not PS_CALLS, str(PS_CALLS[:3]))
