@@ -15,7 +15,10 @@
   bag_slots   開始前每人背包至少要有幾格空位（0 = 不檢查）。2026-10-13 起 >= bag_need(id)（Task 表各步獎勵道具、扣掉交出去的條件道具，
               同時佔用的最多格數；強盜的洞穴 = 衣服 / 斧頭 / 頭盔 / 足跡 4 格 —— 當天頭盔因背包滿進了信箱）；test_questdefs 核對。
               questrun preflight 不足 → 先自動刪 bag.AUTO_PURGE 白名單道具，仍不足才 110
-  boss        True = 有任務戰 / BOSS 戰（quest.py 預設模式打完回 37 / 38；P2 只收資料，不實跑）
+  boss        True = 有任務戰 / BOSS 戰（只給 plan / 資料參考；打完驗不驗隊伍看 boss_team_check）
+  boss_team_check（自動）id 在 BOSS_TEAM_CHECK 才 True：questrun 呼叫 quest.py 時帶 --boss-team-check（任務戰打完驗 5 人隊伍再停 37 / 38 → bossretry）。
+              使用者 2026-10-17 定：只有紅暴 2031、四寶玉之謎 2010（加上 rebirth.py 漆黑洞窟 2004～2008 一律帶、bossretry 重打一律帶）；
+              其他任務的任務戰打完**不開切換面板驗隊伍**、quest.py 不停，照常點追蹤往下跑（落後者由完成後的逐人驗證抓）
   est_min     預估分鐘（quest-log 0 轉 123 級 5 人隊實跑）
   live        P2 實機驗證過：True；只有資料沒實跑：False
   note        坑 / 提醒
@@ -168,12 +171,15 @@ NO_DRAGON = {2017, 3003, 2016, 2019}   # 不吃龍王的任務：彌生和日美
 # 轉生 2004～2008 / 寵物轉生 / 封印類一律不列；新任務要開 fast 先確認對話裡沒有不可逆選項再加進來
 FAST_DIALOG = {2999, 2017, 2015, 2027, 2018, 2011, 2024, 2020, 2023, 2028, 2025, 2010, 2014, 2012, 2013, 2021, 3003, 2016, 2019,
                2000, 2003, 2001, 2002, 2031}
+# 任務戰打完要驗 5 人隊伍（quest.py --boss-team-check → 37 / 38）的任務（使用者 2026-10-17）：紅暴、四寶玉之謎。漆黑 2004～2008 由 rebirth.py 自己帶
+BOSS_TEAM_CHECK = {2031, 2010}
 REBIRTH_IDS = {2004, 2005, 2006, 2007, 2008}   # 漆黑洞窟轉生任務（含精靈王）：絕不 fast（test_questrun 核對）
 
 ALL = Q182 + QCAVE + QOTHER
 for _d in ALL:
     _d['walk_s'] = WALK_S.get(_d['id'])
     _d['dragon'] = _d['id'] not in NO_DRAGON
+    _d['boss_team_check'] = _d['id'] in BOSS_TEAM_CHECK
     _d['fast_dialog'] = (_d['id'] in FAST_DIALOG and _d['id'] not in REBIRTH_IDS and not _d.get('irreversible_risk')
                          and not any(sd.get('irreversible') for sd in (_d.get('steps') or {}).values()))
 BY_ID = {d['id']: d for d in ALL}
@@ -245,6 +251,11 @@ def fast_dialog(task_id) -> bool:
     except (TypeError, ValueError):
         return False
     return bool(d and d.get('fast_dialog'))
+
+
+def bag_slots_max(defs) -> int:
+    """一次 run 要跑的任務 bag_slots 最大值（questrun 只在 run 開始讀一次背包空格，2026-10-17）"""
+    return max([int(d.get('bag_slots') or 0) for d in defs or []] or [0])
 
 
 def get(task_id: int) -> dict | None:

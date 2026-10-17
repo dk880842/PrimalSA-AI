@@ -391,7 +391,7 @@ f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
 rc = go(f, [2017])
 n = f.names()
 check('待接取任務：交接 → 接取 → 跑 → 完成 → grind start', rc == 0 and n.count('accept') == 1 and ('grind_start', 'auto') in f.calls and n.index('enc_off') < n.index('accept') < n.index('quest'), str(n))
-check('交接 form + 接取後 form（傳送後一定重組）；接取前交接剛組過 → 略過（2026-10-12）', n.count('team_form') == 2 and n.index('accept') < len(n) - 1 - n[::-1].index('team_form') < n.index('quest'), str(n))
+check('只有交接 form 1 次：接取前交接剛組過 → 略過、接取後不再 form（每任務隊伍只驗 1 次，2026-10-17）', n.count('team_form') == 1 and n.index('team_form') < n.index('accept'), str(n))
 check('quest 指令帶追蹤標題（不含 1.82）、--max-seconds；接取後剛組過隊 → --team-fresh；片內 HP 檢查門檻 = --team-hp-min', ('quest', ('--task', '彌生和日美子', '--max-seconds', '60', '--team-fresh')) in f.calls, str(f.calls))
 f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
 go(f, [2017], team_hp_min=60)
@@ -421,12 +421,21 @@ _tf = questrun.TEAM_FRESH_S
 questrun.TEAM_FRESH_S = -1.0                                   # 隊伍確認永遠「不新鮮」
 f = Fake(status={D17: [questrun.PENDING, questrun.DONE]}, quest=[(0, [])])
 go(f, [2017])
-check('隊伍確認過期 → 交接 / 接取前 / 接取後各 form 一次、quest 不帶 --team-fresh', f.names().count('team_form') == 3 and not any('--team-fresh' in c[1] for c in f.calls if c[0] == 'quest'), str(f.calls))
+check('隊伍確認過期 → 交接 / 接取前各 form 一次（接取後不 form，2026-10-17）、quest 不帶 --team-fresh', f.names().count('team_form') == 2 and not any('--team-fresh' in c[1] for c in f.calls if c[0] == 'quest'), str(f.calls))
 questrun.TEAM_FRESH_S = _tf
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(37, []), (0, ['時間到，結束']), (0, ['任務完成：x'])])
 go(f, [2017])
 qa = [c[1] for c in f.calls if c[0] == 'quest']
-check('37（quest.py 剛驗過滿 5 人）→ 下一片帶 --team-fresh；「時間到」之後的那片不帶', len(qa) == 3 and '--team-fresh' in qa[1] and '--team-fresh' not in qa[2], str(qa))
+check('37（quest.py 剛驗過滿 5 人）→ 下一片帶 --team-fresh；「時間到」正常結束也沿用（2026-10-17）→ 再下一片仍帶', len(qa) == 3 and '--team-fresh' in qa[1] and '--team-fresh' in qa[2], str(qa))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, ['時間到，結束']), (30, []), (0, ['任務完成：x'])])
+go(f, [2017])
+qa = [c[1] for c in f.calls if c[0] == 'quest']
+check('30（隊伍不符）→ team.form --regroup 重驗 → 下一片帶 --team-fresh', len(qa) == 3 and '--team-fresh' in qa[2] and f.names().index('team_regroup') < len(f.names()) - 1 - f.names()[::-1].index('quest'), str(f.calls))
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, ['任務完成：x']), (0, ['任務完成：x'])])
+go(f, [2017, 2015])
+n = f.names()
+check('連 2 個任務：第 1 個沿用交接的 form、第 2 個接取前真的 form 1 次（沿用的確認不跨任務）、背包只在 run 開始讀 1 次',
+      n.count('team_form') == 2 and n.count('bag_free') == 1 and n.index('bag_free') < n.index('accept') and n.index('accept') < len(n) - 1 - n[::-1].index('team_form'), str(n))
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(30, []), (0, ['任務完成：x'])])
 go(f, [2017])
 qa = [c[1] for c in f.calls if c[0] == 'quest']
@@ -1383,8 +1392,8 @@ check('bossretry 後戰鬥設定快取作廢（進度檔 battle_ok_at = 0）', n
 f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail + ['本片戰鬥 0 場']), (0, done_tail)])
 go(f, [2017, 2015], team_hp_min=60)
 check('第一任務沒打仗（本片戰鬥 0 場）→ 第二任務開始前全隊 HP 沿用（只讀 1 次）', f.team_hp_n == 1, str(f.team_hp_n))
-check('任務開始前背包空格 + HP 用 team_scan 同一次讀；HP 沿用的那次只讀空格（bag_free）', f.names().count('team_scan') == 1 and f.names().count('bag_free') == 1
-      and f.names().index('team_scan') < f.names().index('bag_free'), str(f.names()))
+check('背包空格只在 run 開始讀 1 次（bag_free，2026-10-17）；全隊 HP 由 hp_gate 自己讀（不再 team_scan 同讀）', 'team_scan' not in f.names() and f.names().count('bag_free') == 1
+      and f.names().index('bag_free') < f.names().index('accept'), str(f.names()))
 f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING]}, quest=[(0, done_tail + ['本片戰鬥 2 場']), (0, done_tail)])
 go(f, [2017, 2015], team_hp_min=60)
 check('第一任務打過仗 → 第二任務開始前重讀（2 次）', f.team_hp_n == 2, str(f.team_hp_n))
@@ -1974,6 +1983,45 @@ check('questrun.Tools.quest：fast_dialog 才帶 --fast-dialog（rebirth.Tools �
 f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
 go(f, [2017], after='none', use_dragon=False)
 check('run_task：彌生和日美子（安全任務）→ T.fast_dialog = True', getattr(f, 'fast_dialog', None) is True)
+
+# ===== 2026-10-17 拿掉重複檢查：BOSS 後隊伍檢查只留紅暴 / 四寶玉 / 漆黑、背包只在 run 開始讀 =====
+check('questdefs boss_team_check 只有紅暴 2031 / 四寶玉之謎 2010', sorted(d['id'] for d in questdefs.ALL if d.get('boss_team_check')) == [2010, 2031])
+check('questdefs.bag_slots_max = 要跑任務 bag_slots 最大值；空 = 0',
+      questdefs.bag_slots_max([questdefs.get(2017), questdefs.get(2010)]) == 5 and questdefs.bag_slots_max([]) == 0)
+check('rebirth.with_boss_check：預設模式補 --boss-team-check；--fight / --solo / --stop-at-npc / 已有 → 不補',
+      questrun.rebirth.with_boss_check(['--task', 'x']) == ['--task', 'x', '--boss-team-check']
+      and questrun.rebirth.with_boss_check(['--fight', '--task', 'x']) == ['--fight', '--task', 'x']
+      and questrun.rebirth.with_boss_check(['--solo', '--task', 'x']) == ['--solo', '--task', 'x']
+      and questrun.rebirth.with_boss_check(['--task', 'x', '--stop-at-npc']) == ['--task', 'x', '--stop-at-npc']
+      and questrun.rebirth.with_boss_check(['--task', 'x', '--boss-team-check']).count('--boss-team-check') == 1)
+_seen = []
+questrun.rebirth.Tools.quest = lambda self, args, timeout=1500: _seen.append(list(args)) or (0, [])
+_t = questrun.Tools()
+_t.quest(['--task', 'x'])
+_t.boss_team_check = True
+_t.quest(['--task', 'x'])
+_t.quest(['--fight', '--task', 'x'])
+questrun.rebirth.Tools.quest = _orig_rq
+check('questrun.Tools.quest：boss_team_check 才帶 --boss-team-check（--fight 不帶）',
+      _seen == [['--task', 'x'], ['--task', 'x', '--boss-team-check'], ['--fight', '--task', 'x']], str(_seen))
+f = Fake(status={D17: [questrun.DOING, questrun.DONE]}, quest=[(0, [])])
+go(f, [2017], after='none')
+check('run_task：一般任務（彌生和日美子）→ T.boss_team_check = False（任務戰打完不開切換面板）', getattr(f, 'boss_team_check', None) is False)
+D10 = questdefs.get(2010)['detail']
+f = Fake(status={D10: [questrun.DOING]}, quest=[(0, ['時間到，結束']), (0, ['任務完成：x'])])
+go(f, [2010], after='none')
+qa = [c[1] for c in f.calls if c[0] == 'quest']
+check('run_task：四寶玉之謎 → T.boss_team_check = True；正常結束（0）不沿用隊伍確認 → 下一片不帶 --team-fresh（BOSS 後靠 37 / 38）',
+      getattr(f, 'boss_team_check', None) is True and len(qa) == 2 and '--team-fresh' in qa[0] and '--team-fresh' not in qa[1], str(qa))
+f = Fake(status={D17: [questrun.DOING], D10: [questrun.DOING]}, quest=[(0, ['任務完成：x'])] * 2,
+         bag={'DKBO': 5, 'DKBO2': 3, 'DKBO3': 5, 'DKBO4': 5, 'DKBO5': 5})
+f.purge_frees = 0
+rc = go(f, [2017, 2010], after='none')
+check('run 開始一次檢查背包：要跑任務最大 bag_slots（四寶玉 5）；DKBO2 只有 3 格、刪不出 → 110，一個任務都沒接',
+      rc == questrun.EXIT_PREFLIGHT and 'accept' not in f.names() and ('purge', ('DKBO2',)) in f.calls and f.names().count('bag_free') == 2, str(f.names()))
+f = Fake(status={D17: [questrun.DOING], D15: [questrun.DOING], D99: [questrun.DOING]}, quest=[(0, ['任務完成：x'])] * 3)
+go(f, [2017, 2015, 2999], after='none')
+check('3 個任務：背包只讀 1 次（run 開始）', f.names().count('bag_free') == 1, str(f.names()))
 
 print(f'\n{"全部通過" if not fails else f"失敗 {fails} 項"}')
 

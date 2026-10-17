@@ -77,6 +77,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
   89 --confirm-rebirth 停下等人
   97 接任務失敗（info.accept_rc = questdetail 退出碼；已完成 / 條件不達標 / 標題對不上都不亂點）
   98 轉生獎勵寵無法確認（舊 diff 路徑 rebirth_steps.drop_rewards 才會回；cleanup 固定動作丟第 1 格不再回 98）
+BOSS 後隊伍檢查（2026-10-17）：quest.py 預設改成任務戰打完不驗隊伍、不停；本檔 Run.quest 預設模式一律補 --boss-team-check（with_boss_check），boss10 / boss20 照舊 37 / 38。
 載入畫面卡住：quest.py 回 43（載入 / 轉場畫面 60 秒）→ 不重登、重跑同一指令（每階段最多 2 次）。
 卡住自動重登：任何階段的 quest.py 回 19（自動巡路卡住）/ 42（VS 牌卡死）→ stuckrecover.relogin_team（relogin.py --stuck --confirm，只按已帶入帳密的「登錄」；105 → team.form）→
 team.check / form → 重吃龍王 → 重跑同一個 quest.py 指令；每階段最多 2 次（info.relogin_rc 記重登碼），仍卡 / 重登失敗 → 84；重登遇 9 / 10 → 原碼停手。--fight（單人重打）不重登。
@@ -194,6 +195,15 @@ def bow16_progress(pos) -> str:
 def missing_members(cards) -> list:
     """切換面板卡片 → 不在隊上的角色名（label 不是隊長 / 隊員）；名字讀不出的回 None 元素"""
     return [c.name for c in cards if c.label not in ('leader', 'member')]
+
+
+def with_boss_check(args) -> list:
+    """預設模式的 quest.py 參數補 --boss-team-check（--fight / --solo / --stop-at-npc 不需要；已有就不重複）。
+    2026-10-17 使用者：任務戰後隊伍檢查只留紅暴 / 四寶玉 / 漆黑洞窟 → rebirth.py（漆黑 2004～2008）一律帶"""
+    args = list(args)
+    if not any(x in args for x in ('--fight', '--solo', '--stop-at-npc', '--boss-team-check')):
+        args.append('--boss-team-check')
+    return args
 
 
 def parse_plan_stage(a: str) -> str | None:
@@ -453,9 +463,10 @@ class Run:
 
     # -- 共用步驟 --
     def quest(self, args, timeout=1500):
-        """跑 quest.py。回 19（巡路卡住）/ 42（VS 牌卡死）→ 全員重登後重跑同一指令（每階段最多 2 次，stuckrecover）；--fight（單人重打）不重登。
+        """跑 quest.py（預設模式一律帶 --boss-team-check：漆黑 BOSS 戰後驗隊伍停 37 / 38，2026-10-17 起 quest.py 預設不停）。回 19（巡路卡住）/ 42（VS 牌卡死）→ 全員重登後重跑同一指令（每階段最多 2 次，stuckrecover）；--fight（單人重打）不重登。
         重登失敗 → 回原退出碼（階段 84，info.relogin_rc）；重登遇驗證視窗 / 斷線 → 回 9 / 10（一律停手）"""
         recoverable = getattr(self.T, 'relogin', None) is not None and '--fight' not in args
+        args = with_boss_check(args)
         while True:
             event('quest.py ' + ' '.join(str(a) for a in args))
             rc, tail = self.T.quest(args, timeout)

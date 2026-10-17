@@ -165,7 +165,7 @@ s = Sim(battle_at=3.0, auto_on=False, boss_ends=20.0)
 rc = run(['--fight', '--npc', '53,17', '--max-seconds', '120'], s)
 seq = [c[1].split(';')[0] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 850 765', 'click 1283 168'))]
 ok &= check('順序：先自動戰鬥，再刷新；沒逃跑', seq[:2] == ['click 1380 600', 'click 850 765'] and 'click 1283 168' not in seq, str(seq))
-ok &= check('20 秒的戰鬥刷新 2~3 次（不是每秒一次）', 2 <= seq.count('click 850 765') <= 3, str(seq))
+ok &= check(f'20 秒的戰鬥刷新 2～{int(20 / quest.REFRESH_GAP) + 1} 次（照 REFRESH_GAP={quest.REFRESH_GAP:g} 秒，不是每秒一次）', 2 <= seq.count('click 850 765') <= int(20 / quest.REFRESH_GAP) + 1, str(seq))
 ok &= check('刷新用 waitpix + ifok click 910 578', any('waitpix' in c[1] and 'ifok click 910 578' in c[1] for c in s.clicks))
 s = Sim(battle_at=3.0, auto_on=False, boss_ends=10.0)
 rc = run(['--fight', '--npc', '53,17', '--no-refresh', '--max-seconds', '120'], s)
@@ -543,7 +543,7 @@ ok &= check('--team-fresh（questrun 剛驗過隊伍）：開始前不開切換�
 TEAM['calls'], TEAM['ret'] = [], (True, 'ok')
 s = Script([IDLE, DIALOG, REWARD, IDLE, IDLE, IDLE])
 rc = run2(['--task', 'x', '--team-fresh', '--max-seconds', '8'], s, team=True, marker=lambda: None, track=lambda *a, **k: True)
-ok &= check('--team-fresh 只略過開始前那次：領獎後點追蹤前照舊驗隊伍', any(t.startswith('領獎後') for _, t in TEAM['calls']) and not any(t.startswith('開始前') for _, t in TEAM['calls']), str(TEAM['calls']))
+ok &= check('--team-fresh 略過開始前；領獎後點追蹤前也不驗隊伍（2026-10-17 精簡）→ 整片 0 次切換面板', not TEAM['calls'], str(TEAM['calls']))
 
 print('(n4) 2026-10-10 18:44 事件：--solo 後隊伍散成單人，--stop-after-rewards 啟動 → 先驗隊伍，不符退出碼 30、沒有任何點擊')
 TEAM['calls'], TEAM['ret'] = [], (False, "隊長 無、隊員 無、不在隊 / 單人 / 離線 ['DKBO', 'DKBO2', 'DKBO3', 'DKBO4', 'DKBO5']")
@@ -595,7 +595,17 @@ quest.walk.gui = s.gui
 sys.argv = ['quest.py', '--task', 'x', '--max-seconds', '14', '--no-stop-after-boss']
 rc = quest.main()
 tags = [t for _, t in TEAM['calls']]
-ok &= check('任務戰打完後：下一次點追蹤前驗 1 次，之後不再驗', tags.count('點追蹤 / 黃問號前：') == 1 and tags[0] == '開始前：' and len(tags) == 2 and len(tracked_n) >= 2, f'{tags} tracks={len(tracked_n)}')
+ok &= check('一般任務（沒 --boss-team-check）任務戰打完：不開切換面板，只有開始前 1 次（2026-10-17）', tags == ['開始前：'] and len(tracked_n) >= 2, f'{tags} tracks={len(tracked_n)}')
+TEAM['calls'] = []
+s = Script([IDLE, DIALOG, BATTLE_Q, BATTLE_Q, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE])
+tracked_n.clear()
+quest.time.time, quest.time.sleep = s.time, s.sleep
+quest.read_screen, quest.gui = s.screen, s.gui
+quest.walk.gui = s.gui
+sys.argv = ['quest.py', '--task', 'x', '--max-seconds', '14', '--no-stop-after-boss', '--boss-team-check']
+rc = quest.main()
+tags = [t for _, t in TEAM['calls']]
+ok &= check('--boss-team-check --no-stop-after-boss 任務戰打完後：下一次點追蹤前驗 1 次，之後不再驗', tags.count('點追蹤 / 黃問號前：') == 1 and tags[0] == '開始前：' and len(tags) == 2 and len(tracked_n) >= 2, f'{tags} tracks={len(tracked_n)}')
 
 print('(o) 戰鬥鎖檔：戰鬥中存在（含 pid）、戰鬥結束 / 程式結束後刪除')
 seen = []
@@ -914,13 +924,14 @@ ok &= check('--solo：任務戰鬥（boss）也不會有（solo 不當 boss）�
 ok &= check('--fight：路上小怪不刷新、任務 / BOSS 戰刷新', not sr(A(solo=False, fight=True, no_refresh=False), False) and sr(A(solo=False, fight=True, no_refresh=False), True))
 ok &= check('--no-refresh 全部不刷新', not sr(A(solo=False, fight=False, no_refresh=True), False) and not sr(A(solo=False, fight=True, no_refresh=True), True))
 ok &= check('完整戰鬥自動戰鬥還關著 → 先不刷新；快速戰鬥沒有自動戰鬥鈕 → 照刷', not sr(A(solo=False, fight=False, no_refresh=False), False, True, True) and sr(A(solo=False, fight=False, no_refresh=False), False, False, False))
-ok &= check('同一場未滿 REFRESH_GAP 秒不重刷', not sr(A(solo=False, fight=False, no_refresh=False), False, since=3.0))
+ok &= check('同一場未滿 REFRESH_GAP 秒不重刷、滿了才刷', not sr(A(solo=False, fight=False, no_refresh=False), False, since=quest.REFRESH_GAP - 0.5)
+            and sr(A(solo=False, fight=False, no_refresh=False), False, since=quest.REFRESH_GAP))
 QUICK = dict(IDLE, state='battle', full=False)
 FULL_ON = {'state': 'battle', 'gold': 0, 'full': True, 'cmd': False, 'auto_off': False}
 quest.gui = lambda *a, **k: ''
 print('(t2) 預設模式整合：完整戰鬥（自動戰鬥先開、再刷新）/ 快速戰鬥 / 兩場各刷新一次')
-s = Script([IDLE, FULL_CMD_OFF, FULL_CMD_OFF, FULL_ON, FULL_ON, IDLE, IDLE, QUICK, QUICK, IDLE])
-rc = run2(['--no-track', '--max-seconds', '12'], s)
+s = Script([IDLE, FULL_CMD_OFF, FULL_CMD_OFF, FULL_ON, FULL_ON, FULL_ON, IDLE, IDLE, QUICK, QUICK, IDLE])   # 完整戰鬥要撐過 REFRESH_FIRST_DELAY=3.5 秒才按第一次
+rc = run2(['--no-track', '--max-seconds', '13'], s)
 seq = [c[1].split(';')[0] for c in s.clicks if c[1].startswith(('click 1380 600', 'click 850 765', 'click 763 760'))]
 ok &= check('完整戰鬥：先按自動戰鬥、自動開了才刷新（850,765）一次；第二場快速戰鬥刷新（763,760）一次', seq == ['click 1380 600', 'click 850 765', 'click 763 760'], str(seq))
 s = Script([IDLE, FULL_ON, IDLE, IDLE, IDLE])
@@ -1072,15 +1083,19 @@ TEAM['calls'].clear()
 TEAM.pop('after', None)
 s = Script(BOSS_SEQ)
 rc = run2(['--no-track', '--max-seconds', '60'], s, team=True)
+ok &= check('一般任務（沒 --boss-team-check，2026-10-17）：任務戰打完不停、不開切換面板（只有開始前），rc 0', rc == 0 and [t for _, t in TEAM['calls']] == ['開始前：'], f'rc={rc} {TEAM["calls"]}')
+TEAM['calls'].clear()
+s = Script(BOSS_SEQ)
+rc = run2(['--no-track', '--max-seconds', '60', '--boss-team-check'], s, team=True)
 ok &= check('任務戰打完 + 滿 5 人 → 37，BOSS 戰後驗過隊伍、沒點追蹤 / 黃問號', rc == quest.EXIT_BOSS_DONE and any(t.startswith('BOSS 戰後') for _, t in TEAM['calls']) and not any('click 722' in c[1] for c in s.clicks), f'rc={rc} {TEAM["calls"]}')
 TEAM['ret'] = (True, 'x')
 TEAM['after'] = (False, '隊長 DKBO、隊員 [DKBO2]、不在隊 [DKBO3, DKBO4, DKBO5]')
 s = Script(BOSS_SEQ)
-rc = run2(['--no-track', '--max-seconds', '60'], s, team=True)
+rc = run2(['--no-track', '--max-seconds', '60', '--boss-team-check'], s, team=True)
 ok &= check('任務戰打完 + 隊伍不滿 → 38（不是 37、不是 0）', rc == quest.EXIT_BOSS_TEAM, f'rc={rc}')
 TEAM['after'] = (None, '切換面板沒打開')
 s = Script(BOSS_SEQ)
-rc = run2(['--no-track', '--max-seconds', '60'], s, team=True)
+rc = run2(['--no-track', '--max-seconds', '60', '--boss-team-check'], s, team=True)
 ok &= check('隊伍檢查讀不到 → 38（保守）', rc == quest.EXIT_BOSS_TEAM, f'rc={rc}')
 del TEAM['after']
 s = Script([IDLE, DIALOG, BATTLE, BATTLE, DIALOG, DIALOG] + [IDLE] * 4)
@@ -1098,8 +1113,8 @@ s = Script([DIALOG] + [IDLE] * 20 + [BATTLE, BATTLE] + [IDLE] * 6)
 rc = run2(['--no-track', '--max-seconds', '90', '--no-marker'], s)
 ok &= check('對話後超過 15 秒才開打 → 不算 BOSS，不停', rc == 0, f'rc={rc}')
 s = Script(BOSS_SEQ)
-rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
-ok &= check('--team-size 0（不驗隊伍）：BOSS 戰後仍停 37，事件註明未檢查', rc == quest.EXIT_BOSS_DONE, f'rc={rc}')
+rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0', '--boss-team-check'], s)
+ok &= check('--boss-team-check --team-size 0（不驗隊伍）：BOSS 戰後仍停 37，事件註明未檢查', rc == quest.EXIT_BOSS_DONE, f'rc={rc}')
 s = Script([DIALOG, BATTLE, BATTLE, IDLE, IDLE, IDLE, IDLE])
 rc = run2(['--fight', '--no-click', '--no-track', '--max-seconds', '60', '--team-size', '0'], s, real_verify=False)
 ok &= check('--fight 不受影響（照舊回 verify_boss_result 的 0，不是 37）', rc == 0, f'rc={rc}')
@@ -1385,20 +1400,20 @@ def first_refresh(g):
 g = Timed()
 rc = run2(['--no-track', '--max-seconds', '12'], g)
 fr = first_refresh(g)
-ok &= check('一般情況：開戰後 ≤ 3 秒刷新成功、之前沒有失敗的切換（不在開戰瞬間亂按叫出關閉列）',
-            fr is not None and fr - g.bs <= 3.0 and [k for _, k in g.log][:2] == ['switch', 'refreshed'], f'{g.log}')
+ok &= check(f'一般情況：開戰後 ≤ REFRESH_FIRST_DELAY+1={quest.REFRESH_FIRST_DELAY + 1:g} 秒刷新成功、之前沒有失敗的切換（不在開戰瞬間亂按叫出關閉列）',
+            fr is not None and fr - g.bs <= quest.REFRESH_FIRST_DELAY + 1.0 and [k for _, k in g.log][:2] == ['switch', 'refreshed'], f'{g.log}')
 g = Timed(early=99.0, panel_fail=0)
 g.early = 0.0
 g.panel_fail = 2
 rc = run2(['--no-track', '--max-seconds', '14'], g)
 sw = [t for t, k in g.log if k == 'switch']
-ok &= check('面板前 2 次沒開 → 約 1～2.5 秒後重試（不等 8 秒），第 3 次成功仍在開戰 ≤ 8 秒內',
-            len(sw) >= 3 and all(0.9 <= b - a <= 3.2 for a, b in zip(sw, sw[1:3])) and first_refresh(g) is not None and first_refresh(g) - g.bs <= 8.0, f'{g.log}')
+ok &= check(f'面板前 2 次沒開 → 約 1～2.5 秒後重試（不等 REFRESH_GAP），第 3 次成功仍在開戰 ≤ REFRESH_FIRST_DELAY+6={quest.REFRESH_FIRST_DELAY + 6:g} 秒內',
+            len(sw) >= 3 and all(0.9 <= b - a <= 3.2 for a, b in zip(sw, sw[1:3])) and first_refresh(g) is not None and first_refresh(g) - g.bs <= quest.REFRESH_FIRST_DELAY + 6.0, f'{g.log}')
 g = Timed(row=True, eat=1)
 rc = run2(['--no-track', '--max-seconds', '14'], g)
 cl = [t for t, k in g.log if k == 'close']
-ok &= check('開戰就有關閉列、第 1 下被吃 → 每輪只點 1 下，第 2 下收起後立刻刷新（開戰 ≤ 6 秒；舊版 4 下 × 4.5 秒 ≈ 18 秒）',
-            len(cl) == 2 and first_refresh(g) is not None and first_refresh(g) - g.bs <= 6.0 and first_refresh(g) - cl[-1] < 1.5, f'{g.log}')
+ok &= check(f'開戰就有關閉列、第 1 下被吃 → 每輪只點 1 下，第 2 下收起後立刻刷新（開戰 ≤ REFRESH_FIRST_DELAY+3={quest.REFRESH_FIRST_DELAY + 3:g} 秒；舊版 4 下 × 4.5 秒 ≈ 18 秒）',
+            len(cl) == 2 and first_refresh(g) is not None and first_refresh(g) - g.bs <= quest.REFRESH_FIRST_DELAY + 3.0 and first_refresh(g) - cl[-1] < 1.5, f'{g.log}')
 g = Timed(row=True, eat=2)
 rc = run2(['--no-track', '--max-seconds', '14'], g)
 cl = [t for t, k in g.log if k == 'close']
@@ -1411,10 +1426,15 @@ ok &= check('關閉列點不掉、第 10 秒自己消失 → 消失後 ≤ 2 秒
 g = Timed(bs=2.0, be=12.0)
 rc = run2(['--no-track', '--max-seconds', '14'], g)
 rf = [t for t, k in g.log if k == 'refreshed']
-ok &= check('成功後同一場仍照 REFRESH_GAP（10 秒戰鬥成功刷新 1～2 次，不是每秒）', 1 <= len(rf) <= 2 and (len(rf) < 2 or rf[1] - rf[0] >= quest.REFRESH_GAP), f'{rf}')
+ok &= check(f'成功後同一場仍照 REFRESH_GAP={quest.REFRESH_GAP:g}（10 秒戰鬥成功刷新 1～{int(10 / quest.REFRESH_GAP) + 1} 次、間隔 ≥ GAP，不是每秒）',
+            1 <= len(rf) <= int(10 / quest.REFRESH_GAP) + 1 and all(b - a >= quest.REFRESH_GAP for a, b in zip(rf, rf[1:])), f'{rf}')
+ok &= check('刷新 seq（6be1498）：第一次點切換 → 短等 SWITCH_FIRST_WAIT_MS 沒開 → 同一個 seq 內 ifnok 再點一次（算一次嘗試），結果取最後一個 waitpix',
+            any(f'waitpix {quest.SWITCH_FIRST_WAIT_MS} ' in c and 'ifnok click 850 765' in c for c in g.clicks)
+            and quest.waitpix_result('timeout 400\nclick 850,765\nok 200\nclick 910,578') == 'ok'
+            and quest.waitpix_result('ok 100\nskip click\ntimeout 1500') == 'timeout', str(g.clicks[:1]))
 print('(t5) should_refresh 開戰延遲：完整戰鬥未滿 REFRESH_FIRST_DELAY 不按、快速戰鬥不等')
 _a = A(solo=False, fight=False, no_refresh=False)
-ok &= check('完整戰鬥開戰 0.5 秒不按、1.5 秒按', not quest.should_refresh(_a, False, True, False, 99, 0.5) and quest.should_refresh(_a, False, True, False, 99, quest.REFRESH_FIRST_DELAY))
+ok &= check(f'完整戰鬥開戰 0.5 秒不按、REFRESH_FIRST_DELAY={quest.REFRESH_FIRST_DELAY:g} 秒按', not quest.should_refresh(_a, False, True, False, 99, 0.5) and quest.should_refresh(_a, False, True, False, 99, quest.REFRESH_FIRST_DELAY))
 ok &= check('快速戰鬥開戰 0 秒就按', quest.should_refresh(_a, False, False, False, 99, 0.0))
 
 print('(盜賊) 「戰鬥 / 再見」兩鈕對話框後備判斷（強盜的洞穴；classify 判 idle 時用按鈕字旁像素 + 按鈕 OCR）')
@@ -1731,8 +1751,8 @@ rc = run2(['--no-track', '--max-seconds', '8', '--no-refresh', '--no-stop-after-
 ok &= check('沒給 --hp-check-min → 不讀 HP', not _hp_calls)
 quest.read_team_hp = _keep_hp
 s = Script([DIALOG, FULL_ON, FULL_ON, REWARD, IDLE, IDLE, IDLE, IDLE, IDLE, IDLE])
-rc = run2(['--no-track', '--max-seconds', '3', '--no-refresh'], s)
-ok &= check('任務 BOSS 戰打完領獎後 slice 時間到 → 延後到閒置確認，回 37（舊版回 0「時間到」，questrun 不做 BOSS 後補血）', rc == quest.EXIT_BOSS_DONE, f'rc={rc} t={s.t - 1000:.1f}')
+rc = run2(['--no-track', '--max-seconds', '3', '--no-refresh', '--boss-team-check'], s)
+ok &= check('--boss-team-check：任務 BOSS 戰打完領獎後 slice 時間到 → 延後到閒置確認，回 37（舊版回 0「時間到」，questrun 不做 BOSS 後補血）', rc == quest.EXIT_BOSS_DONE, f'rc={rc} t={s.t - 1000:.1f}')
 
 print('(t4b) 戰鬥底部列拖移（2026-10-15 p2 實測：拖「關閉」鈕整條列移走，之後每場都在新位置）')
 quest.CLOSE_ROW_DRAG_TRIES = 2

@@ -36,7 +36,8 @@
   --stop-after-dialog 的停止規則：只要這步已對話或領獎過，之後閒置不再點追蹤 / 黃問號，閒置滿 2.5 秒（連續 2 次以上）就停（退出碼 0）；遊戲自己又開始 Auto Walking → 退出碼 24
   --step N  --fight 用：明確指定任務第 N 步的 NPC（= --npc auto 但不 OCR 追蹤條目；需 --task）。--npc auto 不給 --step 時，改讀追蹤條目「標題正下方那行說明」
            （OCR）對照 Task 表 explandTn 找目前步驟的 endNpc；讀不到 / 對不到（或兩步相似且 NPC 不同）→ 先用「目前所在地圖只對應唯一一個打 BOSS / 對話步驟」反查（事件 log 註明地圖反查），仍不行 → 退出碼 31，不點任何東西，絕不退回「第一個戰鬥步」
-  --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過；切換面板開啟後等卡片內容穩定再讀：連 2 次讀到相同標籤才算，最多 TEAM_STABLE_MAX_S=1.5 秒，全部「不在隊」時至少重讀才判失敗 = read_team_labels_stable）：只在必要時檢查（2026-10-11）：開始前、--fight 點 NPC 前、領獎後（一步結束要去下一步 / 交任務）點追蹤前、任務 / BOSS 戰打完後的下一次點之前；其他點擊（每次點追蹤 / 黃問號）不檢查。開切換面板（uikit.open_panel / close_panel，輪詢驗證；打不開原地重試 CHECK_TEAM_TRIES=3 次、間隔 1 秒、先確認是主畫面）763,760，
+  --team-size N  隊伍人數檢查（預設 5；0 或 1 = 跳過；切換面板開啟後等卡片內容穩定再讀：連 2 次讀到相同標籤才算，最多 TEAM_STABLE_MAX_S=1.5 秒，全部「不在隊」時至少重讀才判失敗 = read_team_labels_stable）：只在必要時檢查（2026-10-11；2026-10-17 精簡）：開始前（--team-fresh 略過）、--fight 點 NPC 前、--boss-team-check 時 BOSS 戰後與之後下一次點之前；
+           領獎後 / 對話後點追蹤前、一般任務戰打完都**不檢查**（2026-10-17 使用者：對話問完通常不用再檢查隊伍；p3 強盜的洞穴 3 場戰鬥開 3 次切換面板）；其他點擊不檢查。開切換面板（uikit.open_panel / close_panel，輪詢驗證；打不開原地重試 CHECK_TEAM_TRIES=3 次、間隔 1 秒、先確認是主畫面）763,760，
            讀 5 張卡片的隊伍標籤，要「1 隊長 + (N-1) 隊員」（N=5 即 5 人都要在隊）；面板上其他卡片是單人 / 不在隊（例如單人 DKB0）不算錯；隊員不夠 / 隊長不是 1 個 / 讀不到 → 不點、事件 log 寫出誰不在隊、關面板（✕ 1064,208）；--fight 開打前退出碼 30、執行中發現脫隊退出碼 32。
            --solo / --fight --no-click 不檢查。--team-fresh（questrun 用：它在 30 秒內剛驗過隊伍）→ 只略過「開始前」那一次。**開始前一定先驗**：非 --solo 模式（含 --no-track / --stop-after-*）第一次點 / 按對話框前先驗一次（不受 GAP 限制），不符退出碼 30；啟動時對話框已開 → 先 ESC 再驗（2026-10-10 18:44 事件：--solo 後單人直接 --stop-after-rewards 只有 DKB0 交任務）。聊天「離開了隊伍」OCR 不可靠（只顯示最新 2 則、會被洗掉），所以脫隊偵測改用這個「點之前先驗隊伍」的做法
   戰鬥鎖檔  所有模式一進戰鬥就寫 tools/.cache/battle.lock（pid + 開始時間），戰鬥結束 / 程式結束（finally）刪除；ass.py 看到有效鎖檔 = 戰鬥中，不改外掛設定（見 ui/ass.md）
@@ -75,9 +76,10 @@
   不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）；
            每一串的第 1 次另存 *-unknown1.png（事後看得到前面是什麼畫面）。第 2 次起先試 close_stray_panel（已知殘留面板 / 快速組隊「提示」只點 ✕）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
-  預設模式 BOSS 戰收尾（errlog #68，2026-10-11）：非 --solo / --fight 時，任務戰（對話框 / 黃問號後 QUEST_BATTLE_WINDOW 秒內開打；打到一半又開始 Auto Walking 的後續遇敵不算）打完、閒置滿 IDLE_CONFIRM_SECS 後
+  預設模式 BOSS 戰收尾（errlog #68，2026-10-11；**2026-10-17 起只在 --boss-team-check 時做**：使用者定只限紅暴 2031 / 四寶玉之謎 2010〔questdefs boss_team_check〕、
+           漆黑洞窟 rebirth.py、bossretry；沒帶 = 任務戰打完不驗隊伍、不停，照常點追蹤往下跑，同舊 --no-stop-after-boss）：非 --solo / --fight 時，任務戰（對話框 / 黃問號後 QUEST_BATTLE_WINDOW 秒內開打；打到一半又開始 Auto Walking 的後續遇敵不算）打完、閒置滿 IDLE_CONFIRM_SECS 後
            **先驗隊伍（check_team）再停手、不點追蹤 / 黃問號、不接下一步**：滿員 = 退出碼 37、不滿 / 讀不到 = 38（事件 log 寫誰不在隊；重打流程由呼叫端做：char.py switch 被打飛者當單人隊長 → 追蹤自動傳送 → 重打 → 切回 DKBO → team.form）。
-           `--no-stop-after-boss` = 不停、照舊連跑（--team-size 0 / 1 仍會停 37，只是沒驗隊伍）。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
+           `--no-stop-after-boss` = 不停、照舊連跑（相容保留；蓋過 --boss-team-check）；--boss-team-check 且 --team-size 0 / 1 仍會停 37，只是沒驗隊伍。路上一般遇敵不算 BOSS 戰；對話後 15 秒以上才開打也不算（Auto Walking 抵達直接開打的 BOSS 偵測不到，那種步驟請用 --fight）。--disband-after 在 BOSS 停手時不執行。
   不可逆對話防護（errlog #68）：每次按對話框左鈕前先 OCR 內文（ocr.ps1 -Light）+ 兩顆按鈕（-Dark），含 IRREVERSIBLE_KEYWORDS（轉生 / 寵物轉生 / 封印 / 刪除 / 丟棄；先移除 IRREVERSIBLE_ALLOW 放行片語「挑戰機暴(轉生任務)」，2026-10-12 使用者定）或內文讀不到 → **不按、不 ESC、對話框維持開著**，存 snap（*-irreversible.png），退出碼 39。
            實證：精靈王第 2 頁左鈕只寫「完成」，轉生字樣在內文（「…進行轉生的儀式吧」）→ 只看按鈕擋不住，所以兩塊都讀。確認要做才加 `--allow-irreversible`（不做 OCR、全放行）。--solo 只 ESC 不按，不受影響。
            **快速連按例外（--fast-dialog，使用者 2026-10-17 選「安全版」）**：只有呼叫端明確打開才生效（questrun 依 questdefs.fast_dialog 帶；轉生 2004～2008 / rebirth.py / 未列任務一律不帶；
@@ -86,7 +88,7 @@
            對話框關了 / 按鈕字樣變了 / 深色點太少（讀不準）/ 剛 OCR 那頁按鈕含「戰鬥」「接受」（FAST_STOP_BUTTONS）→ 不按、回主迴圈照常判斷（下一頁再 OCR）；同一串最多 FAST_DIALOG_MAX=6 次後回正常流程。
            風險（使用者已接受）：同按鈕字樣的後續頁內文不再 OCR —— 所以只給沒有轉生 / 封印 / 寵物轉生的一般任務用。
 結束時印「走路不計時 N 秒」「本片戰鬥 N 場」兩行（questrun 解析：巡路不計時、沒打仗才沿用全隊 HP）。
-退出碼：43 載入 / 轉場畫面連續 LOADING_MAX_S 秒（結束本片，呼叫端重跑）、42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（點追蹤 / 黃問號 / 領獎後追蹤前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、44 --solo-talk 到 NPC 後 team.form 失敗（呼叫端重組後跑舊對話步）、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
+退出碼：43 載入 / 轉場畫面連續 LOADING_MAX_S 秒（結束本片，呼叫端重跑）、42 快速戰鬥 VS 牌卡死 VS_STUCK_S 秒（結束本片，呼叫端重登）、40 任務 NPC 只有「再見」（已 ESC，任務接不下去）、41 --hp-check-min 片內戰鬥後全隊 HP 偏低（結束本片）、37 --boss-team-check 預設模式 BOSS 戰結束且隊伍滿員（已停手）、38 --boss-team-check 預設模式 BOSS 戰結束但隊伍不滿 / 讀不到（已停手，看事件 log）、29 對話 / 選擇對象面板循環 SELECT_LOOP_MAX 次沒進展（已停手）、39 對話框含不可逆關鍵字或讀不到內文（沒按）、33 對話無進展（同一黃問號「點 → 對話」STALL_MAX=4 輪沒領獎 / 戰鬥 / 巡路 / 換圖，沒按對話框就停）、34 --fight 自己所在地圖與 NPC 地圖不同（沒點）、35 --fight BOSS 戰打完但地圖與任務步驟都沒變（沒打贏；事件 log 附 HP 佐證）、36 --fight BOSS 戰打完判斷不了輸贏（OCR 讀不到步驟 / 沒給 --task；**不回 0**，請人工看畫面）、30 隊伍不符（開始前第一次點 / 按對話框前驗隊伍；含 --fight 點 NPC 前）、31 --npc auto 取不到目前步驟、32 執行中脫隊（--boss-team-check 任務戰後下一次點追蹤 / 黃問號前的隊伍檢查）、20 --solo 到達 NPC（已 ESC 關對話框）、21 被打飛回村（--solo / --fight）、22 --fight 沒點到 NPC、23 --fight 對話後沒開打、24 --stop-after-dialog 停止時遊戲自己已在 Auto Walking、25 組隊完整戰鬥自動戰鬥按 4 次仍關、26 --disband-after 解散沒做成、44 --solo-talk 到 NPC 後 team.form 失敗（呼叫端重組後跑舊對話步）、18 獲得物品按確認 3 次仍關不掉、19 自動巡路卡住（Auto Walking 但座標 WALK_STUCK_S 秒不變）自動點地面解卡 WALK_UNSTICK_MAX 次仍卡、0 正常結束（--fight 只有**判定打贏**才回 0；任務完成〔領過獎勵後整個追蹤列表掃完沒有 --task，印「任務完成」〕/ 時間到 / 做完對話或領獎後連續 2 次閒置提前結束 / --once / 達到 --stop-after-rewards）、2 不認得的畫面、3 追蹤沒反應、4 版面不支援 / 參數錯、5 追蹤列表掃完（到頂 + 到底）找不到 --task 的任務且沒領過獎勵（沒點任何東西）。
 （27 / 28 / 29 = 舊外掛自動逃跑專用，2026-10-10 移除，不再使用。）
 只透過 gui.ps1 背景截圖 / 點擊，不碰遊戲記憶體。
 """
@@ -1907,7 +1909,7 @@ def _main() -> int:
     ap.add_argument('--npc-map', type=int, default=0, help='--fight --npc X,Y 用：NPC 所在地圖 ID（不給時，有 --task 會用任務表反查該座標的 NPC 地圖）；與目前所在地圖不同 → 退出碼 %d，不點' % EXIT_NPC_MAP)
     ap.add_argument('--step', type=int, default=0, help='--fight 用：明確指定任務第 N 步（Task.step）的 endNpc 當 NPC（等於 --npc auto 但不 OCR 追蹤條目；需要 --task）')
     ap.add_argument('--team-size', type=int, default=None, help='隊伍人數檢查（預設 = 這個視窗名單人數，主視窗 5）：--fight 點 NPC 前、預設模式每次點追蹤 / 黃問號前，開切換面板確認 1 隊長 + (N-1) 隊員，不符 → 不點（--fight 退出碼 %d、執行中脫隊 %d）；開始前第一次點 / 按對話框前一定先驗（不符 30）；0 或 1 = 跳過；--solo / --fight --no-click 不檢查' % (EXIT_TEAM_MISMATCH, EXIT_TEAM_LOST))
-    ap.add_argument('--team-fresh', action='store_true', help='呼叫端（questrun）剛驗過 5 人隊伍（≤30 秒：team.form 成功 / 上一片 37）→ 「開始前」那次隊伍檢查略過，不開切換面板；領獎後 / 任務戰後 / BOSS 後的檢查照舊（2026-10-12）')
+    ap.add_argument('--team-fresh', action='store_true', help='呼叫端（questrun）剛驗過 5 人隊伍（≤30 秒：team.form 成功 / 上一片 37 / 上一片正常結束）→ 「開始前」那次隊伍檢查略過，不開切換面板；--boss-team-check 的 BOSS 後檢查照舊（2026-10-12；2026-10-17 起領獎後不再檢查）')
     ap.add_argument('--at', default='', help='--fight 用：自己目前的座標 X,Y（不給就 OCR 讀右上角）')
     ap.add_argument('--no-click', action='store_true', help='--fight 用：不點 NPC（已手動點過 / 對話已開），從現在起算開打時間窗')
     ap.add_argument('--max-seconds', type=int, default=900, help='最長執行秒數（預設 900）')
@@ -1916,7 +1918,9 @@ def _main() -> int:
     ap.add_argument('--no-track', action='store_true', help='不主動點任務追蹤')
     ap.add_argument('--no-refresh', action='store_true', help='戰鬥不按刷新角色（預設：--solo / --fight 只在任務 / BOSS 戰刷新，組隊預設模式每場都刷新）')
     ap.add_argument('--stop-after-rewards', type=int, default=0, help='領到第 N 次獲得物品視窗後停（0 = 不停）')
-    ap.add_argument('--no-stop-after-boss', action='store_true', help='預設模式（非 --solo / --fight）：任務 BOSS 戰（對話 / 黃問號後 %d 秒內開打）打完閒置確認後預設會先驗隊伍再停（退出碼 %d 滿員 / %d 不滿）；加這個旗標 = 不停、照舊一路連跑（呼叫端自己負責驗隊伍與不可逆步驟）' % (QUEST_BATTLE_WINDOW, EXIT_BOSS_DONE, EXIT_BOSS_TEAM))
+    ap.add_argument('--boss-team-check', action='store_true', help='預設模式：任務 BOSS 戰（對話 / 黃問號後 %d 秒內開打）打完閒置確認後驗隊伍再停（退出碼 %d 滿員 / %d 不滿），之後下一次點追蹤 / 黃問號前也驗。'
+                    '2026-10-17 起**預設不檢查**（任務戰打完照常往下跑）；只有紅暴 2031 / 四寶玉之謎 2010（questdefs boss_team_check，questrun 帶）、漆黑洞窟 rebirth.py、bossretry 帶' % (QUEST_BATTLE_WINDOW, EXIT_BOSS_DONE, EXIT_BOSS_TEAM))
+    ap.add_argument('--no-stop-after-boss', action='store_true', help='相容保留：2026-10-17 起沒帶 --boss-team-check 本來就不停；同時帶 = 蓋過 --boss-team-check（不停、照舊一路連跑，呼叫端自己負責驗隊伍與不可逆步驟）')
     ap.add_argument('--hp-check-min', type=int, default=0, help='預設模式：每打完 --hp-check-every 場戰鬥、回主畫面閒置確認後讀全隊 HP（開背包約 8 秒），任一人低於這個 %%%% → 結束本片，退出碼 %d（questrun 補血後續片）；0 = 不檢查' % EXIT_HP_LOW)
     ap.add_argument('--hp-check-every', type=int, default=HP_CHECK_EVERY, help='--hp-check-min：路上一般戰鬥每幾場讀一次（預設 %d；0 = 只在任務戰後讀）' % HP_CHECK_EVERY)
     ap.add_argument('--allow-irreversible', action='store_true', help='不檢查對話框是否含不可逆關鍵字（%s）：預設遇到會不按、存 snap、退出碼 %d；人 / agent 看過截圖確認要做才加' % ('、'.join(IRREVERSIBLE_KEYWORDS), EXIT_IRREVERSIBLE))
@@ -2001,7 +2005,9 @@ def _run(a) -> int:
             if npc_xy is None:
                 return a.resolve_rc
     guard_ko = a.solo or a.fight         # 只有這兩種風格才會被打飛後要停手
-    boss_stop = not (a.solo or a.fight or a.no_stop_after_boss)   # 預設模式：BOSS 戰打完就停（--no-stop-after-boss 關）
+    # 預設模式：BOSS 戰打完驗隊伍再停（37 / 38）只在呼叫端帶 --boss-team-check 時做（2026-10-17 使用者：只限紅暴 2031 / 四寶玉之謎 2010 / 漆黑 rebirth.py）；
+    # 沒帶 = 等同舊 --no-stop-after-boss：任務戰打完照常往下跑、不開切換面板
+    boss_stop = a.boss_team_check and not (a.solo or a.fight or a.no_stop_after_boss)
     if not a.no_track and not a.task:
         log('沒給 --task：不知道要點哪個任務追蹤（點錯任務是之前的老問題）。請加 --task 任務名，或用 --no-track（只處理對話 / 戰鬥）')
         return 4
@@ -2139,7 +2145,7 @@ def _run(a) -> int:
                 STATS['battles'] = STATS.get('battles', 0) + 1
                 if quest_battle:
                     quest_since_hp += 1
-                    team_dirty = True          # 任務戰打完：下次點之前驗隊伍
+                    team_dirty = a.boss_team_check   # 任務戰打完：只有 --boss-team-check（紅暴 / 四寶玉 / 漆黑）下次點之前驗隊伍（2026-10-17）
                 else:
                     road_since_hp += 1
             in_battle = False
@@ -2492,10 +2498,8 @@ def _run(a) -> int:
                 checked_rewards = rewards
                 post_track = False
                 time.sleep(1.0)                              # 等獲得物品視窗收掉、列表刷新
-                res = track_task(a.task, click=False)        # 先只掃不點：任務已不在列表（= 完成）就不必驗隊伍（2026-10-11：最後一步領完獎被隊伍檢查擋下，白跑一輪）
-                if res:
-                    if (rc := team_gate('領獎後點追蹤前：', EXIT_TEAM_LOST, force=True)):      # 還有下一步 / 要去交任務：驗一次
-                        return rc
+                res = track_task(a.task, click=False)        # 先只掃不點：任務已不在列表 = 完成
+                if res:                                      # 還有下一步 / 要去交任務：直接點（2026-10-17 使用者：領獎 / 對話後不再驗隊伍）
                     res = track_task(a.task)
                 if res is None:
                     checked_rewards = rewards - 1            # 被打斷，下次回主畫面再查

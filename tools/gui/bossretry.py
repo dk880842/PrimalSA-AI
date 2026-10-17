@@ -24,7 +24,7 @@ notes/quest-log.md 10-10 兩段：第一次輸、5 人 HP 1 原地；第二次 5
              → ref 解散舊隊伍（之後 team.form 要全員單人；解散要「當前 = 隊長」，所以趁 ref 是當前時解）
   4 每個掉隊者（依序）：char.switch(掉隊者) → 讀他的步號：== ref（或都 GONE）→ 不用重打；
      落後 → team.form(leader=掉隊者) 組滿 5 人 → 全隊 HP（bag.hps）任一 < --hp-min% → 補血（小護士補整隊）→
-     迴圈（≤ --max-slices 片）：quest.py --task <追蹤> --team-size 5（預設模式：點追蹤 = 自動傳送 / 巡路、對話按確認、BOSS 戰開自動戰鬥 + 刷新，戰後停 37 / 38）
+     迴圈（≤ --max-slices 片）：quest.py --task <追蹤> --team-size 5 --boss-team-check（預設模式：點追蹤 = 自動傳送 / 巡路、對話按確認、BOSS 戰開自動戰鬥 + 刷新，戰後停 37 / 38）
        追蹤沒反應（3）→ 改 quest.py --fight --task <追蹤> --npc auto --team-size 5（站在 BOSS 旁直接點 NPC，英雄島前傳步 6 的打法）
        → 讀掉隊者步號：== ref 追上；BOSS 戰後步號沒前進 / 被打飛（21）/ --fight 35 = 輸一次 → 補血 → 重組 → 再打（≤ --max-tries 次）；
           38 / 30 / 32（隊伍又散）→ 原地重組再起一片
@@ -349,7 +349,7 @@ class Run:
             if fight_next:
                 args = ['--fight', '--task', self.track, '--npc', 'auto', '--team-size', TEAM_SIZE, '--max-seconds', self.o['slice_s']]
             else:
-                args = ['--task', self.track, '--max-seconds', self.o['slice_s'], '--team-size', TEAM_SIZE]
+                args = ['--task', self.track, '--max-seconds', self.o['slice_s'], '--team-size', TEAM_SIZE, '--boss-team-check']   # 重打就是要 BOSS 後驗隊伍停 37 / 38（2026-10-17 起 quest.py 預設不停）
             qrc, tail = self.T.quest(args, self.o['slice_s'] + WALK_CAP_S + 120)
             act = classify_quest(qrc, fight_next)
             self.event(f'{who} 隊第 {n + 1} 片 quest.py{" --fight" if fight_next else ""} 退出碼 {qrc}（{act}）')
