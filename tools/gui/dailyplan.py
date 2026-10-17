@@ -290,13 +290,27 @@ def match_mats(cands, mats, recipes: dict) -> list:
     return full or [c for c, f in fits.items() if f == 'partial']
 
 
+def mats_only(mats, recipes: dict):
+    """名字完全沒得票時的最後一層：彈窗材料列**看到整張**（有「石幣」列、▲ 不亮）且全配方表裡**唯一**一個 full 吻合 → 該名；
+    item-book 有 38 組材料完全相同的不同成品（厚肉塊串燒 / 鹽味獸肉串燒…），撞到這些 → 不唯一 → None（呼叫端 225，不猜）。
+    沒看全（partial）一律 None：partial 只能排除、不能定名"""
+    info = _as_info(mats)
+    if not info.get('seq') or not info.get('complete'):
+        return None
+    full = [c for c in recipes if mats_fit(c, info, recipes) == 'full']
+    return full[0] if len(full) == 1 else None
+
+
 def resolve_name(panel: dict, pop: dict, mats, recipes: dict):
     """面板名稱不確定時的第二層（快速合成彈窗）：panel / pop = vote_lines 結果，mats = pop_mats 結果（或材料名 list）。
     有讀到材料列 → 候選（兩邊得票名 + 同族只差數字的名）裡材料吻合的**唯一**一個；材料列讀不到 → 只在面板與彈窗大字同名、
-    或彈窗大字 sure 且面板沒投給別的名字時才接受。其他一律 None（呼叫端 225，不猜）"""
+    或彈窗大字 sure 且面板沒投給別的名字時才接受。面板與大字都一票沒有 → mats_only（整張材料列在全配方表唯一吻合）。
+    其他一律 None（呼叫端 225，不猜）"""
     names = set(panel.get('votes') or {}) | set(pop.get('votes') or {})
     pool = sorted({f for n in names for f in digit_family(n, recipes)})
     ok = set(pool)
+    if not pool:                                                   # 兩邊都一票沒有（2 字短名「蒜豆」面板 / 大字 OCR 全空，2026-10-18 p1 225）
+        return mats_only(mats, recipes)
     if _as_info(mats).get('seq'):
         m = match_mats(pool, mats, recipes)
         if len(m) == 1:

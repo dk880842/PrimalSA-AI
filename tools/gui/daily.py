@@ -28,6 +28,9 @@
   read    gather_hospital → 輪流 char.switch：點 NPC 開委託面板 → 讀 5 環 × 上 / 下 → daily-<角色>.json
           成品名讀法（2026-10-17 修 225）：名稱框 OCR -Zooms 2,3,4,5 -Dark 0 → dp.vote_lines **逐倍率各自 snap 投票**（舊版把各倍率 join 成一串 →「成弓箭8口成弓箭8」）；
           數字尾碼（合成爪 7 / 3）要 ≥2 倍率同意才確定，否則開快速合成彈窗讀大字 + 材料列 → dp.resolve_name（同族只差數字的用材料列分）；仍不確定 → 225 不猜
+          2～5 倍一票都沒有 → 加讀 -Zooms 6,7,8（NAME_MORE_OPTS）合併投票（2026-10-18 修 225：2 字短名「蒜豆」2～5 倍全空，實機 6 倍讀得到）；
+          面板 / 大字都沒得票 → dp.mats_only：彈窗材料列看到整張且在全配方表唯一 full 吻合才定名（材料相同的 38 組撞到 → 不唯一 → 225）；
+          225 前 uikit.snap('daily-read-fail') 存面板現場圖，quest-events.log 記面板各倍率 / 大字 / 材料列原字
           快速合成彈窗（第二輪，p1 樣本 99 張）：大字框 380,398,204,50；材料列整欄一次讀（dp.pop_rows 依 y 分列）；▼ 亮（材料 4 種以上）且還分不出 → 材料列內拖一次再讀（pop_scroll）；
           合成前（craft_item，2026-10-17 改）：**大字不再是合成閘門**——只讀一次大字寫 log；明確投給「別的已知成品」才 229（防點錯項），讀空 / 讀不出一律放行；
           不讀材料列、不捲動。保留：彈窗開了（QCRAFT）、計數紅字像素 popup_short（紅 = 不合成）、合成後該項變綠、提交前兩項綠。dp.pop_check 仍給 read 段 peek_item / resolve_name 用
@@ -146,6 +149,8 @@ SAM_WALK = (1000, 106, 91)                                       # 薩村 → 10
 FISH_WALK = (2000, 73, 103)                                      # 瑪麗娜絲 → 2009 出口（快速走路卡 67,90 → walk 自動慢速）
 NAME_BOXES = [(382, 236, 240, 36), (382, 340, 240, 36)]          # 第 1 / 2 項名稱（x386～、y242～268 / 346～372；寬 200 會切掉「肉丸」的丸）
 NAME_OPTS = ('-Zooms', '2,3,4,5', '-Dark', '0')                   # 褐字米色底：不二值化，4 倍率逐倍率 snap 投票（dp.vote_lines；離線 50/50，2026-10-17）
+# 2～5 倍一票都沒有時才加讀的高倍率（2026-10-18 p1 225：2 字短名「蒜豆」實機 / 截圖 2～5 倍全空，實機 6 倍「蒜豆」、-Small 7 倍「丨蒜豆」都 snap 得到）
+NAME_MORE_OPTS = ('-Zooms', '6,7,8', '-Dark', '0')
 # 委託面板的基本特徵（不含兩顆藍色合成鈕）：最後一環提交後面板沒有合成鈕，uikit.DAILY 不中（2026-10-17 play-p1-daily5）
 DAILY_BASE = uikit.Panel('DAILY', None, uikit.DAILY.sig[:-2], uikit.DAILY.close_xy, forbidden=uikit.DAILY.forbidden)
 POP_WAIT_N = 18                                                  # 點合成後等快速合成彈窗：18 × 0.25 秒 + 失敗前再 1 秒重檢
@@ -504,6 +509,10 @@ class Tools:
         names = [uikit.ocr_lines(box, *NAME_OPTS) for box in NAME_BOXES]
         return {'names': names, 'states': self.item_states()}
 
+    def name_more(self, k: int) -> list:
+        """第 k 項名稱 2～5 倍一票都沒有 → 6～8 倍再讀一次（原始行，zoom 鍵不同、可跟原本的行合併投票）"""
+        return uikit.ocr_lines(NAME_BOXES[k], *NAME_MORE_OPTS)
+
     def peek_item(self, k: int, panel: dict | None = None) -> dict:
         """名稱不確定時：開該項快速合成彈窗讀成品名大字 + 材料列（不按彈窗合成）→ 關彈窗。
         ▼ 亮（材料 4 種以上、第一眼看不全）且第一眼還分不出（dp.resolve_name None）→ 材料列內捲一次再讀（pop_scroll）。
@@ -847,12 +856,20 @@ class Daily:
                 pair = []
                 for k in range(2):
                     v = dp.vote_lines(pg['names'][k], self.recipes)
+                    if not v['votes']:                           # 2～5 倍一票都沒有（2 字短名「蒜豆」）→ 加讀 6～8 倍合併投票
+                        v = dp.vote_lines(list(pg['names'][k]) + T.name_more(k), self.recipes)
                     nm = v['name'] if v['sure'] else None       # 單票的數字尾碼（合成爪 7 / 3）不算確定 → 開彈窗核對大字 + 材料列
+                    pk = {}
                     if nm is None:
                         pk = T.peek_item(k, v) or {}
+                        # 面板 / 大字都沒得票時 resolve_name 退到 dp.mats_only（整張材料列在全配方表唯一吻合）
                         nm = dp.resolve_name(v, dp.vote_lines(pk.get('name'), self.recipes), dp.pop_mats(pk, self.recipes), self.recipes)
                     if nm is None:
-                        self.fail(EXIT_READ, f'{role} 第 {page} 環第 {k + 1} 項讀不出成品名（OCR 各倍率 {v["texts"]!r} 票 {v["votes"]}，彈窗也不行）', read_page=page)
+                        shot = uikit.snap('daily-read-fail')    # 面板第 page 頁現場圖（彈窗已關）
+                        pv = dp.vote_lines(pk.get('name'), self.recipes)
+                        event(f'daily read {role} 第 {page} 環第 {k + 1} 項讀不出：面板各倍率 {v["texts"]!r} 票 {v["votes"]}；'
+                              f'彈窗大字 {pv["texts"]!r} 票 {pv["votes"]}；材料列 {dp.pop_mats(pk, self.recipes)}；現場圖 {shot}')
+                        self.fail(EXIT_READ, f'{role} 第 {page} 環第 {k + 1} 項讀不出成品名（OCR 各倍率 {v["texts"]!r} 票 {v["votes"]}，彈窗也不行；現場圖 {shot}）', read_page=page)
                     pair.append(nm)
                 items.append(pair)
                 dones.append([s == 'green' for s in pg['states']])

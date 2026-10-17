@@ -117,6 +117,26 @@ check('pop_is：沒材料列 → 大字 2 倍率同意才算', dp.pop_is('合成
       and not dp.pop_is('合成爪 7', {'name': L('合成爪7', '合成爪1'), 'mats': []}, RECIPES))
 check('pop_is：真截圖貝類飯 → True；當成大補飯團 → False', dp.pop_is('貝類飯', P, RECIPES) and not dp.pop_is('大補飯團', P, RECIPES))
 
+# ---------------- 2 字短名（fixtures/daily_short_name.json = p1 2026-10-18 DKBO 第 4 環上項「蒜豆」實機原始行；225 重現 + 修）----------------
+SN = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_short_name.json').read_text(encoding='utf-8'))
+v0 = dp.vote_lines(SN['panel_2345'], RECIPES)
+check('蒜豆：面板 2～5 倍實機全空 → 0 票（重現 225）', not v0['votes'] and v0['name'] is None, str(v0))
+pm = dp.pop_mats({'list': SN['pop_list']}, RECIPES)
+check('蒜豆：舊行為 = 面板 / 大字都 0 票時候選池空 → 只靠候選池比對的 match_mats 回空', dp.match_mats([], pm, RECIPES) == [], str(pm))
+for key in ('panel_678', 'panel_678_small'):
+    vm = dp.vote_lines(SN['panel_2345'] + SN[key], RECIPES)
+    check(f'蒜豆：加讀 6～8 倍（{key}）合併投票 → 蒜豆確定', vm['name'] == '蒜豆' and vm['sure'], str(vm))
+check('蒜豆：材料列整張讀得到（普通的大蒜 / 有點過期的豆子 / 石幣）', pm == {'seq': ['普通的大蒜', '有點過期的豆子'], 'complete': True}, str(pm))
+check('蒜豆：面板 / 大字都 0 票 → resolve_name 退 mats_only → 蒜豆',
+      dp.resolve_name(v0, dp.vote_lines(SN['pop_name_small'], RECIPES), pm, RECIPES) == '蒜豆')
+check('mats_only：沒看全（無石幣列）→ None', dp.mats_only({'seq': ['普通的大蒜', '有點過期的豆子'], 'complete': False}, RECIPES) is None)
+dup = next((a, b) for a in RECIPES for b in RECIPES if a < b and any([n for n, _ in ra] == [n for n, _ in rb] for ra in RECIPES[a] for rb in RECIPES[b]))
+dm = {'seq': [n for n, _ in RECIPES[dup[0]][0]], 'complete': True}
+check(f'mats_only：材料完全相同的不同成品（{dup[0]} / {dup[1]}）→ 不唯一 → None（不猜）',
+      dp.mats_only(dm, RECIPES) is None and dp.resolve_name(v0, v0, dm, RECIPES) is None, str(dm))
+check('mats_only：材料列空 → None', dp.mats_only({'seq': [], 'complete': True}, RECIPES) is None and dp.resolve_name(v0, v0, [], RECIPES) is None)
+check('蒜豆頁下項（味道爽口的炒青菜）2～5 倍照常確定', dp.vote_lines(SN['below']['panel_2345'], RECIPES)['sure'])
+
 # ---------------- 快速合成彈窗第二輪（fixtures/daily_pop_ocr.json = p1 2026-10-17 樣本 50 項 + ▼ 項的捲動版；成品名框 380,398,204,50、材料列整欄 686,228,234,402）----------------
 PX = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_pop_ocr.json').read_text(encoding='utf-8'))
 TRUTHS = sorted({dp.norm(c['truth']) for c in PX['cases']})
@@ -775,12 +795,23 @@ class FakeTools:
         names = [[{'text': n, 'x': 400, 'zoom': z} for z in (2, 3)] for n in self.W.items[r][pg]]   # 兩倍率都讀對
         if self.inj.get('noise') == (r, pg):
             names[1] = [{'text': '？？？', 'x': 400, 'zoom': 2}]          # 名稱 OCR 壞掉 → 要走 peek
+        if self.inj.get('short') == (r, pg):
+            names[0] = []                                                # 2 字短名：2～5 倍全空（2026-10-18 蒜豆）
         return {'names': names, 'states': ['green' if g else 'red' for g in self.W.green[r][pg]]}
+
+    def name_more(self, k):
+        self.L('name_more', self.W.cur, self.W.page, k)
+        if self.inj.get('short') == (self.W.cur, self.W.page - 1) and not self.inj.get('short_more_fail'):
+            return [{'text': self.W.items[self.W.cur][self.W.page - 1][k], 'x': 410, 'zoom': 6}]
+        return []
 
     def peek_item(self, k, panel=None):
         self.L('peek', self.W.cur, self.W.page, k)
         if self.inj.get('peek_fail'):
             return {'name': [], 'mats': []}
+        if self.inj.get('short_more_fail'):                             # 大字也空、只有材料列（整張含石幣）
+            nm = self.W.items[self.W.cur][self.W.page - 1][k]
+            return {'name': [], 'mats': [n for n, _ in self.W.recipes[dp.norm(nm)][0]] + ['石幣']}
         nm = self.W.items[self.W.cur][self.W.page - 1][k]
         return {'name': [{'text': nm, 'x': 480, 'zoom': z} for z in (2, 3)], 'mats': []}
 
@@ -1162,6 +1193,24 @@ W.inj['noise'] = ('DKBO', 1)
 W.inj['peek_fail'] = True
 rc, out, _ = go(W)
 check('名稱 OCR 壞、彈窗也讀不出 → 225（已讀的不寫成 read）', rc == 225 and not (dp.load(dp.role_path('DKBO')) or {}).get('read'), f'{rc} {out[-300:]}')
+fresh_dir()
+W = scenario(items=it6, roles=['DKBO'])
+W.inj['short'] = ('DKBO', 3)                                              # 第 4 環上項 2～5 倍全空 → 6～8 倍救回、不開彈窗
+rc, out, _ = go(W)
+check('2 字短名：2～5 倍全空 → name_more 6～8 倍救回 → 完成（不開彈窗）', rc == 0 and W.reward['DKBO'] == 5
+      and not any(x[0] == 'peek' and x[2] == 4 for x in W.log if isinstance(x, tuple)), f'{rc} {out[-300:]}')
+fresh_dir()
+W = scenario(items=it6, roles=['DKBO'])
+W.inj['short'] = ('DKBO', 4)
+W.inj['short_more_fail'] = True                                           # 6～8 倍也空、大字也空 → 材料列整張唯一吻合（貝類飯）
+rc, out, _ = go(W)
+check('2 字短名：面板 / 大字全空、材料列整張 → mats_only 定名 → 完成', rc == 0 and W.reward['DKBO'] == 5, f'{rc} {out[-300:]}')
+fresh_dir()
+W = scenario(items=it6, roles=['DKBO'])
+W.inj['short'] = ('DKBO', 3)
+W.inj['short_more_fail'] = True                                           # 葉子烤蕃薯：材料和半熟的芋頭完全相同 → 不唯一 → 225 不猜
+rc, out, _ = go(W)
+check('全空且材料列和別的成品相同（葉子烤蕃薯 / 半熟的芋頭）→ 225 不猜', rc == 225, f'{rc} {out[-300:]}')
 fresh_dir()
 W = scenario(items=it6, roles=['DKBO'])
 W.inj['panel_fail'] = True
