@@ -226,6 +226,7 @@
 - 流程：交接（關遇敵 → **戰鬥設定檢查** → DKBO、組隊）→ 每任務 task_status（已完成跳過 / 待接取接取 / 進行中續跑）→（`--dragon` 才）龍王的守護 → quest.py 迴圈依退出碼分支 → 詳情確認已完成 →（`--drop-reward` 才）丟獎勵寵 → 全部成功才 `grind.py start --spot 地雷區`；失敗不恢復。
 - **2026-10-12 預設變更 / 新旗標**（離線測試通過，**實機未驗證**）：
   - **龍王的守護預設不吃**：要吃加 `--dragon`；`--no-dragon` 保留相容（= 預設，no-op；兩個一起給 → 1）。
+  - **2026-10-17 再收緊（使用者：「之後解任務都先不要龍王守護，把腳本這塊改成預設不使用不看」；離線測試，未實機）**：不給 `--dragon` 時完全不碰龍王——不呼叫 depot_use、不讀 buff 人形圖示（`dragon_active`）、不從倉庫取、run 開頭 / 結束不存回進度檔殘留的 `dragon_in_bag`（只記事件、旗標留著，等下次 `--dragon` run 結束再存）；紅暴 2031（`dragon_required` + `solo`）**自動走 `--solo` 單人逃跑**（`questrun.auto_solo`），不回 156。紅暴完成後 post 照舊把任務獎勵的龍王的守護存公共（那是獎勵處理，不是借用）。
   - **戰鬥設定檢查**（四寶玉之謎 DKBO 人物首次動作「風的精靈Lv.5」勾選不見 → 打火雞輸、2 人陣亡）：交接時關遇敵、等戰鬥結束後跑 `ass.battle_check`（= `ass.py battle all`，見 ui/ass.md）：一次開外掛面板、左欄頭像逐人（隊長最後）讀 5 人「自動戰鬥」+ DKBO「人物首次動作」值與勾選；只改不對的**勾選**、讀回確認；值確定不是風的精靈（讀到攻擊 / 防禦 / 逃跑 / 滋潤）→ 不改下拉、**109** 停手；值讀不準（OCR 認不出）只警告。快速戰鬥 / 原地遇敵不管。bossretry 重打前也查一次（失敗 147）。`--no-battle-check` 兩邊都關。
   - **交寵物 `--pet-turnin`**（預設關，manual 步照舊 115）：恐龍博士 2016 的 manual 步 → `pet.py rest-all` → 整隊 `quest.py --stop-at-npc` 走到 NPC 旁（2026-10-16：到了才解散；失敗 `T.stop_walk` 點地面停巡路；吉魯 / 哈魯同圖一趟）→ `team.disband` → `pet_turnin.run` 5 人逐人（步 1 / 步號讀不到 = 交步 1、2；步 2 = 只交步 2）→ `char.ensure DKBO` → `team.form` → **不讀詳情**（2026-10-14，直接下一片 quest.py：「任務完成」/ 回 5 = 完成，還在 manual = 115；交寵物記風險事件，完成時逐人驗）；每任務只試一次，失敗 **150**（仍先切回 DKBO）。卡坦的願望 2019（`rest_pets`）：接取後第一片前 `pet.py rest-all`，交仍由 quest.py 隊長一次交。資料在 questdefs `turnin` / `rest_pets`。
   - **丟獎勵寵 `--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩`**（不可逆；兩串名單要相同、不能是騎寵，否則 1、不碰遊戲）：全部任務成功後、恢復掛機前，每個名字 `petdrop.drop('all', 名字, max_level=1)`——只丟名字完全相同、**等級讀得到且 = 1** 的（練過的同名寵、等級讀不出 → 73 擋下；同名 1 級 + 高級各一隻只丟 1 級那隻；兩隻都 1 級 → 79 不猜），騎寵 / 第 1 格 / 出戰 / 騎乘照舊擋，提示窗驗名。失敗 **151**、後面的名字不丟、不恢復掛機。plan 會列各任務的 `reward_pets`（只顯示，不自動丟）。
@@ -297,24 +298,25 @@
 名單 = `clients.roster()`（`PSA_CLIENT` 程序名稱 → 寫死的名單；主視窗 PrimalSA = DKBO、DKBO2～5，PrimalSA2 = DKBO6～DKBO10，字母 O；第 1 個 = 隊長）。**沒設 `PSA_CLIENT` 行為與以前完全相同**（`test_roster_quest.py` 快照：名單常數、切換面板卡位、抓寵分配字串、預設值逐字相同）；名單沒登錄的視窗（例 PrimalSA3）CLI 一律拒跑（各腳本的參數 / preflight 退出碼，不點任何東西）。
 - 用法：前面加 `PSA_CLIENT=PrimalSA2`，例 `PSA_CLIENT=PrimalSA2 uv run --no-project python tools/gui/questrun.py run 2999 2017 2015`；子程序（quest.py / bossretry / petquest / rebirth…）繼承環境變數，進度檔與事件 log 在 `tools/.cache/clients/PrimalSA2/`、`notes/clients/PrimalSA2/`（第 3a 步）。
 - 改讀名單的：questrun（隊長 / 逐人驗證 / 背包 / 存倉 / 龍王借還 / `--role` 只認自己名單）、quest.py（切換面板 5 張卡的名字 = 名單卡位，`--team-size` 預設 = 名單人數）、questdetail（`status_all` / `roles_all` 切回名單隊長）、questdefs（交寵物分配 `roster_at(卡位)`）、bossretry（隊長 / TEAM_SIZE / `--who`）、shopbuy（`--roles all` = 名單、切回隊長）、relogin（`--leader` / `--size` 預設）。
-- 龍王的守護：只從**這個帳號自己的公共倉庫**借、還回同一個（公共倉庫每個帳號各一份，知識庫字串 31324）；PrimalSA2 公共倉庫沒有龍王 → 紅暴 156 → `--solo`。
+- 龍王的守護（只在 `--dragon`）：只從**這個帳號自己的公共倉庫**借、還回同一個（公共倉庫每個帳號各一份，知識庫字串 31324）；PrimalSA2 公共倉庫沒有龍王 → 紅暴 156 → `--solo`。2026-10-17 起預設不用龍王，紅暴直接 `--solo`。
 - 還要第 3b 步（team / char / ass / pet / bag / grind 改讀名單）合併後 PrimalSA2 才真的能跑：這些模組的名字白名單、外掛頭像座標、`team.form` / `check` 預設隊長、`ass.QUEST_BATTLE`（隊長「人物首次動作 風的精靈」是 DKBO 的設定）都在 3b。
 - 多視窗不自動重登：`--stuck` 卡住重登 / relogin 在多視窗時 109 → questrun 照「重登失敗」停手交人（第 3a 步規則）。
 
 ### 紅暴（英雄島前傳 2031）組隊打到底：questrun 納入（2026-10-13，**只有離線測試，實機未驗證**）
+**2026-10-17 起預設單人逃跑**：`questrun.py run 2031` 不給 `--dragon` → 自動走下面 `--solo`（不吃不讀龍王、不回 156）；本節「組隊打到底」只在明確 `--dragon`（opt-in）時才跑。
 使用者 2026-10-13：有龍王效果就不用逃跑 → 改組隊跑；完全沒龍王可吃才退回單人逃跑（`/psa-quest-solo` §4，**2026-10-14 起 `questrun run 2031 --solo` 腳本化**，見下）。questdefs `QOTHER`（不進預設順序，指定 ID 才跑）。
 ```
-uv run --no-project python tools/gui/questrun.py run 2031 --after none \
+uv run --no-project python tools/gui/questrun.py run 2031 --after none --dragon \
     --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾
 ```
 - **前置**（`check_prereq`，背包開一次逐人讀，`bag.team_read`）：5 人 ≥80 級（2026-10-15 起不檢查任務道具：耐久力回複藥 NPC 會給，不用買）；成人儀式由接取 / 逐人驗證把關；背包每人 ≥ 6 格（questdefs.bag_need）。
   **`--buy-missing`**：相容保留的 no-op（postrebirth hero 段已不帶）。shopbuy.py 模組保留但紅暴不再呼叫（腳本本身**未實機**）。
-- **`--solo`：沒龍王的單人逃跑**（2026-10-14 02:41～02:55 手動流程寫成，questdefs `solo=dict(group_from=7)`；**未實機**）：不吃龍王；接取後 `solo_setup`（DKBO 戰寵 首次 防禦〔勾〕/ 一般 攻擊、DKBO 快速戰鬥 關，`ass.set_pet` / `set_states`）→ 每輪讀追蹤步號：
+- **`--solo`：單人逃跑（2026-10-17 起預設；`--dragon` 時是沒龍王的退路）**（2026-10-14 02:41～02:55 手動流程寫成，questdefs `solo=dict(group_from=7)`；**未實機**）：不吃龍王；接取後 `solo_setup`（DKBO 戰寵 首次 防禦〔勾〕/ 一般 攻擊、DKBO 快速戰鬥 關，`ass.set_pet` / `set_states`）→ 每輪讀追蹤步號：
   步 1～5 = 解散（上一步已驗證解散就略過，2026-10-17）→ **一支** `quest.py --solo-talk --task 英雄島前傳 --max-seconds 900 --talk-seconds 120`（逃跑巡路，到 NPC ESC 對話框 → 程序內 team.form → 對話段 `--stop-after-dialog --disband-after --team-fresh`；21 被打飛 → 補血重跑，最多 2 次；組隊失敗 44 → questrun 退回舊流程 team.form 重試 + 另跑對話步）；
   步 6 = 先 team.form → `do_fight`（同組隊模式：HP → 便捷傳送龍王守衛 → --fight → team.check，38 / 21 → bossretry）；步 7 / 8 = 組隊 `quest.py --stop-after-rewards 1 --max-seconds 900`；
   追蹤欄找不到（GONE / quest.py 5）= 完成 → `solo_restore`（DKBO 戰寵改回 首次 攻擊 不勾 / 一般 攻擊）→ post 存倉 → 照舊 `--drop-reward` / `--drop-items`。同一步做 4 次沒前進 112；單人逃跑 = 風險事件（完成當場逐人驗）。
   `--solo` 用在沒有 solo 設定的任務 → 110。
-- **龍王必要**（`dragon_required`，不看 `--dragon`）：接取前 `require_dragon` → 人形 buff 在就跑；沒有就吃（DKBO 背包 → 公共倉庫）；兩邊都沒有（depot 92）→ **156**「改走單人逃跑」；一時失敗（90 等）重試 3 次仍不行也 156（訊息不同：處理後重跑）。每片前照舊 `ensure_dragon` 補吃。
+- **龍王必要**（`dragon_required`，2026-10-17 起**只在 `--dragon`**；沒給就 auto_solo）：接取前 `require_dragon` → 人形 buff 在就跑；沒有就吃（DKBO 背包 → 公共倉庫）；兩邊都沒有（depot 92）→ **156**「改走單人逃跑」；一時失敗（90 等）重試 3 次仍不行也 156（訊息不同：處理後重跑）。每片前照舊 `ensure_dragon` 補吃。
 - **每步收片**：每片 quest.py 加 `--stop-after-rewards 1`（步 1～5 勾玉、步 7、步 8 都有獲得物品窗），收片字樣「停止（--stop-after-rewards）」當提前結束、不開詳情；下一片前讀步號。步 1 點到同 NPC 閒聊（只有再見）→ quest.py ESC 回原流程（10-12 是 rc 2 誤報，已修未實機）。
 - **步 6 kind=fight**（`do_fight`）：（2026-10-14 起只看隊長 HUD HP，不讀全隊；`--team-hp-min > 0` 才讀）→ 不在 5510:50,17 三格內就便捷傳送「龍王守衛」（地圖傳送 → 便捷傳送分頁 259,432 → 1160,646，`heal.teleport`）→ team.form → `quest.py --fight --task 英雄島前傳 --step 6`；
   0（判定打贏）→ `team.check` 滿 5 人 = 當 37 續片、不滿 = 當 38（bossretry）；35 輸 → 補血重組再打（共 `FIGHT_TRIES` 2 次，仍輸 114）；22 / 23 / 34 → 重新傳送 / 站位再試；21 / 30 / 32 / 2 / 9 / 10 照原意。
@@ -330,8 +332,8 @@ uv run --no-project python tools/gui/questrun.py run 2031 --after none \
 uv run --no-project python tools/gui/postrebirth.py plan [--confirm-drop]                     # 印 13 段完整順序與每段指令
 uv run --no-project python tools/gui/postrebirth.py run --confirm-drop [--from 段] [--to 段] [--fresh]     # --confirm-buy-bait 已無作用（petquest 誘餌不夠自動買）
 ```
-- 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031`，有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；156 沒龍王 → **自動改跑 `run 2031 --solo`**〔同一串參數〕，仍失敗才 173）→ bag0 清背包⓪（門檻 5 格；舊進度檔 q182a 已完成就不回頭）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
-  - **紅暴首飾依轉數自動判斷（2026-10-16）**：薩姆吉爾的首飾 **0 轉 → 不刪、紅暴成功後 `bag.py list all` → 背包有首飾的人 `bag.py wear <角色> 薩姆吉爾的首飾`**（hero 段含 156 改單人逃跑只帶 `--drop-reward / --confirm-drop 巴朵蘭恩`）；**1～5 轉 → 照舊 `--drop-items` 刪**；讀不出轉數 → 不刪不戴、首飾留背包 + warning。轉數：盤點段 `exp.py read` 5 人全同 > 本視窗 trans.json（`grind.load_trans`）；hero 段開跑前判斷，plan 也顯示。`--wear-hero-items` 保留為強制覆寫（不管轉數一律戴）。戴失敗只警告；清背包白名單不含首飾。離線測試 test_postrebirth，**戴的動作實機未驗證**。
+- 段：inventory 盤點（exp read / bag list / pet list，只警告）→ adult 成人儀式 → yayoi 彌生和日美子 → hero 紅暴（`run 2031 --solo`：2026-10-17 起各段都不帶 `--dragon`、紅暴直接單人逃跑；有 --confirm-drop 才帶巴朵蘭恩 / 首飾丟棄旗標；失敗 173）→ bag0 清背包⓪（門檻 5 格；舊進度檔 q182a 已完成就不回頭）→ q182a 1.82 前段（2015 2027 2018 2011 2024 2023 2020 2028）→ bag1 清背包① → q182b 1.82 後段（2025 2010 2014 2012 2013 2021；摩娜西普存個人、人龍隨機蛋存公共由 questdefs post 自動做）→ bag2 清背包② → caves 四大洞窟（`--max-min 45`）→ dino / katan / quiz（`petquest.py run 2016 / 2019 / 3003`）→ finish（`questrun status --role all` 全部任務 not_done 要空 → pet list 5 人朵拉比斯出戰 + 騎寵騎乘 → `grind.py start --spot 地雷區`）。
+  - **紅暴首飾依轉數自動判斷（2026-10-16）**：薩姆吉爾的首飾 **0 轉 → 不刪、紅暴成功後 `bag.py list all` → 背包有首飾的人 `bag.py wear <角色> 薩姆吉爾的首飾`**（hero 段單人逃跑只帶 `--drop-reward / --confirm-drop 巴朵蘭恩`）；**1～5 轉 → 照舊 `--drop-items` 刪**；讀不出轉數 → 不刪不戴、首飾留背包 + warning。轉數：盤點段 `exp.py read` 5 人全同 > 本視窗 trans.json（`grind.load_trans`）；hero 段開跑前判斷，plan 也顯示。`--wear-hero-items` 保留為強制覆寫（不管轉數一律戴）。戴失敗只警告；清背包白名單不含首飾。離線測試 test_postrebirth，**戴的動作實機未驗證**。
 - **開面板前先靜下來（2026-10-15）**：inventory / bag0 / bag1 / bag2 開頭呼叫 `Tools.quiet()`（follow 停 → `questrun.Tools.encounter_off_wait` 關原地遇敵並等這場打完 → `questrun.wait_battle_end` 畫面還是戰鬥就等，最多 240 秒）；inventory 失敗只警告、bag 失敗 174。起因：p2 地雷區掛機中 exp.py 開人物資訊，快戰畫面疊上來 → 9 + 停手旗標。questrun / petquest 段交接自己會做。`exp.py` 單獨跑也會先 `wait_not_battle()`（只等、不關遇敵；逾時 100）。
 - 收尾 finish 的練功 = `grind.py start`（不帶 --spot = 去練功；`postrebirth.py --spot 點名` 才固定點）。
 - questrun 一律 `--after none`（中段不回練功）、`--dragon`（NO_DRAGON 的任務 questrun 自己不吃；紅暴必吃）。

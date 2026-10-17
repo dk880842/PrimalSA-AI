@@ -804,7 +804,7 @@ buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     questrun.run([2017], dry_run=True)
 txt = buf.getvalue()
-check('plan：預設不吃龍王、列戰鬥設定檢查', '預設不吃（要吃加 --dragon' in txt and '每片前：龍王' not in txt and 'ass.battle_check' in txt, txt[-400:])
+check('plan：預設不吃龍王、列戰鬥設定檢查', '預設不吃、不讀 buff' in txt and '每片前：龍王' not in txt and 'ass.battle_check' in txt, txt[-400:])
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
     questrun.run([2017], dry_run=True, use_dragon=True, dragon_all=True, battle_check=False)
@@ -1424,7 +1424,8 @@ check('驗證視窗（9）→ 不碰畫面、不存；旗標留進度檔', rc ==
 f2 = Fake(status={D17: [questrun.DONE]})
 quiet(questrun.run, [2017], tools=f2, after='none')                 # 沿用進度檔（dragon_in_bag True），這次不吃
 n = f2.names()
-check('下次 run（不吃龍王）→ 交接後先存回上次留在背包的龍王', n.count('dragon_store') == 1 and n.index('team_form') < n.index('dragon_store') < n.index('accept'), str(n))
+check('下次 run（預設不碰龍王，2026-10-17）→ 不存回上次留在背包的龍王、旗標留著', 'dragon_store' not in n and 'dragon' not in n
+      and questrun.load_progress().get('dragon_in_bag') is True, str(n))
 f = Fake(status={D18: [questrun.DOING]}, quest=[(0, done_tail)])
 f.store_rc = 90
 go(f, [2018], use_dragon=True, after='none')
@@ -1486,7 +1487,7 @@ txt = buf.getvalue()
 check('plan --dragon：長巡路列「每片前」、短巡路列「不吃」、逐人驗證模式', '每片前：龍王' in txt.split('[任務 2017]')[0] and '龍王的守護：不吃' in txt.split('[任務 2017]')[1]
       and '--verify risk' in txt, txt[-600:])
 
-# ================= 紅暴 2031（2026-10-13：有龍王就組隊打到底）=================
+# ================= 紅暴 2031（2026-10-13：有龍王就組隊打到底；2026-10-17 起只在 --dragon opt-in）=================
 D31 = questdefs.get(2031)['detail']
 STOP = ['已領 1 次獎勵視窗，停止（--stop-after-rewards）']
 
@@ -1541,13 +1542,13 @@ def hero(quest=None, steps=None, **kw):
 HAPPY_Q = [(0, STOP)] * 5 + [(0, [])] + [(0, STOP)] * 2 + [(5, [])]
 HAPPY_S = [1, 2, 3, 4, 5, 6, 7, 8, 'GONE']
 f = hero(HAPPY_Q, HAPPY_S)
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 n = f.names()
 qs = [c[1] for c in f.calls if c[0] == 'quest']
 fight = [q for q in qs if '--fight' in q]
 check('紅暴 happy path：rc 0、5 片 --stop-after-rewards 1 + 1 次 --fight --step 6 + 2 片 + 完成', rc == 0 and len(fight) == 1 and '6' in fight[0]
       and sum('--stop-after-rewards' in q for q in qs) == 8, f'rc={rc} {qs}')
-check('紅暴：不加 --dragon 也吃龍王（dragon_required），且在接取前', 'dragon' in n and n.index('dragon') < n.index('accept'), str(n[:20]))
+check('紅暴 --dragon：吃龍王（dragon_required），且在接取前', 'dragon' in n and n.index('dragon') < n.index('accept'), str(n[:20]))
 check('紅暴：前置 team_read（只讀等級、不查任務道具）在接取前', ('team_read', ()) in f.calls and n.index('team_read') < n.index('accept'))
 check('紅暴步 6：便捷傳送龍王守衛 → --fight → team.check', ('warp', (1160, 646), 5510, '龍王守衛') in f.calls
       and n.index('warp') < n.index('team_check'), str([c for c in f.calls if c[0] in ('warp', 'team_check')]))
@@ -1558,55 +1559,55 @@ check('步 6 BOSS 前不讀全隊 HP（2026-10-14）', f.team_hp_n == 0)
 
 f = hero(HAPPY_Q, HAPPY_S)
 f.no_dragon = True
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check(f'背包 / 公共倉庫都沒有龍王 → {questrun.EXIT_NODRAGON}（改走單人逃跑）、不接取', rc == questrun.EXIT_NODRAGON and 'accept' not in f.names()
       and '單人逃跑' in questrun.LAST['info'].get('msg', ''), f'rc={rc} {questrun.LAST["info"].get("msg")}')
 f = hero(HAPPY_Q, HAPPY_S, active=True)
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check('龍王 buff 已在 → 不吃、照跑', rc == 0 and 'dragon' not in f.names())
 f = hero(HAPPY_Q, HAPPY_S)
 f.have = {'DKBO4': False}
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check('有人沒有耐久力回複藥 → 不檢查、照跑（NPC 會給）', rc == 0 and 'accept' in f.names(), f'rc={rc}')
 f = hero(HAPPY_Q, HAPPY_S)
 f.levels = {'DKBO3': (2, 79), 'DKBO5': None}
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check('有人 < 80 級 / 讀不到 → 110', rc == questrun.EXIT_PREFLIGHT and 'DKBO3' in questrun.LAST['info'].get('msg', '') and 'DKBO5' in questrun.LAST['info'].get('msg', ''))
 f = hero([(0, STOP)] * 5 + [(35, []), (0, [])] + [(0, STOP)] * 2 + [(5, [])], HAPPY_S)
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check('步 6 輸了（35）→ 補血重組再打一次 → 贏 → 完成', rc == 0 and 'heal' in f.names() and sum('--fight' in c[1] for c in f.calls if c[0] == 'quest') == 2, f'rc={rc}')
 f = hero([(0, STOP)] * 5 + [(35, []), (35, [])], HAPPY_S)
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check(f'步 6 打 {questrun.FIGHT_TRIES} 次都輸 → 114', rc == questrun.EXIT_TEAM and '沒贏' in questrun.LAST['info'].get('msg', ''))
 f = hero(HAPPY_Q, HAPPY_S, boss=[(0, {'msg': 'ok'})])
 f.check_rc = 47
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check('步 6 贏了但不滿 5 人 → bossretry 補人後續跑', rc == 0 and any(c[0] == 'boss_retry' for c in f.calls), f'rc={rc}')
 f = hero(HAPPY_Q, HAPPY_S)
 f.pos = (5510, 51, 17)
-go(f, [2031], after='none')
+go(f, [2031], after='none', use_dragon=True)
 check('已在龍穴門口附近 → 不再便捷傳送', 'warp' not in f.names())
 f = hero(HAPPY_Q, HAPPY_S)
-rc = go(f, [2031], after='none', post=False)
+rc = go(f, [2031], after='none', use_dragon=True, post=False)
 check('--no-post → 不存倉', rc == 0 and 'store_many' not in f.names())
 f = hero(HAPPY_Q, HAPPY_S)
 f.store_rc = 91
-rc = go(f, [2031], after='none')
+rc = go(f, [2031], after='none', use_dragon=True)
 check(f'存倉失敗 → {questrun.EXIT_POST}', rc == questrun.EXIT_POST)
 f = hero(HAPPY_Q, HAPPY_S)
-rc = go(f, [2031], after='none', drop_items='薩姆吉爾的首飾', confirm_drop_items='薩姆吉爾的首飾', drop_reward='巴朵蘭恩', confirm_drop='巴朵蘭恩')
+rc = go(f, [2031], after='none', use_dragon=True, drop_items='薩姆吉爾的首飾', confirm_drop_items='薩姆吉爾的首飾', drop_reward='巴朵蘭恩', confirm_drop='巴朵蘭恩')
 n = f.names()
 check('--drop-items 首飾 + --drop-reward 巴朵蘭恩：全部成功後才丟（bag.purge / petdrop 1 級）', rc == 0 and ('bag_drop', ('薩姆吉爾的首飾',)) in f.calls
       and ('pet_drop', '巴朵蘭恩', 1) in f.calls and n.index('bag_drop') > n.index('store_many'), str(n[-8:]))
 f = hero(HAPPY_Q, HAPPY_S)
-rc = go(f, [2031], after='none', drop_items='薩姆吉爾的首飾', confirm_drop_items='')
+rc = go(f, [2031], after='none', use_dragon=True, drop_items='薩姆吉爾的首飾', confirm_drop_items='')
 check('--drop-items 沒配同名 --confirm-drop-items → 參數錯、不跑', rc == uikit.EXIT_USAGE and not f.calls)
 f = hero(HAPPY_Q, HAPPY_S)
-rc = go(f, [2031], after='none', drop_items='英雄的祝福', confirm_drop_items='英雄的祝福')
+rc = go(f, [2031], after='none', use_dragon=True, drop_items='英雄的祝福', confirm_drop_items='英雄的祝福')
 check('--drop-items 不在 questdefs drop_items（英雄的祝福）→ 參數錯', rc == uikit.EXIT_USAGE and not f.calls)
 f = hero(HAPPY_Q, HAPPY_S)
 f.drop_rc = 96
-rc = go(f, [2031], after='none', drop_items='薩姆吉爾的首飾', confirm_drop_items='薩姆吉爾的首飾')
+rc = go(f, [2031], after='none', use_dragon=True, drop_items='薩姆吉爾的首飾', confirm_drop_items='薩姆吉爾的首飾')
 check('丟首飾提示窗對不上（96）→ 151', rc == questrun.EXIT_DROP)
 D14, D12 = questdefs.get(2014)['detail'], questdefs.get(2012)['detail']
 f = Hero(status={D14: [questrun.DOING]}, quest=[(0, ['任務完成：x'])], bag={r: 8 for r in questrun.ALL_ROLES})
@@ -1618,7 +1619,7 @@ check('五兄弟之謎完成 → post 人龍隨機蛋 5 人存公共倉庫', rc 
 check('early_end 認得 --stop-after-rewards 收片', questrun.early_end(STOP) and not questrun.early_end(['時間到，結束']))
 buf = io.StringIO()
 with contextlib.redirect_stdout(buf):
-    questrun.run([2031], dry_run=True)
+    questrun.run([2031], dry_run=True, use_dragon=True)
 txt = buf.getvalue()
 check('plan 2031：fight 步、前置、龍王必要、post、可丟道具都列出', all(k in txt for k in ('kind=fight', 'dragon_required', '英雄的祝福 5 人存個人倉庫', '薩姆吉爾的首飾')), txt[-400:])
 
@@ -1915,12 +1916,38 @@ qs = [c[1] for c in f.calls if c[0] == 'quest']
 check('--solo 續跑（進行中）步號讀不到 → 依地圖 5506 推步 4 → 步 4、5 單人 → 步 6 fight → 完成（不再 112）', rc == 0 and sum('--solo-talk' in q for q in qs) == 2
       and sum('--fight' in q for q in qs) == 1, f'rc={rc} {questrun.LAST["info"].get("msg")} {qs}')
 f = SoloHero(status={D17: [questrun.DOING]}, quest=[(0, [])])
+# 8b) 2026-10-17 預設不用龍王：紅暴不給 --solo / --dragon → 自動單人逃跑；完全不呼叫 depot_use、不讀 buff
+class NoDragonHero(SoloHero):
+    def dragon_active(self):
+        self.rec('dragon_active')
+        return None
+
+
+f = NoDragonHero(status={D31: [questrun.PENDING]}, quest=SOLO_Q, steps=[1, 2, 3, 4, 5, 6, 7, 8, 'GONE'], bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2031], after='none')
+n = f.names()
+qs = [c[1] for c in f.calls if c[0] == 'quest']
+check('預設（無 --dragon / --solo）紅暴 → 直接單人逃跑完成：不吃龍王、不讀 buff、不存回、不回 156', rc == 0 and not ({'dragon', 'dragon_active', 'dragon_store'} & set(n))
+      and 'solo_setup' in n and sum('--solo-talk' in q for q in qs) == 5 and sum('--fight' in q for q in qs) == 1, f'rc={rc} {n}')
+check('預設紅暴：任務獎勵（英雄的祝福 / 龍王的守護）照 post 存倉', ('store_many', '龍王的守護', 'public') in f.calls)
+f = NoDragonHero(status={D18: [questrun.DOING]}, quest=[(0, ['時間到，結束']), (0, done_tail)], bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2018], after='none')
+check('預設長巡路任務（馬祖快遞）：每片都不呼叫 depot_use / 不讀 buff', rc == 0 and not ({'dragon', 'dragon_active', 'dragon_store'} & set(f.names())), str(f.names()))
+f = NoDragonHero(status={D31: [questrun.PENDING, questrun.DONE]}, quest=HAPPY_Q, steps=HAPPY_S, bag={r: 8 for r in questrun.ALL_ROLES})
+rc = go(f, [2031], after='none', use_dragon=True)
+check('--dragon opt-in 紅暴：照舊吃龍王 → 組隊打到底（不走 solo）', rc == 0 and 'dragon' in f.names() and 'solo_setup' not in f.names(), f'rc={rc} {f.names()}')
+buf = io.StringIO()
+with contextlib.redirect_stdout(buf):
+    questrun.run([2031], dry_run=True)
+txt = buf.getvalue()
+check('plan 2031 預設：直接單人逃跑、不列龍王必要 / 每片前龍王', '直接單人逃跑' in txt and '[單人逃跑 --solo]' in txt and '龍王的守護必要' not in txt and '每片前：龍王' not in txt, txt[-600:])
+check('auto_solo 純函式', questrun.auto_solo(_d31, {}) and not questrun.auto_solo(_d31, {'dragon': True}) and not questrun.auto_solo(questdefs.get(2017), {}))
 check('--solo 用在沒有 solo 設定的任務 → 110', go(f, [2017], after='none', solo=True) == questrun.EXIT_PREFLIGHT)
 # 9) --buy-missing 相容保留 = no-op：缺藥也不買（不呼叫 shopbuy）、照跑
 f = hero(HAPPY_Q, HAPPY_S)
 f.__class__ = SoloHero
 f.have = {'DKBO4': False}
-rc = go(f, [2031], after='none', buy_missing=True)
+rc = go(f, [2031], after='none', buy_missing=True, use_dragon=True)
 n = f.names()
 check('缺藥 + --buy-missing → no-op：不 shopbuy、只讀一次背包、接取照跑', rc == 0 and 'shop_buy' not in n and n.count('team_read') == 1
       and 'accept' in n, f'rc={rc} {n[:14]}')

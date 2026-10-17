@@ -1,18 +1,17 @@
 ---
 name: psa-quest-solo
-description: Use when the PrimalSA (精靈王石器) quest chain must be solved the "單人逃跑" way — DKB0 runs alone to each NPC fleeing every fight, then the party is quick-teamed only for the dialogue or the quest battle (e.g. 紅暴 / 英雄島前傳 2031 when questrun returns 156 = no 龍王的守護), or the user asks 逃跑解任務 / 單人跑任務 / 紅暴任務.
+description: Use when the PrimalSA (精靈王石器) quest chain must be solved the "單人逃跑" way — DKB0 runs alone to each NPC fleeing every fight, then the party is quick-teamed only for the dialogue or the quest battle (e.g. 紅暴 / 英雄島前傳 2031, which since 2026-10-17 runs solo by default because quests no longer use 龍王的守護), or the user asks 逃跑解任務 / 單人跑任務 / 紅暴任務.
 ---
 
 # 單人逃跑解任務（跑路 → 到 NPC 停 → 組隊 → 對話 / 打 → 再解散）
 
 **何時用**：其他任務預設走一般組隊流程（5 人組隊 + quest.py 預設模式），規劃時先問使用者這次要「逃跑」還是「組隊跑」，選逃跑才用本 skill。
-**紅暴（2031 英雄島前傳）2026-10-13 起改組隊打到底**（使用者：有龍王效果就不用逃跑）：先跑 `uv run --no-project python tools/gui/questrun.py run 2031 --after none --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾`
-（接取前沒龍王 buff 就吃、步 6 便捷傳送 + `--fight`、獎勵存倉 / 丟棄都在裡面，見 `../psa-game-ui/ui/quest.md`「紅暴組隊打到底」；未實機）。
-**只有 questrun 回 156（背包與公共倉庫都沒有龍王的守護）才用本 skill 的第 4 節單人逃跑**；156 但訊息是「吃不到（一時失敗）」→ 先處理再重跑 questrun，不要直接改逃跑。
+**紅暴（2031 英雄島前傳）2026-10-17 起預設單人逃跑**（使用者：「之後解任務都先不要龍王守護，把腳本這塊改成預設不使用不看」）：`questrun.py run 2031` 不給 `--dragon` 就自動走下面的 `--solo` 流程（不吃、不讀 buff、不取 / 不存龍王，不會回 156；帶 `--solo` 也一樣）。
+舊的「有龍王效果就組隊打到底」（2026-10-13）改成 opt-in：明確給 `--dragon` 才接取前吃龍王 → 組隊打到底；那時背包與公共倉庫都沒有龍王 → 156 → 再改 `--solo`。
 **2026-10-14 起紅暴單人逃跑已腳本化**（照 02:41～02:55 手動流程寫，**未實機**）：先跑
 `uv run --no-project python tools/gui/questrun.py run 2031 --solo --after none --drop-reward 巴朵蘭恩 --confirm-drop 巴朵蘭恩 --drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾`
 （不吃龍王；DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 1～5「解散 → `quest.py --solo-talk`（同一支程序：`--solo` 到 NPC → team.form → `--stop-after-dialog --disband-after`）」→ 步 6 組隊 + 便捷傳送 + `--fight` → 步 7 / 8 組隊 `--stop-after-rewards 1`
-→ DKBO 戰寵改回 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾；耐久力回複藥 NPC 會給，不檢查不買）。`postrebirth.py` hero 段收到 156 會**自動**改跑這一行。
+→ DKBO 戰寵改回 → 英雄的祝福存個人 / 龍王的守護存公共 → 丟巴朵蘭恩 / 刪首飾；耐久力回複藥 NPC 會給，不檢查不買）。`postrebirth.py` hero 段 2026-10-17 起**直接**帶 `--solo` 跑這一行（不先試龍王）。
 2026-10-17 精簡（離線測試，未實機）：每個對話步只啟動 1 次 quest.py（`--solo-talk`，舊版 2 次各約 6～7 秒）；對話段不再開始前驗隊伍（form 剛驗過）；上一步已驗證解散就不再開切換面板確認（26 / 未知 / 續跑照舊確認）；解散後左側自動切回任務分頁。quest.py 內組隊失敗（44）→ questrun 退回舊流程重組再對話。下面第 2 節是手動流程，步驟不變。
 續跑（任務已「進行中」）時步 1～5 說明行同文字讀不出步號：2026-10-17 起 questrun 依目前地圖推（步 k 的薩姆吉爾地圖 5501 / 5503 / 5505 / 5506 / 5508 = 步 k，其他 = 步 1；步 1～5 做法相同，推錯只影響計數），不用再設 `QUESTRUN_SOLO_STEP`（仍可手動指定，優先；未實機）。
 
@@ -88,7 +87,7 @@ $A pet DKB0 first 防禦 normal 攻擊            # 設定並讀回確認（約 
 - **戰鬥步被打飛**（步 4 的 `--fight`）→ 補完血就**停下回報使用者**（打不過，要評估等級 / 隊伍配置，不要無腦重打）。
 - 隊員是單人狀態時被打飛的是各自的角色；補血只補「當前角色」所在隊伍，組隊後再補一次。
 
-## 4. 紅暴任務（2031 英雄島前傳，每轉必解）專屬 —— 2026-10-13 起只當「沒有龍王的守護」時的退路（平常用 questrun 組隊，見開頭）
+## 4. 紅暴任務（2031 英雄島前傳，每轉必解）專屬 —— 2026-10-17 起是預設流程（不用龍王；`--dragon` opt-in 才組隊打到底，見開頭）
 **先跑腳本 `questrun.py run 2031 --solo …`（見開頭）**，下面是它照做的手動步驟 / 腳本失敗時的手動流程。耐久力回複藥 NPC 會給，不用自己買、也不檢查。
 步 1～5：照第 2 節的通用流程（NPC：避難洞窟 5500 老爺爺接任務 → 薩姆吉爾 5501 / 5503 / 5505 / 5506 / 5508，座標以 `psa.py steps 2031` 為準，每步對話步）。
 **步 6（戰鬥）不巡路，直接傳送**：

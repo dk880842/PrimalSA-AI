@@ -8,7 +8,8 @@
         [--verify risk|each|off] [--no-verify-all] [--verify-skipped] [--no-battle-check] [--battle-check-always]
         [--pet-turnin] [--drop-reward 左迪洛斯,巴朵蘭恩 --confirm-drop 左迪洛斯,巴朵蘭恩]
         [--drop-items 薩姆吉爾的首飾 --confirm-drop-items 薩姆吉爾的首飾] [--no-post] [--solo] [--buy-missing（相容保留，no-op）]
-  --solo（2026-10-14，紅暴沒龍王 156 的退路；只限 questdefs 有 solo 的任務，其他 110；**未實機**）：不吃龍王，接取後 DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 →
+  --solo（2026-10-14，紅暴沒龍王 156 的退路；只限 questdefs 有 solo 的任務，其他 110；**未實機**）：不吃龍王，
+        2026-10-17 起不帶 --dragon 時紅暴（dragon_required + solo）**自動走 --solo**（不必給旗標、不讀 buff、不回 156；questrun.auto_solo）；接取後 DKBO 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 →
         每輪讀步號：步 < solo.group_from = 解散 → **一支** quest.py --solo-talk（單人逃跑到 NPC 20 → 清殘留 → team.form → --stop-after-dialog --disband-after；21 補血重跑 ≤2）；
         2026-10-17 精簡（離線測試，未實機）：對話步從「2 次 quest.py 啟動 + 5 次切換面板」降為「1 次啟動 + 2 次」——對話段帶 --team-fresh（form 自己驗過，不再開始前驗隊伍）、
         上一步 quest.py 印「解散確認：--disband-after 已驗證解散」且緊接著就是下一個對話步 → 不再 team_disband 開面板確認（未知 / 26 / 續跑照舊確認）、
@@ -18,9 +19,11 @@
         步 1～5 說明行同文字讀不出步號：剛接取 = 步 1 起算；續跑（任務已進行中）→ infer_solo_step 依目前地圖推（步 k 的 NPC 地圖 = 步 k，其他 = 步 1；
         2026-10-17 p2 實跑 112 後補，未實機）；QUESTRUN_SOLO_STEP=N 環境變數仍可手動指定（優先）
   --buy-missing：相容保留的 no-op（任務道具如耐久力回複藥由 NPC 給，開跑前不檢查不買；2026-10-15 使用者定）
-  龍王的守護（2026-10-12 起）預設**不吃**，要吃加 --dragon；--no-dragon 保留相容（= 預設，no-op）。
+  龍王的守護（使用者 2026-10-17：「之後解任務都先不要龍王守護，把腳本這塊改成預設不使用不看」）預設**不吃、不讀 buff 圖示、不從倉庫取、不存回**
+  （不呼叫 depot_use / bag.buff_state；進度檔殘留的 dragon_in_bag 也不處理）；紅暴 2031 預設直接單人逃跑（同 --solo）。--no-dragon 保留相容（= 預設，no-op）。
+  以下只在明確 --dragon（opt-in）時生效：
   --dragon（2026-10-13 使用者定）對 questdefs 標 dragon（NO_DRAGON = 彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望 以外）的任務吃，--dragon-all 全吃；
-  questdefs dragon_required（紅暴 2031）不看 --dragon 一定吃，背包 / 公共倉庫都沒有 → 156（改走單人逃跑）；
+  questdefs dragon_required（紅暴 2031）配 --dragon 一定吃（有龍王組隊打到底），背包 / 公共倉庫都沒有 → 156（改走 --solo 單人逃跑）；
   第一次從公共倉庫整疊取出，剩的**留在 DKBO 背包**，run 結束（成功或失敗；9 / 10 / 116 / 152 等畫面要留給人看的除外）才整疊存回公共倉庫；
   中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 開頭（不吃時）/ 結束補存。depot_use 判 buff 已在（skip）不計「已吃」
   龍王失敗（depot_use 非 0，9 / 10 等除外）→ 等 1 秒再 quest.clear_leftovers 收尾（depot_use 自己也 tidy；2026-10-14 08:21 step=open 背包面板殘留 → 下一片誤報 9）。
@@ -82,8 +85,8 @@
                  → pet_turnin.run 5 人逐人（人都在旁，不再長途巡路）（char.ensure → 點追蹤 → 對話 → 依名字點卡 → 確定）→ char.ensure DKBO → team.form → 不開詳情（2026-10-14），下一片 quest.py「任務完成」/ 回 5 = 完成；失敗 150。
                  defs.rest_pets（卡坦的願望 2019：隊長交一次 5 人完成，quest.py 預設流程交）：接取後第一片前先 pet.py rest-all。每任務只試一次
                  --rested（petquest 練完已 rest-all --candidates 且退出碼 0 才帶）：接取後 / 交寵物前都不再 rest-all（2026-10-13 review 1013b §2.2，每次交件省 30～90 秒）
-  紅暴 2031（2026-10-13 起納入；使用者：有龍王效果就組隊打到底；**未實機**）：前置 check_prereq（5 人 ≥80 級，bag.team_read 開一次；不符 110；不檢查任務道具）
-                 → require_dragon（接取前沒 buff 就吃；都沒有 → 156）→ 接取「英雄島前傳（必做）」→ 每片 quest.py --stop-after-rewards 1（每步收片）
+  紅暴 2031（2026-10-13 起納入；**2026-10-17 起預設單人逃跑 = --solo 流程**，以下組隊打到底只在 --dragon；**未實機**）：前置 check_prereq（5 人 ≥80 級，bag.team_read 開一次；不符 110；不檢查任務道具）
+                 →（--dragon）require_dragon（接取前沒 buff 就吃；都沒有 → 156）→ 接取「英雄島前傳（必做）」→ 每片 quest.py --stop-after-rewards 1（每步收片）
                  → 步 6 kind=fight（do_fight：全隊 HP < 80% 補血 → 便捷傳送「龍王守衛」5510:50,17 → team.form → quest.py --fight --step 6 → team.check；
                    贏 + 滿 5 人 = 37 續片、不滿 = 38 bossretry、輸 35 補血重打共 2 次）→ 步 7 / 8 預設 → 完成後 post：英雄的祝福 5 人存個人、龍王的守護 5 人存公共（失敗 157）
                  → 全部成功後 --drop-reward 巴朵蘭恩（petdrop 只丟 1 級）/ --drop-items 薩姆吉爾的首飾（bag.purge 只刪背包內、穿著的不動；只准 questdefs drop_items 列的名稱）
@@ -123,7 +126,7 @@ quest.py 退出碼分支（37 / 38 只有 --boss-team-check 的任務〔紅暴 /
   119 接取失敗（info.accept_rc 是 questdetail 的 120～128）
   150 交寵物失敗（--pet-turnin：rest-all / 解散 / pet_turnin 120～126〔126 = 按了確定但驗不到交出〕 / 切回 DKBO / 重組；info.turnin）
   151 丟獎勵寵 / 道具失敗（--drop-reward：petdrop 70～79，73 = 防護擋下；--drop-items：bag.purge 93 / 96；info.drop）
-  156 dragon_required 任務（紅暴）沒有龍王的守護 buff 也吃不到（背包 / 公共倉庫都沒有 → 改跑 `run 2031 --solo`〔postrebirth 自動〕；一時失敗 → 處理後重跑）
+  156 （只在 --dragon）dragon_required 任務（紅暴）沒有龍王的守護 buff 也吃不到（背包 / 公共倉庫都沒有 → 改跑 `run 2031 --solo`〔postrebirth 自動〕；一時失敗 → 處理後重跑）
   157 任務完成後獎勵處理失敗（questdefs post：bag.depot_many 存個人 / 公共倉庫、pet.store_many 寵物存個人；info.post）
       post 目前：紅暴 2031 英雄的祝福 → 個人、龍王的守護 → 公共；黃金羚羊之謎 2014 摩娜西普 → 個人寵物倉庫；五兄弟之謎 2012 人龍隨機蛋 → 公共（使用者 2026-10-13；--no-post 關）
   153 任務接不下去：quest.py 40（任務 NPC 只有「再見」）且背包有空、信箱沒有丟失的物品（或處理 2 次後 NPC 仍只有再見）→ 停手回報（條件不符？請人看）
@@ -725,8 +728,10 @@ def print_plan(defs, opts: dict) -> None:
             print(f'  - 背包空位：5 人各 ≥ {d["bag_slots"]} 格（bag.find_items；不足先刪 bag.AUTO_PURGE 白名單，仍不足 110）')
         if d.get('min_level'):
             print(f'  - 前置：5 人 ≥{d["min_level"]} 級（bag.team_read 開背包一次逐人讀；不符 / 讀不到 110；任務道具不檢查）')
-        if d.get('dragon_required'):
-            print(f'  - 龍王的守護必要（dragon_required，不看 --dragon）：接取前沒 buff 就吃；背包與公共倉庫都沒有 / 一直吃不到 → {EXIT_NODRAGON}（改走單人逃跑 psa-quest-solo §4）')
+        if d.get('dragon_required') and opts.get('dragon'):
+            print(f'  - 龍王的守護必要（dragon_required，--dragon）：接取前沒 buff 就吃 → 組隊打到底；背包與公共倉庫都沒有 / 一直吃不到 → {EXIT_NODRAGON}（改走 --solo 單人逃跑）')
+        elif auto_solo(d, opts) and not opts.get('solo'):
+            print('  - 預設不用龍王的守護（2026-10-17）→ 直接單人逃跑（同 --solo，見下方 [單人逃跑]；要組隊打到底加 --dragon）')
         print(f'  - 補血檢查（任務開始前、每次 BOSS 戰後）：隊長 HUD HP < {opts["hp_min"]}%' + (f' 或全隊（bag.hps）任一人 < {opts["team_hp_min"]}%' if opts.get('team_hp_min', TEAM_HP_MIN) > 0 else '（全隊血量不讀：--team-hp-min 0）') + ' → heal.heal_trip --no-return（小護士補整隊）+ team.form')
         for st, sd in sorted((d.get('steps') or {}).items()):
             if sd['kind'] == 'fight':
@@ -758,7 +763,7 @@ def print_plan(defs, opts: dict) -> None:
             print(f'  - 可丟獎勵道具：{"、".join(d["drop_items"])}（要丟用 --drop-items / --confirm-drop-items；bag.purge 只刪背包內，穿著的不動）')
         if d.get('boss'):
             print(f'  - 有任務戰 / BOSS 戰：quest.py 預設模式打完回 37（滿 5 人 → 繼續）/ 38（不滿 → bossretry.py 落後者當隊長 5 人重打 + 重組，每任務最多 {BOSS_RETRY_MAX} 次；失敗 114）')
-        if d.get('dragon_required') or (opts.get('dragon', False) and (opts.get('dragon_all') or d.get('dragon'))):
+        if opts.get('dragon', False) and (d.get('dragon_required') or opts.get('dragon_all') or d.get('dragon')):
             print(f'  - 每片前：龍王的守護（巡路 {d.get("walk_s")} 秒；buff 列看不到人形圖示才吃；第一次公共倉庫整疊取出，剩的留在 {LEADER} 背包，run 結束存回）')
         elif opts.get('dragon', False):
             print(f'  - 龍王的守護：不吃（使用者指定不吃的任務 questdefs.NO_DRAGON；--dragon-all 才吃）')
@@ -775,14 +780,14 @@ def print_plan(defs, opts: dict) -> None:
             'defer': '同 risk，但沒風險事件的延後到呼叫端收尾（postrebirth finish：status --role all → questrun.py verify 補人）'
                      + (f'；接取前先批次驗待驗的前置任務 {pre}' if pre else '')}[opts.get('verify', 'risk')])
     if not opts.get('dragon', False):
-        print('[龍王的守護] 預設不吃（要吃加 --dragon；對 questdefs 標 dragon 的任務吃（除彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望），--dragon-all 全吃）')
+        print('[龍王的守護] 預設不吃、不讀 buff、不取 / 不存（2026-10-17；紅暴直接單人逃跑）。要吃加 --dragon：對 questdefs 標 dragon 的任務吃（除彌生和日美子 / 猜謎三兄弟 / 恐龍博士 / 卡坦的願望）、紅暴組隊打到底，--dragon-all 全吃')
     else:
         print(f'[龍王的守護] 剩的整疊留在 {LEADER} 背包，run 結束（含失敗）存回公共倉庫；中斷沒存到 → 進度檔 dragon_in_bag，下次 questrun 補存')
     if opts.get('verify') == 'defer':
         print('[逐人驗證] --verify defer：沒風險事件的任務 run 結束不驗，留在進度檔待驗清單（12 小時）給呼叫端收尾驗')
     if opts.get('verify', 'risk') == 'risk':
         print('[逐人驗證] 沒風險事件的任務延後：全部任務結束後其他 4 人每人開一次詳情批次讀（失敗退出留進度檔，下次 run 結束再驗）')
-    if opts.get('solo'):
+    if opts.get('solo') or any(auto_solo(d, opts) for d in defs):
         print(f'[單人逃跑 --solo] 不吃龍王；{LEADER} 戰寵 首次 防禦 / 一般 攻擊 + 快速戰鬥關 → 步 < group_from：解散（上一步已驗證解散就略過）→ quest.py --solo-talk（單人跑 → team.form → '
               f'--stop-after-dialog --disband-after 同一支程序）；fight 步：組隊 → do_fight；步 ≥ group_from：組隊 --stop-after-rewards 1 → 完成後 {LEADER} 戰寵改回')
     if opts.get('buy_missing'):
@@ -796,7 +801,7 @@ def print_plan(defs, opts: dict) -> None:
                                          else f'grind.py start --spot {opts["spot"]}（固定點、不起 follow）') + '；失敗退出不恢復')
     else:
         print('[交接回去] --after none：不動')
-    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 / 道具 156 紅暴沒龍王（改跑 --solo 單人逃跑）157 完成後獎勵存倉失敗 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
+    print('退出碼：108 逐人驗證 109 戰鬥設定 150 交寵物 151 丟獎勵寵 / 道具 156 （--dragon）紅暴沒龍王（改跑 --solo 單人逃跑）157 完成後獎勵存倉失敗 152 領獎窗關不掉 155 追蹤沒反應且該步需先抓 / 練寵（questdefs.pet_prep，訊息帶 pet_catch / petwatch 指令） 153 NPC 只有再見（背包 / 信箱都不是原因）154 背包滿自動處理失敗；110 preflight 111 交接/組隊 112 步驟卡住 113 片數/時間上限 114 BOSS後補人失敗 115 manual 116 不可逆對話 117 對話無進展 118 戰鬥卡住 119 接取失敗；9 驗證視窗 10 斷線')
 
 
 # ---------------------------------------------------------------- 驅動器
@@ -888,10 +893,10 @@ class Run:
         return bool(self.hp_ok_at) and time.time() - self.hp_ok_at <= HP_FRESH_S
 
     def dragon_wanted(self, d) -> bool:
-        """--dragon 且（--dragon-all 或 questdefs 標 dragon = NO_DRAGON 以外）；questdefs dragon_required（紅暴）不看 --dragon 一定吃"""
-        if (d or {}).get('dragon_required'):
-            return True
-        return bool(self.o.get('dragon')) and (bool(self.o.get('dragon_all')) or bool((d or {}).get('dragon')))
+        """--dragon（opt-in，2026-10-17 起沒給就一律 False：不吃、不讀 buff）且（dragon_required / --dragon-all / questdefs 標 dragon = NO_DRAGON 以外）"""
+        if not self.o.get('dragon'):
+            return False
+        return bool((d or {}).get('dragon_required')) or bool(self.o.get('dragon_all')) or bool((d or {}).get('dragon'))
 
     def ensure_dragon(self, d=None, force: bool = False):
         """隊長吃龍王的守護（第一次公共倉庫整疊取出 → 吃 1 顆 → 剩的留在 DKBO 背包，之後直接從背包吃；run 結束 dragon_return 才存回）；
@@ -946,8 +951,8 @@ class Run:
     def require_dragon(self, d) -> int:
         """questdefs dragon_required（紅暴 2031，使用者 2026-10-13：有龍王效果就組隊打到底）：開始前一定要有 buff。
         沒 buff → 吃（同 ensure_dragon）；巡路中 / 一時失敗 → 等 3 秒再試，共 3 次；背包與公共倉庫都沒有（92）或一直吃不到 → 156（改走單人逃跑 psa-quest-solo）"""
-        if not (d or {}).get('dragon_required'):
-            return 0
+        if not (d or {}).get('dragon_required') or not self.o.get('dragon'):
+            return 0                                                   # 2026-10-17：沒 --dragon 不吃不讀（紅暴已由 auto_solo 改走單人逃跑）
         st = None
         for i in range(3):
             st = self.ensure_dragon(d)
@@ -1450,7 +1455,10 @@ class Run:
         solo = bool(self.o.get('solo') and d.get('solo'))
         if self.o.get('solo') and not d.get('solo'):
             return self.fail(EXIT_PREFLIGHT, f'任務 {tid}「{d["detail"]}」沒有 questdefs solo 設定，不能 --solo（目前只有紅暴 2031）')
-        rc = 0 if solo else self.require_dragon(d)                     # 紅暴：沒龍王 buff 就吃，都沒有 → 156（改走單人逃跑）；--solo 本來就是沒龍王的退路，不吃
+        if not solo and auto_solo(d, self.o):
+            solo = True
+            event(f'任務 {tid}「{d["detail"]}」：預設不用龍王的守護（2026-10-17）→ 直接單人逃跑（同 --solo；要組隊打到底加 --dragon）')
+        rc = 0 if solo else self.require_dragon(d)                     # 只在 --dragon：紅暴沒龍王 buff 就吃，都沒有 → 156；沒 --dragon 已由 auto_solo 走單人逃跑
         if rc:
             return rc
         if self.team_fresh():                                          # 交接剛組完（同一秒內連開 2 次切換面板，2026-10-12）→ 沿用
@@ -2155,6 +2163,12 @@ def parse_names(text) -> list:
     return list(dict.fromkeys(x.strip() for x in items if x and x.strip()))
 
 
+def auto_solo(d, opts) -> bool:
+    """純函式：沒給 --dragon 時，dragon_required 且有 questdefs solo 的任務（紅暴 2031）直接走單人逃跑（使用者 2026-10-17 預設不用龍王）"""
+    d = d or {}
+    return bool(d.get('dragon_required') and d.get('solo') and not (opts or {}).get('dragon'))
+
+
 def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_dragon: bool = False, spot: str = DEFAULT_SPOT,
         max_slices: int = MAX_SLICES, slice_s: int = SLICE_S, max_min: int = MAX_MIN, hp_min: int = HP_MIN, trust_progress: bool = True,
         team_hp_min: int = TEAM_HP_MIN, boss_retry: bool = True, verify_all: bool = True, verify_skipped: bool = False,
@@ -2205,8 +2219,8 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
     event(f'開始：任務 {[d["id"] for d in defs]}，選項 {opts}')
     rc = r.handover()
     done = []
-    if not rc and r.st.get('dragon_in_bag') and not use_dragon:
-        r.dragon_return('開始（上次 run 沒存回）')                    # 這次不吃 → 先把上次留在 DKBO 背包的龍王存回公共倉庫
+    if r.st.get('dragon_in_bag') and not use_dragon:
+        event(f'進度檔記 {LEADER} 背包有上次留下的龍王的守護：預設不碰龍王（2026-10-17）→ 不存回；要處理請手動或下次 --dragon run 結束存回')
     if not rc:
         rc = r.preflight_bags(defs)                                    # 背包空格整個 run 只讀一次（所有要跑任務的 bag_slots 最大值，2026-10-17）
     if not rc:
@@ -2229,7 +2243,7 @@ def run(ids=None, dry_run: bool = False, after: str = 'grind', tools=None, use_d
         rc = r.flush_verify('全部任務結束')                            # 延後的逐人驗證一次批次讀（review §2-B）
     elif r.st.get('verify_pending'):
         event(f'失敗退出：待逐人驗證 {sorted(r.st["verify_pending"])} 留在進度檔，下次 questrun 結束（或依賴任務接取前）再驗')
-    if r.st.get('dragon_in_bag') and rc not in NO_TOUCH:
+    if use_dragon and r.st.get('dragon_in_bag') and rc not in NO_TOUCH:
         r.dragon_return('結束')                                         # 借出的道具要還（失敗也存；畫面要留給人看的失敗碼不碰）
     if not rc and drops:
         rc = r.drop_rewards()
@@ -2347,7 +2361,7 @@ def main() -> int:
     def common(p):
         p.add_argument('ids', nargs='*')
         p.add_argument('--after', default='grind', choices=['grind', 'none'])
-        p.add_argument('--dragon', action='store_true', help='NO_DRAGON 以外的任務（questdefs dragon）每片前吃龍王的守護（2026-10-12 起預設不吃）')
+        p.add_argument('--dragon', action='store_true', help='opt-in：NO_DRAGON 以外的任務（questdefs dragon）每片前吃龍王的守護、紅暴有龍王組隊打到底（2026-10-17 起預設不吃不讀，紅暴走單人逃跑）')
         p.add_argument('--dragon-all', action='store_true', help='配 --dragon：每個任務都吃（不看 questdefs dragon）')
         p.add_argument('--no-dragon', action='store_true', help='相容舊指令：= 預設（不吃），no-op')
         p.add_argument('--spot', default=DEFAULT_SPOT, help='恢復掛機的練功點：auto（預設）= 去練功依等級選點 + follow；點名 = 固定點')
@@ -2359,7 +2373,7 @@ def main() -> int:
         p.add_argument('--confirm-drop-items', default='', help='--drop-items 的確認（名單要完全相同）')
         p.add_argument('--no-post', action='store_true', help='任務完成後不做 questdefs post 的獎勵存倉（紅暴：英雄的祝福存個人、龍王的守護存公共）')
         p.add_argument('--rested', action='store_true', help='配 --pet-turnin：呼叫端剛 pet.py rest-all 過（petquest 練完）→ 交寵物前不重做 rest-all')
-        p.add_argument('--solo', action='store_true', help='單人逃跑模式（只限 questdefs 有 solo 的任務 = 紅暴 2031；沒龍王 156 的退路，psa-quest-solo）')
+        p.add_argument('--solo', action='store_true', help='單人逃跑模式（只限 questdefs 有 solo 的任務 = 紅暴 2031；2026-10-17 起沒 --dragon 時紅暴自動走，不必給；psa-quest-solo）')
         p.add_argument('--buy-missing', action='store_true', help='相容保留的 no-op（任務道具由 NPC 給，不檢查不買）')
     p = sub.add_parser('plan')
     common(p)

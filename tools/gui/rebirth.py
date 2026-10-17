@@ -17,7 +17,8 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
     --keep-old-weapon 換弓後不丟舊武器
     --confirm-rebirth 精靈王轉生頁確認是「角色轉生」後停下（退出碼 89，對話框維持開著）等人；預設不停直接轉（使用者 2026-10-11：不用停）
     --pet-action 值  換弓後把 5 人戰寵「一般動作」設成這個（預設忠犬；none = 不動）
-    --no-dragon      不用龍王的守護（預設只在 enter 進洞前吃一次，boss10 / bow16 / boss20 / 重登都不再吃）
+    --dragon         opt-in：enter 進洞前吃一次龍王的守護（boss10 / bow16 / boss20 / 重登都不再吃），cleanup 存回公共倉庫。
+                     2026-10-17 使用者「之後解任務都先不要龍王守護」→ 預設不吃、不開背包 / 倉庫取、不存回；--no-dragon 保留相容（= 預設，no-op）
     --read-levels    preflight 改用 bag.levels 逐人讀等級當門檻（舊行為；預設是點追蹤卡看有沒有傳送）
   可 import：rebirth.run(trans=None, from_stage='preflight', dry_run=False, ..., tools=None) → 退出碼；結果 dict 在 rebirth.LAST
 
@@ -38,7 +39,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
   accept    preflight 點卡已傳送（任務進行中）→ 跳過。否則接「漆黑洞窟(N轉)」：rebirth_steps.accept_task（畫面開著村長選單對話框 = 直接在對話框接、別的對話框 = 97 不點；再看任務追蹤欄：有精確標題卡片 → 點卡片巡路到村長；沒有 / 不確定才 questdetail.accept：任務詳情標題精確樣板比對 → 傳送瑪麗娜絲村長 → 選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 驗進行中；已進行中略過；失敗 97）
   enter     （2026-10-17：吃龍王前畫面是 NPC 對話框〔點卡傳送後巡路已到守門人〕→ 先 ESC 關掉〔不回答〕再開背包；舊版背包打不開 bag rc 90 → 不吃龍王。
             使用途中回 90 且有對話框 → ESC 後重試一次；未實機）
-            **龍王的守護只在這裡吃一次**（2026-10-16 使用者：進洞前、quest.py 巡路到吉魯島守門人之前；背包沒有就從公共倉庫取、都沒有照樣進；已在漆黑 1F 續跑就不吃）→
+            （--dragon 才做；預設不吃不碰）**龍王的守護只在這裡吃一次**（2026-10-16 使用者：進洞前、quest.py 巡路到吉魯島守門人之前；背包沒有就從公共倉庫取、都沒有照樣進；已在漆黑 1F 續跑就不吃）→
             quest.py 點追蹤（--stop-after-dialog，最多 3 輪）→ 吉魯島守門人 → 漆黑 1F（地圖 32001）
   boss10    quest.py 預設模式到 10F BOSS（37 / 38）→ 38 走「被打飛者重打」→ 確認在 11F 以上（32011～32021，地圖為準）
   bow16     quest.py --stop-after-rewards 1：11F→16F 守門人收 4 件證明、每人得精靈王之弓（地圖 32016）。
@@ -60,7 +61,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
   cleanup   （2026-10-16，**機械式固定動作、不檢查、未實機**）storepets 後寵物欄全空 → 轉生獎勵寵一定在 5 人第 1 格：一～四轉 → 面板開一次、左欄頭像逐人切，
             每人選第 1 格 → 垃圾桶 → 確定（petdrop.drop_first_slot；不讀名字 / 等級、不驗 Lv1、不分轉數；只確認第 1 格變空，失敗 76 → 86）；
             **五轉（--trans 5）獎勵寵帖拉所伊朵（機暴）存個人倉庫（pet.py store-all，同樣不檢查），絕不丟**；
-            → 龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
+            →（--dragon 才）龍王的守護存回公共倉庫 → 確認原地遇敵關 → 回 DKBO → 寫 notes/quest-log.md 摘要
   之後      不自己練功；下一步 `rebirth_pets.py --trans N`（寵物重整，完成後自動去練功 = grind.go，不寫死練功點）。轉生確認後記 tools/.cache/trans.json
 
 退出碼（共用 0 / 1 / 2 / 8 / 9 / 10 見 uikit；其他工具 40～79、90～96；rebirth 自己 80～89）：
@@ -80,7 +81,7 @@ swap 後 heal / boss20 跳過直接 rebirth）。這三項只有離線測試。
 BOSS 後隊伍檢查（2026-10-17）：quest.py 預設改成任務戰打完不驗隊伍、不停；本檔 Run.quest 預設模式一律補 --boss-team-check（with_boss_check），boss10 / boss20 照舊 37 / 38。
 載入畫面卡住：quest.py 回 43（載入 / 轉場畫面 60 秒）→ 不重登、重跑同一指令（每階段最多 2 次）。
 卡住自動重登：任何階段的 quest.py 回 19（自動巡路卡住）/ 42（VS 牌卡死）→ stuckrecover.relogin_team（relogin.py --stuck --confirm，只按已帶入帳密的「登錄」；105 → team.form）→
-team.check / form → 重吃龍王 → 重跑同一個 quest.py 指令；每階段最多 2 次（info.relogin_rc 記重登碼），仍卡 / 重登失敗 → 84；重登遇 9 / 10 → 原碼停手。--fight（單人重打）不重登。
+team.check / form → 重跑同一個 quest.py 指令（龍王不重吃）；每階段最多 2 次（info.relogin_rc 記重登碼），仍卡 / 重登失敗 → 84；重登遇 9 / 10 → 原碼停手。--fight（單人重打）不重登。
 驗證視窗（quest 回 2 / uikit 回 9）→ 一律回 9 並停手（鐵則 5）；斷線（netwatch halt）→ 10。
 """
 import argparse
@@ -511,7 +512,7 @@ class Run:
 
     def ensure_dragon(self, force: bool = False):
         """隊長吃龍王的守護（背包沒有就從公共倉庫取）。失敗只警告（沒有也能跑，只是遇敵）；10 分鐘內不重吃"""
-        if not self.o.get('dragon', True):
+        if not self.o.get('dragon', False):                   # 2026-10-17 起預設不吃（--dragon opt-in）
             return
         now = time.time()
         if not force and now - self.st.get('last_eat', 0) < DRAGON_REEAT_S:
@@ -834,7 +835,7 @@ class Run:
     def s_enter(self) -> int:
         pos0 = self.read_pos()
         if not (pos0 and pos0[0] == MAP_1F):
-            self.ensure_dragon()                                # 龍王的守護只在進洞前吃這一次（2026-10-16 使用者）；沒有就不用（ensure_dragon 容錯）
+            self.ensure_dragon()                                # --dragon 才吃：龍王的守護只在進洞前吃這一次（2026-10-16 使用者）；預設 no-op（2026-10-17）
         for k in range(3):
             pos = self.read_pos()
             if pos and pos[0] == MAP_1F:
@@ -1015,10 +1016,11 @@ class Run:
                 return self.fail(rc, '丟轉生獎勵寵時看到驗證視窗 / 斷線，停手')
             if rc:
                 return self.fail(EXIT_REWARD if rc == EXIT_REWARD else EXIT_BAG, f'丟轉生獎勵寵失敗 rc={rc}（{d.get("why", "")}）', bag_rc=rc)
-        rc = T.bag_store(LEADER, DRAGON)
-        if rc not in (0, 92):
-            return self.fail(EXIT_BAG, f'{DRAGON}存回公共倉庫失敗 bag rc={rc}', bag_rc=rc)
-        self.info['dragon_stored'] = rc == 0
+        if self.o.get('dragon', False):                        # 2026-10-17 起預設不吃 → 背包不會有借出的龍王，不開倉庫
+            rc = T.bag_store(LEADER, DRAGON)
+            if rc not in (0, 92):
+                return self.fail(EXIT_BAG, f'{DRAGON}存回公共倉庫失敗 bag rc={rc}', bag_rc=rc)
+            self.info['dragon_stored'] = rc == 0
         if T.encounter_on():
             T.encounter_off()
             self.warn('原地遇敵是開的，已關（轉生後維持關閉、不練功）')
@@ -1047,7 +1049,7 @@ DRY_PLAN = {
                   '點追蹤卡「{t}」= 等級檢查（rebirth_steps.level_gate）：傳送到吉魯島 / 漆黑 = 5 人達標；跳「未達到 / 禁止傳送 / 條件不足 / 等級不足」→ 關視窗、原地遇敵開回、留在練功點 → 80；讀不懂的視窗 → 9；沒卡 → bag.levels（--read-levels 一律用 bag.levels：(N-1)轉 ≥{lv} 級）',
                   '傳送後 heal.heal_trip --no-return（已到守門人對話框 → 警告、不補血直接 enter）（87）'],
     'accept': ['preflight 點卡已傳送 → 跳過', 'questdetail.accept {t}（任務詳情列表 / 中間標題精確樣板比對 → 傳送瑪麗娜絲村長 → 對話選單頁左鈕「漆黑洞窟」翻頁 → 「接受」→ 重開詳情驗證進行中；已進行中略過）（97）'],
-    'enter': ['龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use；都沒有照樣進）——全程只在這裡吃一次（已在漆黑 1F 不吃）', 'quest.py --task {t} --stop-after-dialog --max-seconds 240（最多 3 輪）→ 地圖 32001'],
+    'enter': ['（--dragon 才做，預設不吃）龍王的守護：bag.use_item（沒有 → 公共倉庫 take → use；都沒有照樣進）——全程只在這裡吃一次（已在漆黑 1F 不吃）', 'quest.py --task {t} --stop-after-dialog --max-seconds 240（最多 3 輪）→ 地圖 32001'],
     'boss10': ['quest.py --task {t} --max-seconds 540 → 37 / 38', '38 → team.cards 找不在隊的人 → char.switch → track → quest.py --fight --npc auto --team-size 1 → char.ensure DKBO → team.form / check（85）', '確認在 11F 以上（32011～32021，地圖為準）'],
     'bow16': ['quest.py --task {t} --stop-after-rewards 1 --max-seconds 540 → 地圖 32016', '已過 16F 看地圖：17～20F = 弓已拿到；21F = 20F 也打完 → after_boss（滿 5 人）→ boss20_done，heal / boss20 跳過'],
     'swap': ['5 人：bag.swap_weapon（選弓 → 穿戴 → 武器格確認 → 丟舊武器；--keep-old-weapon 不丟）（86）'],
@@ -1056,7 +1058,7 @@ DRY_PLAN = {
     'storepets': ['pet.py store-all：5 人寵物欄所有寵物存個人倉庫（不驗名字、不擋騎寵 / 騎乘 / 第 1 格；寵物欄已空跳過；倉庫滿 77；其他失敗 86；未實機）'],
     'rebirth': ['team.form', 'quest.py --task {t} --max-seconds 420 → 39（精靈王轉生頁）', 'OCR 對話：角色轉生才放行（寵物轉生 / 讀不到 / 位置不對 → 88；--confirm-rebirth → 89）',
                 '點完成 + quest.py --no-track --allow-irreversible 收尾 → bag.levels 確認 5 人轉數 = N'],
-    'cleanup': ['一～四轉：丟轉生獎勵寵（固定動作：逐人選第 1 格 → 垃圾桶 → 確定，不讀名字 / 等級；petdrop.drop_first_slot）；五轉：獎勵寵機暴 pet.py store-all 存個人倉庫，絕不丟（77 / 86）', '龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
+    'cleanup': ['一～四轉：丟轉生獎勵寵（固定動作：逐人選第 1 格 → 垃圾桶 → 確定，不讀名字 / 等級；petdrop.drop_first_slot）；五轉：獎勵寵機暴 pet.py store-all 存個人倉庫，絕不丟（77 / 86）', '（--dragon 才做）龍王的守護存回公共倉庫（背包沒有 = 略過）', '原地遇敵確認關閉', 'char.ensure DKBO', '寫 notes/quest-log.md 摘要'],
 }
 
 
@@ -1072,7 +1074,7 @@ def print_plan(n: int, from_stage: str, opts: dict) -> None:
 
 
 def run(trans=None, from_stage: str = 'preflight', dry_run: bool = False, keep_old_weapon: bool = False, confirm_rebirth: bool = False,
-        pet_action: str = '忠犬', use_dragon: bool = True, tools=None, to_stage: str = 'cleanup', read_levels: bool = False) -> int:
+        pet_action: str = '忠犬', use_dragon: bool = False, tools=None, to_stage: str = 'cleanup', read_levels: bool = False) -> int:
     LAST.clear()
     if from_stage not in STAGES or to_stage not in STAGES or STAGES.index(to_stage) < STAGES.index(from_stage):
         print(f'rebirth：--from / --to 要是 {STAGES} 之一，且 to 不早於 from', file=sys.stderr)
@@ -1133,13 +1135,14 @@ def main() -> int:
     ap.add_argument('--keep-old-weapon', action='store_true')
     ap.add_argument('--confirm-rebirth', action='store_true')
     ap.add_argument('--pet-action', default='忠犬', choices=['忠犬', '攻擊', '防禦', 'none'])
-    ap.add_argument('--no-dragon', action='store_true')
+    ap.add_argument('--dragon', action='store_true', help='opt-in：enter 進洞前吃一次龍王的守護、cleanup 存回公共（2026-10-17 起預設不吃不碰）')
+    ap.add_argument('--no-dragon', action='store_true', help='相容舊指令：= 預設（不吃），no-op')
     ap.add_argument('--read-levels', action='store_true', help='preflight 用 bag.levels 逐人讀等級當門檻（舊行為；預設改點追蹤卡看有沒有傳送）')
     a = ap.parse_args()
     if not ALL_ROLES:
         print(f'rebirth：PSA_CLIENT={clients.name()} 沒有登錄角色名單（clients.ROSTERS），不跑', file=sys.stderr)
         return EXIT_TEAM
-    rc = run(a.trans, a.from_stage, a.dry_run, a.keep_old_weapon, a.confirm_rebirth, a.pet_action, not a.no_dragon, to_stage=a.to_stage, read_levels=a.read_levels)
+    rc = run(a.trans, a.from_stage, a.dry_run, a.keep_old_weapon, a.confirm_rebirth, a.pet_action, a.dragon and not a.no_dragon, to_stage=a.to_stage, read_levels=a.read_levels)
     if not a.dry_run:
         print(json.dumps(LAST, ensure_ascii=False, default=str))
     return rc

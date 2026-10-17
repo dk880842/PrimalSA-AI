@@ -100,8 +100,9 @@ f = Fake()
 rc = go(f, confirm_drop=True)
 qr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
 check('happy：rc 0、14 段全跑', rc == 0 and pr.LAST['ran'] == pr.SEGMENTS, f'rc={rc} {pr.LAST}')
-check('questrun 每段 --after none；成人儀式 / 1.82 / 洞窟帶 --dragon；紅暴帶丟寵 / 丟首飾旗標', all('--after' in a and a[a.index('--after') + 1] == 'none' for a in qr)
-      and all('--dragon' in a for a in qr if a[1] in ('2999', '2015', '2025', '2000')) and '--drop-items' in qr[2] and '巴朵蘭恩' in qr[2], str(qr))
+check('questrun 每段 --after none；全部不帶 --dragon（2026-10-17 預設不用龍王）；紅暴帶 --solo + 丟寵 / 丟首飾旗標', all('--after' in a and a[a.index('--after') + 1] == 'none' for a in qr)
+      and not any('--dragon' in a for a in qr) and '--solo' in qr[2] and not any('--solo' in a for i, a in enumerate(qr) if i != 2)
+      and '--drop-items' in qr[2] and '巴朵蘭恩' in qr[2], str(qr))
 check('1.82 前段 / 後段 / 洞窟的任務順序', qr[3][1:9] == tuple(map(str, pr.Q182A)) and qr[4][1:7] == tuple(map(str, pr.Q182B))
       and qr[5][1:5] == ('2000', '2003', '2001', '2002') and '--max-min' in qr[5])
 pq = [a for s, a in f.calls if s == 'petquest.py']
@@ -137,19 +138,19 @@ rc = go(f, from_seg='bag0', to_seg='bag0')
 check('清背包⓪：空 5 ≥ 5 → 不刪', rc == 0 and not [a for s, a in f.calls if s == 'bag.py' and a[0] == 'purge'])
 
 # ---------------- 失敗 / 續跑
-f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 0]})
+f = Fake(rcs={('questrun.py', 'run'): [0, 0, 0]})
 rc = go(f, confirm_drop=True, to_seg='hero')
 hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run' and a[1] == '2031']
-check('紅暴 156（沒龍王）→ 自動改跑 questrun --solo（同樣的丟棄參數）→ 0', rc == 0 and len(hr) == 2 and '--solo' not in hr[0] and '--solo' in hr[1]
-      and '--buy-missing' not in hr[0] and '--buy-missing' not in hr[1] and '--drop-items' in hr[1] and pr.LAST['ran'][-1] == 'hero', str(hr))
-f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 112]})
+check('紅暴直接 questrun --solo 一次（不先試龍王、不重跑）→ 0', rc == 0 and len(hr) == 1 and '--solo' in hr[0] and '--dragon' not in hr[0]
+      and '--buy-missing' not in hr[0] and '--drop-items' in hr[0] and pr.LAST['ran'][-1] == 'hero', str(hr))
+f = Fake(rcs={('questrun.py', 'run'): [0, 0, 112]})
 rc = go(f, confirm_drop=True)
 check('紅暴單人逃跑也失敗 → 173、訊息帶 --solo 指令、後面不跑', rc == pr.EXIT_HERO and '--solo' in pr.LAST['info']['manual'] and pr.LAST['ran'] == ['inventory', 'adult', 'yayoi']
       and not any(s == 'petquest.py' for s, _ in f.calls))
 f2 = Fake()
 rc = go(f2, confirm_drop=True, reset=False)
 check('重跑 = 從紅暴續跑（前 3 段進度檔跳過）', rc == 0 and pr.LAST['ran'][0] == 'hero' and not any(a[1] == '2999' for s, a in f2.calls if s == 'questrun.py' and a[0] == 'run'))
-f = Fake(rcs={('questrun.py', 'run'): [0, 0, 156, 9]})
+f = Fake(rcs={('questrun.py', 'run'): [0, 0, 9]})
 check('紅暴單人逃跑回 9（驗證視窗）→ 透傳', go(f, confirm_drop=True) == 9)
 f = Fake(rcs={('questrun.py', 'run'): [0, 0, 0, 112]})
 rc = go(f)
@@ -192,11 +193,11 @@ hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
 ws = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'wear']
 check('--wear-hero-items：紅暴帶丟巴朵蘭恩、不帶 --drop-items；背包沒首飾 → 不戴', rc == 0 and '--drop-reward' in hr[0] and '--drop-items' not in hr[0] and not ws, str(hr))
 rich = bags(14, {'DKBO': [pr.HERO_RING], 'DKBO3': ['儀之兜', pr.HERO_RING]})
-f = Fake(rcs={('questrun.py', 'run'): [156, 0]}, bag_lists=[rich])
+f = Fake(rcs={('questrun.py', 'run'): [0]}, bag_lists=[rich])
 rc = go(f, confirm_drop=True, wear_hero_items=True, from_seg='hero', to_seg='hero')
 hr = [a for s, a in f.calls if s == 'questrun.py' and a[0] == 'run']
 ws = [a for s, a in f.calls if s == 'bag.py' and a[0] == 'wear']
-check('156 改單人逃跑也不帶 --drop-items，成功後只對背包有首飾的人 bag.py wear', rc == 0 and len(hr) == 2 and '--solo' in hr[1] and all('--drop-items' not in a for a in hr)
+check('單人逃跑（--solo）不帶 --drop-items，成功後只對背包有首飾的人 bag.py wear', rc == 0 and len(hr) == 1 and '--solo' in hr[0] and all('--drop-items' not in a for a in hr)
       and ws == [('wear', 'DKBO', pr.HERO_RING), ('wear', 'DKBO3', pr.HERO_RING)], str(ws))
 f = Fake(rcs={('bag.py', 'wear'): [92, 0]}, bag_lists=[rich])
 rc = go(f, confirm_drop=True, wear_hero_items=True, from_seg='hero', to_seg='hero')
