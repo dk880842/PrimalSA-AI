@@ -74,6 +74,46 @@ check('snap_item：數字不同的同族不互認（合成爪 3 vs 7）', dp.sna
 check('snap_item：歧義 / 讀不到 → None', dp.snap_item('', RECIPES) is None and dp.snap_item('xyz', RECIPES) is None and dp.snap_item(None, RECIPES) is None)
 check('snap_item：兩個近似候選相差 < 0.05 → 歧義不猜', dp.snap_item('厚肉塊', ['厚肉塊串燒', '厚肉塊串烤']) is None)
 
+# ---------------- 成品名 OCR：逐倍率投票（fixtures/daily_names_ocr.json = p1 2026-10-17 5 人 × 5 環 × 2 項真截圖的 OCR 原始行）----------------
+import json  # noqa: E402
+FX = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_names_ocr.json').read_text(encoding='utf-8'))
+bad = [(c['role'], c['page'], c['item'], c['truth'], dp.vote_lines(c['lines'], RECIPES)) for c in FX['cases']]
+bad = [b for b in bad if not (b[4]['name'] == dp.norm(b[3]) and b[4]['sure'])]
+check(f'vote_lines：50 項真截圖 OCR 全部確定且正確（{len(FX["cases"])} 項）', len(FX['cases']) == 50 and not bad, str(bad[:3]))
+old = [c for c in FX['cases'] if dp.snap_item(''.join(ln['text'] for ln in c['lines']), RECIPES) == dp.norm(c['truth'])]
+check('舊讀法（各倍率 join 成一串再 snap）在同一批樣本大多失敗（重現 225 根因）', len(old) <= 5, str(len(old)))
+L = lambda *ts: [{'text': t, 'x': 400, 'zoom': z} for z, t in enumerate(ts, 2)]  # noqa: E731
+v = dp.vote_lines(L('合成弓箭8', '口成弓箭8'), RECIPES)
+check('vote_lines：「合成弓箭8 / 口成弓箭8」兩倍率 → 合成弓箭8 確定（舊 join = 成弓箭8口成弓箭8 失敗）', v['name'] == '合成弓箭8' and v['sure'], str(v))
+v = dp.vote_lines(L('合成弓箭8', '合成弓箭3'), RECIPES)
+check('vote_lines：同族數字兩倍率不同（8 / 3）→ 衝突、None', v['name'] is None and v['conflict'], str(v))
+v = dp.vote_lines(L('合成爪7', '合成爪', '爪7'), RECIPES)
+check('vote_lines：數字尾碼只有 1 票 → 不確定（要開彈窗核對）', v['name'] == '合成爪7' and not v['sure'], str(v))
+v = dp.vote_lines(L('葉子烤', '葉烤薯', '葉子烤蕃薯'), RECIPES)
+check('vote_lines：無數字名 1 票即確定（葉子烤蕃薯，其他倍率掉字不投票）', v['name'] == '葉子烤蕃薯' and v['sure'], str(v))
+check('vote_lines：壞字 / 空 / None → None', all(dp.vote_lines(x, RECIPES)['name'] is None for x in (L('？？？', 'xyz'), [], None, '')))
+check('vote_lines：同倍率分兩行依 x 拼起來', dp.vote_lines([{'text': '弓箭8', 'x': 450, 'zoom': 3}, {'text': '合成', 'x': 400, 'zoom': 3}], RECIPES)['name'] == '合成弓箭8')
+check('digit_family：合成爪 7 → 合成爪1～10；無數字 → 自己', len(dp.digit_family('合成爪 7', RECIPES)) == 10 and dp.digit_family('貝類飯', RECIPES) == ['貝類飯'])
+P = FX['popup'][0]
+check('彈窗真截圖（12-craft 貝類飯）：材料列讀出好吃的米 / 大的貝、resolve_name = 貝類飯', dp.snap_mats(P['mats'], RECIPES) == ['好吃的米', '大的貝']
+      and dp.resolve_name(dp.vote_lines([], RECIPES), dp.vote_lines(P['name'], RECIPES), dp.snap_mats(P['mats'], RECIPES), RECIPES) == '貝類飯')
+m7 = [n for n, _ in RECIPES['合成爪7'][0]]
+m3 = [n for n, _ in RECIPES['合成爪3'][0]]
+pv1 = dp.vote_lines(L('合成爪3'), RECIPES)                       # 面板 / 彈窗都讀成 3（單票）
+check('resolve_name：大字讀成 3 但材料列是 7 的配方 → 合成爪7（材料列為準）', dp.resolve_name(pv1, pv1, dp.snap_mats(m7 + ['石幣'], RECIPES), RECIPES) == '合成爪7')
+check('resolve_name：材料列是 3 的配方 → 合成爪3', dp.resolve_name(dp.vote_lines(L('合成爪7'), RECIPES), pv1, m3, RECIPES) == '合成爪3')
+check('resolve_name：材料列讀不到、面板 7 彈窗 3 → None（不猜）', dp.resolve_name(dp.vote_lines(L('合成爪7'), RECIPES), pv1, [], RECIPES) is None)
+check('resolve_name：材料列讀不到、大字只有 1 票數字 → None', dp.resolve_name(dp.vote_lines([], RECIPES), pv1, [], RECIPES) is None)
+check('resolve_name：材料列讀不到、面板與彈窗同為 7 → 合成爪7', dp.resolve_name(dp.vote_lines(L('合成爪7'), RECIPES), dp.vote_lines(L('合成爪7'), RECIPES), [], RECIPES) == '合成爪7')
+check('resolve_name：什麼都讀不到 → None', dp.resolve_name(dp.vote_lines([], RECIPES), dp.vote_lines([], RECIPES), [], RECIPES) is None)
+check('resolve_name：材料列和所有候選矛盾 → None', dp.resolve_name(pv1, pv1, ['好吃的米', '大的貝'], RECIPES) is None)
+check('pop_is：材料列吻合 7 → 是合成爪7、不是合成爪3', dp.pop_is('合成爪 7', {'name': L('合成爪3'), 'mats': m7}, RECIPES)
+      and not dp.pop_is('合成爪 3', {'name': L('合成爪3', '合成爪3'), 'mats': m7}, RECIPES))
+check('pop_is：沒材料列 → 大字 2 倍率同意才算', dp.pop_is('合成爪 7', {'name': L('合成爪7', '合成爪7'), 'mats': []}, RECIPES)
+      and not dp.pop_is('合成爪 7', {'name': L('合成爪7'), 'mats': []}, RECIPES)
+      and not dp.pop_is('合成爪 7', {'name': L('合成爪7', '合成爪1'), 'mats': []}, RECIPES))
+check('pop_is：真截圖貝類飯 → True；當成大補飯團 → False', dp.pop_is('貝類飯', P, RECIPES) and not dp.pop_is('大補飯團', P, RECIPES))
+
 # ---------------- 純函式：畫面讀值 ----------------
 check('count_state 紅 / 綠 / 其他', dp.count_state((255, 0, 0)) == 'red' and dp.count_state((135, 255, 91)) == 'green' and dp.count_state((90, 62, 41)) == '?' and dp.count_state(None) == '?')
 check('popup_short：任一紅 → 不足', dp.popup_short([(255, 0, 0), (255, 255, 255)]) and not dp.popup_short([(135, 255, 91), (255, 255, 255)]) and not dp.popup_short(None))
@@ -354,15 +394,17 @@ class FakeTools:
     def read_page(self):
         assert self.W.panel
         r, pg = self.W.cur, self.W.page - 1
-        names = list(self.W.items[r][pg])
+        names = [[{'text': n, 'x': 400, 'zoom': z} for z in (2, 3)] for n in self.W.items[r][pg]]   # 兩倍率都讀對
         if self.inj.get('noise') == (r, pg):
-            names[1] = '？？？'                                  # 名稱 OCR 壞掉 → 要走 peek
+            names[1] = [{'text': '？？？', 'x': 400, 'zoom': 2}]          # 名稱 OCR 壞掉 → 要走 peek
         return {'names': names, 'states': ['green' if g else 'red' for g in self.W.green[r][pg]]}
 
     def peek_item(self, k):
+        self.L('peek', self.W.cur, self.W.page, k)
         if self.inj.get('peek_fail'):
-            return ''
-        return self.W.items[self.W.cur][self.W.page - 1][k]
+            return {'name': [], 'mats': []}
+        nm = self.W.items[self.W.cur][self.W.page - 1][k]
+        return {'name': [{'text': nm, 'x': 480, 'zoom': z} for z in (2, 3)], 'mats': []}
 
     def reward_count(self):
         assert self.W.panel

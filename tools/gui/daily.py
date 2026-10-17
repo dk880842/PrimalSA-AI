@@ -4,6 +4,8 @@
 設計（notes/plan-daily.md v3 §4，使用者 2026-10-17 定案；**全程未實機**，只有離線測試）：全隊一起移動、各買各的、各合成各的，不經公倉轉手（胡椒除外）。
   prep    停練功 / 關遇敵 / 等戰鬥 → 全隊傳送薩姆吉爾 → 隊長帶隊走進醫院 1005 站 38,48 → 解散
   read    DKBO2 → DKBO3 → DKBO4 → DKBO5 → DKBO 輪流 char.switch：點 NPC 開委託面板 → 讀 5 環 × 上 / 下 → daily-<角色>.json
+          成品名讀法（2026-10-17 修 225）：名稱框 OCR -Zooms 2,3,4,5 -Dark 0 → dp.vote_lines **逐倍率各自 snap 投票**（舊版把各倍率 join 成一串 →「成弓箭8口成弓箭8」）；
+          數字尾碼（合成爪 7 / 3）要 ≥2 倍率同意才確定，否則開快速合成彈窗讀大字 + 材料列 → dp.resolve_name（同族只差數字的用材料列分）；仍不確定 → 225 不猜
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
   sam     組隊 → 帶隊到 1009 → 解散 → 5 人輪流沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
   mid     組隊 → 傳送薩姆吉爾 → 帶隊回醫院 → 解散 → 5 人輪流：材料齊的項先合成、該環兩項都綠就提交（沒人有事可做就整段跳過）
@@ -63,14 +65,16 @@ DAILY_NPC = (41, 42)
 MARINAS_XY = (553, 625)                                          # 傳送面板尼斯大陸分頁的「瑪麗娜絲」→ 2000:65,58（ui/transfer.md）
 SAM_WALK = (1000, 106, 91)                                       # 薩村 → 1009 出口
 FISH_WALK = (2000, 73, 103)                                      # 瑪麗娜絲 → 2009 出口（快速走路卡 67,90 → walk 自動慢速）
-NAME_BOXES = [(380, 236, 200, 36), (380, 340, 200, 36)]          # 第 1 / 2 項名稱（x386～540、y242～268 / 346～372）
+NAME_BOXES = [(382, 236, 240, 36), (382, 340, 240, 36)]          # 第 1 / 2 項名稱（x386～、y242～268 / 346～372；寬 200 會切掉「肉丸」的丸）
+NAME_OPTS = ('-Zooms', '2,3,4,5', '-Dark', '0')                   # 褐字米色底：不二值化，4 倍率逐倍率 snap 投票（dp.vote_lines；離線 50/50，2026-10-17）
 MERGE_XY = [(735, 265), (735, 370)]                              # 兩顆「合成」藍鈕
 STATE_PX = [(390, 291), (390, 396)]                              # 兩項計數「0」紅字像素（1/1 綠字位置相同）
 PAGE_BOX = (520, 672, 70, 45)                                    # 頁碼「n/5」
 PREV_XY, NEXT_XY = (363, 692), (745, 692)
 SUBMIT_XY = (1015, 685)
 REWARD_BOX = (960, 350, 110, 45)                                 # 「完成所有任務額外獎勵」計數 n/5（綠字 986～1044 × 358～387）
-POP_NAME_BOX = (420, 405, 140, 36)                               # 彈窗成品名（黃字 454～508 × 415～431）
+POP_NAME_BOX = (392, 404, 180, 38)                               # 彈窗成品名（黃字置中 x≈481；「貝類飯」454～508 × 415～431，長名字更寬）
+POP_MAT_BOXES = [(686, 240 + 92 * i, 230, 36) for i in range(dp.POP_MAT_ROWS)]   # 彈窗材料列名稱（列距 92；材料後面一列是「石幣」）
 POP_COUNT_PX = [(695, 287), (695, 378), (695, 470)]              # 彈窗材料列計數（紅 = 不足）
 POP_CRAFT_XY = (480, 552)
 STONE = '裝備升級石'                                              # 5/5 獎勵（Item 93016）
@@ -78,6 +82,16 @@ SHOP_STAND_DX = -2                                               # 店員 (27, y
 
 MAT_PRICE_TXT = f'{dp.MAT_PRICE:,}'
 LAST: dict = {}
+
+
+_RECIPES: dict = {}
+
+
+def _recipes() -> dict:
+    """配方表（Tools.craft_item 核對彈窗用；只讀一次）"""
+    if not _RECIPES:
+        _RECIPES.update(dp.load_recipes())
+    return _RECIPES
 
 
 def event(msg: str) -> None:
@@ -267,27 +281,29 @@ class Tools:
         return uikit.safe_click(*NEXT_XY, uikit.DAILY, note='daily 下一頁', wait_ms=500)
 
     def read_page(self) -> dict:
-        """目前頁：{'names': [OCR 原字 ×2], 'states': ['red'|'green'|'?' ×2]}（名稱不修正，呼叫端 snap）"""
-        names = []
-        for box in NAME_BOXES:
-            t = ''.join(uikit.ocr(box, *shopkit.TITLE_OPTS))
-            names.append(t if t.strip() else ''.join(uikit.ocr(box, '-Zooms', '2,3')))
+        """目前頁：{'names': [OCR 原始行 ×2（uikit.ocr_lines，多倍率）], 'states': ['red'|'green'|'?' ×2]}（呼叫端 dp.vote_lines 逐倍率投票）"""
+        names = [uikit.ocr_lines(box, *NAME_OPTS) for box in NAME_BOXES]
         cols = uikit.px(STATE_PX) or [None, None]
         return {'names': names, 'states': [dp.count_state(c) for c in cols]}
 
     def peek_item(self, k: int) -> str:
-        """名稱讀不出時：開該項快速合成彈窗讀成品名大字（不按彈窗合成）→ 關彈窗"""
+        """名稱不確定時：開該項快速合成彈窗讀成品名大字 + 材料列（不按彈窗合成）→ 關彈窗。
+        回 {'name': 原始行, 'mats': [每列原始行]}（呼叫端 dp.resolve_name）；彈窗沒開 → 兩個都空"""
+        out = {'name': [], 'mats': []}
         if not uikit.safe_click(*MERGE_XY[k], uikit.DAILY, note=f'daily 開第 {k + 1} 項快速合成（讀名稱）', wait_ms=700):
-            return ''
-        nm = ''
+            return out
         for _ in range(6):
             if uikit.is_open(uikit.QCRAFT):
-                nm = ''.join(uikit.ocr(POP_NAME_BOX, *shopkit.TITLE_OPTS))
+                out = self.pop_read()
                 break
             uikit.sleep(0.2)
         if uikit.is_open(uikit.QCRAFT):
             uikit.safe_click(*uikit.QCRAFT.close_xy, uikit.QCRAFT, note='daily 關快速合成彈窗', wait_ms=500)
-        return nm
+        return out
+
+    def pop_read(self) -> dict:
+        """（快速合成彈窗開著）成品名大字 + 材料列的 OCR 原始行"""
+        return {'name': uikit.ocr_lines(POP_NAME_BOX, *NAME_OPTS), 'mats': [uikit.ocr_lines(b, *NAME_OPTS) for b in POP_MAT_BOXES]}
 
     def reward_count(self):
         return dp.parse_reward(''.join(uikit.ocr(REWARD_BOX, '-Zooms', '2,3')))
@@ -305,10 +321,10 @@ class Tools:
 
         def close_pop():
             uikit.safe_click(*uikit.QCRAFT.close_xy, uikit.QCRAFT, note='daily 關快速合成彈窗', wait_ms=500)
-        nm = ''.join(uikit.ocr(POP_NAME_BOX, *shopkit.TITLE_OPTS))
-        if dp.snap_item(nm, [dp.norm(name)]) is None:
+        pop = self.pop_read()
+        if not dp.pop_is(name, pop, _recipes()):
             close_pop()
-            return False, f'彈窗成品名 OCR 是 {nm!r}，不是「{name}」（沒合成）'
+            return False, f'彈窗成品名 / 材料列對不上「{name}」（成品名 OCR 各倍率 {dp.vote_lines(pop["name"], [])["texts"]}，沒合成）'
         if dp.popup_short(uikit.px(POP_COUNT_PX)):
             close_pop()
             return False, '彈窗材料計數有紅字（材料不足，沒合成）'
@@ -564,11 +580,13 @@ class Daily:
                 pg = T.read_page()
                 pair = []
                 for k in range(2):
-                    nm = dp.snap_item(pg['names'][k], self.recipes)
+                    v = dp.vote_lines(pg['names'][k], self.recipes)
+                    nm = v['name'] if v['sure'] else None       # 單票的數字尾碼（合成爪 7 / 3）不算確定 → 開彈窗核對大字 + 材料列
                     if nm is None:
-                        nm = dp.snap_item(T.peek_item(k), self.recipes)
+                        pk = T.peek_item(k) or {}
+                        nm = dp.resolve_name(v, dp.vote_lines(pk.get('name'), self.recipes), dp.snap_mats(pk.get('mats'), self.recipes), self.recipes)
                     if nm is None:
-                        self.fail(EXIT_READ, f'{role} 第 {page} 環第 {k + 1} 項讀不出成品名（OCR {pg["names"][k]!r}，彈窗也不行）', read_page=page)
+                        self.fail(EXIT_READ, f'{role} 第 {page} 環第 {k + 1} 項讀不出成品名（OCR 各倍率 {v["texts"]!r} 票 {v["votes"]}，彈窗也不行）', read_page=page)
                     pair.append(nm)
                 items.append(pair)
                 dones.append([s == 'green' for s in pg['states']])

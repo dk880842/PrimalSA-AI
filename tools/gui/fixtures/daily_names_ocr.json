@@ -1,0 +1,1513 @@
+{
+"_說明": "每日委託面板成品名 OCR 原始行（ocr.ps1 -Image 讀 p1 2026-10-17 截圖，-Zooms 2,3,4,5 -Dark 0；名稱框 382,236/340,240,36；彈窗名 392,404,180,38、材料列 686,240+92i,230,36）。truth = play agent 人眼讀。test_daily 用",
+"opts": [
+"-Zooms",
+"2,3,4,5",
+"-Dark",
+"0"
+],
+"cases": [
+{
+"img": "tools/.cache/dp-DKBO-1.png",
+"role": "DKBO",
+"page": 1,
+"item": 1,
+"truth": "厚肉塊串燒",
+"lines": [
+{
+"text": "厚肉塊串燒",
+"x": 448,
+"zoom": 2
+},
+{
+"text": "厚肉塊串燒",
+"x": 449,
+"zoom": 3
+},
+{
+"text": "厚肉塊串燒",
+"x": 448,
+"zoom": 4
+},
+{
+"text": "厚肉塊串燒",
+"x": 449,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-1.png",
+"role": "DKBO",
+"page": 1,
+"item": 2,
+"truth": "熱的魚味噌湯",
+"lines": [
+{
+"text": "熱的魚味噌",
+"x": 447,
+"zoom": 2
+},
+{
+"text": "熱的魚味噌湯",
+"x": 460,
+"zoom": 3
+},
+{
+"text": "熱的魚味噌湯",
+"x": 460,
+"zoom": 4
+},
+{
+"text": "熱的魚味噌湯",
+"x": 460,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-2.png",
+"role": "DKBO",
+"page": 2,
+"item": 1,
+"truth": "幹柿子",
+"lines": [
+{
+"text": "幹柨子",
+"x": 422,
+"zoom": 2
+},
+{
+"text": "幹柿子",
+"x": 422,
+"zoom": 3
+},
+{
+"text": "幹柿子",
+"x": 422,
+"zoom": 4
+},
+{
+"text": "幹柿子",
+"x": 422,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-2.png",
+"role": "DKBO",
+"page": 2,
+"item": 2,
+"truth": "合成爪 7",
+"lines": [
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-3.png",
+"role": "DKBO",
+"page": 3,
+"item": 1,
+"truth": "烤焦的魚串燒",
+"lines": [
+{
+"text": "烤焦的魚串燒",
+"x": 460,
+"zoom": 2
+},
+{
+"text": "烤焦的魚串燒",
+"x": 460,
+"zoom": 3
+},
+{
+"text": "烤焦的魚串燒",
+"x": 460,
+"zoom": 4
+},
+{
+"text": "烤焦的魚串燒",
+"x": 460,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-3.png",
+"role": "DKBO",
+"page": 3,
+"item": 2,
+"truth": "合成爪 3",
+"lines": [
+{
+"text": "合成爪3",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成爪3",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "合成爪3",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成爪3",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-4.png",
+"role": "DKBO",
+"page": 4,
+"item": 1,
+"truth": "葉子烤蕃薯",
+"lines": [
+{
+"text": "葉孑烤",
+"x": 422,
+"zoom": 2
+},
+{
+"text": "葉孑烤",
+"x": 422,
+"zoom": 3
+},
+{
+"text": "葉子烤蕃薯",
+"x": 447,
+"zoom": 4
+},
+{
+"text": "葉烤薯",
+"x": 448,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-4.png",
+"role": "DKBO",
+"page": 4,
+"item": 2,
+"truth": "大補飯團",
+"lines": [
+{
+"text": "大補飯團",
+"x": 436,
+"zoom": 2
+},
+{
+"text": "大補飯團",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "大補飯團",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "大補飯團",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-5.png",
+"role": "DKBO",
+"page": 5,
+"item": 1,
+"truth": "貝類飯",
+"lines": [
+{
+"text": "貝類飯",
+"x": 423,
+"zoom": 3
+},
+{
+"text": "貝類飯",
+"x": 423,
+"zoom": 4
+},
+{
+"text": "貝類飯",
+"x": 423,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO-5.png",
+"role": "DKBO",
+"page": 5,
+"item": 2,
+"truth": "特製2倍厚肉片",
+"lines": [
+{
+"text": "特製2倍厚肉片",
+"x": 466,
+"zoom": 2
+},
+{
+"text": "特製2倍厚肉片",
+"x": 466,
+"zoom": 3
+},
+{
+"text": "特製2倍厚肉片",
+"x": 466,
+"zoom": 4
+},
+{
+"text": "特製2倍厚肉片",
+"x": 465,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-1.png",
+"role": "DKBO2",
+"page": 1,
+"item": 1,
+"truth": "合成弓箭 8",
+"lines": [
+{
+"text": "合成弓箭8",
+"x": 448,
+"zoom": 2
+},
+{
+"text": "合成弓箭8",
+"x": 448,
+"zoom": 3
+},
+{
+"text": "合成弓箭8",
+"x": 448,
+"zoom": 4
+},
+{
+"text": "合成弓箭8",
+"x": 448,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-1.png",
+"role": "DKBO2",
+"page": 1,
+"item": 2,
+"truth": "合成投擲斧頭 2",
+"lines": [
+{
+"text": "合成投擲斧頭2",
+"x": 473,
+"zoom": 2
+},
+{
+"text": "合成投擲斧頭2",
+"x": 473,
+"zoom": 3
+},
+{
+"text": "合成投擲斧頭2",
+"x": 473,
+"zoom": 4
+},
+{
+"text": "合成投擲斧頭2",
+"x": 473,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-2.png",
+"role": "DKBO2",
+"page": 2,
+"item": 1,
+"truth": "原始肉的經濟套餐",
+"lines": [
+{
+"text": "原始肉的經濟套餐",
+"x": 485,
+"zoom": 2
+},
+{
+"text": "原始肉的經濟套餐",
+"x": 485,
+"zoom": 3
+},
+{
+"text": "原始肉的經濟套餐",
+"x": 484,
+"zoom": 4
+},
+{
+"text": "原始肉的經濟套餐",
+"x": 485,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-2.png",
+"role": "DKBO2",
+"page": 2,
+"item": 2,
+"truth": "原始粽子",
+"lines": [
+{
+"text": "原始粽子",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "原始",
+"x": 410,
+"zoom": 3
+},
+{
+"text": "原始",
+"x": 410,
+"zoom": 4
+},
+{
+"text": "原始粽子",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-3.png",
+"role": "DKBO2",
+"page": 3,
+"item": 1,
+"truth": "合成弓箭 5",
+"lines": [
+{
+"text": "合成弓箭5",
+"x": 448,
+"zoom": 2
+},
+{
+"text": "合成弓箭5",
+"x": 448,
+"zoom": 3
+},
+{
+"text": "合成弓箭5",
+"x": 447,
+"zoom": 4
+},
+{
+"text": "合成弓箭5",
+"x": 447,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-3.png",
+"role": "DKBO2",
+"page": 3,
+"item": 2,
+"truth": "精心燉煮過的肉丸",
+"lines": [
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 2
+},
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 3
+},
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 4
+},
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-4.png",
+"role": "DKBO2",
+"page": 4,
+"item": 1,
+"truth": "鹽味的油炸螃蟹",
+"lines": [
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 2
+},
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 3
+},
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 4
+},
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-4.png",
+"role": "DKBO2",
+"page": 4,
+"item": 2,
+"truth": "半熟的芋頭",
+"lines": [
+{
+"text": "半熟的芋頭",
+"x": 448,
+"zoom": 2
+},
+{
+"text": "半熟的芋頭",
+"x": 448,
+"zoom": 3
+},
+{
+"text": "半熟的芋頭",
+"x": 448,
+"zoom": 4
+},
+{
+"text": "半熟的芋頭",
+"x": 448,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-5.png",
+"role": "DKBO2",
+"page": 5,
+"item": 1,
+"truth": "大補飯團",
+"lines": [
+{
+"text": "大補飯團",
+"x": 436,
+"zoom": 2
+},
+{
+"text": "大補飯團",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "大補飯團",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "大補飯團",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO2-5.png",
+"role": "DKBO2",
+"page": 5,
+"item": 2,
+"truth": "合成兜 3",
+"lines": [
+{
+"text": "合成兜3",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成兜3",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "合成兜3",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成兜3",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-1.png",
+"role": "DKBO3",
+"page": 1,
+"item": 1,
+"truth": "肉片煮",
+"lines": [
+{
+"text": "肉片煮",
+"x": 423,
+"zoom": 2
+},
+{
+"text": "肉片煮",
+"x": 423,
+"zoom": 3
+},
+{
+"text": "肉片煮",
+"x": 423,
+"zoom": 4
+},
+{
+"text": "肉片煮",
+"x": 423,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-1.png",
+"role": "DKBO3",
+"page": 1,
+"item": 2,
+"truth": "合成棍棒1",
+"lines": [
+{
+"text": "合成棍棒1",
+"x": 442,
+"zoom": 2
+},
+{
+"text": "合成棍棒1",
+"x": 442,
+"zoom": 3
+},
+{
+"text": "合成棍棒1",
+"x": 442,
+"zoom": 4
+},
+{
+"text": "合成棍棒1",
+"x": 442,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-2.png",
+"role": "DKBO3",
+"page": 2,
+"item": 1,
+"truth": "葉子烤蕃薯",
+"lines": [
+{
+"text": "葉孑烤",
+"x": 422,
+"zoom": 2
+},
+{
+"text": "葉孑烤",
+"x": 422,
+"zoom": 3
+},
+{
+"text": "葉子烤蕃薯",
+"x": 447,
+"zoom": 4
+},
+{
+"text": "葉烤薯",
+"x": 448,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-2.png",
+"role": "DKBO3",
+"page": 2,
+"item": 2,
+"truth": "烤焦的蝦子串燒",
+"lines": [
+{
+"text": "烤焦的蝦子串燒",
+"x": 473,
+"zoom": 2
+},
+{
+"text": "烤焦的蝦子串燒",
+"x": 472,
+"zoom": 3
+},
+{
+"text": "烤焦的蝦子串燒",
+"x": 473,
+"zoom": 4
+},
+{
+"text": "烤焦的蝦子串燒",
+"x": 472,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-3.png",
+"role": "DKBO3",
+"page": 3,
+"item": 1,
+"truth": "生包心菜",
+"lines": [
+{
+"text": "生包心菜",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "生包心菜",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "生包心菜",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "生包心菜",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-3.png",
+"role": "DKBO3",
+"page": 3,
+"item": 2,
+"truth": "鹽味獸肉串燒",
+"lines": [
+{
+"text": "鹽味獸肉串燒",
+"x": 460,
+"zoom": 2
+},
+{
+"text": "鹽味獸肉串燒",
+"x": 460,
+"zoom": 3
+},
+{
+"text": "鹽味獸肉串燒",
+"x": 460,
+"zoom": 4
+},
+{
+"text": "鹽味獸肉串燒",
+"x": 460,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-4.png",
+"role": "DKBO3",
+"page": 4,
+"item": 1,
+"truth": "生炒蔬菜",
+"lines": [
+{
+"text": "生炒蔬菜",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "炒蔬菜",
+"x": 448,
+"zoom": 3
+},
+{
+"text": "生炒蔬菜",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "生炒蔬菜",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-4.png",
+"role": "DKBO3",
+"page": 4,
+"item": 2,
+"truth": "合成爪 2",
+"lines": [
+{
+"text": "合成爪2",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成爪2",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "合成爪2",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成爪2",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-5.png",
+"role": "DKBO3",
+"page": 5,
+"item": 1,
+"truth": "鹽味的油炸螃蟹",
+"lines": [
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 2
+},
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 3
+},
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 4
+},
+{
+"text": "鹽味的油炸螃蟹",
+"x": 472,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO3-5.png",
+"role": "DKBO3",
+"page": 5,
+"item": 2,
+"truth": "合成石 2",
+"lines": [
+{
+"text": "合成石2",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成石2",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "合成石2",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成石2",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-1.png",
+"role": "DKBO4",
+"page": 1,
+"item": 1,
+"truth": "合成爪 7",
+"lines": [
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成爪7",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-1.png",
+"role": "DKBO4",
+"page": 1,
+"item": 2,
+"truth": "稍甜的燙青菜",
+"lines": [
+{
+"text": "稍甜的燙青菜",
+"x": 460,
+"zoom": 2
+},
+{
+"text": "稍甜的燙青菜",
+"x": 460,
+"zoom": 3
+},
+{
+"text": "稍甜的燙青菜",
+"x": 460,
+"zoom": 4
+},
+{
+"text": "稍甜的燙青菜",
+"x": 460,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-2.png",
+"role": "DKBO4",
+"page": 2,
+"item": 1,
+"truth": "特製5倍厚肉片",
+"lines": [
+{
+"text": "特製5倍厚肉片",
+"x": 466,
+"zoom": 2
+},
+{
+"text": "特製5倍厚肉片",
+"x": 466,
+"zoom": 3
+},
+{
+"text": "特製5倍厚肉片",
+"x": 466,
+"zoom": 4
+},
+{
+"text": "特製5倍厚肉片",
+"x": 465,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-2.png",
+"role": "DKBO4",
+"page": 2,
+"item": 2,
+"truth": "白米鮮味高湯",
+"lines": [
+{
+"text": "白米鮮味高湯",
+"x": 461,
+"zoom": 2
+},
+{
+"text": "白米鮮味高湯",
+"x": 461,
+"zoom": 3
+},
+{
+"text": "白米鮮味高湯",
+"x": 461,
+"zoom": 4
+},
+{
+"text": "白米鮮味高湯",
+"x": 461,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-3.png",
+"role": "DKBO4",
+"page": 3,
+"item": 1,
+"truth": "合成兜 8",
+"lines": [
+{
+"text": "合成兜8",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成兜8",
+"x": 436,
+"zoom": 3
+},
+{
+"text": "合成兜8",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成兜8",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-3.png",
+"role": "DKBO4",
+"page": 3,
+"item": 2,
+"truth": "炸馬鈴薯",
+"lines": [
+{
+"text": "炸馬鈴薯",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "炸馬鈴薯",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "炸馬鈴薯",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "炸馬鈴薯",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-4.png",
+"role": "DKBO4",
+"page": 4,
+"item": 1,
+"truth": "山煮蘑菇",
+"lines": [
+{
+"text": "山煮蘑菇",
+"x": 436,
+"zoom": 2
+},
+{
+"text": "山煮蘑菇",
+"x": 436,
+"zoom": 3
+},
+{
+"text": "山煮蘑菇",
+"x": 436,
+"zoom": 4
+},
+{
+"text": "山煮蘑菇",
+"x": 436,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-4.png",
+"role": "DKBO4",
+"page": 4,
+"item": 2,
+"truth": "葡萄醬汁牛排",
+"lines": [
+{
+"text": "葡萄醬汁牛排",
+"x": 460,
+"zoom": 2
+},
+{
+"text": "葡萄醬汁牛排",
+"x": 460,
+"zoom": 3
+},
+{
+"text": "葡萄醬汁牛排",
+"x": 460,
+"zoom": 4
+},
+{
+"text": "葡萄醬汁牛排",
+"x": 460,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-5.png",
+"role": "DKBO4",
+"page": 5,
+"item": 1,
+"truth": "街煮蘑菇",
+"lines": [
+{
+"text": "街煮蘑菇",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "街煮蘑菇",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "街煮蘑菇",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "街煮蘑菇",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO4-5.png",
+"role": "DKBO4",
+"page": 5,
+"item": 2,
+"truth": "貝類飯",
+"lines": [
+{
+"text": "貝類飯",
+"x": 423,
+"zoom": 3
+},
+{
+"text": "貝類飯",
+"x": 423,
+"zoom": 4
+},
+{
+"text": "貝類飯",
+"x": 423,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-1.png",
+"role": "DKBO5",
+"page": 1,
+"item": 1,
+"truth": "巨人俱樂部",
+"lines": [
+{
+"text": "巨人俱樂部",
+"x": 449,
+"zoom": 2
+},
+{
+"text": "巨人俱樂部",
+"x": 449,
+"zoom": 3
+},
+{
+"text": "巨人俱樂部",
+"x": 448,
+"zoom": 4
+},
+{
+"text": "巨人俱樂部",
+"x": 448,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-1.png",
+"role": "DKBO5",
+"page": 1,
+"item": 2,
+"truth": "特製厚肉片",
+"lines": [
+{
+"text": "特製厚肉片",
+"x": 447,
+"zoom": 2
+},
+{
+"text": "特製厚肉片",
+"x": 447,
+"zoom": 3
+},
+{
+"text": "特製厚肉片",
+"x": 447,
+"zoom": 4
+},
+{
+"text": "特製厚肉片",
+"x": 447,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-2.png",
+"role": "DKBO5",
+"page": 2,
+"item": 1,
+"truth": "雞蛋雜煮",
+"lines": [
+{
+"text": "雞蛋雜煮",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "雞蛋雜煮",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "雞蛋雜煮",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "雞蛋雜煮",
+"x": 435,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-2.png",
+"role": "DKBO5",
+"page": 2,
+"item": 2,
+"truth": "豆漿",
+"lines": [
+{
+"text": "豆漿",
+"x": 410,
+"zoom": 4
+},
+{
+"text": "豆漿",
+"x": 410,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-3.png",
+"role": "DKBO5",
+"page": 3,
+"item": 1,
+"truth": "生烤蔬菜串燒",
+"lines": [
+{
+"text": "生烤蔬菜串燒",
+"x": 460,
+"zoom": 2
+},
+{
+"text": "生烤蔬菜串燒",
+"x": 460,
+"zoom": 3
+},
+{
+"text": "生烤蔬菜串燒",
+"x": 460,
+"zoom": 4
+},
+{
+"text": "生烤蔬菜串燒",
+"x": 460,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-3.png",
+"role": "DKBO5",
+"page": 3,
+"item": 2,
+"truth": "烤筋肉",
+"lines": [
+{
+"text": "烤筋肉",
+"x": 422,
+"zoom": 3
+},
+{
+"text": "烤筋肉",
+"x": 422,
+"zoom": 4
+},
+{
+"text": "烤筋肉",
+"x": 422,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-4.png",
+"role": "DKBO5",
+"page": 4,
+"item": 1,
+"truth": "爛青菜的串燒",
+"lines": [
+{
+"text": "爛青菜的串燒",
+"x": 460,
+"zoom": 2
+},
+{
+"text": "燘青菜的串燒",
+"x": 460,
+"zoom": 3
+},
+{
+"text": "燘青菜的串燒",
+"x": 460,
+"zoom": 4
+},
+{
+"text": "燘青菜的串燒",
+"x": 460,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-4.png",
+"role": "DKBO5",
+"page": 4,
+"item": 2,
+"truth": "精心燉煮過的肉丸",
+"lines": [
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 2
+},
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 3
+},
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 4
+},
+{
+"text": "精心燉煮過的肉丸",
+"x": 485,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-5.png",
+"role": "DKBO5",
+"page": 5,
+"item": 1,
+"truth": "高級香草茶",
+"lines": [
+{
+"text": "高級香草茶",
+"x": 448,
+"zoom": 2
+},
+{
+"text": "高級香草茶",
+"x": 448,
+"zoom": 3
+},
+{
+"text": "高級香草茶",
+"x": 447,
+"zoom": 4
+},
+{
+"text": "高級香草茶",
+"x": 448,
+"zoom": 5
+}
+]
+},
+{
+"img": "tools/.cache/dp-DKBO5-5.png",
+"role": "DKBO5",
+"page": 5,
+"item": 2,
+"truth": "合成槍 5",
+"lines": [
+{
+"text": "合成槍5",
+"x": 435,
+"zoom": 2
+},
+{
+"text": "合成槍5",
+"x": 435,
+"zoom": 3
+},
+{
+"text": "合成槍5",
+"x": 435,
+"zoom": 4
+},
+{
+"text": "合成槍5",
+"x": 435,
+"zoom": 5
+}
+]
+}
+],
+"popup": [
+{
+"img": "tools/.cache/daily-probe/12-craft.png",
+"truth": "貝類飯",
+"name": [
+{
+"text": "貝類飯",
+"x": 481,
+"zoom": 4
+},
+{
+"text": "貝類飯",
+"x": 481,
+"zoom": 5
+}
+],
+"mats": [
+[
+{
+"text": "好吃的米",
+"x": 734,
+"zoom": 2
+},
+{
+"text": "好吃的米",
+"x": 735,
+"zoom": 3
+},
+{
+"text": "好吃的米",
+"x": 734,
+"zoom": 4
+},
+{
+"text": "好吃的米",
+"x": 735,
+"zoom": 5
+}
+],
+[
+{
+"text": "大的貝",
+"x": 724,
+"zoom": 2
+},
+{
+"text": "大的貝",
+"x": 724,
+"zoom": 3
+}
+],
+[
+{
+"text": "石幣",
+"x": 713,
+"zoom": 2
+},
+{
+"text": "石幣",
+"x": 714,
+"zoom": 3
+},
+{
+"text": "石幣",
+"x": 714,
+"zoom": 4
+},
+{
+"text": "石幣",
+"x": 713,
+"zoom": 5
+}
+],
+[]
+]
+}
+]
+}
