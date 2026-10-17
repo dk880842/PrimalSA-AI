@@ -274,7 +274,7 @@ def preflight(src: str, fast: bool = True) -> int:
     fast=True 且 watch 狀態夠新時（watch_preflight_ok）省掉 layout / netwatch / 畫面連讀（約 0.36 s → 約 0.02 s）；battle.lock 一律檢查。
     本視窗驗證停手旗標（verifyhalt.py）存在 → 9；但 watch 沒在跑時先現場連讀約 5 秒（verify_autoclear_now），已知正常畫面穩定 → 自動清掉照常往下
     （watch 在跑就交給 watch 清，這裡不讀畫面）。答題 / 驗證介面正面命中 → 立刻 9 + 設本視窗旗標（多視窗）；
-    連 3 次不認得回 9 但**不設旗標**（2026-10-16 使用者定案：設旗標只限答題介面正面命中或 watch 的 3 分鐘沒有進度兜底；trip_verify 會再現場確認一次）
+    連 3 次不認得回 9 但**不設旗標**（2026-10-16 使用者定案：設旗標只限答題介面正面命中；2026-10-18 拿掉 watch 3 分鐘兜底；trip_verify 會再現場確認一次）
     不認得但其實是已知面板殘留（close_known_panel：標題板字 + ✕ 都命中，背包另要外框兩顆鈕）→ 點 ✕ 關掉、不計次（最多 PREFLIGHT_CLOSE_MAX 次；
     答題介面 / 面板上疊已知彈窗先判，不會去關答題介面底下的面板）"""
     import battleguard
@@ -339,7 +339,7 @@ def preflight(src: str, fast: bool = True) -> int:
         if i < UNKNOWN_N:
             sleep(UNKNOWN_GAP_S)
     print(f'{src}：畫面連 {UNKNOWN_N} 次不認得，停手（不點；鐵則 5）', file=sys.stderr)
-    trip_verify(f'畫面連 {UNKNOWN_N} 次不認得', src)        # 只有答題介面正面命中才真的設旗標（其餘交給 watch 3 分鐘兜底）
+    trip_verify(f'畫面連 {UNKNOWN_N} 次不認得', src)        # 只有答題介面正面命中才真的設旗標（其餘不設旗標）
     return EXIT_UNKNOWN_SCREEN
 
 
@@ -817,14 +817,14 @@ def shot_getter(tag: str = 'img'):
 
 def trip_verify(reason: str, src: str) -> bool:
     """腳本判「疑似驗證視窗」要停手時呼叫：現場再讀一次，**只有答題介面正面命中（quiz_now）才設**本視窗停手旗標（多視窗；單一視窗不寫）。
-    沒認出答題介面 → 不設旗標，只印一行（腳本照樣自己停、不點；連續 3 分鐘沒有進度由 watch 兜底設）。使用者 2026-10-16 定案。測試可替換"""
+    沒認出答題介面 → 不設旗標，只印一行（腳本照樣自己停、不點；watch 只截圖存證）。使用者 2026-10-16 定案。測試可替換"""
     import verifyhalt
     try:
         quiz = quiz_now()
     except Exception:      # noqa: BLE001  讀不到 = 沒認出
         quiz = False
     if not quiz:
-        print(f'{src}：沒認出答題介面 → 不設驗證停手旗標（腳本自己停；watch 連續 3 分鐘沒有進度才兜底設）', file=sys.stderr)
+        print(f'{src}：沒認出答題介面 → 不設驗證停手旗標（腳本自己停；不設旗標）', file=sys.stderr)
         return False
     return verifyhalt.trip(f'{reason}（答題介面正面命中）', src)
 

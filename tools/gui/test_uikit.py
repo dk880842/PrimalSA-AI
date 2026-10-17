@@ -241,7 +241,7 @@ rc = uikit.preflight('t')
 check('preflight unknown 連 3 次 → 9（每次多讀轉場特徵 + 已知彈窗 + 已知面板殘留各一次，最後 trip_verify 再現場確認一次答題介面）',
       rc == 9 and g.reads == 13 and g.t >= 10.0, f'rc={rc} reads={g.reads} t={g.t}')
 check('preflight unknown 時 0 點擊', g.clicks == [])
-check('preflight unknown 連 3 次但沒認出答題介面 → 不設驗證停手旗標（2026-10-16：交給 watch 3 分鐘兜底）', _TRIPS == [], str(_TRIPS))
+check('preflight unknown 連 3 次但沒認出答題介面 → 不設驗證停手旗標（2026-10-16：不設旗標，2026-10-18 拿掉 watch 兜底）', _TRIPS == [], str(_TRIPS))
 # 答題介面（合成模擬圖，fixtures/verify_px.json）：preflight 第一次 unknown 就 9 + 設旗標，不等 3 次
 _vfx = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'verify_px.json').read_text(encoding='utf-8'))
 _vpts = [tuple(p) for p in _vfx['points']]

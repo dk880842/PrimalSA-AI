@@ -39,15 +39,12 @@
 - **安全實測法（不用真的斷線）**：①人在某個視窗自己登出到登入畫面（或剛開的遊戲停在登入畫面），跑 `PSA_CLIENT=<程序名> uv run --no-project python -c "import sys; sys.path.insert(0,'tools/gui'); import netwatch, accounts; print(netwatch.read_account(accounts.for_client()[1]))"`（唯讀，只印 self / other / unreadable）；②人把帳號欄改成另一個帳號再跑一次應得 other；③改呼叫 `netwatch.retype_account(...)`（會點帳號欄 / 清空 / 打字，不按登錄），回空字串 = 重打成功，人看畫面確認；④最後才 `netwatch.py --once` 整套（會按登錄）。
 
 ## 每視窗驗證停手旗標（verifyhalt.py，2026-10-15；同日下午改成各自視窗停手）
-**什麼時候設（使用者 2026-10-16 定案：正面辨識 + 3 分鐘兜底；鐵則 5「出現答題 / 驗證視窗立刻停手」精神不變）**：
+**什麼時候設（使用者 2026-10-16 定案：正面辨識；2026-10-18 使用者拿掉 3 分鐘兜底，設旗標只剩答題介面正面命中；鐵則 5「出現答題 / 驗證視窗立刻停手」精神不變）**：
 - 答題 / 驗證介面正面命中（`screen_sigs.quiz_screen`）→ **立刻**設：watch（第一輪就設、alerts.kind=quiz、截圖 `watch-alerts/quiz-*.png`）、`uikit.preflight`（第一次 unknown 就讀，不等 3 次）、quest.py（不等 3 次，退出碼 2）。
   特徵來源：沒有實機截圖，從 `GameClient/.../uiuinpcanswer_yhkrn.assetbundle`（唯讀）抽 prefab 版面與 sprite，`tools/extract/uimock.py` 合成 1440×830 模擬圖（`tools/.cache/npcanswer-extract/`）；
   大彈窗 bg_2（米色木框）約 x 312～1157 × y 185～703、標題板「知識答題」、4 張棕色選項卡（x 377 起每 179 px、y 304～548）、卡下淺棕底條、藍「確認」鈕（約 736, 609）、背景壓暗 ×0.4。
   畫布比例 k ≈ 1.0546 由 10-09 爬塔實測點擊座標（選項 463 / 643 / 822 / 1002, 430、確認 735, 610）反推。判定 = 7 組 34 點至少 26 點、7 組中 6 組過半；
-  tools/.cache 3108 張實機截圖 0 命中（最高 15 / 34、4 / 7 組）。**未實機**：實際版面有出入就只能靠兜底。
-- watch 看到不認得的畫面連續 **3 分鐘沒有進度** → 兜底設（alerts.kind=unknown_stuck）。「進度」= 下列任一，發生就從那一刻重新計時：
-  ①畫面：這輪全部取樣點（約 1100 點）與上次進度時相比，max(各通道差) > 60 的點佔 ≥ 30%（換了一個視窗；小動畫 / 壓暗背景閃動不算）；
-  ②座標：HUD 地圖座標讀值變了；③腳本動作：本視窗 actions.log 最後一筆（不含 watch / verifyhalt 自己寫的）變了。
+  tools/.cache 3108 張實機截圖 0 命中（最高 15 / 34、4 / 7 組）。**未實機**：實際版面有出入就認不出（腳本照樣自己停下不點、watch 截圖存證，但不會設旗標）。
 - 其他情況**不設旗標**：不認得的畫面腳本照樣自己停下、不點（preflight 9、quest.py 2、follow 暫停），`uikit.trip_verify` / `uikit.fail(…, 9)` 會現場再讀一次，沒認出答題介面就只印一行；
   watch 10 秒只截圖存證（`watch-alerts/unknown-*.png`）+ errlog + `alerts.unknown_long`（HUD「不認得的畫面」、`flags.unknown_screen`；`verify_suspect` 不亮；follow / VerifyGuard 照舊會暫停）；quest.py 的「連續 3 次不認得」警報 watch 只轉述顯示。
 - **網路異常窗**（10-16 08:00 三視窗同時斷線的死結根因：舊版 watch 把它當 unknown → 10 秒設旗標 → netwatch 看到旗標 exit 9 → 窗不會消失 → 旗標永遠清不掉）：

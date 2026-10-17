@@ -1407,7 +1407,7 @@ check('normal_screen：主畫面 / 跑路 / 戰鬥 / 認得的面板 / popup_* /
                                                                    ('idle', ['notice_dialog']), ('unknown', ['quiz']), ('idle', ['quiz']), ('error', []), ('minimized', []), (None, []))))
 verifyhalt.clear(why='test')
 
-# ---------------------------------------------------------------- 驗證停手重設計（使用者 2026-10-16：正面辨識 + 3 分鐘兜底、網路異常交給 netwatch）
+# ---------------------------------------------------------------- 驗證停手重設計（使用者 2026-10-16：正面辨識、網路異常交給 netwatch；2026-10-18 拿掉 3 分鐘兜底）
 TRIPS = []
 _real_trip = watch.trip_verify
 watch.trip_verify = lambda reason: TRIPS.append(reason) or True
@@ -1450,7 +1450,7 @@ fk.pixel = (0, px_out('idle'), '')
 run_s(w, clk, 8)
 check('答題介面消失 5 s 以上 → quiz 警報清除、errlog 補 fix', watchstate.read()['alerts'] == [] and errlog._read(errlog.LOG)[0]['fix'])
 
-# 2. 不認得的畫面：10 秒只截圖 / 警報、不 trip；沒有進度滿 180 秒才 trip（兜底）
+# 2. 不認得的畫面：10 秒只截圖 / 警報、不 trip；久留（10 分鐘）也不 trip（2026-10-18 拿掉 3 分鐘兜底）
 def run_to(w, clk, t_end, step=0.5):
     """跑到假時鐘 ≥ t_end（每輪讀圖本身也會讓假時鐘前進，所以用時鐘判斷、不數輪數）"""
     while clk.t < t_end:
@@ -1463,54 +1463,13 @@ TRIPS.clear()
 _t0 = clk.t
 run_s(w, clk, 12)
 check('unknown 12 s：unknown_long、沒有 trip', not TRIPS and [a['kind'] for a in watchstate.read()['alerts']] == ['unknown_long'])
-run_to(w, clk, _t0 + 175)
-check('unknown 175 s（未滿 180）：仍沒有 trip', not TRIPS and watchstate.read()['flags']['verify_suspect'] is False)
-run_to(w, clk, _t0 + 182)
+check('unknown_long 文案不再提 3 分鐘兜底', '3 分鐘' not in watchstate.read()['alerts'][0]['msg'], str(watchstate.read()['alerts']))
+run_to(w, clk, _t0 + 600)
 st = watchstate.read()
-check('unknown 且沒有進度滿 180 s → trip 一次、alerts.kind=unknown_stuck、verify_suspect',
-      len(TRIPS) == 1 and '沒有進度' in TRIPS[0] and [a['kind'] for a in st['alerts']] == ['unknown_stuck'] and st['flags']['verify_suspect'] is True, str((TRIPS, st['alerts'])))
-run_s(w, clk, 60)
-check('之後持續 unknown 不重複 trip', len(TRIPS) == 1)
+check('unknown 持續 10 分鐘、沒有進度 → 仍不 trip、alerts 只有 unknown_long、verify_suspect 不亮',
+      not TRIPS and [a['kind'] for a in st['alerts']] == ['unknown_long'] and st['flags']['verify_suspect'] is False, str((TRIPS, st['alerts'])))
+check('watch 不再有兜底常數 / 方法', not any(hasattr(watch, n) for n in ('UNKNOWN_HALT_S', 'PROGRESS_DIFF')) and not hasattr(watch.Watcher, '_progress'))
 
-
-# 3. 有進度不 trip：畫面大幅變化（換了一個不認得的視窗）/ 腳本動作 log 有新行 → 從那一刻重新計時
-def px_unk(base):
-    return (0, px_with(base=base), '')
-
-
-w, clk, fk = make('vr-prog-screen')
-TRIPS.clear()
-for i in range(8):                   # 每 60 秒換一個不同的不認得畫面（70 ↔ 200 灰：全部點 diff 130 > 60）
-    fk.pixel = px_unk('70,70,70' if i % 2 == 0 else '200,200,200')
-    run_s(w, clk, 60)
-check('unknown 8 分鐘但每 60 s 畫面大幅變化（有進度）→ 不 trip', not TRIPS and [a['kind'] for a in watchstate.read()['alerts']] == ['unknown_long'])
-fk.pixel = px_unk('70,70,70')
-_t1 = clk.t
-run_to(w, clk, _t1 + 175)
-check('最後一次變化後未滿 180 s → 不 trip', not TRIPS)
-run_to(w, clk, _t1 + 182)
-check('最後一次變化後滿 180 s 沒有進度 → trip', len(TRIPS) == 1)
-w, clk, fk = make('vr-prog-small')
-TRIPS.clear()
-fk.pixel = UNK
-_small = px_with(base='70,70,70').split()
-for i in range(0, len(_small), 10):
-    _small[i] = '200,200,200'        # 10% 的點變化（小動畫）不算進度
-for i in range(12):
-    fk.pixel = (0, ' '.join(_small), '') if i % 2 else UNK
-    run_s(w, clk, 16)
-check('只有 10% 的點在變（小動畫 / 閃動）→ 不算進度，滿 180 s trip', len(TRIPS) == 1)
-w, clk, fk = make('vr-prog-act')
-TRIPS.clear()
-fk.pixel = UNK
-for i in range(8):
-    run_s(w, clk, 60)
-    actlog.add('click', f'測試腳本動作 {i}')        # 本視窗腳本還在動作（actions.log 有新行）
-check('unknown 8 分鐘但腳本動作 log 每 60 s 有新行（有進度）→ 不 trip', not TRIPS)
-for i in range(8):
-    run_s(w, clk, 30)
-    actlog.add('watch', f'watch 自己寫的 {i}')       # watch / verifyhalt 自己寫的不算
-check('只有 watch 自己寫的 log → 不算進度，滿 180 s trip', len(TRIPS) == 1)
 
 # 4. 網路異常窗：已知畫面（不 unknown、不 trip）→ 3 秒後叫 netwatch --once；旗標在 / 動作鎖在 / 上一支還在跑 → 不叫
 w, clk, fk = make('vr-net')
@@ -1563,10 +1522,10 @@ check('quest「連續 3 次不認得」警報：只轉述顯示（alerts.kind=qu
 _b = {'v': 1, 'ts': time.time(), 'seq': 1, 'watcher': {'running': True, 'platform': winenv.platform_kind(), 'token': 't'}, 'flags': {'verify_suspect': False}}
 fresh_dir('vr-vs')
 _ok_vs = []
-for _k in ('unknown_long', 'unknown_stuck', 'quiz', 'quest_unknown'):
+for _k in ('unknown_long', 'quiz', 'quest_unknown'):
     watchstate.write({**_b, 'alerts': [{'kind': _k}]}, 'x')
     _ok_vs.append(watchstate.verify_suspect() is True)
-check('verify_suspect()（follow / VerifyGuard 用）：unknown_long / unknown_stuck / quiz / quest_unknown 都算（保守暫停）', all(_ok_vs), str(_ok_vs))
+check('verify_suspect()（follow / VerifyGuard 用）：unknown_long / quiz / quest_unknown 都算（保守暫停）', all(_ok_vs), str(_ok_vs))
 watch.trip_verify = _real_trip
 verifyhalt.clear(why='test')
 winenv.run_ps, winenv._server_wanted, winenv.server_alive = real_run_ps, real_wanted, real_alive

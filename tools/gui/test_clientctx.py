@@ -232,7 +232,7 @@ check('VerifyGuard.check → timeout（呼叫端停止）', vg.check() == 'timeo
 check('clear → 消失', verifyhalt.clear() and verifyhalt.active() is None and verifyhalt.main(['status']) == 0)
 check('clear 沒有旗標 → False', verifyhalt.clear() is False)
 
-# 設旗標的入口：uikit.fail(…, 9) / preflight（多視窗才寫；2026-10-16 起只有答題介面正面命中才設，其餘 watch 3 分鐘兜底）
+# 設旗標的入口：uikit.fail(…, 9) / preflight（多視窗才寫；2026-10-16 起只有答題介面正面命中才設，其餘不設，2026-10-18 拿掉 watch 3 分鐘兜底）
 import errlog  # noqa: E402
 _qn = uikit.quiz_now
 uikit.quiz_now = lambda: False
@@ -261,7 +261,7 @@ uikit.sleep = lambda *_: None
 _sa = uikit.screen_annot
 uikit.screen_annot = lambda: ({'state': 'unknown'}, [])
 uikit.quiz_now = lambda: False
-check('多視窗：preflight 連 3 次不認得 → 9 但不設旗標（交給 watch 3 分鐘兜底）', uikit.preflight('pf') == 9 and verifyhalt.active() is None)
+check('多視窗：preflight 連 3 次不認得 → 9 但不設旗標（不設旗標）', uikit.preflight('pf') == 9 and verifyhalt.active() is None)
 uikit.screen_annot = lambda: ({'state': 'unknown'}, ['quiz'])
 check('多視窗：preflight 看到答題介面 → 9 且設旗標', uikit.preflight('pf') == 9 and (verifyhalt.active() or {}).get('src') == 'pf')
 verifyhalt.clear()
@@ -395,10 +395,10 @@ layout.current, netwatch.guard = _lc2, _ng2
 uikit.verify_screen = lambda: VS_READS.append(1) or ('unknown', [], '不認得的畫面')
 os.environ['PSA_TEST_PROCS'] = _procs
 
-# watch.py：答題介面正面命中 / unknown 3 分鐘沒有進度兜底兩處 trip（quest 轉述只顯示，2026-10-16），state.flags 帶 verify_halt（靜態）
+# watch.py：只有答題介面正面命中一處 trip（quest 轉述只顯示，2026-10-16），state.flags 帶 verify_halt（靜態）
 ws = (GUI / 'watch.py').read_text(encoding='utf-8')
-check('watch.py：答題介面與 3 分鐘兜底兩處呼叫 trip_verify（quest 轉述不 trip）、flags 有 verify_halt',
-      ws.count('trip_verify(') == 3 and "trip_verify('watch：答題 / 驗證介面正面命中" in ws and "trip_verify(f'watch：不認得的畫面連續 {stuck} 秒沒有進度" in ws
+check('watch.py：只有答題介面正面命中呼叫 trip_verify（def + 1 處呼叫；quest 轉述不 trip）、flags 有 verify_halt',
+      ws.count('trip_verify(') == 2 and "trip_verify('watch：答題 / 驗證介面正面命中" in ws and 'unknown_stuck' not in ws
       and "trip_verify(f'watch 轉述 quest 警報" not in ws and "'verify_halt': verifyhalt.active() is not None" in ws)
 qs = (GUI / 'quest.py').read_text(encoding='utf-8')
 check('quest.py：答題介面正面命中 → verifyhalt.trip；連續 3 次不認得不再 trip',

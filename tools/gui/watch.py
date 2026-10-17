@@ -23,12 +23,9 @@
 （同 PSA_CLIENT；netwatch 自己的動作鎖 netwatch.act.lock 避免和腳本裡的 netwatch.guard 重複點；最多每 NET_SPAWN_GAP 秒一次、上一支還在跑就不再開）。
 watch 本身仍然不送任何輸入，點「確定」/ 重登都是 netwatch 做（AST 測試只准 _spawn_netwatch 這一處 Popen）。
 watch 不上傳截圖（只有警報觸發時唯讀存一張到 tools/.cache/watch-alerts/）；state 不能當點擊依據。
-**驗證停手（使用者 2026-10-16 定案：正面辨識 + 3 分鐘兜底）**：
+**驗證停手（使用者 2026-10-16 定案：正面辨識；2026-10-18 拿掉「3 分鐘沒有進度」兜底）**：
   - 答題 / 驗證介面（screen_sigs.quiz_screen，npcanswer prefab 推出的特徵，未實機）正面命中 → **立刻** alerts.kind=quiz + 截圖 + 設本視窗驗證停手旗標
-  - 其他不認得的畫面（unknown）連續 UNKNOWN_LONG_S（10）秒 → 只截圖存證、errlog、alerts.kind=unknown_long（state / HUD 顯示「不認得的畫面」），**不設旗標**
-  - 兜底：unknown 連續且「沒有進度」滿 UNKNOWN_HALT_S（180）秒 → alerts.kind=unknown_stuck + 設旗標。「進度」= 下列任一（發生就從那一刻重新計時）：
-      畫面：這輪全部取樣點與上次進度時的參考畫面相比，max(各通道差) > PROGRESS_DIFF（60）的點佔 ≥ PROGRESS_FRAC（30%）（換了視窗 / 大幅變化；
-            小動畫、壓暗背景的閃動不算）；座標：HUD 地圖座標讀值變了；腳本動作：本視窗 actions.log 最後一筆（不含 watch / verifyhalt 自己寫的）變了
+  - 其他不認得的畫面（unknown）連續 UNKNOWN_LONG_S（10）秒 → 只截圖存證、errlog、alerts.kind=unknown_long（state / HUD 顯示「不認得的畫面」），**不設旗標**（腳本自己停下不點）
   - quest.py 的「連續 3 次不認得」警報只轉述顯示（alerts.kind=verify），不再設旗標
   - 網路異常窗（net_lost）、登入 / 選角 / 載入畫面 = 已知畫面：不算 unknown，也算旗標自動清的正常畫面
 驗證停手旗標自動清（使用者 2026-10-16）：本視窗 verify-halt.json 存在時，每輪把畫面餵給 verifyhalt.AutoClear；
@@ -67,7 +64,7 @@ import winenv  # noqa: E402
 
 
 def trip_verify(reason: str) -> bool:
-    """答題介面正面命中（quiz）/ unknown 3 分鐘沒有進度（unknown_stuck）：多視窗時設本視窗驗證停手旗標（verifyhalt.py，只停這個視窗；單一視窗不寫，行為不變）。
+    """答題介面正面命中（quiz）：多視窗時設本視窗驗證停手旗標（verifyhalt.py，只停這個視窗；單一視窗不寫，行為不變）。
     watch 自己不停（零輸入，繼續監看），state.flags.verify_halt 會顯示。測試可替換"""
     return verifyhalt.trip(reason, 'watch')
 
@@ -101,11 +98,6 @@ PS_TIMEOUT = 8.0                  # stat / ocr
 OCR_EVERY = 3.0                   # 每 3 s 跑一次 stat.ps1（HUD 數值）
 HUD_STALE_S = 12.0                # 超過這麼久沒成功讀到 → hud.stale
 UNKNOWN_LONG_S = 10.0             # screen.state=unknown 連續這麼久 → alerts.unknown_long + 截圖存證（只顯示，不設旗標；2026-10-16）
-UNKNOWN_HALT_S = 180.0            # 兜底：unknown 連續且沒有進度這麼久 → alerts.unknown_stuck + 設驗證停手旗標（使用者 2026-10-16）
-PROGRESS_DIFF = 60                # 「畫面有進度」：取樣點 max(各通道差) 超過這個值才算變了
-PROGRESS_FRAC = 0.30              # 而且變了的點佔全部取樣點這個比例以上
-PROGRESS_LOG_EVERY = 2.0          # 讀 actions.log 最後一筆（腳本動作）的間隔
-PROGRESS_SKIP_KINDS = ('watch', 'verifyhalt')   # 這些類別的 actions.log 行是 watch / 旗標自己寫的，不算腳本動作
 NET_SPAWN_AFTER = 3.0             # 網路異常窗持續這麼久（先讓腳本裡的 netwatch.guard 自己處理）才叫 netwatch.py --once
 NET_SPAWN_GAP = 60.0              # 兩次叫 netwatch 至少間隔
 NET_ACT_STALE = 300.0             # netwatch.act.lock 超過這麼久當殘鎖（同 netwatch.relogin 的 300）
@@ -283,7 +275,6 @@ class Watcher:
         self.last_ppid_check = mono()
         self.pts = screen_sigs.points() + screen_sigs.annot_points() + screen_sigs.loading_points()   # classify 用 points()；annot_points() 是 annotate / enc_on 另外要的點；loading_points() = 「加載中」字形（2026-10-12）
         self.pts_arg = ' '.join(f'{x},{y}' for x, y in self.pts)
-        self.last_px = None
         self._flags_cache = None
         self.call_t0 = self.started
         # HUD 數值（stat.ps1 OCR 合併）：欄位級 {v, ts}；讀不到 / 被蓋住時保留舊值並標 stale
@@ -306,12 +297,7 @@ class Watcher:
         self.enc_on = None
         self.unknown_since = None        # 本地 monotonic
         self.known_since = None
-        self.unk_alert = None            # {'kind','since','msg','shot'} + 內部 'err_id'（unknown_long → unknown_stuck）
-        self.unk_prog_t = None           # unknown 期間最後一次「有進度」的 monotonic（兜底計時從這裡起算）
-        self.unk_ref = None              # 上次進度時的參考畫面（取樣點 → 顏色）
-        self.unk_pos = None              # 上次進度時的 HUD 座標
-        self.act_last = None             # actions.log 本視窗最後一筆腳本動作（進度判斷用）
-        self.last_actscan = -1e9
+        self.unk_alert = None            # {'kind','since','msg','shot'} + 內部 'err_id'
         self.quiz_alert = None           # 答題介面正面命中的警報（kind=quiz）+ 內部 'err_id'
         self.quiz_gone = None            # 答題介面消失的 monotonic（連續 CLEAR_S 秒沒看到才清警報）
         self.net_since = None            # 網路異常窗開始的 monotonic
@@ -507,7 +493,6 @@ class Watcher:
             self.cls = {k: c[k] for k in ('full', 'cmd', 'auto_off', 'gold', 'panel')}
             self.annot = screen_sigs.annotate(px, c)
             self.enc_on = screen_sigs.enc_on(px, c)
-            self.last_px = px
         else:
             new = kind                    # minimized / no_game / error / unsupported
             if kind != 'error':
@@ -570,14 +555,13 @@ class Watcher:
         return out
 
     def _suspect(self) -> bool:
-        """state.flags.verify_suspect：答題介面正面命中 / unknown 兜底停手 / quest 的 Clef 驗證警報轉述
+        """state.flags.verify_suspect：答題介面正面命中 / quest 的 Clef 驗證警報轉述
         （純 unknown_long、quest「連續 3 次不認得」quest_unknown 不算，HUD 只顯示「不認得的畫面」）"""
-        return (bool(self.quiz_alert) or any(a.get('kind') == 'verify' for a in self.q_alerts)
-                or (self.unk_alert or {}).get('kind') == 'unknown_stuck')
+        return bool(self.quiz_alert) or any(a.get('kind') == 'verify' for a in self.q_alerts)
 
     def _update_alerts(self) -> None:
         """答題介面正面命中 → 立刻 alerts.quiz + 截圖 + 設旗標（trip_verify）；
-        unknown 連續 UNKNOWN_LONG_S 秒 → alerts.unknown_long + 截圖 + errlog（不設旗標）；連續且沒有進度 UNKNOWN_HALT_S 秒 → unknown_stuck + 設旗標；
+        unknown 連續 UNKNOWN_LONG_S 秒 → alerts.unknown_long + 截圖 + errlog（不設旗標）；
         連續 CLEAR_S 秒都是已知畫面（或沒開遊戲 / 最小化）→ 清除並補 fix。error / unsupported 不計（既不累積也不清除）。
         登入 / 選角 / 載入 / 網路異常窗（ANNOT_KNOWN）算已知畫面（那是 netwatch / 轉場的範圍）。"""
         now = self.mono()
@@ -590,26 +574,12 @@ class Watcher:
             if self.unknown_since is None:
                 self.unknown_since = now
                 self.unknown_wall = self.clock()
-                self._progress_reset(now)
-            else:
-                why = self._progress(now)
-                if why:
-                    self._progress_reset(now)
             if self.unk_alert is None and now - self.unknown_since >= UNKNOWN_LONG_S:
                 shot = self._snap_alert()
-                eid = errlog.add(f'不認得的畫面連續 {int(UNKNOWN_LONG_S)} 秒以上（watch 只截圖存證、沒設停手旗標；連續 {int(UNKNOWN_HALT_S // 60)} 分鐘沒有進度才設）'
+                eid = errlog.add(f'不認得的畫面連續 {int(UNKNOWN_LONG_S)} 秒以上（watch 只截圖存證、沒設停手旗標）'
                                  + (f'；截圖 {shot}' if shot else ''), source='watch')
                 self.unk_alert = {'kind': 'unknown_long', 'since': self.unknown_wall, 'shot': shot, 'err_id': eid,
-                                  'msg': f'不認得的畫面（已截圖存證，未停手；連續 {int(UNKNOWN_HALT_S // 60)} 分鐘沒有進度才設停手旗標）'}
-            if (self.unk_alert is not None and self.unk_alert['kind'] == 'unknown_long'
-                    and now - max(self.unknown_since, self.unk_prog_t or self.unknown_since) >= UNKNOWN_HALT_S):
-                stuck = int(now - max(self.unknown_since, self.unk_prog_t or self.unknown_since))
-                shot = self._snap_alert() or self.unk_alert.get('shot')
-                errlog.add(f'疑似驗證視窗（兜底）：不認得的畫面連續 {stuck} 秒沒有進度（畫面 / 座標 / 腳本動作都沒變）→ 設驗證停手旗標，請人工確認'
-                           + (f'；截圖 {shot}' if shot else ''), source='watch')
-                self.unk_alert.update({'kind': 'unknown_stuck', 'shot': shot,
-                                       'msg': f'不認得的畫面 {stuck // 60} 分鐘沒有進度（兜底停手，可能是驗證視窗，請人工確認）'})
-                trip_verify(f'watch：不認得的畫面連續 {stuck} 秒沒有進度（兜底，疑似驗證視窗）')
+                                  'msg': '不認得的畫面（已截圖存證，未停手）'}
         elif st in NOGAME_STATES:
             self.unknown_since = self.known_since = None
             self._clear_unknown(st)
@@ -646,64 +616,6 @@ class Watcher:
             a, self.quiz_alert, self.quiz_gone = self.quiz_alert, None, None
             if a.get('err_id'):
                 errlog.fix(a['err_id'], f'答題介面已消失（畫面「{screen_sigs.label({"state": self.cur}, self.annot)}」），警報清除；旗標照 verifyhalt 規則自動清 / 人工清')
-
-    # ---- 兜底的「進度」判斷（unknown 期間）----
-    def _pos(self):
-        v = (self.hud.get('pos') or {}).get('v')
-        return json.dumps(v, ensure_ascii=False, sort_keys=True) if v is not None else None
-
-    def _progress_reset(self, now: float) -> None:
-        """記下這一刻當參考（畫面 / 座標 / 腳本動作），兜底計時從這裡重來"""
-        self.unk_prog_t = now
-        self.unk_ref = dict(self.last_px) if self.last_px else None
-        self.unk_pos = self._pos()
-        self.act_last = self._last_action(force=True) or self.act_last
-
-    def _progress(self, now: float):
-        """unknown 期間這輪有沒有進度 → 'screen' / 'pos' / 'action' / None（定義見檔頭）"""
-        px, ref = self.last_px, self.unk_ref
-        if px and ref:
-            changed = sum(1 for pt, c in px.items() if pt in ref and max(abs(a - b) for a, b in zip(c, ref[pt])) > PROGRESS_DIFF)
-            if changed >= PROGRESS_FRAC * len(px):
-                return 'screen'
-        pos = self._pos()
-        if pos is not None and pos != self.unk_pos:
-            return 'pos'
-        act = self._last_action()
-        if act is not None and act != self.act_last:
-            return 'action'
-        return None
-
-    def _last_action(self, force: bool = False):
-        """本視窗 actions.log 最後一筆腳本動作（主視窗 = 沒有「[程序名]」標記的行；其他視窗 = 帶自己標記的行；
-        不含 PROGRESS_SKIP_KINDS）。每 PROGRESS_LOG_EVERY 秒最多讀一次（只讀檔尾 32 KB）；沒讀 / 讀不到回 None"""
-        if not force and self.mono() - self.last_actscan < PROGRESS_LOG_EVERY:
-            return None
-        self.last_actscan = self.mono()
-        try:
-            with open(actlog.LOG, 'rb') as f:
-                f.seek(0, 2)
-                size = f.tell()
-                f.seek(max(0, size - 32768))
-                lines = f.read().decode('utf-8', errors='replace').splitlines()
-        except OSError:
-            return None
-        tag = clients.log_tag()
-        for ln in reversed(lines):
-            parts = ln.split(' ', 1)
-            if len(parts) < 2 or len(parts[0]) != 8 or parts[0][2:3] != ':':
-                continue
-            rest = parts[1]
-            if tag:
-                if not rest.startswith(tag):
-                    continue
-                rest = rest[len(tag):]
-            elif rest.startswith('['):
-                continue
-            if rest.split(' ', 1)[0] in PROGRESS_SKIP_KINDS:
-                continue
-            return ln
-        return None
 
     # ---- 網路異常窗 → 委派 netwatch（watch 自己不點）----
     def _maybe_netwatch(self) -> None:
@@ -784,7 +696,7 @@ class Watcher:
 
     def _scan_quest_log(self) -> None:
         """讀 quest-events.log 啟動後新增的行；比對 quest 的兩句警報開頭 → alerts.kind=verify（Clef 判斷）/ quest_unknown（連續 3 次不認得）（只轉述顯示；
-        2026-10-16 起不設旗標：quest.py 自己在答題介面正面命中時設，unknown 由 watch 的 3 分鐘兜底）。
+        2026-10-16 起不設旗標：quest.py 自己在答題介面正面命中時設，unknown 只由 watch 截圖存證，2026-10-18 拿掉 3 分鐘兜底）。
         檔案變小 = 被輪替 → offset 歸零；只消化到最後一個換行（寫到一半的行下次再讀）"""
         if self.mono() - self.last_qscan < QUEST_SCAN_EVERY:
             return

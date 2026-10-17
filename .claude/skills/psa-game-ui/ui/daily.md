@@ -95,7 +95,7 @@
 
 ## watch / 驗證視窗
 委託面板 / 快速合成彈窗開著時 HUD 變暗（ASS 254→127）、切換鈕 763,760 被面板下緣蓋住；`uikit.close_known_panel` 2026-10-17 起會先認 `uikit.QCRAFT / DAILY`（同一次讀圖）並點 ✕，preflight 遇到殘留面板會關掉而不是連 3 次不認得。
-委託面板與快速合成彈窗**還沒進 `screen_sigs.PANEL_X`**（只有探路 1 次樣本，不夠做 8 點統計 + fixture）：HUD 會顯示「不認得的畫面」，停留 3 分鐘才會兜底設旗標；daily 每次停留 < 1 分鐘。
+委託面板與快速合成彈窗**還沒進 `screen_sigs.PANEL_X`**（只有探路 1 次樣本，不夠做 8 點統計 + fixture）：HUD 會顯示「不認得的畫面」，只截圖存證、不設旗標；daily 每次停留 < 1 分鐘。
 便利店已由 719a2fe 認得（panel=shop）。第一次實跑後有多張樣本再補進 PANEL_X / PANEL_PTS / PANEL_TITLE。
 
 ## final-close：最後一環後面板沒合成鈕 / 彈窗晚開 / 走出口誤判（2026-10-17 p1 play-p1-daily5，離線測試、未實機）

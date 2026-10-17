@@ -322,7 +322,7 @@ class Follow:
         if now - self.unk_since > UNKNOWN_STOP_MIN * 60:
             errlog.add(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘，follow 停止，請人工檢查畫面（鐵則 5）', source=SRC)
             log(f'畫面不認得超過 {UNKNOWN_STOP_MIN} 分鐘 → 停手通知使用者')
-            uikit.trip_verify(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘', SRC)   # 答題介面正面命中才設本視窗旗標（其餘 watch 3 分鐘兜底，2026-10-16）
+            uikit.trip_verify(f'畫面不認得（{st}）超過 {UNKNOWN_STOP_MIN} 分鐘', SRC)   # 答題介面正面命中才設本視窗旗標（其餘不設，2026-10-18 拿掉 watch 3 分鐘兜底）
             return uikit.EXIT_UNKNOWN_SCREEN
         if not self.unk_logged:
             shot = self.alert_shot()
