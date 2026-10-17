@@ -21,6 +21,7 @@
           數字尾碼（合成爪 7 / 3）要 ≥2 倍率同意才確定，否則開快速合成彈窗讀大字 + 材料列 → dp.resolve_name（同族只差數字的用材料列分）；仍不確定 → 225 不猜
           快速合成彈窗（第二輪，p1 樣本 99 張）：大字框 380,398,204,50；材料列整欄一次讀（dp.pop_rows 依 y 分列）；▼ 亮（材料 4 種以上）且還分不出 → 材料列內拖一次再讀（pop_scroll）；
           合成前 dp.pop_check：材料列依序比對配方 + 一定要有大字證據（item-book 有 38 組材料完全相同的不同成品）；None 且 ▼ → 捲一次再核對、捲回頂端
+          大字投不出名字 → pop_name 隔 0.5 秒只重讀大字、最多 3 次（2026-10-17 修 p1 229：剛開彈窗大字全空；材料齊時字色仍是黃字，不是白字）；仍不行 229 + ui-log 存 daily-pop-fail 現場圖
   plan    離線：每人 10 項 → 配方 → 薩村 1009 / 漁村 2009 / 公倉胡椒 → 每人購買清單（不讀背包 / 倉庫格數）；沒給 --confirm-buy 停 221
   （便利店選商品：shopkit.select_item 標題逐倍率比對該店清單投票 title_is，第二輪離線 132/132）
   sam     into_shop → 5 人輪流沿櫃檯逐店買自己的薩村料（背包材料種類模型放不下 → 存個人倉庫；個人倉庫滿 → 公倉並記 in_public）
@@ -132,6 +133,8 @@ SUBMIT_XY = (1015, 685)
 REWARD_BOX = (960, 350, 110, 45)                                 # 「完成所有任務額外獎勵」計數 n/5（綠字 986～1044 × 358～387）
 POP_NAME_BOX = (380, 398, 204, 50)                               # 彈窗成品名黃字（置中 x≈481、y 415～431；8 字「精心燉煮過的肉丸」404～557，框容得下 item-book 最長 10 字名；
                                                                  #   離線 99 張 0 誤認：舊框 392,404,180,38 97/99、加寬但不加高的框掉到 83～89，2026-10-17 第二輪）
+POP_NAME_TRIES, POP_NAME_WAIT = 3, 0.5                          # 大字投票讀不出 → 只重讀大字（最多 3 次、隔 0.5 秒）：p1 2026-10-17 20:09 229 彈窗剛開大字 4 倍率全空、
+                                                                 #   同一彈窗 20:12 實機圖（材料 1/1 綠）用同參數讀得出且字色與舊樣本相同（黃字黑邊，不是白字）→ 推測剛開時還沒畫好 / OCR 逾時回空
 POP_LIST_BOX = (686, 228, 234, 402)                              # 彈窗材料列整欄一次讀（每行帶 y → dp.pop_rows 分列；視野 y 228～630、列距 92；99 張 0 誤認）
 POP_DOWN_PX = [(812, 626), (820, 626), (828, 626)]               # 材料列下緣黃 ▼（還有更多列；5 種材料 + 石幣要捲）
 POP_UP_PX = [(812, 242), (820, 242), (828, 242)]                 # 材料列上緣黃 ▲（拖過後才出現；短清單也會冒、會蓋住第 1 列右半）
@@ -463,8 +466,19 @@ class Tools:
         """（快速合成彈窗開著，剛開、還沒捲）成品名大字 + 材料列整欄的 OCR 原始行 + ▼ / ▲（dp.pop_mats / pop_check 吃這個 dict）"""
         cols = uikit.px(POP_DOWN_PX + POP_UP_PX) or []
         n = len(POP_DOWN_PX)
-        return {'name': uikit.ocr_lines(POP_NAME_BOX, *NAME_OPTS), 'list': uikit.ocr_lines(POP_LIST_BOX, *NAME_OPTS),
+        return {'name': self.pop_name(), 'list': uikit.ocr_lines(POP_LIST_BOX, *NAME_OPTS),
                 'down': dp.arrow_on(cols[:n]), 'up': dp.arrow_on(cols[n:])}
+
+    def pop_name(self) -> list:
+        """彈窗成品名大字 OCR 原始行；dp.vote_lines 投不出名字就等 POP_NAME_WAIT 秒重讀，最多 POP_NAME_TRIES 次（彈窗不在就不重讀）。
+        回最後一次的原始行（pop_check 照舊要大字證據，不放寬）"""
+        known = _recipes()
+        for i in range(POP_NAME_TRIES):
+            lines = uikit.ocr_lines(POP_NAME_BOX, *NAME_OPTS)
+            if dp.vote_lines(lines, known)['name'] or i == POP_NAME_TRIES - 1 or not uikit.is_open(uikit.QCRAFT):
+                return lines
+            uikit.sleep(POP_NAME_WAIT)
+        return []
 
     def pop_scroll(self, pop: dict) -> dict:
         """材料列內往上拖一次（捲到底）→ 等 1.8 秒 → 再讀材料列，存進 pop['list2'] / pop['up2']（dp.pop_mats 依序合併兩張）。彈窗不在就不拖"""
@@ -498,9 +512,10 @@ class Tools:
             ok = dp.pop_check(name, pop, _recipes())
             uikit.gui('seq', 'drag {2} {3} {0} {1}; wait {4}'.format(*POP_SCROLL, POP_SCROLL_MS), note='daily 快速合成材料列捲回頂端')
         if ok is not True:
+            shot = uikit.snap('daily-pop-fail')                   # 失敗現場存圖（ui-log），下次有實機證據
             close_pop()
             return False, (f'彈窗成品名 / 材料列對不上「{name}」（成品名 OCR 各倍率 {dp.vote_lines(pop["name"], [])["texts"]}、'
-                           f'材料列 {dp.pop_mats(pop, _recipes())["seq"]}，沒合成）')
+                           f'材料列 {dp.pop_mats(pop, _recipes())["seq"]}，沒合成；現場圖 {shot}）')
         if dp.popup_short(uikit.px(POP_COUNT_PX)):
             close_pop()
             return False, '彈窗材料計數有紅字（材料不足，沒合成）'

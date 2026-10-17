@@ -147,6 +147,52 @@ check('mats_fit：看到整張卻少一列 → False（不當 partial）', dp.ma
       and dp.mats_fit('特製2倍厚肉片', {'seq': ['大的大蒜', '幹燥肉'], 'complete': False}, RECIPES) is False)
 check('arrow_on：黃 → True；米色 / None → False', dp.arrow_on([(251, 228, 20)]) and not dp.arrow_on([(255, 221, 188)]) and not dp.arrow_on(None))
 
+# ---------------- 快速合成彈窗：實機材料齊（1/1 綠）+ 大字讀空重讀（p1 2026-10-17 20:09 229）----------------
+LV = PX['live_full']
+check('實機材料齊（1/1 綠）彈窗：成品名仍是黃字、同參數讀得出 → pop_check 合成弓箭8 True、計數不判紅',
+      dp.vote_lines(LV['name'], RECIPES)['sure'] and dp.pop_check(LV['truth'], LV, RECIPES) is True and not LV['short'] and not dp.popup_short([tuple(c) for c in LV['counts']]))
+check('實機材料齊彈窗：拿其他成品名核對一律不是（0 誤認）', not [o for o in TRUTHS if o != dp.norm(LV['truth']) and dp.pop_check(o, LV, RECIPES) is True])
+check('實機材料齊彈窗：大字讀空 → pop_check 不是 True（不放寬大字證據）', dp.pop_check(LV['truth'], dict(LV, name=[]), RECIPES) is not True)
+_kp = (uikit.ocr_lines, uikit.is_open, uikit.sleep, uikit.safe_click, uikit.px, uikit.snap, uikit.gui)
+_seq, _ocr_n, _sl, _clicks, _snaps = [], [], [], [], []
+try:
+    _open = [True]
+    uikit.ocr_lines = lambda box, *o: (_ocr_n.append(box), (_seq.pop(0) if _seq else []) if tuple(box) == daily.POP_NAME_BOX else LV['list'])[1]
+    uikit.is_open = lambda p: _open[0]
+    uikit.sleep = lambda t: _sl.append(t)
+    _seq[:] = [[], [], LV['name']]
+    got = daily.Tools().pop_name()
+    check('pop_name：前 2 次讀空 → 等 0.5 秒重讀，第 3 次讀到合成弓箭8', got == LV['name'] and len(_ocr_n) == 3 and _sl == [daily.POP_NAME_WAIT] * 2, f'{len(_ocr_n)} {_sl}')
+    _ocr_n.clear(); _sl.clear(); _seq[:] = [LV['name']]
+    check('pop_name：第一次就讀到 → 不重讀、不等', daily.Tools().pop_name() == LV['name'] and len(_ocr_n) == 1 and not _sl)
+    _ocr_n.clear(); _sl.clear(); _seq[:] = []
+    check('pop_name：3 次都空 → 回空、只讀 3 次', daily.Tools().pop_name() == [] and len(_ocr_n) == daily.POP_NAME_TRIES == 3 and len(_sl) == 2)
+    _ocr_n.clear(); _sl.clear(); _open[0] = False
+    check('pop_name：彈窗不在 → 不重讀', daily.Tools().pop_name() == [] and len(_ocr_n) == 1 and not _sl)
+    # craft_item：大字 3 次全空 → 不按合成、存現場圖、回失敗（229 路徑）
+    _open[0] = True; _seq[:] = []
+    uikit.safe_click = lambda x, y, panel=None, note='', **k: (_clicks.append(note), True)[1]
+    uikit.px = lambda pts, cmd='pixel': [(223, 187, 147)] * len(pts)
+    uikit.snap = lambda tag: (_snaps.append(tag), 'tools/.cache/ui-log/x.png')[1]
+    uikit.gui = lambda *a, **k: ''
+    ok, why = daily.Tools().craft_item(0, '合成弓箭8')
+    check('craft_item：大字 3 次全空 → 不合成、存現場圖、原因帶圖路徑',
+          not ok and not any('1000 石幣' in n for n in _clicks) and _snaps == ['daily-pop-fail'] and 'ui-log/x.png' in why, f'{ok} {why} {_clicks}')
+    # craft_item：剛開讀空、重讀到大字 → 照常合成（按合成鈕）
+    _clicks.clear(); _snaps.clear(); _seq[:] = [[], LV['name']]
+    def _px(pts, cmd='pixel'):
+        if list(pts) == [daily.STATE_PX[0]]:
+            return [(0, 200, 0)]                                     # 合成後該項綠
+        if list(pts) == daily.POP_COUNT_PX:
+            return [tuple(c) for c in LV['counts']]
+        return [(223, 187, 147)] * len(pts)
+    uikit.px = _px
+    ok, why = daily.Tools().craft_item(0, '合成弓箭8')
+    check('craft_item：剛開大字讀空、重讀到 → 照常按合成（花 1000 石幣）且不存失敗圖',
+          any('1000 石幣' in n for n in _clicks) and not _snaps, f'{ok} {why} {_clicks}')
+finally:
+    uikit.ocr_lines, uikit.is_open, uikit.sleep, uikit.safe_click, uikit.px, uikit.snap, uikit.gui = _kp
+
 # ---------------- 便利店標題（fixtures/daily_shop_titles.json = p1 2026-10-17 11 間店 × 12 張）----------------
 SX = json.loads((Path(__file__).resolve().parent / 'fixtures' / 'daily_shop_titles.json').read_text(encoding='utf-8'))
 STORES, _ = dp.load_stores()
