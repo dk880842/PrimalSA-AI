@@ -73,7 +73,8 @@
            2. 沒有 → 在追蹤列表先用標題圖片樣板比對（titlematch，0.7 秒）、沒樣板 / 沒找到才用 OCR（ocr.ps1，成功會存樣板）找 --task 那一格，必要時捲動列表，確認標題相符才點 → 開始（繼續）巡路
   轉場     載入畫面（「加載中」字形 / 英文版「Loading...」綠橘雙進度條〔進度無關，綠條剛開始很短也認〕/ 舊三點）或全黑 → 等待、不點、不計入不認得（screen_sigs.transition）；
            同一串連續超過 LOADING_MAX_S=60 秒 → 存 snap loading-stuck、退出碼 43（questrun / rebirth 重跑同一片，stuckrecover.RETRY_RC）。
-  不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 存圖、印警告、退出碼 2（鐵則 5：交給使用者）；
+  浮窗     完整戰鬥上疊寵物資訊浮窗（screen_sigs.battle_tip，整畫面壓暗；2026-10-17）→ 當戰鬥、不點，等它消失（TIP_MAX_S=90 秒後才落回不認得）。
+  不認得   連續 3 次且滿 UNKNOWN_CONFIRM_SECS 秒都不是以上任何狀態（答題 / 驗證視窗、讀取中卡住…）→ 停手前再重讀一次（unknown_recheck：已是主畫面 / 跑路 / 戰鬥 = 過場不停、載入圖 = 改等載入），仍不認得才存圖、印警告、退出碼 2（鐵則 5：交給使用者）；
            每一串的第 1 次另存 *-unknown1.png（事後看得到前面是什麼畫面）。第 2 次起先試 close_stray_panel（已知殘留面板 / 快速組隊「提示」只點 ✕）
   追蹤沒反應 點了任務追蹤約 5 秒（TRACK_RETRY_SECS 重點一次、再等一輪）都沒進入巡路 / 對話 / 戰鬥 → 退出碼 3，改手動（walk.py + 點 NPC）
   預設模式 BOSS 戰收尾（errlog #68，2026-10-11；**2026-10-17 起只在 --boss-team-check 時做**：使用者定只限紅暴 2031 / 四寶玉之謎 2010〔questdefs boss_team_check〕、
@@ -153,6 +154,7 @@ SHOT_EXTS = ('.png', '.jpg', '.jpeg')
 DEFAULT_EVERY = 1.0                  # --every 預設（一般 / --solo / --fight 都是；舊值 2.5 / 1.5）
 IDLE_CONFIRM_SECS = 2.5              # 連續閒置至少這麼久（且連續 >= 2 次）才算「這步結束 / 戰鬥打完」（舊：2 次 × 2.5 秒）
 UNKNOWN_CONFIRM_SECS = 5.0           # 連續 3 次不認得 + 至少這麼久才停手（舊：3 次 × 2.5 秒 ≈ 5 秒；鐵則 5 的 3 次規則仍在，只是多一道時間條件）
+TIP_MAX_S = 90.0                     # 戰鬥上疊寵物資訊浮窗（battle_tip）最多當戰鬥等這麼久；超過就回到不認得規則（實測浮窗 25 秒內自己消失）
 SELECT_LOOP_MAX = 6                 # 選擇對象面板在「沒領獎 / 戰鬥 / 巡路」期間累計點幾次就停（退出碼 29）
 SELECT_MAX_TRIES = 4                # 「選擇對象」面板連續出現幾輪還沒消失就不再點（交給不認得規則）
 TRACK_RETRY_SECS = 2.5               # 點了任務追蹤後，等這麼久沒反應才算 1 次失敗（重點一次；連續 2 次失敗退出碼 3，約 5 秒）
@@ -278,6 +280,8 @@ def read_screen() -> dict:
         return {'state': 'error', 'raw': out[:3]}
     px = dict(zip(allp, cols))
     r = screen_sigs.classify(px)
+    if r['state'] == 'unknown':          # 診斷用（2026-10-17）：不認得時 log 帶取樣點平均亮度，事後分得出「過場暗畫面」與「亮的彈窗」（存證圖會晚約 1 秒、常已恢復）
+        r = dict(r, lum=round(sum(sum(c) for c in cols) / (3 * len(cols))))
     if r['state'] in ('idle', 'unknown') and button_probe_ok(px) and fight_button_open():
         r = dict(r, state='dialog', fight_fallback=True)
     elif r['state'] in ('idle', 'unknown') and bye_probe_ok(px) and bye_button_only():
@@ -334,9 +338,34 @@ def quiz_screen() -> bool:
     return len(cols) == len(pts) and screen_sigs.quiz_screen(dict(zip(pts, cols)))
 
 
+def battle_tip_screen() -> bool:
+    """現場讀一次 → 完整戰鬥上疊「寵物資訊浮窗」（screen_sigs.battle_tip，2026-10-17）且**不是**答題介面。讀不到 = False（照不認得處理）"""
+    pts = list(dict.fromkeys(screen_sigs.battle_tip_points() + screen_sigs.quiz_points()))
+    try:
+        out = gui('pixel', ' '.join(f'{x},{y}' for x, y in pts)).split()
+        cols = [tuple(int(v) for v in c.split(',')) for c in out]
+    except Exception:
+        return False
+    if len(cols) != len(pts):
+        return False
+    px = dict(zip(pts, cols))
+    return screen_sigs.battle_tip(px) and not screen_sigs.quiz_screen(px)
+
+
 def loading_screen() -> bool:
     """相容舊名：是不是轉場畫面（載入圖 / 全黑）"""
     return transition_screen() is not None
+
+
+RECHECK_OK = ('walking', 'idle', 'battle')   # 停手前重讀是這些才算「過場」；dialog 不算（驗證視窗是 NpcScript，可能像對話框）、select 不算（點了還在的選擇面板本來就會被降成 unknown）
+
+
+def unknown_recheck(state, trans) -> str:
+    """純函式：連 3 次不認得、停手前重讀的結果 → 'resume'（已是主畫面 / 跑路 / 戰鬥 RECHECK_OK：過場，不停手）/ 'loading'（載入圖：改等載入）/ 'stop'（照舊停手）。
+    state = 重讀的 classify 狀態；trans = 重讀仍不認得時 transition_screen() 的結果（'loading' / 'black' / None）。全黑不算（沒有正面特徵，鐵則 5 從嚴）"""
+    if state in RECHECK_OK:
+        return 'resume'
+    return 'loading' if state == 'unknown' and trans == 'loading' else 'stop'
 
 
 def transition_wait(t0: float, now: float) -> bool:
@@ -2040,6 +2069,7 @@ def _run(a) -> int:
     unknown = 0
     unknown_t0 = 0.0             # 這一串不認得的第一次時間
     trans_t0 = 0.0               # 這一串轉場畫面（載入圖 / 全黑）的第一次時間；0 = 不在轉場
+    tip_t0 = 0.0                 # 這一串「戰鬥上疊寵物資訊浮窗」的第一次時間；0 = 沒有浮窗
     track_fail = 0
     track_t = 0.0                # 最後一次點任務追蹤的時間（TRACK_RETRY_SECS）
     idle_t0 = 0.0                # 這一串閒置的第一次時間（IDLE_CONFIRM_SECS）
@@ -2154,6 +2184,19 @@ def _run(a) -> int:
         nap = a.every                # 這一輪結束後睡多久（戰鬥中刷新角色快到期時縮短，見 battle 分支）
         s = read_screen()
         st = s['state']
+        if st == 'unknown' and battle_tip_screen():
+            # 2026-10-17 p2：--fast-dialog 無腦第二下（948,461）在任務戰開打後點到己方寵物 → 寵物資訊浮窗 + 整畫面壓暗，
+            # 舊版當不認得連 3 次 → rc 2（questrun rc 9）。改當「完整戰鬥（演出中）」：照常記戰鬥開始，但 battle 分支看到 tip 不點任何東西，等浮窗自己消失
+            now = time.time()
+            if not tip_t0:
+                tip_t0 = now
+                event('完整戰鬥上疊寵物資訊浮窗（screen_sigs.battle_tip；不是答題介面）→ 當戰鬥中，不點、等它自己消失'
+                      f'（上限 {TIP_MAX_S:.0f} 秒，超過照不認得規則）', snap('battle-tip'))
+            if now - tip_t0 <= TIP_MAX_S:
+                st = 'battle'
+                s = dict(s, state='battle', full=True, cmd=False, auto_off=False, tip=True)
+        elif st != 'unknown':
+            tip_t0 = 0.0
         wclock.tick(st, time.time())
         if st in ('idle', 'walking', 'dialog', 'reward'):
             if in_battle:
@@ -2349,6 +2392,10 @@ def _run(a) -> int:
                     return EXIT_REWARD_STUCK
                 event(f'已領 {rewards} 次獎勵視窗，停止（--stop-after-rewards）' + (f'；停手前又關了 {extra} 個領獎窗' if extra else ''))
                 return finish(a)
+        elif st == 'battle' and s.get('tip'):
+            # 戰鬥上疊寵物資訊浮窗（模態遮罩）：不按逃跑 / 自動戰鬥 / 刷新角色（點下去會落在遮罩上，行為未驗證），只等浮窗消失
+            if in_battle_new:
+                auto_presses, last_refresh_t, refresh_tries, row_clicks = 0, 0.0, 0, 0
         elif st == 'battle':
             # 手動逃跑模式（--solo / --fight）：路上小怪只逃、不刷新；任務 / BOSS 戰（--fight 且點 NPC / 對話後 QUEST_BATTLE_WINDOW 內開始）開自動戰鬥 + 刷新角色。
             # 組隊預設模式：每一場戰鬥都刷新（完整戰鬥先確保自動戰鬥開）
@@ -2639,6 +2686,26 @@ def _run(a) -> int:
             if unknown >= 2 and close_stray_panel():       # 戰鬥剛結束時「刷新角色」的 850,765 會點到主畫面的「組隊」鈕（2026-10-11 小豬愛情故事）→ 已知面板直接關，不算驗證視窗
                 unknown = 0
                 continue
+            if unknown >= 3 and time.time() - unknown_t0 >= UNKNOWN_CONFIRM_SECS and st == 'unknown':
+                # 停手前再看一次（2026-10-17）：
+                #  p3 21:26 bow16：3 次現場讀點都是過場（UI 全藏、沒有金黃字），但 unknown1 / UNKNOWN 兩張存證圖（各晚約 1 秒）都是 Auto Walking 跑路；
+                #    p2 / p3 歷來 538 張 unknown1 存證圖離線判都是跑路 = 換圖過場一閃而過，剛好連中 3 次就誤停。
+                #  p2 21:07：前 3 次是設置 →「解決異常」確認窗（不是腳本點的），停手前那一刻已換成「加載中」。
+                # 重讀一次：已是主畫面 / 跑路 / 戰鬥（RECHECK_OK）→ 這串不算、繼續（下一輪照常處理）；載入圖 → 改走載入等待（上限 LOADING_MAX_S → 43）；仍不認得才停手。
+                # 驗證 / 答題視窗不會一秒內自己消失，所以不放寬鐵則 5（答題介面正面命中在上面就已立刻停手）。
+                s2 = read_screen()
+                if s2.get('state') == 'unknown' and (not tip_t0 or time.time() - tip_t0 <= TIP_MAX_S) and battle_tip_screen():
+                    s2 = dict(s2, state='battle', tip=True)     # 戰鬥上疊寵物資訊浮窗：下一輪迴圈開頭會照浮窗規則處理
+                verdict = unknown_recheck(s2.get('state'), transition_screen() if s2.get('state') in ('unknown', 'error') else None)
+                if verdict == 'resume':
+                    log(f'不認得的畫面連 3 次，停手前重讀已是「{s2.get("state")}」→ 是過場，不停手（重新計數）')
+                    unknown = 0
+                    continue
+                if verdict == 'loading':
+                    log('不認得的畫面連 3 次後已換成載入畫面（加載中）→ 改等載入，不停手')
+                    unknown, trans_t0 = 0, time.time()
+                    time.sleep(1.0)
+                    continue
             if unknown >= 3 and time.time() - unknown_t0 >= UNKNOWN_CONFIRM_SECS:
                 shot = snap('UNKNOWN')
                 event('警告：連續 3 次遇到不認得的畫面（可能是答題 / 防腳本驗證視窗）→ 停止自動操作，請使用者處理', shot)

@@ -323,6 +323,11 @@ def preflight(src: str, fast: bool = True) -> int:
             if kp:
                 mark(f'preflight({kp})')
                 return EXIT_OK
+            if 'battle_tip' in ann:                       # 戰鬥上疊寵物資訊浮窗（2026-10-17）：同轉場，等它自己消失、不計次（最多 TRANSITION_MAX_S 秒，之後照舊計次）
+                t_trans = clock() if t_trans is None else t_trans
+                if clock() - t_trans < screen_sigs.TRANSITION_MAX_S:
+                    sleep(1.0)
+                    continue
         if st == 'unknown' and closed < PREFLIGHT_CLOSE_MAX:
             name = close_known_panel()                    # 別的工具 / 手動留下的已知面板（背包 / 寵物 / 倉庫…，標題板字 + ✕ 都命中）→ 點 ✕ 關掉，不計次
             if name:                                      # 2026-10-15 PrimalSA2：bag.py 留下背包面板 → pet.py list 連 3 次不認得 → verify-halt

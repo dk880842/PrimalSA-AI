@@ -332,8 +332,8 @@ check('全黑轉場：annotate=[black]、label=黑畫面（轉場）', c['state'
 bk[S.BLACK_PTS[3]] = (S.BLACK_MAX, 0, 0)
 check('黑畫面：任一點亮度 ≥ BLACK_MAX → 不是黑畫面', S.annotate(bk, S.classify(bk)) == [])
 check('黑 / 載入只在 classify=unknown 時附註（idle 畫面剛好暗不算）', S.annotate({**bk, **{pt: (0, 0, 0) for pt in S.BLACK_PTS}}, {'state': 'idle'}) == [])
-check('ANNOT_KNOWN = login / charsel / loading / black / net_lost + 三種面板上已知彈窗 + 背包刪除確認窗 + 道具說明彈窗（quiz 不在內）',
-      set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'net_lost', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item'})
+check('ANNOT_KNOWN = login / charsel / loading / black / net_lost + 三種面板上已知彈窗 + 背包刪除確認窗 + 道具說明彈窗 + 戰鬥寵物資訊浮窗（quiz 不在內）',
+      set(S.ANNOT_KNOWN) == {'login', 'charsel', 'loading', 'black', 'net_lost', 'popup_keypad', 'popup_qty', 'popup_confirm', 'popup_delok', 'popup_item', 'battle_tip'})
 
 # ---- 6. 面板上疊已知彈窗（2026-10-12，watch 誤報 #243 #244 #254 #261 #264）----
 PP = json.loads((HERE / 'fixtures' / 'popup_px.json').read_text(encoding='utf-8'))
@@ -443,8 +443,9 @@ check('watch 用的 loading_points 含進度條點（英文版載入圖 watch �
 # ---- 背包刪除管理：刪除模式 / 刪除確認窗（2026-10-15 p1 purge 誤設驗證停手旗標）----
 _dfx = _json.loads((HERE / 'fixtures' / 'bag_del_px.json').read_text(encoding='utf-8'))
 _dpts = [tuple(p) for p in _dfx['points']]
-check('bag_del fixture 取樣點 == watch 讀的點（points + annot_points + loading_points）',
-      _dpts == list(dict.fromkeys(S.points() + S.annot_points() + S.loading_points())))
+_wnow = list(dict.fromkeys(S.points() + S.annot_points() + S.loading_points()))
+check('bag_del fixture 取樣點 == watch 讀的點的前綴（points + annot_points + loading_points；10-17 起尾端多 battle_tip 點）',
+      _wnow[:len(_dpts)] == _dpts and set(_wnow[len(_dpts):]) <= set(S.battle_tip_points()))
 check('watch 的點含 delok_points（確認窗框 + 壓暗背景 + 綠字格 + 標題板）', set(S.delok_points()) <= set(_dpts))
 
 
@@ -554,8 +555,10 @@ check('ANNOT_KNOWN 含 popup_item', 'popup_item' in S.ANNOT_KNOWN)
 # ---- 驗證停手重設計（2026-10-16）：網路異常窗字形 net_lost / 答題介面 quiz（fixtures/verify_px.json，make_fixtures --only verify）----
 _vfx = _json.loads((HERE / 'fixtures' / 'verify_px.json').read_text(encoding='utf-8'))
 _vpts = [tuple(p) for p in _vfx['points']]
-check('verify fixture 取樣點 == watch 讀的點（含 net_points / quiz_points）',
-      _vpts == list(dict.fromkeys(S.points() + S.annot_points() + S.loading_points())) and set(S.net_points() + S.quiz_points()) <= set(_vpts))
+_wpts = list(dict.fromkeys(S.points() + S.annot_points() + S.loading_points()))
+# 10-16 產的 fixture：取樣點 = 當時 watch 讀的點；之後 watch 只在尾端加點（10-17 battle_tip_points），所以舊取樣點必須是現在的前綴（部分原圖已刪，不能重產）
+check('verify fixture 取樣點 == watch 讀的點的前綴（含 net_points / quiz_points；之後只多 battle_tip 點）',
+      _wpts[:len(_vpts)] == _vpts and set(_wpts[len(_vpts):]) <= set(S.battle_tip_points()) and set(S.net_points() + S.quiz_points()) <= set(_vpts))
 _vsmp, _vbad, _vcnt = {}, [], {'net_lost': 0, 'quiz': 0, None: 0}
 for smp in _vfx['samples']:
     h = smp['px']
@@ -610,6 +613,50 @@ check('normal_screen：quiz 永遠不正常；登入 / 選角 / 載入 / 網路�
       not S.normal_screen('idle', ['quiz']) and not S.normal_screen('unknown', ['quiz'])
       and all(S.normal_screen('unknown', [a]) for a in ('login', 'charsel', 'loading', 'net_lost'))
       and not S.normal_screen('unknown', ['black']) and not S.normal_screen('unknown', ['notice_dialog']) and not S.normal_screen('unknown', []))
+
+# ---- 戰鬥上疊寵物資訊浮窗（screen_sigs.battle_tip，2026-10-17 p2 rc 9 ×4；fixtures/battle_tip_px.json，make_fixtures --only battle_tip）----
+_tfx = _json.loads((HERE / 'fixtures' / 'battle_tip_px.json').read_text(encoding='utf-8'))
+_tpts = [tuple(p) for p in _tfx['points']]
+check('battle_tip fixture 取樣點 == watch 讀的點（含 battle_tip_points）', _tpts == _wpts and set(S.battle_tip_points()) <= set(_tpts))
+_tsmp, _tbad = {}, []
+for smp in _tfx['samples']:
+    h = smp['px']
+    px = {pt: (int(h[i * 6:i * 6 + 2], 16), int(h[i * 6 + 2:i * 6 + 4], 16), int(h[i * 6 + 4:i * 6 + 6], 16)) for i, pt in enumerate(_tpts)}
+    _tsmp[smp['f']] = px
+    c = S.classify(px)
+    a = S.annotate(px, c)
+    want = smp['expect']
+    ok_ = S.battle_tip(px) == (want == 'battle_tip') and (a[:1] == [want] if want else 'battle_tip' not in a)
+    if want == 'battle_tip':
+        ok_ = ok_ and c['state'] == 'unknown' and S.normal_screen(c['state'], a) and S.label(c, a) == '戰鬥中（寵物資訊浮窗）'
+    if not ok_:
+        _tbad.append((smp['f'], want, c['state'], a))
+_tn = sum(smp['expect'] == 'battle_tip' for smp in _tfx['samples'])
+check(f'battle_tip：{len(_tfx["samples"])} 張實機 / 模擬樣本（{_tn} 張浮窗含「關閉」列蓋住的變體；解決異常確認窗 / 加載中 / 一般戰鬥 / 答題模擬圖 / 壓暗外掛面板）全對',
+      not _tbad and _tn >= 4, str(_tbad))
+_t = _tsmp['clients/PrimalSA2/quest-log/211413-UNKNOWN.png']
+check('浮窗：不壓暗（k=1，一般戰鬥 + 深棕方塊）→ 不認', not S.battle_tip({**_t, **{(x, y): (r, g, b) for x, y, r, g, b, _ in S.SIG_BATTLE}}))
+check('浮窗：整張壓暗 ×0.4（答題介面遮罩的比例）→ 不認',
+      not S.battle_tip({**_t, **{(x, y): tuple(int(v * 0.4) for v in (r, g, b)) for x, y, r, g, b, _ in S.SIG_BATTLE}}))
+_g = dict(_t)
+for pt in [(x, y) for x, y in S.TIP_GRID if y in (140, 180)][:5]:
+    _g[pt] = (240, 213, 178)
+check('浮窗外有一片沒壓暗的米色（別的面板 / 答題介面）→ 不認', not S.battle_tip(_g))
+_g = dict(_t)
+for pt in [(x, y) for x, y in S.TIP_GRID if 820 <= x <= 1020 and 280 <= y <= 440]:
+    _g[pt] = (30, 30, 30)
+check('浮窗底色不是 (38,28,16) 實色 → 不認', not S.battle_tip(_g))
+_g = dict(_t)
+for pt in [(x, y) for x, y in S.TIP_GRID if 400 <= x <= 1200 and 140 <= y <= 620]:
+    _g[pt] = S.TIP_BG
+check('深棕實色大到不像浮窗（> 7 欄 × 6 列）→ 不認', not S.battle_tip(_g))
+_v = _tsmp['clients/PrimalSA2/quest-log/213157-unknown1.png']
+_g = dict(_v)
+for x, y, *_ in S.TIP_ROW_SIG:
+    _g[(x, y)] = (97, 83, 68)
+check('「關閉」列蓋住浮窗的變體：列也被壓暗（不是在遮罩上層）→ 不認', not S.battle_tip(_g))
+check('battle_tip 缺點 → False', not S.battle_tip({}) and not S.battle_tip({pt: c for pt, c in _t.items() if pt not in set(S.TIP_GRID[:3])}))
+check('annotate：classify 不是 unknown（例：有 HUD 的主畫面）不判浮窗', 'battle_tip' not in S.annotate(_t, {'state': 'idle'}))
 
 print('\n全部通過' if not fails else f'\n{fails} 項失敗')
 sys.exit(1 if fails else 0)

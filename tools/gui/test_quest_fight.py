@@ -395,6 +395,44 @@ ok &= check('轉場中間回過主畫面 → 計時重來（兩段各自 < 上�
 ok &= check('transition_wait：上限內 True、超過 False', quest.transition_wait(100.0, 100.0 + quest.LOADING_MAX_S - 1) and not quest.transition_wait(100.0, 100.0 + quest.LOADING_MAX_S))
 quest.transition_screen = _keep_tr
 
+print('(k5) 停手前重讀（2026-10-17 p3 bow16 212648：過場連中 3 次，存證圖其實是 Auto Walking；p2 21:07 解決異常窗 → 加載中）')
+ok &= check('unknown_recheck：重讀是 walking / idle / battle → resume；dialog / select / panel 不算過場 → stop',
+            all(quest.unknown_recheck(x, None) == 'resume' for x in ('walking', 'idle', 'battle'))
+            and all(quest.unknown_recheck(x, None) == 'stop' for x in ('dialog', 'select', 'panel', 'reward')))
+ok &= check('unknown_recheck：重讀仍不認得 + 載入圖 → loading；全黑 / 沒特徵 / 讀失敗 → stop',
+            quest.unknown_recheck('unknown', 'loading') == 'loading' and quest.unknown_recheck('unknown', 'black') == 'stop'
+            and quest.unknown_recheck('unknown', None) == 'stop' and quest.unknown_recheck('error', 'loading') == 'stop' and quest.unknown_recheck(None, None) == 'stop')
+s = Script([UNK] * 6 + [WALK])
+rc = run2(['--no-track', '--max-seconds', '30'], s)
+ok &= check('連 6 次不認得（滿 5 秒），停手前重讀已是跑路 → 不停手（rc 不是 2）、0 點擊', rc != 2 and not [c for c in s.clicks if c[1].startswith('click')], f'rc={rc} {s.clicks[:3]}')
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '60'], s)
+ok &= check('重讀仍不認得 → 照舊 rc 2（鐵則 5 不放寬）', rc == 2, f'rc={rc}')
+_keep_tr = quest.transition_screen
+_flag = {'n': 0}
+def _tr_after():                                           # 前幾次轉場讀點都沒特徵，停手前那次才是載入圖
+    _flag['n'] += 1
+    return 'loading' if s.t - 1000 >= 5.0 else None
+quest.transition_screen = _tr_after
+s = Script([UNK] * 7 + [WALK])
+rc = run2(['--no-track', '--max-seconds', '30'], s)
+ok &= check('停手前那一刻換成載入圖 → 改等載入、不 rc 2', rc != 2, f'rc={rc}')
+quest.transition_screen = _keep_tr
+
+print('(k6) 戰鬥上疊寵物資訊浮窗（battle_tip）：當戰鬥、不點、等它消失；超過 TIP_MAX_S 才落回不認得規則')
+_keep_tip = quest.battle_tip_screen
+_tip = {'until': 25.0}
+quest.battle_tip_screen = lambda: s.t - 1000 < _tip['until']
+s = Script([DIALOG] + [UNK] * 25 + [IDLE])
+rc = run2(['--no-track', '--max-seconds', '60', '--team-size', '0'], s)
+_clk = [c for c in s.clicks if c[1].startswith('click') and c[1] != 'click 948 461']
+ok &= check('浮窗 25 秒（模擬 p2 21:31:57～21:32:21）→ 不 rc 2、浮窗期間除了對話鈕 0 點擊（不按切換 / 刷新 / 自動戰鬥）', rc != 2 and not _clk, f'rc={rc} {_clk[:5]}')
+_tip['until'] = 1e9
+s = Script([UNK])
+rc = run2(['--no-track', '--max-seconds', '300'], s)
+ok &= check(f'浮窗一直不消失 → TIP_MAX_S（{quest.TIP_MAX_S:.0f} 秒）後照不認得規則 rc 2', rc == 2 and s.t - 1000 >= quest.TIP_MAX_S, f'rc={rc} t={s.t - 1000}')
+quest.battle_tip_screen = _keep_tip
+
 
 # ---- 事故後新增：隊伍檢查 / 戰鬥鎖檔 / --npc auto 取目前步驟 ----
 import argparse
